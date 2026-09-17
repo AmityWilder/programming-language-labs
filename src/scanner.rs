@@ -1,48 +1,54 @@
 use std::{borrow::Cow, range::Range};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ErrorType {
+pub enum ErrorType<'a> {
     UnknownToken,
     EndlessBlockComment,
     EndlessStringLiteral,
     EscapedStringLiteralEnd,
-    InvalidEscape,
+    InvalidEscape(&'a str),
     InvalidUIntLiteral(std::num::ParseIntError),
     InvalidSIntLiteral(std::num::TryFromIntError),
     InvalidSIntNegOverflow,
     InvalidFltLiteral(std::num::ParseFloatError),
 }
 
-impl std::fmt::Display for ErrorType {
+impl std::fmt::Display for ErrorType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::UnknownToken => "unknown token pattern",
+        match self {
+            Self::UnknownToken => f.write_str("unknown token"),
             Self::EndlessBlockComment => {
-                "block comment opens (`/*`) but never closes (missing `*/`)"
+                f.write_str("block comment opens (`/*`) but never closes (missing `*/`)")
             }
             Self::EndlessStringLiteral => {
-                "string literal opens (`\"`) but never closes (missing unescaped `\"`)"
+                f.write_str("string literal opens (`\"`) but never closes (missing unescaped `\"`)")
             }
-            Self::EscapedStringLiteralEnd => {
-                "string literal opens (`\"`) but never closes (missing unescaped `\"`); there is a closing double-quote candidate, but it is escaped (`\\\"`)"
-            }
-            Self::InvalidEscape => "unknown character escape",
-            Self::InvalidUIntLiteral(_) |
-            Self::InvalidSIntLiteral(_) |
-            Self::InvalidSIntNegOverflow |
-            Self::InvalidFltLiteral(_) => "invalid number literal",
-        })
+            Self::EscapedStringLiteralEnd => f.write_str(
+                "string literal opens (`\"`) but never closes (missing unescaped `\"`). \
+                there is a closing double-quote candidate, but it is escaped (`\\\"`). \
+                string literals cannot end with an unescaped backslash (`\\`), \
+                it is indistinguishable from an escaped double-quote (`\\\"`)",
+            ),
+            Self::InvalidEscape(s) => write!(f, "unknown character escape: {s}"),
+            Self::InvalidUIntLiteral(e) => write!(f, "invalid number literal: {e}"),
+            Self::InvalidSIntLiteral(e) => write!(f, "invalid number literal: {e}"),
+            Self::InvalidSIntNegOverflow => write!(
+                f,
+                "invalid number literal: number too small to fit in target type"
+            ),
+            Self::InvalidFltLiteral(e) => write!(f, "invalid number literal: {e}"),
+        }
     }
 }
 
-impl std::error::Error for ErrorType {
+impl std::error::Error for ErrorType<'_> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::UnknownToken
             | Self::EndlessBlockComment
             | Self::EndlessStringLiteral
             | Self::EscapedStringLiteralEnd
-            | Self::InvalidEscape
+            | Self::InvalidEscape(_)
             | Self::InvalidSIntNegOverflow => None,
 
             Self::InvalidUIntLiteral(e) => Some(e),
@@ -53,12 +59,12 @@ impl std::error::Error for ErrorType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Error {
+pub struct Error<'a> {
     pub range: Range<usize>,
-    pub err: ErrorType,
+    pub err: ErrorType<'a>,
 }
 
-impl std::fmt::Display for Error {
+impl std::fmt::Display for Error<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self {
             range: Range { start, end },
@@ -68,10 +74,14 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error<'_> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.err.source()
+    }
+}
 
-impl Error {
-    pub const fn add_context<'a>(self, source: &'a str) -> ContextError<'a> {
+impl<'a> Error<'a> {
+    pub const fn add_context(self, source: &'a str) -> ContextError<'a> {
         ContextError {
             source,
             range: self.range,
@@ -84,7 +94,7 @@ impl Error {
 pub struct ContextError<'a> {
     pub source: &'a str,
     pub range: Range<usize>,
-    pub err: ErrorType,
+    pub err: ErrorType<'a>,
 }
 
 fn line_col(s: &str, position: usize) -> (usize, usize) {
@@ -92,8 +102,9 @@ fn line_col(s: &str, position: usize) -> (usize, usize) {
         .lines()
         .enumerate()
         .last()
-        .map(|(row, line)| (/* 1-based index */ row + 1, line.len()))
-        .unwrap_or((0, 0))
+        .map_or((0, 0), |(row, line)| {
+            (/* 1-based index */ row + 1, line.len())
+        })
 }
 
 impl std::fmt::Display for ContextError<'_> {
@@ -121,7 +132,11 @@ impl std::fmt::Display for ContextError<'_> {
     }
 }
 
-impl std::error::Error for ContextError<'_> {}
+impl std::error::Error for ContextError<'_> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.err.source()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenType {
@@ -192,7 +207,10 @@ impl Keyword {
         match self {
             Self::Struct | Self::Union | Self::Enum | Self::Type => KeywordType::Definition,
 
-            // gray area - isolated for future decision
+            #[allow(
+                clippy::match_same_arms,
+                reason = "gray area - isolated for future decision"
+            )]
             Self::Def | Self::Fn => KeywordType::Definition,
 
             Self::Let | Self::Const | Self::Static => KeywordType::Value,
@@ -572,12 +590,13 @@ impl std::fmt::Debug for Token<'_> {
     }
 }
 
-fn escape_seq(i: usize, (j, ch): (usize, char), src: &str) -> Option<(Range<usize>, char)> {
-    Some(match ch {
-        repl @ ('\\' | '"') => (Range::from(i..j + ch.len_utf8()), repl),
+fn escape_seq(i: usize, (j, ch): (usize, char), src: &str) -> Result<(Range<usize>, char), &str> {
+    let (end, repl) = match ch {
+        repl @ ('\\' | '"') => (j + ch.len_utf8(), repl),
 
-        'n' => (Range::from(i..j + ch.len_utf8()), '\n'),
-        'r' => (Range::from(i..j + ch.len_utf8()), '\r'),
+        'n' => (j + ch.len_utf8(), '\n'),
+        'r' => (j + ch.len_utf8(), '\r'),
+        't' => (j + ch.len_utf8(), '\t'),
 
         prefix @ ('x' | 'o' | 'b') => {
             let (digits, base) = match prefix {
@@ -588,18 +607,24 @@ fn escape_seq(i: usize, (j, ch): (usize, char), src: &str) -> Option<(Range<usiz
             };
             let num_start = j + ch.len_utf8();
             let end = num_start + digits; // ASCII digits
-            let num: u8 = src
-                .get(num_start..end)
-                .and_then(|n| u8::from_str_radix(n, base).ok())?;
-            (Range::from(i..end), char::from(num))
+            src.get(num_start..end)
+                .ok_or(&src[i..])
+                .and_then(|n| u8::from_str_radix(n, base).map_err(|_| &src[i..end]))
+                .map(|num| (end, char::from(num)))?
         }
 
-        _ => return None,
-    })
+        _ => return Err(src),
+    };
+    Ok((Range::from(i..end), repl))
 }
 
 impl<'a> Token<'a> {
-    fn value_noalloc(self) -> Result<Option<TokenValue<'a>>, ErrorType> {
+    #[cfg(test)]
+    pub const fn new(src: &'a str, ty: TokenType) -> Self {
+        Self { src, ty }
+    }
+
+    fn value_noalloc(self) -> Result<Option<TokenValue<'a>>, ErrorType<'a>> {
         const VALID_TOKENS: &str = "Token::value() expects vaild tokens";
         match self.ty {
             TokenType::Whitespace | TokenType::Comment => Ok(None),
@@ -655,8 +680,10 @@ impl<'a> Token<'a> {
                             // just checking if it's valid, not actually using it
                             _ = iter
                                 .next()
-                                .and_then(|item| escape_seq(i, item, src))
-                                .ok_or(ErrorType::InvalidEscape)?;
+                                .ok_or(ErrorType::InvalidEscape(&src[i..]))
+                                .and_then(|item| {
+                                    escape_seq(i, item, src).map_err(ErrorType::InvalidEscape)
+                                })?;
                         }
                     }
                 }
@@ -676,7 +703,7 @@ impl<'a> Token<'a> {
     }
 
     /// Returns [`None`] if non-code (whitespace/comment)
-    pub fn value(self) -> Result<Option<TokenValue<'a>>, ErrorType> {
+    pub fn value(self) -> Result<Option<TokenValue<'a>>, ErrorType<'a>> {
         let res = self.value_noalloc();
         if let Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src)))) = res
             && src.contains('\\')
@@ -697,8 +724,10 @@ impl<'a> Token<'a> {
                 if ch == '\\' {
                     replacements.push(
                         iter.next()
-                            .and_then(|item| escape_seq(i, item, src))
-                            .ok_or(ErrorType::InvalidEscape)?,
+                            .ok_or(ErrorType::InvalidEscape(&src[i..]))
+                            .and_then(|item| {
+                                escape_seq(i, item, src).map_err(ErrorType::InvalidEscape)
+                            })?,
                     );
                 }
             }
@@ -760,7 +789,7 @@ impl<'a> Scanner<'a> {
     /// Generate an error starting at the current (incomplete) token
     ///
     /// [Splits off](Self::split_off) the erroneous segment so we can find more errors
-    const fn error_here(&mut self, len: usize, err: ErrorType) -> Error {
+    const fn error_here(&mut self, len: usize, err: ErrorType<'a>) -> Error<'a> {
         let err = Error {
             range: Range {
                 start: self.offset,
@@ -774,8 +803,12 @@ impl<'a> Scanner<'a> {
 }
 
 impl<'a> Iterator for Scanner<'a> {
-    type Item = Result<Token<'a>, Error>;
+    type Item = Result<Token<'a>, Error<'a>>;
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "don't care. I don't see a need to make an entire function only to call it in one place."
+    )]
     fn next(&mut self) -> Option<Self::Item> {
         let mut iter = self.source.chars().peekable();
         // if there are no characters remaining, this will return None and stop iterating.
@@ -833,16 +866,15 @@ impl<'a> Iterator for Scanner<'a> {
                         && ch == '-'
                         && iter.peek().is_some_and(|ch| ch.is_numeric())
                 {
+                    const DECIMAL: char = '.';
                     // starts with number or hyphen (where allowed) -> number literal
                     let mut is_first_decimal = true; // at most one decimal
-                    const DECIMAL: char = '.';
                     let mut len = self.source[ch.len_utf8()..]
                         .find(|ch: char| {
                             !(ch.is_alphanumeric()
                                 || ch == DECIMAL && std::mem::take(&mut is_first_decimal))
                         })
-                        .map(|n| n + ch.len_utf8())
-                        .unwrap_or(self.source.len());
+                        .map_or(self.source.len(), |n| n + ch.len_utf8());
                     // no trailing decimal
                     if self.source[..len].ends_with(DECIMAL) {
                         len -= DECIMAL.len_utf8();
@@ -915,7 +947,17 @@ impl<'a> Iterator for Scanner<'a> {
 /// [`Scanner`] will never return another element after outputting [`None`].
 impl std::iter::FusedIterator for Scanner<'_> {}
 
+pub type TokenResult<'a> = Result<(Token<'a>, Option<TokenValue<'a>>), ContextError<'a>>;
+
 /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
-pub fn tokenize<'a>(source: &'a str) -> impl Iterator<Item = Result<Token<'a>, ContextError<'a>>> {
-    Scanner::new(source).map(|item| item.map_err(|e| e.add_context(source)))
+pub fn tokenize(source: &str) -> impl Iterator<Item = TokenResult<'_>> {
+    Scanner::new(source).map(|item| {
+        item.map(|token| {
+            (
+                token,
+                token.value().expect("should have been caught by scanner"),
+            )
+        })
+        .map_err(|e| e.add_context(source))
+    })
 }

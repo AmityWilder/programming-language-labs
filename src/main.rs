@@ -1,20 +1,32 @@
-use crate::scanner::{TokenType, tokenize};
+//! This project is not, and will not ever be, written with the help of any form of generative AI.
+//! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
+
+#![warn(clippy::pedantic)]
+#![warn(clippy::missing_safety_doc, clippy::missing_panics_doc, clippy::todo)]
+#![deny(clippy::undocumented_unsafe_blocks, reason = "must prove soundness")]
+#![deny(
+    clippy::unwrap_used,
+    clippy::missing_assert_message,
+    reason = "give a reason for panics"
+)]
+
+use scanner::{TokenType, tokenize};
 
 mod scanner;
 
+#[cfg(test)] // only include testing module in test builds
 mod test;
 
-fn run_code(source: &str) {
+pub fn run_code(source: &str) {
     println!("source code:\n```\n{source}\n```");
     let tokens: Vec<_> = tokenize(source).collect();
     for item in &tokens {
         match item {
-            Ok(token) => {
+            Ok((token, value)) => {
                 print!("{token:?}:\n  ");
-                match token.value() {
-                    Ok(None) => println!("ignored"),
-                    Ok(Some(value)) => println!("{value:?}"),
-                    Err(e) => eprintln!("error: {e}"),
+                match value {
+                    None => println!("ignored"),
+                    Some(value) => println!("{value:?}"),
                 }
             }
             Err(error) => eprintln!("\x1b[91merror: {error}\x1b[0m"),
@@ -22,9 +34,9 @@ fn run_code(source: &str) {
     }
     // syntax highlighted
     println!("```");
-    for item in tokens.iter() {
+    for item in &tokens {
         let (lexeme, ansi_color) = match item {
-            Ok(token) => {
+            Ok((token, _)) => {
                 let ansi_color = match token.ty {
                     TokenType::Whitespace => "0",
                     TokenType::Comment => "32",
@@ -60,9 +72,8 @@ fn main() {
                     .expect("failed to obtain input");
                 if input.trim() == "exit" {
                     break; // finish
-                } else {
-                    run_code(&input);
                 }
+                run_code(&input);
             }
         }
 
@@ -78,5 +89,5 @@ fn main() {
                 }
             }
         },
-    };
+    }
 }
