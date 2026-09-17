@@ -1,8 +1,11 @@
+def foo#5 {}
+
 fn main() {
     for i in 0..5 {
         let my'text /*
             there is absolutely no reason for the apostrophe,
             i just wanted to show it off */ = "hello world";
+        my'text += "this \"text\" is \x1b[90mred\x1b[0m";
         print(my'text); // output the contents of `my'text` to the console
     }
 }

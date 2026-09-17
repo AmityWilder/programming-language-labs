@@ -35,13 +35,20 @@ fn main() {
     let tokens: Vec<_> = tokenize(&source).collect();
     for item in &tokens {
         match item {
-            Ok(token) => println!("{token:?}"),
+            Ok(token) => {
+                print!("{token:?}:\n  ");
+                match token.value() {
+                    Ok(None) => println!("ignored"),
+                    Ok(Some(value)) => println!("{value:?}"),
+                    Err(e) => eprintln!("error: {e}"),
+                }
+            }
             Err(error) => eprintln!("\x1b[91merror: {error}\x1b[0m"),
         }
     }
     // syntax highlighted
     println!("```");
-    for token in tokens.iter().filter_map(|item| item.ok()) {
+    for token in tokens.iter().filter_map(|item| item.as_ref().ok()) {
         let ansi_color = match token.ty {
             TokenType::Whitespace => "0",
             TokenType::Comment => "32",

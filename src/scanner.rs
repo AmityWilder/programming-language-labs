@@ -1,11 +1,16 @@
-use std::range::Range;
+use std::{borrow::Cow, range::Range};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorType {
     UnknownToken,
     EndlessBlockComment,
     EndlessStringLiteral,
     EscapedStringLiteralEnd,
+    InvalidEscape,
+    InvalidUIntLiteral(std::num::ParseIntError),
+    InvalidSIntLiteral(std::num::TryFromIntError),
+    InvalidSIntNegOverflow,
+    InvalidFltLiteral(std::num::ParseFloatError),
 }
 
 impl std::fmt::Display for ErrorType {
@@ -21,13 +26,33 @@ impl std::fmt::Display for ErrorType {
             Self::EscapedStringLiteralEnd => {
                 "string literal opens (`\"`) but never closes (missing unescaped `\"`); there is a closing double-quote candidate, but it is escaped (`\\\"`)"
             }
+            Self::InvalidEscape => "unknown character escape",
+            Self::InvalidUIntLiteral(_) |
+            Self::InvalidSIntLiteral(_) |
+            Self::InvalidSIntNegOverflow |
+            Self::InvalidFltLiteral(_) => "invalid number literal",
         })
     }
 }
 
-impl std::error::Error for ErrorType {}
+impl std::error::Error for ErrorType {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UnknownToken
+            | Self::EndlessBlockComment
+            | Self::EndlessStringLiteral
+            | Self::EscapedStringLiteralEnd
+            | Self::InvalidEscape
+            | Self::InvalidSIntNegOverflow => None,
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+            Self::InvalidUIntLiteral(e) => Some(e),
+            Self::InvalidSIntLiteral(e) => Some(e),
+            Self::InvalidFltLiteral(e) => Some(e),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
     pub range: Range<usize>,
     pub err: ErrorType,
@@ -55,7 +80,7 @@ impl Error {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextError<'a> {
     pub source: &'a str,
     pub range: Range<usize>,
@@ -73,7 +98,11 @@ fn line_col(s: &str, position: usize) -> (usize, usize) {
 
 impl std::fmt::Display for ContextError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { source, range, err } = *self;
+        let Self {
+            source,
+            range,
+            ref err,
+        } = *self;
         let (start_line, start_col) = line_col(source, range.start);
         if range.is_empty() {
             let code = &source[range.start..]; // TODO: what do we print when we don't know what token should be there?
@@ -107,14 +136,37 @@ pub enum TokenType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeywordType {
+    Definition,
+    Value,
+    Control,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Keyword {
     // Definitions
-    /// `fn`
-    Fn,
     /// `struct`
     Struct,
+    /// `union`
+    Union,
+    /// `enum`
+    Enum,
     /// `type`
     Type,
+
+    // halway between Definition and Value
+    /// `def`
+    Def,
+    /// `fn`
+    Fn,
+
+    // Value
+    /// `let`
+    Let,
+    /// `const`
+    Const,
+    /// `static`
+    Static,
 
     // Flow control
     /// `if`
@@ -133,40 +185,42 @@ pub enum Keyword {
     Loop,
     /// `in`
     In,
-
-    // Value
-    /// `let`
-    Let,
-    /// `const`
-    Const,
-    /// `static`
-    Static,
 }
 
 impl Keyword {
-    pub const fn is_definition(self) -> bool {
-        matches!(self, Self::Fn | Self::Struct | Self::Type)
-    }
+    pub const fn kw_type(self) -> KeywordType {
+        match self {
+            Self::Struct | Self::Union | Self::Enum | Self::Type => KeywordType::Definition,
 
-    pub const fn is_control(self) -> bool {
-        matches!(self, |Self::If| Self::Else
+            // gray area - isolated for future decision
+            Self::Def | Self::Fn => KeywordType::Definition,
+
+            Self::Let | Self::Const | Self::Static => KeywordType::Value,
+
+            Self::If
+            | Self::Else
             | Self::For
             | Self::While
             | Self::With
             | Self::Where
             | Self::Loop
-            | Self::In)
-    }
-
-    pub const fn is_value(self) -> bool {
-        matches!(self, |Self::Let| Self::Const | Self::Static)
+            | Self::In => KeywordType::Control,
+        }
     }
 
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "fn" => Some(Self::Fn),
             "struct" => Some(Self::Struct),
+            "union" => Some(Self::Union),
+            "enum" => Some(Self::Enum),
             "type" => Some(Self::Type),
+
+            "fn" => Some(Self::Fn),
+            "def" => Some(Self::Def),
+
+            "let" => Some(Self::Let),
+            "const" => Some(Self::Const),
+            "static" => Some(Self::Static),
 
             "if" => Some(Self::If),
             "else" => Some(Self::Else),
@@ -177,10 +231,6 @@ impl Keyword {
             "loop" => Some(Self::Loop),
             "in" => Some(Self::In),
 
-            "let" => Some(Self::Let),
-            "const" => Some(Self::Const),
-            "static" => Some(Self::Static),
-
             _ => None,
         }
     }
@@ -189,7 +239,14 @@ impl Keyword {
         match self {
             Self::Fn => "fn",
             Self::Struct => "struct",
+            Self::Union => "union",
+            Self::Enum => "enum",
             Self::Type => "type",
+            Self::Def => "def",
+
+            Self::Let => "let",
+            Self::Const => "const",
+            Self::Static => "static",
 
             Self::If => "if",
             Self::Else => "else",
@@ -199,10 +256,6 @@ impl Keyword {
             Self::Where => "where",
             Self::Loop => "loop",
             Self::In => "in",
-
-            Self::Let => "let",
-            Self::Const => "const",
-            Self::Static => "static",
         }
     }
 }
@@ -218,6 +271,10 @@ pub enum Punctuation {
     // 1-char
     /// `!`
     Not,
+    /// `#`
+    MacroArgCount,
+    /// `$`
+    Ref,
     /// `%`
     Remainder,
     /// `&`
@@ -309,110 +366,170 @@ pub enum Punctuation {
 }
 
 impl Punctuation {
-    pub fn from_prefix(s: &str) -> Option<Self> {
-        // descending length, so bigger tokens aren't broken apart by subset tokens
-        const OPTIONS: [(&str, Punctuation); 43] = [
-            // 3-char
-            ("<<=", Punctuation::ShlAssign),
-            (">>=", Punctuation::ShrAssign),
-            // 2-char
-            ("!=", Punctuation::Neq),
-            ("%=", Punctuation::RemAssign),
-            ("&=", Punctuation::AndAssign),
-            ("*=", Punctuation::MulAssign),
-            ("**", Punctuation::Exponent),
-            ("+=", Punctuation::AddAssign),
-            ("-=", Punctuation::SubAssign),
-            ("->", Punctuation::Arrow),
-            ("/=", Punctuation::DivAssign),
-            ("::", Punctuation::PathSep),
-            ("<=", Punctuation::Le),
-            ("<<", Punctuation::Shl),
-            ("==", Punctuation::Eq),
-            ("=>", Punctuation::FatArrow),
-            (">=", Punctuation::Ge),
-            (">>", Punctuation::Shr),
-            ("^=", Punctuation::XorAssign),
-            ("|=", Punctuation::OrAssign),
-            // 1-char
-            ("!", Punctuation::Not),
-            ("%", Punctuation::Remainder),
-            ("&", Punctuation::And),
-            ("(", Punctuation::LParen),
-            (")", Punctuation::RParen),
-            ("*", Punctuation::Mul),
-            ("+", Punctuation::Add),
-            (",", Punctuation::Comma),
-            ("-", Punctuation::Sub),
-            (".", Punctuation::Dot),
-            ("/", Punctuation::Div),
-            (":", Punctuation::Colon),
-            (";", Punctuation::Semi),
-            ("<", Punctuation::Lt),
-            ("=", Punctuation::Assign),
-            (">", Punctuation::Gt),
-            ("?", Punctuation::QMark),
-            ("[", Punctuation::LBrack),
-            ("]", Punctuation::RBrack),
-            ("^", Punctuation::Xor),
-            ("{", Punctuation::LBrace),
-            ("|", Punctuation::Or),
-            ("}", Punctuation::RBrace),
-        ];
+    /// Descending length, so bigger tokens aren't broken apart by subset tokens
+    const OPTIONS: [(&str, Self); 45] = [
+        // 3-char
+        ("<<=", Self::ShlAssign),
+        (">>=", Self::ShrAssign),
+        // 2-char
+        ("!=", Self::Neq),
+        ("%=", Self::RemAssign),
+        ("&=", Self::AndAssign),
+        ("*=", Self::MulAssign),
+        ("**", Self::Exponent),
+        ("+=", Self::AddAssign),
+        ("-=", Self::SubAssign),
+        ("->", Self::Arrow),
+        ("/=", Self::DivAssign),
+        ("::", Self::PathSep),
+        ("<=", Self::Le),
+        ("<<", Self::Shl),
+        ("==", Self::Eq),
+        ("=>", Self::FatArrow),
+        (">=", Self::Ge),
+        (">>", Self::Shr),
+        ("^=", Self::XorAssign),
+        ("|=", Self::OrAssign),
+        // 1-char
+        ("!", Self::Not),
+        ("#", Self::MacroArgCount),
+        ("$", Self::Ref),
+        ("%", Self::Remainder),
+        ("&", Self::And),
+        ("(", Self::LParen),
+        (")", Self::RParen),
+        ("*", Self::Mul),
+        ("+", Self::Add),
+        (",", Self::Comma),
+        ("-", Self::Sub),
+        (".", Self::Dot),
+        ("/", Self::Div),
+        (":", Self::Colon),
+        (";", Self::Semi),
+        ("<", Self::Lt),
+        ("=", Self::Assign),
+        (">", Self::Gt),
+        ("?", Self::QMark),
+        ("[", Self::LBrack),
+        ("]", Self::RBrack),
+        ("^", Self::Xor),
+        ("{", Self::LBrace),
+        ("|", Self::Or),
+        ("}", Self::RBrace),
+    ];
 
-        OPTIONS
+    /// Matches the prefix of `s` to a [`Punctuation`]. Tries to find the longest one possible.
+    pub fn from_prefix(s: &str) -> Option<Self> {
+        Self::OPTIONS
             .into_iter()
             .find(|(pat, _)| s.starts_with(pat))
             .map(|(_, punc)| punc)
     }
 
+    /// Like [`Self::from_prefix`] but matches the full string
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "!" => Some(Self::Not),
+            "#" => Some(Self::MacroArgCount),
+            "$" => Some(Self::Ref),
+            "%" => Some(Self::Remainder),
+            "&" => Some(Self::And),
+            "(" => Some(Self::LParen),
+            ")" => Some(Self::RParen),
+            "*" => Some(Self::Mul),
+            "+" => Some(Self::Add),
+            "," => Some(Self::Comma),
+            "-" => Some(Self::Sub),
+            "." => Some(Self::Dot),
+            "/" => Some(Self::Div),
+            ":" => Some(Self::Colon),
+            ";" => Some(Self::Semi),
+            "<" => Some(Self::Lt),
+            "=" => Some(Self::Assign),
+            ">" => Some(Self::Gt),
+            "?" => Some(Self::QMark),
+            "[" => Some(Self::LBrack),
+            "]" => Some(Self::RBrack),
+            "^" => Some(Self::Xor),
+            "{" => Some(Self::LBrace),
+            "|" => Some(Self::Or),
+            "}" => Some(Self::RBrace),
+
+            "!=" => Some(Self::Neq),
+            "%=" => Some(Self::RemAssign),
+            "&=" => Some(Self::AndAssign),
+            "*=" => Some(Self::MulAssign),
+            "**" => Some(Self::Exponent),
+            "+=" => Some(Self::AddAssign),
+            "-=" => Some(Self::SubAssign),
+            "->" => Some(Self::Arrow),
+            "/=" => Some(Self::DivAssign),
+            "::" => Some(Self::PathSep),
+            "<=" => Some(Self::Le),
+            "<<" => Some(Self::Shl),
+            "==" => Some(Self::Eq),
+            "=>" => Some(Self::FatArrow),
+            ">=" => Some(Self::Ge),
+            ">>" => Some(Self::Shr),
+            "^=" => Some(Self::XorAssign),
+            "|=" => Some(Self::OrAssign),
+
+            "<<=" => Some(Self::ShlAssign),
+            ">>=" => Some(Self::ShrAssign),
+
+            _ => None,
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
-            Punctuation::Not => "!",
-            Punctuation::Remainder => "%",
-            Punctuation::And => "&",
-            Punctuation::LParen => "(",
-            Punctuation::RParen => ")",
-            Punctuation::Mul => "*",
-            Punctuation::Add => "+",
-            Punctuation::Comma => ",",
-            Punctuation::Sub => "-",
-            Punctuation::Dot => ".",
-            Punctuation::Div => "/",
-            Punctuation::Colon => ":",
-            Punctuation::Semi => ";",
-            Punctuation::Lt => "<",
-            Punctuation::Assign => "=",
-            Punctuation::Gt => ">",
-            Punctuation::QMark => "?",
-            Punctuation::LBrack => "[",
-            Punctuation::RBrack => "]",
-            Punctuation::Xor => "^",
-            Punctuation::LBrace => "{",
-            Punctuation::Or => "|",
-            Punctuation::RBrace => "}",
+            Self::Not => "!",
+            Self::MacroArgCount => "#",
+            Self::Ref => "$",
+            Self::Remainder => "%",
+            Self::And => "&",
+            Self::LParen => "(",
+            Self::RParen => ")",
+            Self::Mul => "*",
+            Self::Add => "+",
+            Self::Comma => ",",
+            Self::Sub => "-",
+            Self::Dot => ".",
+            Self::Div => "/",
+            Self::Colon => ":",
+            Self::Semi => ";",
+            Self::Lt => "<",
+            Self::Assign => "=",
+            Self::Gt => ">",
+            Self::QMark => "?",
+            Self::LBrack => "[",
+            Self::RBrack => "]",
+            Self::Xor => "^",
+            Self::LBrace => "{",
+            Self::Or => "|",
+            Self::RBrace => "}",
 
-            Punctuation::Neq => "!=",
-            Punctuation::RemAssign => "%=",
-            Punctuation::AndAssign => "&=",
-            Punctuation::MulAssign => "*=",
-            Punctuation::Exponent => "**",
-            Punctuation::AddAssign => "+=",
-            Punctuation::SubAssign => "-=",
-            Punctuation::Arrow => "->",
-            Punctuation::DivAssign => "/=",
-            Punctuation::PathSep => "::",
-            Punctuation::Le => "<=",
-            Punctuation::Shl => "<<",
-            Punctuation::Eq => "==",
-            Punctuation::FatArrow => "=>",
-            Punctuation::Ge => ">=",
-            Punctuation::Shr => ">>",
-            Punctuation::XorAssign => "^=",
-            Punctuation::OrAssign => "|=",
+            Self::Neq => "!=",
+            Self::RemAssign => "%=",
+            Self::AndAssign => "&=",
+            Self::MulAssign => "*=",
+            Self::Exponent => "**",
+            Self::AddAssign => "+=",
+            Self::SubAssign => "-=",
+            Self::Arrow => "->",
+            Self::DivAssign => "/=",
+            Self::PathSep => "::",
+            Self::Le => "<=",
+            Self::Shl => "<<",
+            Self::Eq => "==",
+            Self::FatArrow => "=>",
+            Self::Ge => ">=",
+            Self::Shr => ">>",
+            Self::XorAssign => "^=",
+            Self::OrAssign => "|=",
 
-            Punctuation::ShlAssign => "<<=",
-            Punctuation::ShrAssign => ">>=",
+            Self::ShlAssign => "<<=",
+            Self::ShrAssign => ">>=",
         }
     }
 }
@@ -429,8 +546,11 @@ pub enum TokenValue<'a> {
     UIntLiteral(usize),
     SIntLiteral(isize),
     FltLiteral(f64),
-    StringLiteral(String),
+    /// Escape sequences are converted (unless there are none)
+    StringLiteral(Cow<'a, str>),
+    /// Value is the token source itself
     Direct(&'a str),
+    Keyword(Keyword),
     Punctuation(Punctuation),
 }
 
@@ -449,6 +569,122 @@ impl std::fmt::Debug for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { src, ty } = self;
         write!(f, "{ty:?}({src:?})")
+    }
+}
+
+impl<'a> Token<'a> {
+    /// Returns [`None`] if non-code (whitespace/comment)
+    pub fn value(self) -> Result<Option<TokenValue<'a>>, ErrorType> {
+        const VALID_TOKENS: &str = "Token::value() expects vaild tokens";
+        match self.ty {
+            TokenType::Whitespace | TokenType::Comment => Ok(None),
+
+            TokenType::NumberLiteral => {
+                if self.src.contains('.') {
+                    self.src
+                        .parse()
+                        .map(|x| Some(TokenValue::FltLiteral(x)))
+                        .map_err(ErrorType::InvalidFltLiteral)
+                } else {
+                    let stripped = self.src.strip_prefix('-');
+                    let is_negative = stripped.is_some();
+                    let magnitude = stripped.unwrap_or(self.src);
+
+                    let (digits, radix) = if let Some(n) = magnitude.strip_prefix("0x") {
+                        (n, 16)
+                    } else if let Some(n) = magnitude.strip_prefix("0o") {
+                        (n, 8)
+                    } else if let Some(n) = magnitude.strip_prefix("0b") {
+                        (n, 2)
+                    } else {
+                        (magnitude, 10)
+                    };
+                    usize::from_str_radix(digits, radix)
+                        .map_err(ErrorType::InvalidUIntLiteral)
+                        .and_then(|value| {
+                            if is_negative {
+                                (isize::try_from(value)
+                                    .map_err(ErrorType::InvalidSIntLiteral)
+                                    .and_then(|x| {
+                                        x.checked_neg().ok_or(ErrorType::InvalidSIntNegOverflow)
+                                    }))
+                                .map(TokenValue::SIntLiteral)
+                            } else {
+                                Ok(TokenValue::UIntLiteral(value))
+                            }
+                        })
+                        .map(Some)
+                }
+            }
+
+            TokenType::StringLiteral => {
+                let src = self
+                    .src
+                    .strip_prefix('"')
+                    .and_then(|s| s.strip_suffix('"'))
+                    .expect("string literal tokens should include delimiters (`\"`)");
+                Ok(Some(TokenValue::StringLiteral(if src.contains('\\') {
+                    let mut unescaped = src.to_string();
+                    let escape_count_hint = {
+                        let mut is_escaped = false;
+                        src.chars()
+                            .filter(|&ch| {
+                                is_escaped = !is_escaped && ch == '\\';
+                                is_escaped
+                            })
+                            .count()
+                    };
+                    let mut replacements = Vec::with_capacity(escape_count_hint);
+                    let mut iter = src.chars().enumerate();
+                    while let Some((i, ch)) = iter.find(|(_, ch)| *ch == '\\') {
+                        if ch == '\\' {
+                            let (j, ch) = iter.next().ok_or(ErrorType::InvalidEscape)?;
+                            replacements.push(match ch {
+                                repl @ ('\\' | '"') => (Range::from(i..j + ch.len_utf8()), repl),
+
+                                'n' => (Range::from(i..j + ch.len_utf8()), '\n'),
+                                'r' => (Range::from(i..j + ch.len_utf8()), '\r'),
+
+                                prefix @ ('x' | 'o' | 'b') => {
+                                    let (digits, base) = match prefix {
+                                        'x' => (2, 16),
+                                        'o' => (3, 8),
+                                        'b' => (8, 2),
+                                        _ => unreachable!("guarded by outer branch"),
+                                    };
+                                    let num_start = j + ch.len_utf8();
+                                    let end = num_start + digits; // ASCII digits
+                                    let num: u8 = src
+                                        .get(num_start..end)
+                                        .and_then(|n| u8::from_str_radix(n, base).ok())
+                                        .ok_or(ErrorType::InvalidEscape)?;
+                                    (Range::from(i..end), char::from(num))
+                                }
+
+                                _ => return Err(ErrorType::InvalidEscape),
+                            });
+                        }
+                    }
+                    for (range, repl) in replacements.into_iter().rev() {
+                        unescaped
+                            .replace_range(range, repl.encode_utf8(&mut [0; char::MAX_LEN_UTF8]));
+                    }
+                    Cow::Owned(unescaped)
+                } else {
+                    Cow::Borrowed(src)
+                })))
+            }
+
+            TokenType::Identifier => Ok(Some(TokenValue::Direct(self.src))),
+
+            TokenType::Keyword | TokenType::CtrlKeyword => Ok(Some(TokenValue::Keyword(
+                Keyword::from_str(self.src).expect(VALID_TOKENS),
+            ))),
+
+            TokenType::Punctuation => Ok(Some(TokenValue::Punctuation(
+                Punctuation::from_str(self.src).expect(VALID_TOKENS),
+            ))),
+        }
     }
 }
 
@@ -531,12 +767,10 @@ impl<'a> Iterator for Scanner<'a> {
                     Ok(self.split_off_token(len, TokenType::Whitespace))
                 } else if ch == '/' && iter.peek() == Some(&'/') {
                     // starts with double forward slashes (`//`) -> (line) comment token
-                    const OPEN: &str = "//";
-                    // take the first line (excluding newline/return)
                     let len = self
                         .source
                         .lines()
-                        .next()
+                        .next() // take the first line (excluding newline/return)
                         .expect("the existence of characters should imply the existence of a line")
                         .len();
                     Ok(self.split_off_token(len, TokenType::Comment))
@@ -561,7 +795,7 @@ impl<'a> Iterator for Scanner<'a> {
                     Ok(Token {
                         src,
                         ty: if let Some(kw) = Keyword::from_str(src) {
-                            if kw.is_control() {
+                            if matches!(kw.kw_type(), KeywordType::Control) {
                                 TokenType::CtrlKeyword
                             } else {
                                 TokenType::Keyword
