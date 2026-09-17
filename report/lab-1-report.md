@@ -1,4 +1,6 @@
-Name: TBD
+# Batscript
+
+**Note:** Tests are in [src/test](src/test).
 
 ## Regular Expressions
 
@@ -54,3 +56,11 @@ Everthing following that character, through the next **unescaped** double-quote 
 ```
 
 Identifiers must start with a letter (not restricted to ASCII) or underscore (`_`). The rest of the characters in the token can be letters (not restricted to ASCII), numbers (not restricted to ASCII), apostrophes (`'`), or underscores (`_`).
+
+## Execution
+
+1. Install [The Rust Programming Language](https://rust-lang.org/tools/install/)
+2. Navigate to [the project folder](../) in a terminal (this can be the vscode terminal)
+3. Execute one of the following commands:
+    - `cargo run` to run in interactive mode
+    - `cargo run -- <FILE>` to run the contents of a file (the `--` is needed to distinguish `cargo` arguments from `batscript` arguments; this is equivalent to running `batscript <FILE>`)

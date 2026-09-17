@@ -1,3 +1,5 @@
+//! # Batscript
+//!
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
@@ -83,7 +85,7 @@ fn main() {
 
             Ok(source) => {
                 if args.next().is_some() {
-                    eprintln!("Usage: {} [script]", prgm.display());
+                    eprintln!("usage: {} [script]", prgm.display());
                 } else {
                     run_code(&source);
                 }
