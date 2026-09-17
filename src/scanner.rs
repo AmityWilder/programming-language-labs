@@ -572,9 +572,34 @@ impl std::fmt::Debug for Token<'_> {
     }
 }
 
+fn escape_seq(i: usize, (j, ch): (usize, char), src: &str) -> Option<(Range<usize>, char)> {
+    Some(match ch {
+        repl @ ('\\' | '"') => (Range::from(i..j + ch.len_utf8()), repl),
+
+        'n' => (Range::from(i..j + ch.len_utf8()), '\n'),
+        'r' => (Range::from(i..j + ch.len_utf8()), '\r'),
+
+        prefix @ ('x' | 'o' | 'b') => {
+            let (digits, base) = match prefix {
+                'x' => (2, 16),
+                'o' => (3, 8),
+                'b' => (8, 2),
+                _ => unreachable!("guarded by outer branch"),
+            };
+            let num_start = j + ch.len_utf8();
+            let end = num_start + digits; // ASCII digits
+            let num: u8 = src
+                .get(num_start..end)
+                .and_then(|n| u8::from_str_radix(n, base).ok())?;
+            (Range::from(i..end), char::from(num))
+        }
+
+        _ => return None,
+    })
+}
+
 impl<'a> Token<'a> {
-    /// Returns [`None`] if non-code (whitespace/comment)
-    pub fn value(self) -> Result<Option<TokenValue<'a>>, ErrorType> {
+    fn value_noalloc(self) -> Result<Option<TokenValue<'a>>, ErrorType> {
         const VALID_TOKENS: &str = "Token::value() expects vaild tokens";
         match self.ty {
             TokenType::Whitespace | TokenType::Comment => Ok(None),
@@ -623,56 +648,19 @@ impl<'a> Token<'a> {
                     .strip_prefix('"')
                     .and_then(|s| s.strip_suffix('"'))
                     .expect("string literal tokens should include delimiters (`\"`)");
-                Ok(Some(TokenValue::StringLiteral(if src.contains('\\') {
-                    let mut unescaped = src.to_string();
-                    let escape_count_hint = {
-                        let mut is_escaped = false;
-                        src.chars()
-                            .filter(|&ch| {
-                                is_escaped = !is_escaped && ch == '\\';
-                                is_escaped
-                            })
-                            .count()
-                    };
-                    let mut replacements = Vec::with_capacity(escape_count_hint);
+                if src.contains('\\') {
                     let mut iter = src.chars().enumerate();
                     while let Some((i, ch)) = iter.find(|(_, ch)| *ch == '\\') {
                         if ch == '\\' {
-                            let (j, ch) = iter.next().ok_or(ErrorType::InvalidEscape)?;
-                            replacements.push(match ch {
-                                repl @ ('\\' | '"') => (Range::from(i..j + ch.len_utf8()), repl),
-
-                                'n' => (Range::from(i..j + ch.len_utf8()), '\n'),
-                                'r' => (Range::from(i..j + ch.len_utf8()), '\r'),
-
-                                prefix @ ('x' | 'o' | 'b') => {
-                                    let (digits, base) = match prefix {
-                                        'x' => (2, 16),
-                                        'o' => (3, 8),
-                                        'b' => (8, 2),
-                                        _ => unreachable!("guarded by outer branch"),
-                                    };
-                                    let num_start = j + ch.len_utf8();
-                                    let end = num_start + digits; // ASCII digits
-                                    let num: u8 = src
-                                        .get(num_start..end)
-                                        .and_then(|n| u8::from_str_radix(n, base).ok())
-                                        .ok_or(ErrorType::InvalidEscape)?;
-                                    (Range::from(i..end), char::from(num))
-                                }
-
-                                _ => return Err(ErrorType::InvalidEscape),
-                            });
+                            // just checking if it's valid, not actually using it
+                            _ = iter
+                                .next()
+                                .and_then(|item| escape_seq(i, item, src))
+                                .ok_or(ErrorType::InvalidEscape)?;
                         }
                     }
-                    for (range, repl) in replacements.into_iter().rev() {
-                        unescaped
-                            .replace_range(range, repl.encode_utf8(&mut [0; char::MAX_LEN_UTF8]));
-                    }
-                    Cow::Owned(unescaped)
-                } else {
-                    Cow::Borrowed(src)
-                })))
+                }
+                Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src))))
             }
 
             TokenType::Identifier => Ok(Some(TokenValue::Direct(self.src))),
@@ -684,6 +672,42 @@ impl<'a> Token<'a> {
             TokenType::Punctuation => Ok(Some(TokenValue::Punctuation(
                 Punctuation::from_str(self.src).expect(VALID_TOKENS),
             ))),
+        }
+    }
+
+    /// Returns [`None`] if non-code (whitespace/comment)
+    pub fn value(self) -> Result<Option<TokenValue<'a>>, ErrorType> {
+        let res = self.value_noalloc();
+        if let Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src)))) = res
+            && src.contains('\\')
+        {
+            let mut unescaped = src.to_string();
+            let escape_count_hint = {
+                let mut is_escaped = false;
+                src.chars()
+                    .filter(|&ch| {
+                        is_escaped = !is_escaped && ch == '\\';
+                        is_escaped
+                    })
+                    .count()
+            };
+            let mut replacements = Vec::with_capacity(escape_count_hint);
+            let mut iter = src.chars().enumerate();
+            while let Some((i, ch)) = iter.find(|(_, ch)| *ch == '\\') {
+                if ch == '\\' {
+                    replacements.push(
+                        iter.next()
+                            .and_then(|item| escape_seq(i, item, src))
+                            .ok_or(ErrorType::InvalidEscape)?,
+                    );
+                }
+            }
+            for (range, repl) in replacements.into_iter().rev() {
+                unescaped.replace_range(range, repl.encode_utf8(&mut [0; char::MAX_LEN_UTF8]));
+            }
+            Ok(Some(TokenValue::StringLiteral(Cow::Owned(unescaped))))
+        } else {
+            res
         }
     }
 }
@@ -858,6 +882,18 @@ impl<'a> Iterator for Scanner<'a> {
                     // no other matching pattern -> unknown token
                     Err(self.error_here(1, ErrorType::UnknownToken))
                 }
+            })
+            .map(|token| {
+                token.and_then(|tkn| match tkn.value_noalloc() {
+                    Ok(_) => Ok(tkn),
+                    Err(err) => Err(Error {
+                        range: Range {
+                            start: self.offset - tkn.src.len(),
+                            end: self.offset,
+                        },
+                        err,
+                    }),
+                })
             })
             .inspect(|res| {
                 if let Ok(token) = res {
