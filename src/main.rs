@@ -11,7 +11,10 @@
     clippy::missing_assert_message,
     reason = "give a reason for panics"
 )]
-
+#![allow(
+    clippy::too_many_lines,
+    reason = "don't care. I don't see a need to make an entire function only to call it in one place."
+)]
 use scanner::{TokenType, tokenize};
 
 mod scanner;
@@ -29,7 +32,7 @@ pub fn run_code(source: &str) {
                 print!("{token:?}:\n  ");
                 match value {
                     None => println!("ignored"),
-                    Some(value) => println!("{value:?}"),
+                    Some(value) => println!("{value:#?}"),
                 }
             }
             Err(error) => eprintln!("\x1b[91merror: {error}\x1b[0m"),

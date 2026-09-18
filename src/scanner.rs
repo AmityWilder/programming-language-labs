@@ -33,6 +33,7 @@ pub enum ErrorType<'a> {
     EndlessBlockComment,
     EndlessStringLiteral,
     EscapedStringLiteralEnd,
+    EndlessInterpStrExpr,
     InvalidEscape(&'a str),
     EmptyCharLiteral,
     MultiCharLiteral,
@@ -55,6 +56,9 @@ impl std::fmt::Display for ErrorType<'_> {
                 string literals cannot end with an unescaped backslash (`\\`), \
                 it is indistinguishable from an escaped double-quote (`\\\"`)",
             ),
+            Self::EndlessInterpStrExpr => f.write_str(
+                "interpolated string expression opened (`${`) but never closes (missing `}`)",
+            ),
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s}"),
             Self::EmptyCharLiteral => f.write_str("empty character literal"),
             Self::MultiCharLiteral => f.write_str(
@@ -70,15 +74,8 @@ impl std::fmt::Display for ErrorType<'_> {
 impl std::error::Error for ErrorType<'_> {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::UnknownToken
-            | Self::EndlessBlockComment
-            | Self::EndlessStringLiteral
-            | Self::EscapedStringLiteralEnd
-            | Self::InvalidEscape(_)
-            | Self::EmptyCharLiteral
-            | Self::MultiCharLiteral => None,
-
             Self::InvalidNumLiteral(e) => Some(e),
+            _ => None,
         }
     }
 }
@@ -361,8 +358,18 @@ define_token_eq! {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InterpolatedString<'a> {
-    pub string: String,
-    pub expressions: Vec<(usize, Vec<Token<'a>>)>,
+    /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.
+    ///
+    /// Like a string literal, it's possible no escape sequences or "`${}`"s were present,
+    /// in which case this will be borrowed and [`Self::expressions`] will be empty.
+    pub text: Cow<'a, str>,
+
+    /// The positions and tokens of the expressions to insert into [`Self::text`]
+    ///
+    /// Note: It is impossible to have an interpolated string *within* an interpolated string expression,
+    /// as the opening delimiter to the inner literal would be identical to the closing delimiter of the outer literal.
+    /// Instead of getting a nested interpolated string, you would get an [`ErrorType::EndlessInterpStrExpr`] error.
+    pub expressions: Vec<(usize, Scanner<'a>)>,
 }
 
 /// The value represented by a [`Token`]
@@ -399,6 +406,7 @@ impl std::fmt::Debug for Token<'_> {
     }
 }
 
+/// Returns [`None`] if `src` does not start with `\`
 fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
     const ESCAPE: char = '\\';
     let mut iter = src.chars();
@@ -423,7 +431,7 @@ fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
                     };
                     let num_start = base_len;
                     let end = num_start + digits; // ASCII digits
-                    let len = end - num_start;
+                    let len = base_len + digits;
                     src.get(num_start..end)
                         .and_then(|n| u8::from_str_radix(n, base).ok())
                         .map(|num| (len, char::from(num)))
@@ -440,6 +448,9 @@ fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
     })
 }
 
+/// Range part of return is the range in the string literal that should get replaced with the char part of the literal
+///
+/// Errors if `i` is not the position of a `\` in `src`
 fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>> {
     escape_char(&src[i..])
         .ok_or(ErrorType::InvalidEscape(&src[i..])) // no remaining characters
@@ -448,6 +459,37 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>
             res.map(|ch| (range, ch))
                 .map_err(|()| ErrorType::InvalidEscape(&src[range]))
         })
+}
+
+/// Range part of return is the range in the string literal that should get eliminated due to being replaced with a runtime expression
+///
+/// # Panics
+/// This function will panic if `i` is not the position of a `${` in `src`
+fn interp_str_expr(src: &str, i: usize) -> Result<(Range<usize>, Scanner<'_>), ErrorType<'_>> {
+    const OPEN: &str = "${";
+    let expr = src[i..]
+        .strip_prefix(OPEN)
+        .expect("`i` should be the position of a `${` in `src`");
+    let mut depth = 0;
+    expr.find(|ch: char| {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                if depth == 0 {
+                    return true;
+                }
+                depth -= 1;
+            }
+            _ => (),
+        }
+        false
+    })
+    .map(|len| {
+        let start_rm = i;
+        let end_rm = start_rm + OPEN.len() + len + '}'.len_utf8();
+        (Range::from(start_rm..end_rm), Scanner::new(&expr[..len]))
+    })
+    .ok_or(ErrorType::EndlessInterpStrExpr)
 }
 
 impl<'a> Token<'a> {
@@ -509,14 +551,20 @@ impl<'a> Token<'a> {
             }
 
             TokenType::StringLiteral => {
+                const DELIM: char = '"';
+                const ESCAPE: char = '\\';
                 let src = self
                     .src
-                    .strip_prefix('"')
-                    .and_then(|s| s.strip_suffix('"'))
+                    .strip_prefix(DELIM)
+                    .and_then(|s| s.strip_suffix(DELIM))
                     .expect("string literal tokens should include delimiters (`\"`)");
-                if src.contains('\\')
+                let mut is_esc = false;
+                if src.contains(ESCAPE)
                     && let Some(e) = src
-                        .match_indices('\\')
+                        .match_indices(|ch: char| {
+                            is_esc = !is_esc && ch == ESCAPE;
+                            is_esc
+                        })
                         .find_map(|(i, _)| escape_seq(src, i).err())
                 {
                     Err(e)
@@ -526,11 +574,12 @@ impl<'a> Token<'a> {
             }
 
             TokenType::CharLiteral => {
+                const DELIM: char = '\'';
                 let src = self
                     .src
-                    .strip_prefix('\'')
-                    .and_then(|s| s.strip_suffix('\''))
-                    .expect("string literal tokens should include delimiters (`'`)");
+                    .strip_prefix(DELIM)
+                    .and_then(|s| s.strip_suffix(DELIM))
+                    .expect("character literal tokens should include delimiters (`'`)");
                 if let Some((len, res)) = escape_char(src) {
                     // escape sequence
                     res.map_err(|()| ErrorType::InvalidEscape(src))
@@ -554,8 +603,33 @@ impl<'a> Token<'a> {
             }
 
             TokenType::InterpolatedString => {
-                println!("not yet implemented: interpolated string");
-                Err(ErrorType::UnknownToken)
+                const DELIM: char = '`';
+                let src = self
+                    .src
+                    .strip_prefix(DELIM)
+                    .and_then(|s| s.strip_suffix(DELIM))
+                    .expect(
+                        "interpolated string literal tokens should include delimiters (`` ` ``)",
+                    );
+                let mut is_esc = false;
+                if let Some(e) = src
+                    .match_indices(|ch: char| {
+                        is_esc = !is_esc && ch == '\\';
+                        is_esc
+                    })
+                    .find_map(|(i, _)| escape_seq(src, i).err())
+                    .or_else(|| {
+                        src.match_indices("${")
+                            .find_map(|(i, _)| interp_str_expr(src, i).err())
+                    })
+                {
+                    Err(e)
+                } else {
+                    Ok(Some(TokenValue::InterpolatedString(InterpolatedString {
+                        text: Cow::Borrowed(src),
+                        expressions: Vec::new(),
+                    })))
+                }
             }
 
             TokenType::Identifier | TokenType::Callable => Ok(Some(TokenValue::Direct(self.src))),
@@ -572,26 +646,111 @@ impl<'a> Token<'a> {
 
     /// Returns [`None`] if non-code (whitespace/comment)
     pub fn value(self) -> Result<Option<TokenValue<'a>>, ErrorType<'a>> {
+        const EXPR_START: &str = "${";
+        const ESC_START: char = '\\';
         let res = self.value_noalloc();
-        if let Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src)))) = res
-            && src.contains('\\')
-        {
-            let replacements = src
-                .match_indices('\\')
-                .map(|(i, _)| escape_seq(src, i))
-                .collect::<Result<Vec<_>, _>>()?;
-            let mut unescaped = src.to_string();
-            for (range, repl) in replacements.into_iter().rev() {
-                unescaped.replace_range(range, repl.encode_utf8(&mut [0; char::MAX_LEN_UTF8]));
+        match res {
+            Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src)))) if src.contains(ESC_START) => {
+                let mut is_esc = false;
+                let replacements = src
+                    .match_indices(|ch: char| {
+                        is_esc = !is_esc && ch == ESC_START;
+                        is_esc
+                    })
+                    .map(|(i, _)| escape_seq(src, i))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut unescaped = src.to_string();
+                for (range, repl) in replacements.into_iter().rev() {
+                    unescaped.replace_range(range, repl.encode_utf8(&mut [0; char::MAX_LEN_UTF8]));
+                }
+                Ok(Some(TokenValue::StringLiteral(Cow::Owned(unescaped))))
             }
-            Ok(Some(TokenValue::StringLiteral(Cow::Owned(unescaped))))
-        } else {
-            res
+
+            Ok(Some(TokenValue::InterpolatedString(InterpolatedString {
+                text: Cow::Borrowed(text),
+                mut expressions,
+            }))) if text.contains(ESC_START) || text.contains(EXPR_START) => {
+                debug_assert_eq!(
+                    &expressions,
+                    &[],
+                    "should have no expressions if text is borrowed"
+                );
+                let mut is_esc = false;
+                let esc_replacements = text
+                    .match_indices(|ch: char| {
+                        is_esc = !is_esc && ch == ESC_START;
+                        is_esc
+                    })
+                    .map(|(i, _)| escape_seq(text, i))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let (expr_replacements, expr_scanners) = text
+                    .match_indices(EXPR_START)
+                    .map(|(i, _)| interp_str_expr(text, i))
+                    .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
+                let mut replacements =
+                    Vec::with_capacity(esc_replacements.len() + expr_replacements.len());
+                // everything is in order, but expressions and escapes can be interspersed
+                {
+                    let mut esc_iter = esc_replacements
+                        .into_iter()
+                        .map(|(range, ch)| (range, Some(ch)))
+                        .peekable();
+
+                    let mut expr_iter = expr_replacements
+                        .into_iter()
+                        .map(|range| (range, None))
+                        .peekable();
+
+                    replacements.extend(std::iter::from_fn(|| {
+                        esc_iter
+                            .next_if(|(esc_range, _)| {
+                                expr_iter.peek().is_none_or(|(expr_range, _)| {
+                                    esc_range.start < expr_range.start
+                                })
+                            })
+                            .or_else(|| expr_iter.next())
+                    }));
+                }
+
+                // how many bytes of difference between the original string and the processed string
+                let mut byte_diff = 0;
+                // need to get the correct positions of the expression insertions, since their positions change when we replace substrings
+                expressions.extend(
+                    replacements
+                        .iter()
+                        .filter_map(|(range, repl)| {
+                            let start = range.start - byte_diff;
+                            let being_replaced_len = range.end - range.start;
+                            let replace_with_len = repl.map_or(0, char::len_utf8);
+                            byte_diff += being_replaced_len - replace_with_len;
+                            // expression replacements are always None, so if we see a None we know that's an expression.
+                            repl.is_none().then_some(start)
+                        })
+                        .zip(expr_scanners),
+                );
+
+                let mut processed = String::with_capacity(text.len() - byte_diff);
+                let mut prev_end = 0;
+                for (range, repl) in replacements {
+                    processed.push_str(&text[prev_end..range.start]);
+                    prev_end = range.end;
+                    if let Some(ch) = repl {
+                        processed.push(ch);
+                    }
+                }
+
+                Ok(Some(TokenValue::InterpolatedString(InterpolatedString {
+                    text: Cow::Owned(processed),
+                    expressions,
+                })))
+            }
+
+            _ => res,
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scanner<'a> {
     /// A reference to the original source code. Since this is only a copy, it will get ripped apart and fed to the tokens.
     /// The next token will always be at the start of this string.
@@ -655,10 +814,6 @@ impl<'a> Scanner<'a> {
 impl<'a> Iterator for Scanner<'a> {
     type Item = Result<Token<'a>, Error<'a>>;
 
-    #[allow(
-        clippy::too_many_lines,
-        reason = "don't care. I don't see a need to make an entire function only to call it in one place."
-    )]
     fn next(&mut self) -> Option<Self::Item> {
         let mut iter = self.source.chars().peekable();
         // if there are no characters remaining, this will return None and stop iterating.
