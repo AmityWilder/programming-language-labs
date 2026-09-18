@@ -1,16 +1,40 @@
 use std::{borrow::Cow, range::Range};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NumLitError {
+    UInt(std::num::ParseIntError),
+    SInt(std::num::TryFromIntError),
+    Flt(std::num::ParseFloatError),
+}
+
+impl std::fmt::Display for NumLitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UInt(e) => e.fmt(f),
+            Self::SInt(e) => e.fmt(f),
+            Self::Flt(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for NumLitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UInt(e) => Some(e),
+            Self::SInt(e) => Some(e),
+            Self::Flt(e) => Some(e),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorType<'a> {
     UnknownToken,
     EndlessBlockComment,
     EndlessStringLiteral,
     EscapedStringLiteralEnd,
     InvalidEscape(&'a str),
-    InvalidUIntLiteral(std::num::ParseIntError),
-    InvalidSIntLiteral(std::num::TryFromIntError),
-    InvalidSIntNegOverflow,
-    InvalidFltLiteral(std::num::ParseFloatError),
+    InvalidNumLiteral(NumLitError),
 }
 
 impl std::fmt::Display for ErrorType<'_> {
@@ -30,13 +54,7 @@ impl std::fmt::Display for ErrorType<'_> {
                 it is indistinguishable from an escaped double-quote (`\\\"`)",
             ),
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s}"),
-            Self::InvalidUIntLiteral(e) => write!(f, "invalid number literal: {e}"),
-            Self::InvalidSIntLiteral(e) => write!(f, "invalid number literal: {e}"),
-            Self::InvalidSIntNegOverflow => write!(
-                f,
-                "invalid number literal: number too small to fit in target type"
-            ),
-            Self::InvalidFltLiteral(e) => write!(f, "invalid number literal: {e}"),
+            Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
         }
     }
 }
@@ -48,12 +66,9 @@ impl std::error::Error for ErrorType<'_> {
             | Self::EndlessBlockComment
             | Self::EndlessStringLiteral
             | Self::EscapedStringLiteralEnd
-            | Self::InvalidEscape(_)
-            | Self::InvalidSIntNegOverflow => None,
+            | Self::InvalidEscape(_) => None,
 
-            Self::InvalidUIntLiteral(e) => Some(e),
-            Self::InvalidSIntLiteral(e) => Some(e),
-            Self::InvalidFltLiteral(e) => Some(e),
+            Self::InvalidNumLiteral(e) => Some(e),
         }
     }
 }
@@ -140,15 +155,74 @@ impl std::error::Error for ContextError<'_> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenType {
+    /// An entire chunk of whitespace, not just one character
     Whitespace,
     Comment,
     NumberLiteral,
     StringLiteral,
     Identifier,
+    /// Identical to [`Self::Identifier`], but implies a function by context
+    /// i.e. The next token is an open parentheses (`(`)
     Callable,
     Keyword,
+    /// Identical to [`Self::Keyword`], but specific to [`KeywordType::Control`]
+    /// (because they have a different highlight color)
     CtrlKeyword,
     Punctuation,
+}
+
+/// Helper macro for preventing issues with missed variants when adding new ones
+macro_rules! define_token_eq {
+    (
+        $(#[$em:meta])*
+        $vis:vis enum $Enum:ident {$(
+            $(#[$vm:meta])*
+            $Variant:ident = $value:literal
+        ),+ $(,)?}
+    ) => {
+        $(#[$em])*
+        $vis enum $Enum {$(
+            $(#[$vm])*
+            #[doc = concat!("`", $value, "`")]
+            $Variant,
+        )+}
+
+        impl $Enum {
+            /// Descending length, so bigger tokens aren't broken apart by subset tokens
+            pub const OPTIONS: [(&str, Self); [$(Self::$Variant),+].len()] = [
+                $(($value, Self::$Variant),)+
+            ];
+
+            /// Matches the prefix of `s` to a [`Self`]. Tries to find the longest one possible.
+            #[allow(dead_code)]
+            pub fn from_prefix(s: &str) -> Option<Self> {
+                Self::OPTIONS
+                    .into_iter()
+                    .find(|(pat, _)| s.starts_with(pat))
+                    .map(|(_, punc)| punc)
+            }
+
+            /// Like [`Self::from_prefix`] but matches the full string
+            pub fn from_str(s: &str) -> Option<Self> {
+                match s {
+                    $($value => Some(Self::$Variant),)+
+                    _ => None,
+                }
+            }
+
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$Variant => $value,)+
+                }
+            }
+        }
+
+        impl std::fmt::Display for $Enum {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+    };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -158,49 +232,34 @@ pub enum KeywordType {
     Control,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Keyword {
-    // Definitions
-    /// `struct`
-    Struct,
-    /// `union`
-    Union,
-    /// `enum`
-    Enum,
-    /// `type`
-    Type,
+define_token_eq! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Keyword {
+        // Definitions
+        Struct = "struct",
+        Union = "union",
+        Enum = "enum",
+        Type = "type",
 
-    // halway between Definition and Value
-    /// `def`
-    Def,
-    /// `fn`
-    Fn,
+        // halfway between Definition and Value
+        Def = "def",
+        Fn = "fn",
 
-    // Value
-    /// `let`
-    Let,
-    /// `const`
-    Const,
-    /// `static`
-    Static,
+        // Value
+        Let = "let",
+        Const = "const",
+        Static = "static",
 
-    // Flow control
-    /// `if`
-    If,
-    /// `else`
-    Else,
-    /// `for`
-    For,
-    /// `while`
-    While,
-    /// `with`
-    With,
-    /// `where`
-    Where,
-    /// `loop`
-    Loop,
-    /// `in`
-    In,
+        // Flow control
+        If = "if",
+        Else = "else",
+        For = "for",
+        While = "while",
+        With = "with",
+        Where = "where",
+        Loop = "loop",
+        In = "in",
+    }
 }
 
 impl Keyword {
@@ -226,336 +285,62 @@ impl Keyword {
             | Self::In => KeywordType::Control,
         }
     }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "struct" => Some(Self::Struct),
-            "union" => Some(Self::Union),
-            "enum" => Some(Self::Enum),
-            "type" => Some(Self::Type),
-
-            "fn" => Some(Self::Fn),
-            "def" => Some(Self::Def),
-
-            "let" => Some(Self::Let),
-            "const" => Some(Self::Const),
-            "static" => Some(Self::Static),
-
-            "if" => Some(Self::If),
-            "else" => Some(Self::Else),
-            "for" => Some(Self::For),
-            "while" => Some(Self::While),
-            "with" => Some(Self::With),
-            "where" => Some(Self::Where),
-            "loop" => Some(Self::Loop),
-            "in" => Some(Self::In),
-
-            _ => None,
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Fn => "fn",
-            Self::Struct => "struct",
-            Self::Union => "union",
-            Self::Enum => "enum",
-            Self::Type => "type",
-            Self::Def => "def",
-
-            Self::Let => "let",
-            Self::Const => "const",
-            Self::Static => "static",
-
-            Self::If => "if",
-            Self::Else => "else",
-            Self::For => "for",
-            Self::While => "while",
-            Self::With => "with",
-            Self::Where => "where",
-            Self::Loop => "loop",
-            Self::In => "in",
-        }
-    }
 }
 
-impl std::fmt::Display for Keyword {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Punctuation {
-    // 1-char
-    /// `!`
-    Not,
-    /// `#`
-    MacroArgCount,
-    /// `$`
-    Ref,
-    /// `%`
-    Remainder,
-    /// `&`
-    And,
-    /// `(`
-    LParen,
-    /// `)`
-    RParen,
-    /// `*`
-    Mul,
-    /// `+`
-    Add,
-    /// `,`
-    Comma,
-    /// `-`
-    Sub,
-    /// `.`
-    Dot,
-    /// `/`
-    Div,
-    /// `:`
-    Colon,
-    /// `;`
-    Semi,
-    /// `<`
-    Lt,
-    /// `=`
-    Assign,
-    /// `>`
-    Gt,
-    /// `?`
-    QMark,
-    /// `[`
-    LBrack,
-    /// `]`
-    RBrack,
-    /// `^`
-    Xor,
-    /// `{`
-    LBrace,
-    /// `|`
-    Or,
-    /// `}`
-    RBrace,
-
-    // 2-char
-    /// `!=`
-    Neq,
-    /// `%=`
-    RemAssign,
-    /// `&=`
-    AndAssign,
-    /// `*=`
-    MulAssign,
-    /// `**`
-    Exponent,
-    /// `+=`
-    AddAssign,
-    /// `-=`
-    SubAssign,
-    /// `->`
-    Arrow,
-    /// `/=`
-    DivAssign,
-    /// `::`
-    PathSep,
-    /// `<=`
-    Le,
-    /// `<<`
-    Shl,
-    /// `==`
-    Eq,
-    /// `=>`
-    FatArrow,
-    /// `>=`
-    Ge,
-    /// `>>`
-    Shr,
-    /// `^=`
-    XorAssign,
-    /// `|=`
-    OrAssign,
-
-    // 3-char
-    /// `<<=`
-    ShlAssign,
-    /// `>>=`
-    ShrAssign,
-}
-
-impl Punctuation {
-    /// Descending length, so bigger tokens aren't broken apart by subset tokens
-    const OPTIONS: [(&str, Self); 45] = [
+define_token_eq! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum Punctuation {
         // 3-char
-        ("<<=", Self::ShlAssign),
-        (">>=", Self::ShrAssign),
+        ShlAssign = "<<=",
+        ShrAssign = ">>=",
+
         // 2-char
-        ("!=", Self::Neq),
-        ("%=", Self::RemAssign),
-        ("&=", Self::AndAssign),
-        ("*=", Self::MulAssign),
-        ("**", Self::Exponent),
-        ("+=", Self::AddAssign),
-        ("-=", Self::SubAssign),
-        ("->", Self::Arrow),
-        ("/=", Self::DivAssign),
-        ("::", Self::PathSep),
-        ("<=", Self::Le),
-        ("<<", Self::Shl),
-        ("==", Self::Eq),
-        ("=>", Self::FatArrow),
-        (">=", Self::Ge),
-        (">>", Self::Shr),
-        ("^=", Self::XorAssign),
-        ("|=", Self::OrAssign),
+        Neq = "!=",
+        RemAssign = "%=",
+        AndAssign = "&=",
+        MulAssign = "*=",
+        Exponent = "**",
+        AddAssign = "+=",
+        SubAssign = "-=",
+        Arrow = "->",
+        DivAssign = "/=",
+        PathSep = "::",
+        Le = "<=",
+        Shl = "<<",
+        Eq = "==",
+        FatArrow = "=>",
+        Ge = ">=",
+        Shr = ">>",
+        XorAssign = "^=",
+        OrAssign = "|=",
+
         // 1-char
-        ("!", Self::Not),
-        ("#", Self::MacroArgCount),
-        ("$", Self::Ref),
-        ("%", Self::Remainder),
-        ("&", Self::And),
-        ("(", Self::LParen),
-        (")", Self::RParen),
-        ("*", Self::Mul),
-        ("+", Self::Add),
-        (",", Self::Comma),
-        ("-", Self::Sub),
-        (".", Self::Dot),
-        ("/", Self::Div),
-        (":", Self::Colon),
-        (";", Self::Semi),
-        ("<", Self::Lt),
-        ("=", Self::Assign),
-        (">", Self::Gt),
-        ("?", Self::QMark),
-        ("[", Self::LBrack),
-        ("]", Self::RBrack),
-        ("^", Self::Xor),
-        ("{", Self::LBrace),
-        ("|", Self::Or),
-        ("}", Self::RBrace),
-    ];
-
-    /// Matches the prefix of `s` to a [`Punctuation`]. Tries to find the longest one possible.
-    pub fn from_prefix(s: &str) -> Option<Self> {
-        Self::OPTIONS
-            .into_iter()
-            .find(|(pat, _)| s.starts_with(pat))
-            .map(|(_, punc)| punc)
-    }
-
-    /// Like [`Self::from_prefix`] but matches the full string
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "!" => Some(Self::Not),
-            "#" => Some(Self::MacroArgCount),
-            "$" => Some(Self::Ref),
-            "%" => Some(Self::Remainder),
-            "&" => Some(Self::And),
-            "(" => Some(Self::LParen),
-            ")" => Some(Self::RParen),
-            "*" => Some(Self::Mul),
-            "+" => Some(Self::Add),
-            "," => Some(Self::Comma),
-            "-" => Some(Self::Sub),
-            "." => Some(Self::Dot),
-            "/" => Some(Self::Div),
-            ":" => Some(Self::Colon),
-            ";" => Some(Self::Semi),
-            "<" => Some(Self::Lt),
-            "=" => Some(Self::Assign),
-            ">" => Some(Self::Gt),
-            "?" => Some(Self::QMark),
-            "[" => Some(Self::LBrack),
-            "]" => Some(Self::RBrack),
-            "^" => Some(Self::Xor),
-            "{" => Some(Self::LBrace),
-            "|" => Some(Self::Or),
-            "}" => Some(Self::RBrace),
-
-            "!=" => Some(Self::Neq),
-            "%=" => Some(Self::RemAssign),
-            "&=" => Some(Self::AndAssign),
-            "*=" => Some(Self::MulAssign),
-            "**" => Some(Self::Exponent),
-            "+=" => Some(Self::AddAssign),
-            "-=" => Some(Self::SubAssign),
-            "->" => Some(Self::Arrow),
-            "/=" => Some(Self::DivAssign),
-            "::" => Some(Self::PathSep),
-            "<=" => Some(Self::Le),
-            "<<" => Some(Self::Shl),
-            "==" => Some(Self::Eq),
-            "=>" => Some(Self::FatArrow),
-            ">=" => Some(Self::Ge),
-            ">>" => Some(Self::Shr),
-            "^=" => Some(Self::XorAssign),
-            "|=" => Some(Self::OrAssign),
-
-            "<<=" => Some(Self::ShlAssign),
-            ">>=" => Some(Self::ShrAssign),
-
-            _ => None,
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Not => "!",
-            Self::MacroArgCount => "#",
-            Self::Ref => "$",
-            Self::Remainder => "%",
-            Self::And => "&",
-            Self::LParen => "(",
-            Self::RParen => ")",
-            Self::Mul => "*",
-            Self::Add => "+",
-            Self::Comma => ",",
-            Self::Sub => "-",
-            Self::Dot => ".",
-            Self::Div => "/",
-            Self::Colon => ":",
-            Self::Semi => ";",
-            Self::Lt => "<",
-            Self::Assign => "=",
-            Self::Gt => ">",
-            Self::QMark => "?",
-            Self::LBrack => "[",
-            Self::RBrack => "]",
-            Self::Xor => "^",
-            Self::LBrace => "{",
-            Self::Or => "|",
-            Self::RBrace => "}",
-
-            Self::Neq => "!=",
-            Self::RemAssign => "%=",
-            Self::AndAssign => "&=",
-            Self::MulAssign => "*=",
-            Self::Exponent => "**",
-            Self::AddAssign => "+=",
-            Self::SubAssign => "-=",
-            Self::Arrow => "->",
-            Self::DivAssign => "/=",
-            Self::PathSep => "::",
-            Self::Le => "<=",
-            Self::Shl => "<<",
-            Self::Eq => "==",
-            Self::FatArrow => "=>",
-            Self::Ge => ">=",
-            Self::Shr => ">>",
-            Self::XorAssign => "^=",
-            Self::OrAssign => "|=",
-
-            Self::ShlAssign => "<<=",
-            Self::ShrAssign => ">>=",
-        }
-    }
-}
-
-impl std::fmt::Display for Punctuation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
+        Not = "!",
+        MacroArgCount = "#",
+        Ref = "$",
+        Remainder = "%",
+        And = "&",
+        LParen = "(",
+        RParen = ")",
+        Mul = "*",
+        Add = "+",
+        Comma = ",",
+        Sub = "-",
+        Dot = ".",
+        Div = "/",
+        Colon = ":",
+        Semi = ";",
+        Lt = "<",
+        Assign = "=",
+        Gt = ">",
+        QMark = "?",
+        LBrack = "[",
+        MacroStart = "\\",
+        RBrack = "]",
+        Xor = "^",
+        LBrace = "{",
+        Or = "|",
+        RBrace = "}",
     }
 }
 
@@ -637,7 +422,7 @@ impl<'a> Token<'a> {
                     self.src
                         .parse()
                         .map(|x| Some(TokenValue::FltLiteral(x)))
-                        .map_err(ErrorType::InvalidFltLiteral)
+                        .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::Flt(e)))
                 } else {
                     let stripped = self.src.strip_prefix('-');
                     let is_negative = stripped.is_some();
@@ -653,13 +438,19 @@ impl<'a> Token<'a> {
                         (magnitude, 10)
                     };
                     usize::from_str_radix(digits, radix)
-                        .map_err(ErrorType::InvalidUIntLiteral)
+                        .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::UInt(e)))
                         .and_then(|value| {
                             if is_negative {
                                 (isize::try_from(value)
-                                    .map_err(ErrorType::InvalidSIntLiteral)
+                                    .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::SInt(e)))
                                     .and_then(|x| {
-                                        x.checked_neg().ok_or(ErrorType::InvalidSIntNegOverflow)
+                                        x.checked_neg().ok_or_else(|| {
+                                            ErrorType::InvalidNumLiteral(NumLitError::SInt(
+                                                i8::try_from(i16::from(i8::MIN) - 1).expect_err(
+                                                    "should result in negative overflow",
+                                                ),
+                                            ))
+                                        })
                                     }))
                                 .map(TokenValue::SIntLiteral)
                             } else {

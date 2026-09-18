@@ -58,7 +58,7 @@ fn test_multiple_errors() {
     let mut tokens = tokenize("5a \"\\\"").map(|res| res.map_err(|e| (&e.source[e.range], e.err)));
     assert_matches!(
         tokens.next(),
-        Some(Err(("5a", ErrorType::InvalidUIntLiteral(_))))
+        Some(Err(("5a", ErrorType::InvalidNumLiteral(_))))
     );
     assert_eq!(
         tokens.next(),
