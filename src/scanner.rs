@@ -145,6 +145,7 @@ pub enum TokenType {
     NumberLiteral,
     StringLiteral,
     Identifier,
+    Callable,
     Keyword,
     CtrlKeyword,
     Punctuation,
@@ -599,6 +600,8 @@ fn escape_seq(i: usize, (j, ch): (usize, char), src: &str) -> Result<(Range<usiz
         't' => (j + ch.len_utf8(), '\t'),
 
         prefix @ ('x' | 'o' | 'b') => {
+            // digits = ceil(256.log(base))
+            // ilog rounds down but we want rounded up
             let (digits, base) = match prefix {
                 'x' => (2, 16),
                 'o' => (3, 8),
@@ -690,7 +693,7 @@ impl<'a> Token<'a> {
                 Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src))))
             }
 
-            TokenType::Identifier => Ok(Some(TokenValue::Direct(self.src))),
+            TokenType::Identifier | TokenType::Callable => Ok(Some(TokenValue::Direct(self.src))),
 
             TokenType::Keyword | TokenType::CtrlKeyword => Ok(Some(TokenValue::Keyword(
                 Keyword::from_str(self.src).expect(VALID_TOKENS),
@@ -857,6 +860,10 @@ impl<'a> Iterator for Scanner<'a> {
                             } else {
                                 TokenType::Keyword
                             }
+                        } else if self.source.starts_with('(')
+                        /* assumes the token has already been split off */
+                        {
+                            TokenType::Callable
                         } else {
                             TokenType::Identifier
                         },

@@ -64,3 +64,4 @@ Identifiers must start with a letter (not restricted to ASCII) or underscore (`_
 3. Execute one of the following commands:
     - `cargo run` to run in interactive mode
     - `cargo run -- <FILE>` to run the contents of a file (the `--` is needed to distinguish `cargo` arguments from `batscript` arguments; this is equivalent to running `batscript <FILE>`)
+4. To exit interactive mode, input `exit` or `quit`.

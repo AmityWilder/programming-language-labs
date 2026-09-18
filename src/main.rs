@@ -45,6 +45,7 @@ pub fn run_code(source: &str) {
                     TokenType::NumberLiteral => "92",
                     TokenType::StringLiteral => "33",
                     TokenType::Identifier => "4;96",
+                    TokenType::Callable => "4;93",
                     TokenType::Keyword => "94",
                     TokenType::CtrlKeyword => "95",
                     TokenType::Punctuation => "37",
@@ -72,7 +73,7 @@ fn main() {
                 std::io::stdin()
                     .read_line(&mut input)
                     .expect("failed to obtain input");
-                if input.trim() == "exit" {
+                if matches!(input.trim(), "exit" | "quit") {
                     break; // finish
                 }
                 run_code(&input);
