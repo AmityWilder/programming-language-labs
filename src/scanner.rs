@@ -34,6 +34,8 @@ pub enum ErrorType<'a> {
     EndlessStringLiteral,
     EscapedStringLiteralEnd,
     InvalidEscape(&'a str),
+    EmptyCharLiteral,
+    MultiCharLiteral,
     InvalidNumLiteral(NumLitError),
 }
 
@@ -54,6 +56,12 @@ impl std::fmt::Display for ErrorType<'_> {
                 it is indistinguishable from an escaped double-quote (`\\\"`)",
             ),
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s}"),
+            Self::EmptyCharLiteral => f.write_str("empty character literal"),
+            Self::MultiCharLiteral => f.write_str(
+                "character literal may only contain one codepoint; \
+                if you meant to write a string literal, use double quotes (`\"`). \
+                if you meant to write an interpolated string, use graves (`` ` ``).",
+            ),
             Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
         }
     }
@@ -66,7 +74,9 @@ impl std::error::Error for ErrorType<'_> {
             | Self::EndlessBlockComment
             | Self::EndlessStringLiteral
             | Self::EscapedStringLiteralEnd
-            | Self::InvalidEscape(_) => None,
+            | Self::InvalidEscape(_)
+            | Self::EmptyCharLiteral
+            | Self::MultiCharLiteral => None,
 
             Self::InvalidNumLiteral(e) => Some(e),
         }
@@ -160,6 +170,9 @@ pub enum TokenType {
     Comment,
     NumberLiteral,
     StringLiteral,
+    CharLiteral,
+    /// A string that can contain expressions
+    InterpolatedString,
     Identifier,
     /// Identical to [`Self::Identifier`], but implies a function by context
     /// i.e. The next token is an open parentheses (`(`)
@@ -172,6 +185,8 @@ pub enum TokenType {
 }
 
 /// Helper macro for preventing issues with missed variants when adding new ones
+///
+/// Variants should be in the order they should be tested
 macro_rules! define_token_eq {
     (
         $(#[$em:meta])*
@@ -344,6 +359,12 @@ define_token_eq! {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterpolatedString<'a> {
+    pub string: String,
+    pub expressions: Vec<(usize, Vec<Token<'a>>)>,
+}
+
 /// The value represented by a [`Token`]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenValue<'a> {
@@ -352,6 +373,8 @@ pub enum TokenValue<'a> {
     FltLiteral(f64),
     /// Escape sequences are converted (unless there are none)
     StringLiteral(Cow<'a, str>),
+    CharLiteral(char),
+    InterpolatedString(InterpolatedString<'a>),
     /// Value is the token source itself
     Direct(&'a str),
     Keyword(Keyword),
@@ -376,34 +399,55 @@ impl std::fmt::Debug for Token<'_> {
     }
 }
 
-fn escape_seq(i: usize, (j, ch): (usize, char), src: &str) -> Result<(Range<usize>, char), &str> {
-    let (end, repl) = match ch {
-        repl @ ('\\' | '"') => (j + ch.len_utf8(), repl),
+fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
+    const ESCAPE: char = '\\';
+    let mut iter = src.chars();
+    iter.next().filter(|ch| *ch == ESCAPE).map(|_| {
+        let res = iter.next().ok_or(ESCAPE.len_utf8()).and_then(|ch| {
+            let base_len = ESCAPE.len_utf8() + ch.len_utf8();
+            match ch {
+                '\\' | '"' | '\'' | '`' => Ok((base_len, ch)),
 
-        'n' => (j + ch.len_utf8(), '\n'),
-        'r' => (j + ch.len_utf8(), '\r'),
-        't' => (j + ch.len_utf8(), '\t'),
+                'n' => Ok((base_len, '\n')),
+                'r' => Ok((base_len, '\r')),
+                't' => Ok((base_len, '\t')),
 
-        prefix @ ('x' | 'o' | 'b') => {
-            // digits = ceil(256.log(base))
-            // ilog rounds down but we want rounded up
-            let (digits, base) = match prefix {
-                'x' => (2, 16),
-                'o' => (3, 8),
-                'b' => (8, 2),
-                _ => unreachable!("guarded by outer branch"),
-            };
-            let num_start = j + ch.len_utf8();
-            let end = num_start + digits; // ASCII digits
-            src.get(num_start..end)
-                .ok_or(&src[i..])
-                .and_then(|n| u8::from_str_radix(n, base).map_err(|_| &src[i..end]))
-                .map(|num| (end, char::from(num)))?
+                prefix @ ('x' | 'o' | 'b') => {
+                    // digits = ceil(256.log(base))
+                    // ilog rounds down but we want rounded up
+                    let (digits, base) = match prefix {
+                        'x' => (2, 16),
+                        'o' => (3, 8),
+                        'b' => (8, 2),
+                        _ => unreachable!("guarded by outer branch"),
+                    };
+                    let num_start = base_len;
+                    let end = num_start + digits; // ASCII digits
+                    let len = end - num_start;
+                    src.get(num_start..end)
+                        .and_then(|n| u8::from_str_radix(n, base).ok())
+                        .map(|num| (len, char::from(num)))
+                        .ok_or(len)
+                }
+
+                _ => Err(base_len),
+            }
+        });
+        match res {
+            Ok((len, ch)) => (len, Ok(ch)),
+            Err(len) => (len, Err(())),
         }
+    })
+}
 
-        _ => return Err(src),
-    };
-    Ok((Range::from(i..end), repl))
+fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>> {
+    escape_char(&src[i..])
+        .ok_or(ErrorType::InvalidEscape(&src[i..])) // no remaining characters
+        .and_then(|(len, res)| {
+            let range = Range::from(i..i + len);
+            res.map(|ch| (range, ch))
+                .map_err(|()| ErrorType::InvalidEscape(&src[range]))
+        })
 }
 
 impl<'a> Token<'a> {
@@ -412,6 +456,9 @@ impl<'a> Token<'a> {
         Self { src, ty }
     }
 
+    /// Obtains the value of a token without allocating
+    ///
+    /// **Warning:** String literals will be incorrect because of the "no alloc" rule.
     fn value_noalloc(self) -> Result<Option<TokenValue<'a>>, ErrorType<'a>> {
         const VALID_TOKENS: &str = "Token::value() expects vaild tokens";
         match self.ty {
@@ -467,21 +514,48 @@ impl<'a> Token<'a> {
                     .strip_prefix('"')
                     .and_then(|s| s.strip_suffix('"'))
                     .expect("string literal tokens should include delimiters (`\"`)");
-                if src.contains('\\') {
-                    let mut iter = src.chars().enumerate();
-                    while let Some((i, ch)) = iter.find(|(_, ch)| *ch == '\\') {
-                        if ch == '\\' {
-                            // just checking if it's valid, not actually using it
-                            _ = iter
-                                .next()
-                                .ok_or(ErrorType::InvalidEscape(&src[i..]))
-                                .and_then(|item| {
-                                    escape_seq(i, item, src).map_err(ErrorType::InvalidEscape)
-                                })?;
-                        }
-                    }
+                if src.contains('\\')
+                    && let Some(e) = src
+                        .match_indices('\\')
+                        .find_map(|(i, _)| escape_seq(src, i).err())
+                {
+                    Err(e)
+                } else {
+                    Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src))))
                 }
-                Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src))))
+            }
+
+            TokenType::CharLiteral => {
+                let src = self
+                    .src
+                    .strip_prefix('\'')
+                    .and_then(|s| s.strip_suffix('\''))
+                    .expect("string literal tokens should include delimiters (`'`)");
+                if let Some((len, res)) = escape_char(src) {
+                    // escape sequence
+                    res.map_err(|()| ErrorType::InvalidEscape(src))
+                        .and_then(|ch| {
+                            (len == src.len())
+                                .then_some(Some(TokenValue::CharLiteral(ch)))
+                                .ok_or(ErrorType::MultiCharLiteral)
+                        })
+                } else {
+                    // normal character
+                    let mut iter = src.chars();
+                    iter.next()
+                        .ok_or(ErrorType::EmptyCharLiteral)
+                        .and_then(|ch| {
+                            iter.next()
+                                .is_none()
+                                .then_some(Some(TokenValue::CharLiteral(ch)))
+                                .ok_or(ErrorType::MultiCharLiteral)
+                        })
+                }
+            }
+
+            TokenType::InterpolatedString => {
+                println!("not yet implemented: interpolated string");
+                Err(ErrorType::UnknownToken)
             }
 
             TokenType::Identifier | TokenType::Callable => Ok(Some(TokenValue::Direct(self.src))),
@@ -502,29 +576,11 @@ impl<'a> Token<'a> {
         if let Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src)))) = res
             && src.contains('\\')
         {
+            let replacements = src
+                .match_indices('\\')
+                .map(|(i, _)| escape_seq(src, i))
+                .collect::<Result<Vec<_>, _>>()?;
             let mut unescaped = src.to_string();
-            let escape_count_hint = {
-                let mut is_escaped = false;
-                src.chars()
-                    .filter(|&ch| {
-                        is_escaped = !is_escaped && ch == '\\';
-                        is_escaped
-                    })
-                    .count()
-            };
-            let mut replacements = Vec::with_capacity(escape_count_hint);
-            let mut iter = src.chars().enumerate();
-            while let Some((i, ch)) = iter.find(|(_, ch)| *ch == '\\') {
-                if ch == '\\' {
-                    replacements.push(
-                        iter.next()
-                            .ok_or(ErrorType::InvalidEscape(&src[i..]))
-                            .and_then(|item| {
-                                escape_seq(i, item, src).map_err(ErrorType::InvalidEscape)
-                            })?,
-                    );
-                }
-            }
             for (range, repl) in replacements.into_iter().rev() {
                 unescaped.replace_range(range, repl.encode_utf8(&mut [0; char::MAX_LEN_UTF8]));
             }
@@ -609,35 +665,69 @@ impl<'a> Iterator for Scanner<'a> {
         iter.next()
             // the first character
             .map(|ch| {
+                // we check for the pattern of the token with "if/else" instead of "if { return }"
+                // because once we have identified what type of token it should be, there must be an error if it isn't that.
+                // if we continued going down the list of possible tokens until one succeeded, we would be doing
+                // more processing and miss the fact that it wasn't a *different* token, it was just an *invalid* token.
+
+                // branches ordered by:
+                // 1. if a pattern might fit multiple branches, the most specific one must come before a less specific one;
+                //    so that we don't eliminate the opportunity to check if it's more specific.
+                // 2. if branches are equally simple or do not overlap, simplest conditions first; so that we aren't testing
+                //    a complex condition on tokens that don't satisfy them, when they might have satisfied a less expensive
+                //    condition for a different branch.
+
+                // starts with whitespace -> whitespace token
                 if ch.is_whitespace() {
-                    // starts with whitespace -> whitespace token
                     let len = self
                         .source
                         .find(|ch: char| !ch.is_whitespace())
                         .unwrap_or(self.source.len());
                     Ok(self.split_off_token(len, TokenType::Whitespace))
-                } else if ch == '/' && iter.peek() == Some(&'/') {
-                    // starts with double forward slashes (`//`) -> (line) comment token
-                    let len = self
-                        .source
-                        .lines()
-                        .next() // take the first line (excluding newline/return)
-                        .expect("the existence of characters should imply the existence of a line")
-                        .len();
-                    Ok(self.split_off_token(len, TokenType::Comment))
-                } else if ch == '/' && iter.peek() == Some(&'*') {
-                    // starts with forward slash followed by asterisk (`/*`) -> (block) comment token
-                    const OPEN: &str = "/*";
-                    const CLOSE: &str = "*/";
-                    let len = self.source[OPEN.len()..]
-                        .find(CLOSE)
-                        .map(|n| n + const { OPEN.len() + CLOSE.len() });
-                    len.map(|len| self.split_off_token(len, TokenType::Comment))
-                        .ok_or_else(|| {
-                            self.error_here(self.source.len(), ErrorType::EndlessBlockComment)
+                }
+                // starts with quote -> string/char literal
+                // note: identifiers can CONTAIN quotes but cannot START with them
+                else if let open_delim @ ('"' | '\'' | '`') = ch {
+                    const ESCAPE: char = '\\';
+                    let mut is_escaped = false;
+                    let len = self.source[open_delim.len_utf8()..]
+                        .find(|ch: char| {
+                            // unescaped delimiter - end of literal
+                            if !is_escaped && ch == open_delim {
+                                return true;
+                            }
+                            // track escapes
+                            is_escaped = !is_escaped && ch == ESCAPE;
+                            false
                         })
-                } else if ch.is_alphabetic() || ch == '_' {
-                    // starts with letter or underscore -> identifier
+                        // why 2x: first for open delimiter, second for close delimiter (both are the same character)
+                        .map(|n| n + 2 * open_delim.len_utf8());
+                    len.map(|len| {
+                        self.split_off_token(
+                            len,
+                            match open_delim {
+                                '"' => TokenType::StringLiteral,
+                                '\'' => TokenType::CharLiteral,
+                                '`' => TokenType::InterpolatedString,
+                                _ => unreachable!("should be guarded by if condition"),
+                            },
+                        )
+                    })
+                    .ok_or_else(|| {
+                        self.error_here(
+                            self.source.len(),
+                            // the fact there is a closing delimiter that didn't end the string shows it must be escaped
+                            // (or else there wouldn't have been an error)
+                            if self.source[open_delim.len_utf8()..].contains(open_delim) {
+                                ErrorType::EscapedStringLiteralEnd
+                            } else {
+                                ErrorType::EndlessStringLiteral
+                            },
+                        )
+                    })
+                }
+                // starts with letter or underscore -> identifier
+                else if ch.is_alphabetic() || ch == '_' {
                     let len = self
                         .source
                         .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
@@ -659,13 +749,14 @@ impl<'a> Iterator for Scanner<'a> {
                             TokenType::Identifier
                         },
                     })
-                } else if ch.is_numeric()
+                }
+                // starts with number or hyphen (where allowed) -> number literal
+                else if ch.is_numeric()
                     || self.can_be_negative
                         && ch == '-'
                         && iter.peek().is_some_and(|ch| ch.is_numeric())
                 {
                     const DECIMAL: char = '.';
-                    // starts with number or hyphen (where allowed) -> number literal
                     let mut is_first_decimal = true; // at most one decimal
                     let mut len = self.source[ch.len_utf8()..]
                         .find(|ch: char| {
@@ -678,38 +769,37 @@ impl<'a> Iterator for Scanner<'a> {
                         len -= DECIMAL.len_utf8();
                     }
                     Ok(self.split_off_token(len, TokenType::NumberLiteral))
-                } else if ch == '"' {
-                    // starts with double quote -> string literal
-                    let mut is_escaped = false;
-                    let len = self.source[ch.len_utf8()..]
-                        .find(|ch: char| {
-                            // unescaped double-quote - end of string
-                            if !is_escaped && ch == '"' {
-                                return true;
-                            }
-                            // track escapes
-                            is_escaped = !is_escaped && ch == '\\';
-                            false
-                        })
-                        .map(|n| n + 2 * ch.len_utf8()); // 2x: first for open delimiter, second for close delimiter (both are the same character)
-                    len.map(|len| self.split_off_token(len, TokenType::StringLiteral))
+                }
+                // starts with double forward slashes (`//`) -> (line) comment token
+                else if ch == '/' && iter.peek() == Some(&'/') {
+                    let len = self
+                        .source
+                        .lines()
+                        .next() // take the first line (excluding newline/return)
+                        .expect("the existence of characters should imply the existence of a line")
+                        .len();
+                    Ok(self.split_off_token(len, TokenType::Comment))
+                }
+                // starts with forward slash followed by asterisk (`/*`) -> (block) comment token
+                else if ch == '/' && iter.peek() == Some(&'*') {
+                    const OPEN: &str = "/*";
+                    const CLOSE: &str = "*/";
+                    let len = self.source[OPEN.len()..]
+                        .find(CLOSE)
+                        .map(|n| n + const { OPEN.len() + CLOSE.len() });
+                    len.map(|len| self.split_off_token(len, TokenType::Comment))
                         .ok_or_else(|| {
-                            self.error_here(
-                                self.source.len(),
-                                if self.source.contains("\\\"") {
-                                    ErrorType::EscapedStringLiteralEnd
-                                } else {
-                                    ErrorType::EndlessStringLiteral
-                                },
-                            )
+                            self.error_here(self.source.len(), ErrorType::EndlessBlockComment)
                         })
-                } else if ch.is_ascii_punctuation() {
-                    // starts with ascii punctuation -> punctuation
+                }
+                // starts with ascii punctuation -> punctuation
+                else if ch.is_ascii_punctuation() {
                     let len = Punctuation::from_prefix(self.source).map(|x| x.as_str().len());
                     len.map(|len| self.split_off_token(len, TokenType::Punctuation))
                         .ok_or_else(|| self.error_here(1, ErrorType::UnknownToken))
-                } else {
-                    // no other matching pattern -> unknown token
+                }
+                // no other matching pattern -> unknown token
+                else {
                     Err(self.error_here(1, ErrorType::UnknownToken))
                 }
             })

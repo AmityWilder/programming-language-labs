@@ -20,6 +20,7 @@ mod scanner;
 mod test;
 
 pub fn run_code(source: &str) {
+    // token debug
     println!("source code:\n```\n{source}\n```");
     let tokens: Vec<_> = tokenize(source).collect();
     for item in &tokens {
@@ -34,6 +35,7 @@ pub fn run_code(source: &str) {
             Err(error) => eprintln!("\x1b[91merror: {error}\x1b[0m"),
         }
     }
+
     // syntax highlighted
     println!("```");
     for item in &tokens {
@@ -43,7 +45,10 @@ pub fn run_code(source: &str) {
                     TokenType::Whitespace => "0",
                     TokenType::Comment => "32",
                     TokenType::NumberLiteral => "92",
-                    TokenType::StringLiteral => "33",
+                    // TODO: what about escape sequences/expressions within literals?
+                    TokenType::StringLiteral
+                    | TokenType::CharLiteral
+                    | TokenType::InterpolatedString => "33",
                     TokenType::Identifier => "4;96",
                     TokenType::Callable => "4;93",
                     TokenType::Keyword => "94",
@@ -57,6 +62,12 @@ pub fn run_code(source: &str) {
         print!("\x1b[{ansi_color}m{lexeme}");
     }
     println!("\x1b[0m\n```");
+
+    // error list
+    println!("errors:");
+    for e in tokens.iter().filter_map(|item| item.as_ref().err()) {
+        eprintln!("\x1b[91m  {e}\x1b[0m");
+    }
 }
 
 fn main() {
