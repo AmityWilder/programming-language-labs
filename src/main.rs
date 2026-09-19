@@ -65,9 +65,9 @@ const SYNTAX_STYLE: SyntaxStyle = SyntaxStyle {
 
     interp_str_literal: Style::new().foreground(Some(Color::Yellow)),
 
-    escape_seq: Style::new().foreground(Some(Color::BrightMagenta)),
+    escape_seq: Style::new().foreground(Some(Color::Yellow)).bold(true),
 
-    interp_expr: Style::new().foreground(Some(Color::Cyan)),
+    interp_expr: Style::new().foreground(Some(Color::BrightBlue)),
 
     variable: Style::new()
         .underline(true)
