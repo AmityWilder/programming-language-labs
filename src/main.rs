@@ -155,124 +155,122 @@ pub fn run_code(source: &str) {
     for (lexeme, syntax) in highlight(&tokens) {
         print!("{}", SYNTAX_STYLE.stylize(syntax, lexeme));
     }
-    println!("```");
-
-    // these should be identical
-
-    // syntax highlighted
-    println!("```");
-    for item in &tokens {
-        let (lexeme, (ansi_color, ansi_finish)) = token_highlight(item);
-        if let Ok((
-            _,
-            Some(
-                value @ (TokenValue::CharLiteral(..)
-                | TokenValue::StringLiteral(StringLiteral {
-                    text: Cow::Owned(_),
-                    ..
-                })
-                | TokenValue::InterpolatedString(InterpolatedString {
-                    text:
-                        StringLiteral {
-                            text: Cow::Owned(_),
-                            ..
-                        },
-                    ..
-                })),
-            ),
-        )) = item
-        {
-            const ESCAPE_COLOR: &str = "95";
-            match value {
-                TokenValue::CharLiteral(CharLiteral { is_escaped, .. }) => {
-                    if *is_escaped {
-                        const DELIM: char = '\'';
-                        let inner = lexeme
-                            .strip_prefix(DELIM)
-                            .and_then(|s| s.strip_suffix(DELIM))
-                            .expect("character literal lexeme should include delimiters");
-                        print!("\x1b[{ansi_color}m'\x1b[{ESCAPE_COLOR}m{inner}\x1b[{ansi_color}m'");
-                    } else {
-                        print!("\x1b[{ansi_color}m{lexeme}");
-                    }
-                }
-
-                TokenValue::StringLiteral(StringLiteral { escapes, .. }) => {
-                    const DELIM: char = '"';
-                    let inner = lexeme
-                        .strip_prefix(DELIM)
-                        .and_then(|s| s.strip_suffix(DELIM))
-                        .expect("character literal lexeme should include delimiters");
-                    print!("\x1b[{ansi_color}m\"");
-                    let mut prev_end = 0;
-                    for &escape in escapes {
-                        print!(
-                            "\x1b[{ansi_color}m{}\x1b[{ESCAPE_COLOR}m{}",
-                            &inner[prev_end..escape.start],
-                            &inner[escape],
-                        );
-                        prev_end = escape.end;
-                    }
-                    print!("\x1b[{ansi_color}m\"");
-                }
-
-                TokenValue::InterpolatedString(InterpolatedString {
-                    text: StringLiteral { escapes, .. },
-                    expressions,
-                }) => {
-                    const INTERP_BRACES_COLOR: &str = "94";
-                    const DELIM: char = '`';
-                    let inner = lexeme
-                        .strip_prefix(DELIM)
-                        .and_then(|s| s.strip_suffix(DELIM))
-                        .expect("character literal lexeme should include delimiters");
-                    print!("\x1b[{ansi_color}m\"");
-                    let mut prev_end = 0;
-                    let mut esc_iter = escapes.iter().peekable();
-                    let mut expr_iter = expressions.iter().peekable();
-                    // need to visit in order
-                    for (range, expr) in std::iter::from_fn(|| {
-                        esc_iter
-                            .next_if(|esc_range| {
-                                expr_iter
-                                    .peek()
-                                    .is_none_or(|expr| esc_range.start < expr.range.start)
-                            })
-                            .map(|&range| (range, None))
-                            .or_else(|| expr_iter.next().map(|expr| (expr.range, Some(&expr.expr))))
-                    }) {
-                        if let Some(tokens) = expr {
-                            print!("\x1b[{INTERP_BRACES_COLOR}m${{");
-                            for item in tokens {
-                                let (lexeme, (ansi_color, ansi_finish)) = token_highlight(item);
-                                print!("\x1b[{ansi_color}m{lexeme}");
-                                if let Some(ansi_finish) = ansi_finish {
-                                    print!("\x1b[{ansi_finish}m");
-                                }
-                            }
-                            print!("\x1b[{INTERP_BRACES_COLOR}m}}");
-                        } else {
-                            print!(
-                                "\x1b[{ansi_color}m{}\x1b[{ESCAPE_COLOR}m{}",
-                                &inner[prev_end..range.start],
-                                &inner[range],
-                            );
-                        }
-                        prev_end = range.end;
-                    }
-                    print!("\x1b[{ansi_color}m\"");
-                }
-
-                _ => unreachable!("guarded by if condition"),
-            }
-        } else {
-            print!("\x1b[{ansi_color}m{lexeme}");
-        }
-        if let Some(ansi_finish) = ansi_finish {
-            print!("\x1b[{ansi_finish}m");
-        }
-    }
     println!("\x1b[0m\n```");
+
+    // // syntax highlighted
+    // println!("```");
+    // for item in &tokens {
+    //     let (lexeme, (ansi_color, ansi_finish)) = token_highlight(item);
+    //     if let Ok((
+    //         _,
+    //         Some(
+    //             value @ (TokenValue::CharLiteral(..)
+    //             | TokenValue::StringLiteral(StringLiteral {
+    //                 text: Cow::Owned(_),
+    //                 ..
+    //             })
+    //             | TokenValue::InterpolatedString(InterpolatedString {
+    //                 text:
+    //                     StringLiteral {
+    //                         text: Cow::Owned(_),
+    //                         ..
+    //                     },
+    //                 ..
+    //             })),
+    //         ),
+    //     )) = item
+    //     {
+    //         const ESCAPE_COLOR: &str = "95";
+    //         match value {
+    //             TokenValue::CharLiteral(CharLiteral { is_escaped, .. }) => {
+    //                 if *is_escaped {
+    //                     const DELIM: char = '\'';
+    //                     let inner = lexeme
+    //                         .strip_prefix(DELIM)
+    //                         .and_then(|s| s.strip_suffix(DELIM))
+    //                         .expect("character literal lexeme should include delimiters");
+    //                     print!("\x1b[{ansi_color}m'\x1b[{ESCAPE_COLOR}m{inner}\x1b[{ansi_color}m'");
+    //                 } else {
+    //                     print!("\x1b[{ansi_color}m{lexeme}");
+    //                 }
+    //             }
+
+    //             TokenValue::StringLiteral(StringLiteral { escapes, .. }) => {
+    //                 const DELIM: char = '"';
+    //                 let inner = lexeme
+    //                     .strip_prefix(DELIM)
+    //                     .and_then(|s| s.strip_suffix(DELIM))
+    //                     .expect("character literal lexeme should include delimiters");
+    //                 print!("\x1b[{ansi_color}m\"");
+    //                 let mut prev_end = 0;
+    //                 for &escape in escapes {
+    //                     print!(
+    //                         "\x1b[{ansi_color}m{}\x1b[{ESCAPE_COLOR}m{}",
+    //                         &inner[prev_end..escape.start],
+    //                         &inner[escape],
+    //                     );
+    //                     prev_end = escape.end;
+    //                 }
+    //                 print!("\x1b[{ansi_color}m\"");
+    //             }
+
+    //             TokenValue::InterpolatedString(InterpolatedString {
+    //                 text: StringLiteral { escapes, .. },
+    //                 expressions,
+    //             }) => {
+    //                 const INTERP_BRACES_COLOR: &str = "94";
+    //                 const DELIM: char = '`';
+    //                 let inner = lexeme
+    //                     .strip_prefix(DELIM)
+    //                     .and_then(|s| s.strip_suffix(DELIM))
+    //                     .expect("character literal lexeme should include delimiters");
+    //                 print!("\x1b[{ansi_color}m\"");
+    //                 let mut prev_end = 0;
+    //                 let mut esc_iter = escapes.iter().peekable();
+    //                 let mut expr_iter = expressions.iter().peekable();
+    //                 // need to visit in order
+    //                 for (range, expr) in std::iter::from_fn(|| {
+    //                     esc_iter
+    //                         .next_if(|esc_range| {
+    //                             expr_iter
+    //                                 .peek()
+    //                                 .is_none_or(|expr| esc_range.start < expr.range.start)
+    //                         })
+    //                         .map(|&range| (range, None))
+    //                         .or_else(|| expr_iter.next().map(|expr| (expr.range, Some(&expr.expr))))
+    //                 }) {
+    //                     if let Some(tokens) = expr {
+    //                         print!("\x1b[{INTERP_BRACES_COLOR}m${{");
+    //                         for item in tokens {
+    //                             let (lexeme, (ansi_color, ansi_finish)) = token_highlight(item);
+    //                             print!("\x1b[{ansi_color}m{lexeme}");
+    //                             if let Some(ansi_finish) = ansi_finish {
+    //                                 print!("\x1b[{ansi_finish}m");
+    //                             }
+    //                         }
+    //                         print!("\x1b[{INTERP_BRACES_COLOR}m}}");
+    //                     } else {
+    //                         print!(
+    //                             "\x1b[{ansi_color}m{}\x1b[{ESCAPE_COLOR}m{}",
+    //                             &inner[prev_end..range.start],
+    //                             &inner[range],
+    //                         );
+    //                     }
+    //                     prev_end = range.end;
+    //                 }
+    //                 print!("\x1b[{ansi_color}m\"");
+    //             }
+
+    //             _ => unreachable!("guarded by if condition"),
+    //         }
+    //     } else {
+    //         print!("\x1b[{ansi_color}m{lexeme}");
+    //     }
+    //     if let Some(ansi_finish) = ansi_finish {
+    //         print!("\x1b[{ansi_finish}m");
+    //     }
+    // }
+    // println!("\x1b[0m\n```");
 
     // error list
     println!("errors:");
