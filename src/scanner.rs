@@ -1,4 +1,4 @@
-use std::{borrow::Cow, range::Range};
+use std::{borrow::Cow, iter::Peekable, range::Range};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NumLitError {
@@ -31,12 +31,12 @@ impl std::error::Error for NumLitError {
 pub enum ErrorType<'a> {
     UnknownToken,
     EndlessBlockComment,
+    EmptyCharLiteral,
+    MultiCharLiteral,
     EndlessStringLiteral,
     EscapedStringLiteralEnd,
     EndlessInterpStrExpr,
     InvalidEscape(&'a str),
-    EmptyCharLiteral,
-    MultiCharLiteral,
     InvalidNumLiteral(NumLitError),
 }
 
@@ -47,6 +47,12 @@ impl std::fmt::Display for ErrorType<'_> {
             Self::EndlessBlockComment => {
                 f.write_str("block comment opens (`/*`) but never closes (missing `*/`)")
             }
+            Self::EmptyCharLiteral => f.write_str("empty character literal"),
+            Self::MultiCharLiteral => f.write_str(
+                "character literal may only contain one codepoint; \
+                if you meant to write a string literal, use double quotes (`\"`). \
+                if you meant to write an interpolated string, use graves (`` ` ``).",
+            ),
             Self::EndlessStringLiteral => {
                 f.write_str("string literal opens (`\"`) but never closes (missing unescaped `\"`)")
             }
@@ -60,12 +66,6 @@ impl std::fmt::Display for ErrorType<'_> {
                 "interpolated string expression opened (`${`) but never closes (missing `}`)",
             ),
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s}"),
-            Self::EmptyCharLiteral => f.write_str("empty character literal"),
-            Self::MultiCharLiteral => f.write_str(
-                "character literal may only contain one codepoint; \
-                if you meant to write a string literal, use double quotes (`\"`). \
-                if you meant to write an interpolated string, use graves (`` ` ``).",
-            ),
             Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
         }
     }
@@ -137,20 +137,8 @@ impl std::fmt::Display for ContextError<'_> {
             ref err,
         } = *self;
         let (start_line, start_col) = line_col(source, range.start);
-        if range.is_empty() {
-            let code = &source[range.start..]; // TODO: what do we print when we don't know what token should be there?
-            write!(
-                f,
-                "at {start_line}:{start_col}: {err}\n```\n    {code}\n```"
-            )
-        } else {
-            let (end_line, end_col) = line_col(source, range.end);
-            let code = &source[range];
-            write!(
-                f,
-                "at {start_line}:{start_col}-{end_line}:{end_col}: {err}\n```\n    {code}\n```"
-            )
-        }
+        let (end_line, end_col) = line_col(source, range.end);
+        write!(f, "at {start_line}:{start_col}-{end_line}:{end_col}: {err}")
     }
 }
 
@@ -166,8 +154,8 @@ pub enum TokenType {
     Whitespace,
     Comment,
     NumberLiteral,
-    StringLiteral,
     CharLiteral,
+    StringLiteral,
     /// A string that can contain expressions
     InterpolatedString,
     Identifier,
@@ -362,6 +350,34 @@ pub struct CharLiteral {
     pub is_escaped: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct RemappedEscapes<I> {
+    open_delim_len: usize,
+    iter: I,
+}
+
+impl<I> RemappedEscapes<I> {
+    fn new(open_delim_len: usize, iter: I) -> Self {
+        Self {
+            open_delim_len,
+            iter,
+        }
+    }
+}
+
+impl<I> Iterator for RemappedEscapes<I>
+where
+    I: Iterator<Item = Range<usize>>,
+{
+    type Item = Range<usize>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|range| {
+            Range::from((range.start + self.open_delim_len)..(range.end + self.open_delim_len))
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringLiteral<'a> {
     /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.
@@ -370,7 +386,7 @@ pub struct StringLiteral<'a> {
     /// in which case this will be borrowed and [`Self::expressions`] will be empty.
     pub text: Cow<'a, str>,
 
-    /// Ranges of the original lexeme that refer to escape sequences
+    /// Ranges of the original lexeme (quote delimiters excluded) that refer to escape sequences
     pub escapes: Vec<Range<usize>>,
 }
 
@@ -381,11 +397,19 @@ impl<'a> StringLiteral<'a> {
             escapes: Vec::new(),
         }
     }
+
+    /// Remap [`Self::escapes`] to **include** offsets from the quote delimiters
+    pub fn remapped_escapes<'b>(
+        &'b self,
+        open_delim: &str,
+    ) -> RemappedEscapes<std::iter::Copied<std::slice::Iter<'b, Range<usize>>>> {
+        RemappedEscapes::new(open_delim.len(), self.escapes.iter().copied())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterpolatedExpr<T> {
-    /// The range of the entire `${...}` segment within the original lexeme containing this expression
+    /// The range of the entire `${...}` segment within the original lexeme (quote delimiters excluded) containing this expression
     ///
     /// The `${` and `}` delimiters are **included** in this range
     pub range: Range<usize>,
@@ -396,6 +420,64 @@ pub struct InterpolatedExpr<T> {
     /// Token stream of the expression WITHIN the original lexeme
     /// (you will need to supply the offset of that lexeme yourself)
     pub expr: T,
+}
+
+#[derive(Debug, Clone)]
+pub struct Replacements<'a, T> {
+    escapes: Peekable<std::slice::Iter<'a, Range<usize>>>,
+    exprs: Peekable<std::slice::Iter<'a, InterpolatedExpr<T>>>,
+}
+
+impl<'a, T> Replacements<'a, T> {
+    fn new(escapes: &'a [Range<usize>], exprs: &'a [InterpolatedExpr<T>]) -> Self {
+        Self {
+            escapes: escapes.iter().peekable(),
+            exprs: exprs.iter().peekable(),
+        }
+    }
+}
+
+impl<'a, T> Iterator for Replacements<'a, T> {
+    type Item = (Range<usize>, Option<&'a T>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.escapes
+            .next_if(|range| {
+                self.exprs
+                    .peek()
+                    .is_none_or(|item| range.start < item.range.start)
+            })
+            .map(|&range| (range, None))
+            .or_else(|| self.exprs.next().map(|item| (item.range, Some(&item.expr))))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RemappedReplacements<'a, T> {
+    open_delim_len: usize,
+    iter: Replacements<'a, T>,
+}
+
+impl<'a, T> RemappedReplacements<'a, T> {
+    fn new(open_delim_len: usize, iter: Replacements<'a, T>) -> Self {
+        Self {
+            open_delim_len,
+            iter,
+        }
+    }
+}
+
+impl<'a, T> Iterator for RemappedReplacements<'a, T> {
+    type Item = (Range<usize>, Option<&'a T>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(range, x)| {
+            (
+                Range::from((range.start + self.open_delim_len)..(range.end + self.open_delim_len)),
+                x,
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -421,6 +503,14 @@ impl<'a, T> InterpolatedString<'a, T> {
             expressions: Vec::new(),
         }
     }
+
+    pub fn replacements(&self) -> Replacements<'_, T> {
+        Replacements::new(&self.text.escapes, &self.expressions)
+    }
+
+    pub fn remapped_replacements<'b>(&'b self, open_delim: &str) -> RemappedReplacements<'b, T> {
+        RemappedReplacements::new(open_delim.len(), self.replacements())
+    }
 }
 
 /// The value represented by a [`Token`]
@@ -429,9 +519,9 @@ pub enum TokenValue<'a, T> {
     UIntLiteral(usize),
     SIntLiteral(isize),
     FltLiteral(f64),
+    CharLiteral(CharLiteral),
     /// Escape sequences are converted (unless there are none)
     StringLiteral(StringLiteral<'a>),
-    CharLiteral(CharLiteral),
     InterpolatedString(InterpolatedString<'a, T>),
     /// Value is the token source itself
     Direct(&'a str),
@@ -467,17 +557,22 @@ fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
             match ch {
                 '\\' | '"' | '\'' | '`' => Ok((base_len, ch)),
 
-                'n' => Ok((base_len, '\n')),
-                'r' => Ok((base_len, '\r')),
+                'a' => Ok((base_len, '\x07')),
+                'b' => Ok((base_len, '\x08')),
                 't' => Ok((base_len, '\t')),
+                'n' => Ok((base_len, '\n')),
+                'v' => Ok((base_len, '\x0b')),
+                'f' => Ok((base_len, '\x0c')),
+                'r' => Ok((base_len, '\r')),
+                'e' => Ok((base_len, '\x1b')),
 
-                prefix @ ('x' | 'o' | 'b') => {
+                prefix @ ('x' | 'o' /* | 'b' */) => {
                     // digits = ceil(256.log(base))
                     // ilog rounds down but we want rounded up
                     let (digits, base) = match prefix {
                         'x' => (2, 16),
                         'o' => (3, 8),
-                        'b' => (8, 2),
+                        // 'b' => (8, 2),
                         _ => unreachable!("guarded by outer branch"),
                     };
                     let num_start = base_len;
@@ -601,31 +696,6 @@ impl<'a> Token<'a> {
                 }
             }
 
-            TokenType::StringLiteral => {
-                const DELIM: char = '"';
-                const ESCAPE: char = '\\';
-                let src = self
-                    .src
-                    .strip_prefix(DELIM)
-                    .and_then(|s| s.strip_suffix(DELIM))
-                    .expect("string literal tokens should include delimiters (`\"`)");
-                let mut is_esc = false;
-                if src.contains(ESCAPE)
-                    && let Some(e) = src
-                        .match_indices(|ch: char| {
-                            is_esc = !is_esc && ch == ESCAPE;
-                            is_esc
-                        })
-                        .find_map(|(i, _)| escape_seq(src, i).err())
-                {
-                    Err(e)
-                } else {
-                    Ok(Some(TokenValue::StringLiteral(StringLiteral::borrowed(
-                        src,
-                    ))))
-                }
-            }
-
             TokenType::CharLiteral => {
                 const DELIM: char = '\'';
                 let src = self
@@ -658,6 +728,31 @@ impl<'a> Token<'a> {
                                 })))
                                 .ok_or(ErrorType::MultiCharLiteral)
                         })
+                }
+            }
+
+            TokenType::StringLiteral => {
+                const DELIM: char = '"';
+                const ESCAPE: char = '\\';
+                let src = self
+                    .src
+                    .strip_prefix(DELIM)
+                    .and_then(|s| s.strip_suffix(DELIM))
+                    .expect("string literal tokens should include delimiters (`\"`)");
+                let mut is_esc = false;
+                if src.contains(ESCAPE)
+                    && let Some(e) = src
+                        .match_indices(|ch: char| {
+                            is_esc = !is_esc && ch == ESCAPE;
+                            is_esc
+                        })
+                        .find_map(|(i, _)| escape_seq(src, i).err())
+                {
+                    Err(e)
+                } else {
+                    Ok(Some(TokenValue::StringLiteral(StringLiteral::borrowed(
+                        src,
+                    ))))
                 }
             }
 
@@ -1103,21 +1198,20 @@ fn tokenize_uninterpolated(tokens: Scanner<'_>) -> impl Iterator<Item = TokenRes
                 .value()
                 .expect("should have been caught by scanner")
                 .map(|value| {
-                    use TokenValue::*;
                     match value {
-                    InterpolatedString(..) => {
+                    TokenValue::InterpolatedString(..) => {
                         unreachable!(
                             "nested interpolated strings should not be possible; the delimiter does not distinguish open from close"
                         )
                     }
-                    UIntLiteral(x) => UIntLiteral(x),
-                    SIntLiteral(x) => SIntLiteral(x),
-                    FltLiteral(x) => FltLiteral(x),
-                    StringLiteral(x) => StringLiteral(x),
-                    CharLiteral(x) => CharLiteral(x),
-                    Direct(x) => Direct(x),
-                    Keyword(x) => Keyword(x),
-                    Punctuation(x) => Punctuation(x),
+                    TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
+                    TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
+                    TokenValue::FltLiteral(x) => TokenValue::FltLiteral(x),
+                    TokenValue::CharLiteral(x) => TokenValue::CharLiteral(x),
+                    TokenValue::StringLiteral(x) => TokenValue::StringLiteral(x),
+                    TokenValue::Direct(x) => TokenValue::Direct(x),
+                    TokenValue::Keyword(x) => TokenValue::Keyword(x),
+                    TokenValue::Punctuation(x) => TokenValue::Punctuation(x),
                 }});
             (token, value)
         })
@@ -1157,8 +1251,8 @@ pub fn tokenize(source: &str) -> impl Iterator<Item = TokenResult<'_, Vec<TokenR
                     TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
                     TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
                     TokenValue::FltLiteral(x) => TokenValue::FltLiteral(x),
-                    TokenValue::StringLiteral(x) => TokenValue::StringLiteral(x),
                     TokenValue::CharLiteral(x) => TokenValue::CharLiteral(x),
+                    TokenValue::StringLiteral(x) => TokenValue::StringLiteral(x),
                     TokenValue::Direct(x) => TokenValue::Direct(x),
                     TokenValue::Keyword(x) => TokenValue::Keyword(x),
                     TokenValue::Punctuation(x) => TokenValue::Punctuation(x),

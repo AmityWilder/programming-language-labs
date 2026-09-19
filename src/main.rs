@@ -11,16 +11,20 @@
     clippy::missing_assert_message,
     reason = "give a reason for panics"
 )]
-#![allow(clippy::too_many_lines, clippy::enum_glob_use, reason = "don't care.")]
-use scanner::{TokenType, tokenize};
+#![warn(clippy::too_many_lines, reason = "yucky. clean that up.")]
 
-use crate::scanner::{ContextError, InterpolatedExpr, Token};
+use crate::{
+    grammar::{Color, Style, SyntaxStyle, highlight},
+    scanner::{ContextError, InterpolatedExpr, Token, TokenType, tokenize},
+};
 
+mod grammar;
 mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
 mod test;
 
+#[deprecated = "use `grammar` module instead"]
 fn token_highlight<'a, T>(
     item: &Result<(Token<'a>, T), ContextError<'a>>,
 ) -> (&'a str, (&'static str, Option<&'static str>)) {
@@ -33,8 +37,8 @@ fn token_highlight<'a, T>(
                     TokenType::Comment => ("32", None),
                     TokenType::NumberLiteral => ("92", None),
                     // TODO: what about escape sequences/expressions within literals?
-                    TokenType::StringLiteral
-                    | TokenType::CharLiteral
+                    TokenType::CharLiteral
+                    | TokenType::StringLiteral
                     | TokenType::InterpolatedString => ("33", None),
                     TokenType::Identifier => ("4;96", Some("24")),
                     TokenType::Callable => ("4;93", Some("24")),
@@ -47,6 +51,42 @@ fn token_highlight<'a, T>(
         Err(e) => (&e.source[e.range], ("91", None)),
     }
 }
+
+const SYNTAX_STYLE: SyntaxStyle = SyntaxStyle {
+    normal: Style::new(),
+
+    comment: Style::new().foreground(Some(Color::Green)),
+
+    number_literal: Style::new().foreground(Some(Color::Green)),
+
+    char_literal: Style::new().foreground(Some(Color::Yellow)),
+
+    string_literal: Style::new().foreground(Some(Color::Yellow)),
+
+    interp_str_literal: Style::new().foreground(Some(Color::Yellow)),
+
+    escape_seq: Style::new().foreground(Some(Color::BrightMagenta)),
+
+    interp_expr: Style::new().foreground(Some(Color::Cyan)),
+
+    variable: Style::new()
+        .underline(true)
+        .foreground(Some(Color::BrightCyan)),
+
+    constant: Style::new()
+        .underline(true)
+        .foreground(Some(Color::BrightBlue)),
+
+    callable: Style::new()
+        .underline(true)
+        .foreground(Some(Color::BrightYellow)),
+
+    keyword: Style::new().foreground(Some(Color::BrightBlue)),
+
+    ctrl_keyword: Style::new().foreground(Some(Color::BrightMagenta)),
+
+    invalid: Style::new().foreground(Some(Color::Red)),
+};
 
 /// # Panics
 /// This method can panic if [`scanner::Scanner`] isn't written correctly
@@ -110,6 +150,15 @@ pub fn run_code(source: &str) {
         }
     }
 
+    // grammar highlighted
+    println!("```");
+    for (lexeme, syntax) in highlight(&tokens) {
+        print!("{}", SYNTAX_STYLE.stylize(syntax, lexeme));
+    }
+    println!("```");
+
+    // these should be identical
+
     // syntax highlighted
     println!("```");
     for item in &tokens {
@@ -135,6 +184,19 @@ pub fn run_code(source: &str) {
         {
             const ESCAPE_COLOR: &str = "95";
             match value {
+                TokenValue::CharLiteral(CharLiteral { is_escaped, .. }) => {
+                    if *is_escaped {
+                        const DELIM: char = '\'';
+                        let inner = lexeme
+                            .strip_prefix(DELIM)
+                            .and_then(|s| s.strip_suffix(DELIM))
+                            .expect("character literal lexeme should include delimiters");
+                        print!("\x1b[{ansi_color}m'\x1b[{ESCAPE_COLOR}m{inner}\x1b[{ansi_color}m'");
+                    } else {
+                        print!("\x1b[{ansi_color}m{lexeme}");
+                    }
+                }
+
                 TokenValue::StringLiteral(StringLiteral { escapes, .. }) => {
                     const DELIM: char = '"';
                     let inner = lexeme
@@ -152,19 +214,6 @@ pub fn run_code(source: &str) {
                         prev_end = escape.end;
                     }
                     print!("\x1b[{ansi_color}m\"");
-                }
-
-                TokenValue::CharLiteral(CharLiteral { is_escaped, .. }) => {
-                    if *is_escaped {
-                        const DELIM: char = '\'';
-                        let inner = lexeme
-                            .strip_prefix(DELIM)
-                            .and_then(|s| s.strip_suffix(DELIM))
-                            .expect("character literal lexeme should include delimiters");
-                        print!("\x1b[{ansi_color}m'\x1b[{ESCAPE_COLOR}m{inner}\x1b[{ansi_color}m'");
-                    } else {
-                        print!("\x1b[{ansi_color}m{lexeme}");
-                    }
                 }
 
                 TokenValue::InterpolatedString(InterpolatedString {
