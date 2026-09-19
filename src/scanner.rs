@@ -356,32 +356,83 @@ define_token_eq! {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct InterpolatedString<'a> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CharLiteral {
+    pub ch: char,
+    pub is_escaped: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StringLiteral<'a> {
     /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.
     ///
     /// Like a string literal, it's possible no escape sequences or "`${}`"s were present,
     /// in which case this will be borrowed and [`Self::expressions`] will be empty.
     pub text: Cow<'a, str>,
 
+    /// Ranges of the original lexeme that refer to escape sequences
+    pub escapes: Vec<Range<usize>>,
+}
+
+impl<'a> StringLiteral<'a> {
+    pub const fn borrowed(text: &'a str) -> Self {
+        Self {
+            text: Cow::Borrowed(text),
+            escapes: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterpolatedExpr<T> {
+    /// The range of the entire `${...}` segment within the original lexeme containing this expression
+    ///
+    /// The `${` and `}` delimiters are **included** in this range
+    pub range: Range<usize>,
+
+    /// Position in the processed text where the expression result should be inserted
+    pub position: usize,
+
+    /// Token stream of the expression WITHIN the original lexeme
+    /// (you will need to supply the offset of that lexeme yourself)
+    pub expr: T,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterpolatedString<'a, T> {
+    /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.
+    ///
+    /// Like a string literal, it's possible no escape sequences or "`${}`"s were present,
+    /// in which case this will be borrowed and [`Self::expressions`] will be empty.
+    pub text: StringLiteral<'a>,
+
     /// The positions and tokens of the expressions to insert into [`Self::text`]
     ///
     /// Note: It is impossible to have an interpolated string *within* an interpolated string expression,
     /// as the opening delimiter to the inner literal would be identical to the closing delimiter of the outer literal.
     /// Instead of getting a nested interpolated string, you would get an [`ErrorType::EndlessInterpStrExpr`] error.
-    pub expressions: Vec<(usize, Scanner<'a>)>,
+    pub expressions: Vec<InterpolatedExpr<T>>,
+}
+
+impl<'a, T> InterpolatedString<'a, T> {
+    pub const fn borrowed(text: &'a str) -> Self {
+        Self {
+            text: StringLiteral::borrowed(text),
+            expressions: Vec::new(),
+        }
+    }
 }
 
 /// The value represented by a [`Token`]
 #[derive(Debug, Clone, PartialEq)]
-pub enum TokenValue<'a> {
+pub enum TokenValue<'a, T> {
     UIntLiteral(usize),
     SIntLiteral(isize),
     FltLiteral(f64),
     /// Escape sequences are converted (unless there are none)
-    StringLiteral(Cow<'a, str>),
-    CharLiteral(char),
-    InterpolatedString(InterpolatedString<'a>),
+    StringLiteral(StringLiteral<'a>),
+    CharLiteral(CharLiteral),
+    InterpolatedString(InterpolatedString<'a, T>),
     /// Value is the token source itself
     Direct(&'a str),
     Keyword(Keyword),
@@ -501,7 +552,7 @@ impl<'a> Token<'a> {
     /// Obtains the value of a token without allocating
     ///
     /// **Warning:** String literals will be incorrect because of the "no alloc" rule.
-    fn value_noalloc(self) -> Result<Option<TokenValue<'a>>, ErrorType<'a>> {
+    fn value_noalloc(self) -> Result<Option<TokenValue<'a, Scanner<'a>>>, ErrorType<'a>> {
         const VALID_TOKENS: &str = "Token::value() expects vaild tokens";
         match self.ty {
             TokenType::Whitespace | TokenType::Comment => Ok(None),
@@ -569,7 +620,9 @@ impl<'a> Token<'a> {
                 {
                     Err(e)
                 } else {
-                    Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src))))
+                    Ok(Some(TokenValue::StringLiteral(StringLiteral::borrowed(
+                        src,
+                    ))))
                 }
             }
 
@@ -585,7 +638,10 @@ impl<'a> Token<'a> {
                     res.map_err(|()| ErrorType::InvalidEscape(src))
                         .and_then(|ch| {
                             (len == src.len())
-                                .then_some(Some(TokenValue::CharLiteral(ch)))
+                                .then_some(Some(TokenValue::CharLiteral(CharLiteral {
+                                    ch,
+                                    is_escaped: true,
+                                })))
                                 .ok_or(ErrorType::MultiCharLiteral)
                         })
                 } else {
@@ -596,7 +652,10 @@ impl<'a> Token<'a> {
                         .and_then(|ch| {
                             iter.next()
                                 .is_none()
-                                .then_some(Some(TokenValue::CharLiteral(ch)))
+                                .then_some(Some(TokenValue::CharLiteral(CharLiteral {
+                                    ch,
+                                    is_escaped: false,
+                                })))
                                 .ok_or(ErrorType::MultiCharLiteral)
                         })
                 }
@@ -625,10 +684,9 @@ impl<'a> Token<'a> {
                 {
                     Err(e)
                 } else {
-                    Ok(Some(TokenValue::InterpolatedString(InterpolatedString {
-                        text: Cow::Borrowed(src),
-                        expressions: Vec::new(),
-                    })))
+                    Ok(Some(TokenValue::InterpolatedString(
+                        InterpolatedString::borrowed(src),
+                    )))
                 }
             }
 
@@ -645,12 +703,17 @@ impl<'a> Token<'a> {
     }
 
     /// Returns [`None`] if non-code (whitespace/comment)
-    pub fn value(self) -> Result<Option<TokenValue<'a>>, ErrorType<'a>> {
+    pub fn value(self) -> Result<Option<TokenValue<'a, Scanner<'a>>>, ErrorType<'a>> {
         const EXPR_START: &str = "${";
         const ESC_START: char = '\\';
         let res = self.value_noalloc();
         match res {
-            Ok(Some(TokenValue::StringLiteral(Cow::Borrowed(src)))) if src.contains(ESC_START) => {
+            // string literal
+            Ok(Some(TokenValue::StringLiteral(StringLiteral {
+                text: Cow::Borrowed(src),
+                mut escapes,
+            }))) if src.contains(ESC_START) => {
+                debug_assert_eq!(&escapes, &[], "should have no escapes if text is borrowed");
                 let mut is_esc = false;
                 let replacements = src
                     .match_indices(|ch: char| {
@@ -659,33 +722,53 @@ impl<'a> Token<'a> {
                     })
                     .map(|(i, _)| escape_seq(src, i))
                     .collect::<Result<Vec<_>, _>>()?;
-                let mut unescaped = src.to_string();
-                for (range, repl) in replacements.into_iter().rev() {
-                    unescaped.replace_range(range, repl.encode_utf8(&mut [0; char::MAX_LEN_UTF8]));
+                escapes.extend(replacements.iter().map(|(range, _)| range));
+
+                let byte_diff: usize = replacements
+                    .iter()
+                    .map(|(range, ch)| (range.end - range.start) - ch.len_utf8())
+                    .sum();
+                let mut processed = String::with_capacity(src.len() - byte_diff);
+                let mut prev_end = 0;
+                for (range, repl) in replacements {
+                    processed.push_str(&src[prev_end..range.start]);
+                    processed.push(repl);
+                    prev_end = range.end;
                 }
-                Ok(Some(TokenValue::StringLiteral(Cow::Owned(unescaped))))
+
+                Ok(Some(TokenValue::StringLiteral(StringLiteral {
+                    text: Cow::Owned(processed),
+                    escapes,
+                })))
             }
 
+            // interpolated string literal
             Ok(Some(TokenValue::InterpolatedString(InterpolatedString {
-                text: Cow::Borrowed(text),
+                text:
+                    StringLiteral {
+                        text: Cow::Borrowed(src),
+                        mut escapes,
+                    },
                 mut expressions,
-            }))) if text.contains(ESC_START) || text.contains(EXPR_START) => {
+            }))) if src.contains(ESC_START) || src.contains(EXPR_START) => {
+                debug_assert_eq!(&escapes, &[], "should have no escapes if text is borrowed");
                 debug_assert_eq!(
                     &expressions,
                     &[],
                     "should have no expressions if text is borrowed"
                 );
                 let mut is_esc = false;
-                let esc_replacements = text
+                let esc_replacements = src
                     .match_indices(|ch: char| {
                         is_esc = !is_esc && ch == ESC_START;
                         is_esc
                     })
-                    .map(|(i, _)| escape_seq(text, i))
+                    .map(|(i, _)| escape_seq(src, i))
                     .collect::<Result<Vec<_>, _>>()?;
-                let (expr_replacements, expr_scanners) = text
+                escapes.extend(esc_replacements.iter().map(|(range, _)| range));
+                let (expr_replacements, expr_scanners) = src
                     .match_indices(EXPR_START)
-                    .map(|(i, _)| interp_str_expr(text, i))
+                    .map(|(i, _)| interp_str_expr(src, i))
                     .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
                 let mut replacements =
                     Vec::with_capacity(esc_replacements.len() + expr_replacements.len());
@@ -718,21 +801,27 @@ impl<'a> Token<'a> {
                 expressions.extend(
                     replacements
                         .iter()
+                        .copied()
                         .filter_map(|(range, repl)| {
                             let start = range.start - byte_diff;
                             let being_replaced_len = range.end - range.start;
                             let replace_with_len = repl.map_or(0, char::len_utf8);
                             byte_diff += being_replaced_len - replace_with_len;
                             // expression replacements are always None, so if we see a None we know that's an expression.
-                            repl.is_none().then_some(start)
+                            repl.is_none().then_some((range, start))
                         })
-                        .zip(expr_scanners),
+                        .zip(expr_scanners)
+                        .map(|((range, position), expr)| InterpolatedExpr {
+                            range,
+                            position,
+                            expr,
+                        }),
                 );
 
-                let mut processed = String::with_capacity(text.len() - byte_diff);
+                let mut processed = String::with_capacity(src.len() - byte_diff);
                 let mut prev_end = 0;
                 for (range, repl) in replacements {
-                    processed.push_str(&text[prev_end..range.start]);
+                    processed.push_str(&src[prev_end..range.start]);
                     prev_end = range.end;
                     if let Some(ch) = repl {
                         processed.push(ch);
@@ -740,7 +829,10 @@ impl<'a> Token<'a> {
                 }
 
                 Ok(Some(TokenValue::InterpolatedString(InterpolatedString {
-                    text: Cow::Owned(processed),
+                    text: StringLiteral {
+                        text: Cow::Owned(processed),
+                        escapes,
+                    },
                     expressions,
                 })))
             }
@@ -752,11 +844,12 @@ impl<'a> Token<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scanner<'a> {
+    /// This one doesn't get ripped apart
+    original: &'a str,
+
     /// A reference to the original source code. Since this is only a copy, it will get ripped apart and fed to the tokens.
     /// The next token will always be at the start of this string.
     source: &'a str,
-
-    offset: usize,
 
     /// The most recent non-whitespace, non-comment token was either the start of the source code or [`TokenType::Punctuation`]
     /// **and not** `)`, `]`, or `}`.
@@ -766,8 +859,8 @@ pub struct Scanner<'a> {
 impl<'a> Scanner<'a> {
     pub const fn new(source: &'a str) -> Self {
         Self {
+            original: source,
             source,
-            offset: 0,
             // start off true because we are at the start of the source code
             can_be_negative: true,
         }
@@ -782,7 +875,6 @@ impl<'a> Scanner<'a> {
             .split_at_checked(len)
             .expect("should have checked length");
         self.source = back;
-        self.offset += len;
         front
     }
 
@@ -798,21 +890,37 @@ impl<'a> Scanner<'a> {
     /// Generate an error starting at the current (incomplete) token
     ///
     /// [Splits off](Self::split_off) the erroneous segment so we can find more errors
-    const fn error_here(&mut self, len: usize, err: ErrorType<'a>) -> Error<'a> {
+    fn error_here(&mut self, len: usize, err: ErrorType<'a>) -> Error<'a> {
         let err = Error {
-            range: Range {
-                start: self.offset,
-                end: self.offset + len,
-            },
+            range: self
+                .original
+                .substr_range(&self.source[..len])
+                .expect("source should be a substring of original"),
             err,
         };
         _ = self.split_off(1);
         err
     }
+
+    /// Generate an error on the most recent (complete) token
+    fn error_prev(&mut self, len: usize, err: ErrorType<'a>) -> Error<'a> {
+        let end = self
+            .original
+            .substr_range(self.source)
+            .expect("source should be a substring of original")
+            .start;
+        Error {
+            range: Range {
+                start: end - len,
+                end,
+            },
+            err,
+        }
+    }
 }
 
 impl<'a> Iterator for Scanner<'a> {
-    type Item = Result<Token<'a>, Error<'a>>;
+    type Item = Result<Token<'a>, ContextError<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut iter = self.source.chars().peekable();
@@ -896,9 +1004,9 @@ impl<'a> Iterator for Scanner<'a> {
                             } else {
                                 TokenType::Keyword
                             }
-                        } else if self.source.starts_with('(')
-                        /* assumes the token has already been split off */
-                        {
+                        }
+                        // assumes the token has already been split off
+                        else if self.source.starts_with('(') {
                             TokenType::Callable
                         } else {
                             TokenType::Identifier
@@ -958,18 +1066,14 @@ impl<'a> Iterator for Scanner<'a> {
                     Err(self.error_here(1, ErrorType::UnknownToken))
                 }
             })
-            .map(|token| {
-                token.and_then(|tkn| match tkn.value_noalloc() {
-                    Ok(_) => Ok(tkn),
-                    Err(err) => Err(Error {
-                        range: Range {
-                            start: self.offset - tkn.src.len(),
-                            end: self.offset,
-                        },
-                        err,
-                    }),
+            .map(|res| {
+                res.and_then(|tkn| {
+                    tkn.value_noalloc()
+                        .map(|_| tkn)
+                        .map_err(|err| self.error_prev(tkn.src.len(), err))
                 })
             })
+            .map(|res| res.map_err(|e| e.add_context(self.original)))
             .inspect(|res| {
                 if let Ok(token) = res {
                     // non-whitespace, non-comment token
@@ -990,17 +1094,76 @@ impl<'a> Iterator for Scanner<'a> {
 /// [`Scanner`] will never return another element after outputting [`None`].
 impl std::iter::FusedIterator for Scanner<'_> {}
 
-pub type TokenResult<'a> = Result<(Token<'a>, Option<TokenValue<'a>>), ContextError<'a>>;
+pub type TokenResult<'a, T> = Result<(Token<'a>, Option<TokenValue<'a, T>>), ContextError<'a>>;
+
+fn tokenize_uninterpolated(tokens: Scanner<'_>) -> impl Iterator<Item = TokenResult<'_, !>> {
+    tokens.map(|item| {
+        item.map(|token| {
+            let value = token
+                .value()
+                .expect("should have been caught by scanner")
+                .map(|value| {
+                    use TokenValue::*;
+                    match value {
+                    InterpolatedString(..) => {
+                        unreachable!(
+                            "nested interpolated strings should not be possible; the delimiter does not distinguish open from close"
+                        )
+                    }
+                    UIntLiteral(x) => UIntLiteral(x),
+                    SIntLiteral(x) => SIntLiteral(x),
+                    FltLiteral(x) => FltLiteral(x),
+                    StringLiteral(x) => StringLiteral(x),
+                    CharLiteral(x) => CharLiteral(x),
+                    Direct(x) => Direct(x),
+                    Keyword(x) => Keyword(x),
+                    Punctuation(x) => Punctuation(x),
+                }});
+            (token, value)
+        })
+    })
+}
 
 /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
-pub fn tokenize(source: &str) -> impl Iterator<Item = TokenResult<'_>> {
+pub fn tokenize(source: &str) -> impl Iterator<Item = TokenResult<'_, Vec<TokenResult<'_, !>>>> {
     Scanner::new(source).map(|item| {
         item.map(|token| {
-            (
-                token,
-                token.value().expect("should have been caught by scanner"),
-            )
+            let value = token
+                .value()
+                .expect("should have been caught by scanner")
+                .map(|value| match value {
+                    TokenValue::InterpolatedString(InterpolatedString { text, expressions }) => {
+                        TokenValue::InterpolatedString(InterpolatedString {
+                            text,
+                            expressions: expressions
+                                .into_iter()
+                                .map(
+                                    |InterpolatedExpr {
+                                         range,
+                                         position,
+                                         mut expr,
+                                     }| InterpolatedExpr {
+                                        range,
+                                        position,
+                                        expr: {
+                                            expr.original = source;
+                                            tokenize_uninterpolated(expr).collect()
+                                        },
+                                    },
+                                )
+                                .collect(),
+                        })
+                    }
+                    TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
+                    TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
+                    TokenValue::FltLiteral(x) => TokenValue::FltLiteral(x),
+                    TokenValue::StringLiteral(x) => TokenValue::StringLiteral(x),
+                    TokenValue::CharLiteral(x) => TokenValue::CharLiteral(x),
+                    TokenValue::Direct(x) => TokenValue::Direct(x),
+                    TokenValue::Keyword(x) => TokenValue::Keyword(x),
+                    TokenValue::Punctuation(x) => TokenValue::Punctuation(x),
+                });
+            (token, value)
         })
-        .map_err(|e| e.add_context(source))
     })
 }
