@@ -407,6 +407,11 @@ impl<'a> StringLiteral<'a> {
     }
 }
 
+/// `T`: The collection that lists expression sub-tokens.
+/// It is typically one of the following:
+/// - [`Scanner`]
+/// - [`Vec`] (or similar) of [`TokenResult`]
+/// - [`!`](https://doc.rust-lang.org/std/primitive.never.html) (because interpolated strings can't be nested)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterpolatedExpr<T> {
     /// The range of the entire `${...}` segment within the original lexeme (quote delimiters excluded) containing this expression
@@ -422,6 +427,7 @@ pub struct InterpolatedExpr<T> {
     pub expr: T,
 }
 
+/// `T`: The collection that lists [`InterpolatedExpr`] sub-tokens
 #[derive(Debug, Clone)]
 pub struct Replacements<'a, T> {
     escapes: Peekable<std::slice::Iter<'a, Range<usize>>>,
@@ -452,6 +458,7 @@ impl<'a, T> Iterator for Replacements<'a, T> {
     }
 }
 
+/// `T`: The collection that lists [`InterpolatedExpr`] sub-tokens
 #[derive(Debug, Clone)]
 pub struct RemappedReplacements<'a, T> {
     open_delim_len: usize,
@@ -480,6 +487,7 @@ impl<'a, T> Iterator for RemappedReplacements<'a, T> {
     }
 }
 
+/// `T`: The collection that lists [`InterpolatedExpr`] sub-tokens
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterpolatedString<'a, T> {
     /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.

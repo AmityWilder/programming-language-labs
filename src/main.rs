@@ -14,7 +14,10 @@
 #![warn(clippy::too_many_lines, reason = "yucky. clean that up.")]
 
 use crate::{
-    grammar::{Color, Style, SyntaxStyle, highlight},
+    grammar::{
+        SyntaxStyle, highlight,
+        style::{Color, Style},
+    },
     scanner::{ContextError, InterpolatedExpr, Token, TokenType, tokenize},
 };
 
@@ -55,44 +58,37 @@ fn token_highlight<'a, T>(
 const SYNTAX_STYLE: SyntaxStyle = SyntaxStyle {
     normal: Style::new(),
 
-    comment: Style::new().foreground(Some(Color::Green)),
+    comment: Style::new().foreground(Color::Green),
 
-    number_literal: Style::new().foreground(Some(Color::Green)),
+    number_literal: Style::new().foreground(Color::Green),
 
-    char_literal: Style::new().foreground(Some(Color::Yellow)),
+    char_literal: Style::new().foreground(Color::Yellow),
 
-    string_literal: Style::new().foreground(Some(Color::Yellow)),
+    string_literal: Style::new().foreground(Color::Yellow),
 
-    interp_str_literal: Style::new().foreground(Some(Color::Yellow)),
+    interp_str_literal: Style::new().foreground(Color::Yellow),
 
-    escape_seq: Style::new().foreground(Some(Color::Yellow)).bold(true),
+    escape_seq: Style::new().foreground(Color::Yellow).bold(),
 
-    interp_expr: Style::new().foreground(Some(Color::BrightBlue)),
+    interp_expr: Style::new().foreground(Color::BrightBlue),
 
-    variable: Style::new()
-        .underline(true)
-        .foreground(Some(Color::BrightCyan)),
+    variable: Style::new().underline().foreground(Color::BrightCyan),
 
-    constant: Style::new()
-        .underline(true)
-        .foreground(Some(Color::BrightBlue)),
+    constant: Style::new().underline().foreground(Color::BrightBlue),
 
-    callable: Style::new()
-        .underline(true)
-        .foreground(Some(Color::BrightYellow)),
+    callable: Style::new().underline().foreground(Color::BrightYellow),
 
-    keyword: Style::new().foreground(Some(Color::BrightBlue)),
+    keyword: Style::new().foreground(Color::BrightBlue),
 
-    ctrl_keyword: Style::new().foreground(Some(Color::BrightMagenta)),
+    ctrl_keyword: Style::new().foreground(Color::BrightMagenta),
 
-    invalid: Style::new().foreground(Some(Color::Red)),
+    invalid: Style::new().foreground(Color::Red),
 };
 
 /// # Panics
 /// This method can panic if [`scanner::Scanner`] isn't written correctly
 pub fn run_code(source: &str) {
-    use scanner::{CharLiteral, InterpolatedString, StringLiteral, TokenValue};
-    use std::borrow::Cow;
+    use scanner::{InterpolatedString, TokenValue};
 
     // token debug
     println!("source code:\n```\n{source}\n```");
