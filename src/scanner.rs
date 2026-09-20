@@ -459,35 +459,6 @@ impl<'a, T> Iterator for Replacements<'a, T> {
 }
 
 /// `T`: The collection that lists [`InterpolatedExpr`] sub-tokens
-#[derive(Debug, Clone)]
-pub struct RemappedReplacements<'a, T> {
-    open_delim_len: usize,
-    iter: Replacements<'a, T>,
-}
-
-impl<'a, T> RemappedReplacements<'a, T> {
-    fn new(open_delim_len: usize, iter: Replacements<'a, T>) -> Self {
-        Self {
-            open_delim_len,
-            iter,
-        }
-    }
-}
-
-impl<'a, T> Iterator for RemappedReplacements<'a, T> {
-    type Item = (Range<usize>, Option<&'a T>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|(range, x)| {
-            (
-                Range::from((range.start + self.open_delim_len)..(range.end + self.open_delim_len)),
-                x,
-            )
-        })
-    }
-}
-
-/// `T`: The collection that lists [`InterpolatedExpr`] sub-tokens
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterpolatedString<'a, T> {
     /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.
@@ -515,9 +486,44 @@ impl<'a, T> InterpolatedString<'a, T> {
     pub fn replacements(&self) -> Replacements<'_, T> {
         Replacements::new(&self.text.escapes, &self.expressions)
     }
+}
 
-    pub fn remapped_replacements<'b>(&'b self, open_delim: &str) -> RemappedReplacements<'b, T> {
-        RemappedReplacements::new(open_delim.len(), self.replacements())
+fn interpolated_escapes() -> impl FnMut(char) -> bool {
+    let mut within_inner_literal = None;
+    let mut is_esc = false;
+    move |ch: char| {
+        // we don't want to include escapes that belong to nested literals.
+        // those belong to those literals, not this one.
+        let is_inner_delim;
+        if let Some(delim) = within_inner_literal {
+            is_inner_delim = !is_esc && ch == delim;
+            if is_inner_delim {
+                within_inner_literal = None;
+            }
+        } else {
+            is_inner_delim = !is_esc && matches!(ch, '\'' | '"');
+            if is_inner_delim {
+                within_inner_literal = Some(ch);
+            }
+        }
+        if within_inner_literal.is_some() && !is_inner_delim {
+            print!("{ch}");
+        }
+        if is_inner_delim {
+            if within_inner_literal.is_none() {
+                println!();
+            }
+            println!(
+                "{} within inner literal",
+                if within_inner_literal.is_some() {
+                    "now"
+                } else {
+                    "no longer"
+                }
+            );
+        }
+        is_esc = !is_esc && ch == '\\';
+        is_esc && within_inner_literal.is_none()
     }
 }
 
@@ -773,12 +779,8 @@ impl<'a> Token<'a> {
                     .expect(
                         "interpolated string literal tokens should include delimiters (`` ` ``)",
                     );
-                let mut is_esc = false;
                 if let Some(e) = src
-                    .match_indices(|ch: char| {
-                        is_esc = !is_esc && ch == '\\';
-                        is_esc
-                    })
+                    .match_indices(interpolated_escapes())
                     .find_map(|(i, _)| escape_seq(src, i).err())
                     .or_else(|| {
                         src.match_indices("${")
@@ -860,12 +862,8 @@ impl<'a> Token<'a> {
                     &[],
                     "should have no expressions if text is borrowed"
                 );
-                let mut is_esc = false;
                 let esc_replacements = src
-                    .match_indices(|ch: char| {
-                        is_esc = !is_esc && ch == ESC_START;
-                        is_esc
-                    })
+                    .match_indices(interpolated_escapes())
                     .map(|(i, _)| escape_seq(src, i))
                     .collect::<Result<Vec<_>, _>>()?;
                 escapes.extend(esc_replacements.iter().map(|(range, _)| range));
@@ -906,6 +904,10 @@ impl<'a> Token<'a> {
                         .iter()
                         .copied()
                         .filter_map(|(range, repl)| {
+                            assert!(
+                                byte_diff <= range.start,
+                                "shouldn't move tokens backwards\n replacements: {replacements:?}"
+                            );
                             let start = range.start - byte_diff;
                             let being_replaced_len = range.end - range.start;
                             let replace_with_len = repl.map_or(0, char::len_utf8);
