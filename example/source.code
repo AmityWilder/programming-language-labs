@@ -6,7 +6,8 @@ fn main() {
         let ch = '\n';
         let x = `some text that has \"escapes\" but not \"expressions\"`;
         my'text = "this \"text\" is \x1b[90mred\x1b[0m";
-        let interpolated = `apples: \x64 ${i} + \x1b 1 = ${i + 1x * 3 &&
+        let interpolated = `apples: \x64 ${i} + \x1b 1 = ${i + 1x * 3 { { foo } * { bar } /*
+            interpolated strings can have inner braces as long as they're balanced */ } &&
             // the only rule is no nested interpolated strings
             "see?" + ' ' + "you can nest strings, even with \"escapes\" and they'll be highlighted!"
         }`;
