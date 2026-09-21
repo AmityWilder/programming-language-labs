@@ -4,6 +4,7 @@ use crate::{
     grammar::syntax::{Syntax, syntax_of},
     scanner::{
         error::TokenResult,
+        symbols::{INTERP_EXPR_CLOSE, INTERP_EXPR_OPEN},
         token::{CharLiteral, InterpolatedString, StringLiteral, TokenValue},
     },
 };
@@ -33,15 +34,18 @@ impl<T, I: Iterator<Item = T>, J: Iterator<Item = T>> Iterator for Pick<I, J> {
 fn remap_subtoken_range(Range { start, end }: Range<usize>) -> Range<usize> {
     const ASCII_DELIM_LEN: usize = 1;
     Range {
-        start: start + ASCII_DELIM_LEN,
-        end: end + ASCII_DELIM_LEN,
+        start: start.strict_add(ASCII_DELIM_LEN),
+        end: end.strict_add(ASCII_DELIM_LEN),
     }
 }
 
 fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, Syntax), 3> {
     const DELIM: char = '\'';
     let mid1 = DELIM.len_utf8();
-    let mid2 = lex.len() - DELIM.len_utf8();
+    let mid2 = lex
+        .len()
+        .checked_sub(DELIM.len_utf8())
+        .expect("char literal with escape should not be empty");
     [
         (&lex[..mid1], syn),
         (&lex[mid1..mid2], Syntax::EscapeSeq),
@@ -125,8 +129,6 @@ pub fn highlight<'a, T>(
                         None,
                     )))
                     .flat_map(move |(range, val)| {
-                        const OPEN: &str = "${";
-                        const CLOSE: &str = "}";
                         std::iter::once((
                             Range::from(
                                 std::mem::replace(&mut prev_end, range.end)..range.start,
@@ -135,7 +137,8 @@ pub fn highlight<'a, T>(
                         )).chain(match val {
                             Some(list) => {
                                 let open = (
-                                    Range::from(range.start..range.start + OPEN.len()),
+                                    Range::from(range.start..range.start.checked_add(INTERP_EXPR_OPEN.len())
+                                        .expect("interpolated string expression should include delimiters")),
                                     Syntax::InterpExpr,
                                 );
                                 let mid = highlight_simple(list)
@@ -145,7 +148,10 @@ pub fn highlight<'a, T>(
                                             syn,
                                         ));
                                 let close = (
-                                    Range::from(range.end - CLOSE.len()..range.end),
+                                    Range::from(
+                                        range.end.checked_sub(INTERP_EXPR_CLOSE.len_utf8())
+                                            .expect("interpolated string expression should include delimiters")
+                                        ..range.end),
                                     Syntax::InterpExpr,
                                 );
                                 let iter = std::iter::once(open).chain(mid).chain(std::iter::once(close));

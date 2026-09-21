@@ -1,6 +1,7 @@
 use super::{
     Scanner,
     error::{ErrorType, NumLitError, TokenValueResult},
+    symbols::*,
 };
 use std::{borrow::Cow, iter::Peekable, range::Range};
 
@@ -321,7 +322,7 @@ fn interpolated_escapes() -> impl FnMut(char) -> bool {
                 within_inner_literal = None;
             }
         } else {
-            is_inner_delim = !is_esc && matches!(ch, '\'' | '"');
+            is_inner_delim = !is_esc && matches!(ch, CHAR_DELIM | STR_DELIM);
             if is_inner_delim {
                 within_inner_literal = Some(ch);
             }
@@ -365,10 +366,6 @@ pub enum TokenValue<'a, T> {
 
 impl<'a> TokenValue<'a, Scanner<'a>> {
     fn number_literal(src: &'a str) -> TokenValueResult<'a> {
-        const HEX_PREFIX: &str = "0x";
-        const OCT_PREFIX: &str = "0o";
-        const BIN_PREFIX: &str = "0b";
-
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.
         // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
         if !src.starts_with(HEX_PREFIX) && src.contains(['e', 'E']) || src.contains('.') {
@@ -397,10 +394,12 @@ impl<'a> TokenValue<'a, Scanner<'a>> {
                             .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::SInt(e)))
                             .and_then(|x| {
                                 x.checked_neg().ok_or_else(|| {
-                                    ErrorType::InvalidNumLiteral(NumLitError::SInt(
-                                        i8::try_from(i16::from(i8::MIN) - 1)
-                                            .expect_err("should result in negative overflow"),
-                                    ))
+                                    ErrorType::InvalidNumLiteral(NumLitError::SInt({
+                                        // SAFETY: i8::MIN-1 fits in i16. I tried asserting to prove this,
+                                        // but got an `invalid_upcast_comparisons` warning, which prove it by itself.
+                                        i8::try_from(unsafe { i16::from(i8::MIN).unchecked_sub(1) })
+                                            .expect_err("should result in negative overflow")
+                                    }))
                                 })
                             }))
                         .map(TokenValue::SIntLiteral)
@@ -413,10 +412,8 @@ impl<'a> TokenValue<'a, Scanner<'a>> {
     }
 
     fn char_literal(src: &'a str) -> TokenValueResult<'a> {
-        const DELIM: char = '\'';
         let src = src
-            .strip_prefix(DELIM)
-            .and_then(|s| s.strip_suffix(DELIM))
+            .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
             .expect("character literal tokens should include delimiters (`'`)");
         if let Some((len, res)) = escape_char(src) {
             // escape sequence
@@ -447,11 +444,8 @@ impl<'a> TokenValue<'a, Scanner<'a>> {
     }
 
     fn string_literal_noalloc(src: &'a str) -> TokenValueResult<'a> {
-        const DELIM: char = '"';
-        const ESCAPE: char = '\\';
         let src = src
-            .strip_prefix(DELIM)
-            .and_then(|s| s.strip_suffix(DELIM))
+            .strip_circumfix(STR_DELIM, STR_DELIM)
             .expect("string literal tokens should include delimiters (`\"`)");
         let mut is_esc = false;
         if src.contains(ESCAPE)
@@ -474,7 +468,7 @@ impl<'a> TokenValue<'a, Scanner<'a>> {
         let mut is_esc = false;
         let replacements = src
             .match_indices(|ch: char| {
-                is_esc = !is_esc && ch == '\\';
+                is_esc = !is_esc && ch == ESCAPE;
                 is_esc
             })
             .map(|(i, _)| escape_seq(src, i))
@@ -483,9 +477,20 @@ impl<'a> TokenValue<'a, Scanner<'a>> {
 
         let byte_diff: usize = replacements
             .iter()
-            .map(|(range, ch)| (range.end - range.start) - ch.len_utf8())
+            .map(|(range, ch)| {
+                (range
+                    .end
+                    .checked_sub(range.start)
+                    .expect("range should be ascending order"))
+                .checked_sub(ch.len_utf8())
+                .expect("should not be replacing an empty range")
+            })
             .sum();
-        let mut processed = String::with_capacity(src.len() - byte_diff);
+        let mut processed = String::with_capacity(
+            src.len()
+                .checked_sub(byte_diff)
+                .expect("should only be removing bytes, not adding"),
+        );
         let mut prev_end = 0;
         for (range, repl) in replacements {
             processed.push_str(&src[prev_end..range.start]);
@@ -500,16 +505,14 @@ impl<'a> TokenValue<'a, Scanner<'a>> {
     }
 
     fn interpolated_string_noalloc(src: &'a str) -> TokenValueResult<'a> {
-        const DELIM: char = '`';
         let src = src
-            .strip_prefix(DELIM)
-            .and_then(|s| s.strip_suffix(DELIM))
+            .strip_circumfix(INTERP_STR_DELIM, INTERP_STR_DELIM)
             .expect("interpolated string literal tokens should include delimiters (`` ` ``)");
         if let Some(e) = src
             .match_indices(interpolated_escapes())
             .find_map(|(i, _)| escape_seq(src, i).err())
             .or_else(|| {
-                src.match_indices("${")
+                src.match_indices(INTERP_EXPR_OPEN)
                     .find_map(|(i, _)| interp_str_expr(src, i).err())
             })
         {
@@ -528,10 +531,17 @@ impl<'a> TokenValue<'a, Scanner<'a>> {
             .collect::<Result<Vec<_>, _>>()?;
         let escapes = esc_replacements.iter().map(|(range, _)| *range).collect();
         let (expr_replacements, expr_scanners) = src
-            .match_indices("${")
+            .match_indices(INTERP_EXPR_OPEN)
             .map(|(i, _)| interp_str_expr(src, i))
             .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
-        let mut replacements = Vec::with_capacity(esc_replacements.len() + expr_replacements.len());
+        let mut replacements = Vec::with_capacity(
+            esc_replacements
+                .len()
+                .checked_add(expr_replacements.len())
+                .expect("sum of escapes and expressions should not exceed the number of characters in a string, \
+                         since they cannot occupy the same space. the number of characters in the string should\
+                         not exceed usize::MAX."),
+        );
         // everything is in order, but expressions and escapes can be interspersed
         {
             let mut esc_iter = esc_replacements
@@ -562,14 +572,19 @@ impl<'a> TokenValue<'a, Scanner<'a>> {
             .iter()
             .copied()
             .filter_map(|(range, repl)| {
-                assert!(
-                    byte_diff <= range.start,
-                    "shouldn't move tokens backwards\n replacements: {replacements:?}"
-                );
-                let start = range.start - byte_diff;
-                let being_replaced_len = range.end - range.start;
+                let start = range.start.checked_sub(byte_diff).unwrap_or_else(|| {
+                    panic!("shouldn't move tokens backwards\n replacements: {replacements:?}")
+                });
+                let being_replaced_len = range
+                    .end
+                    .checked_sub(range.start)
+                    .expect("ranges should be ascending");
                 let replace_with_len = repl.map_or(0, char::len_utf8);
-                byte_diff += being_replaced_len - replace_with_len;
+                byte_diff = byte_diff.strict_add(
+                    being_replaced_len
+                        .checked_sub(replace_with_len)
+                        .expect("replacements should be smaller than the text being replaced"),
+                );
                 // expression replacements are always None, so if we see a None we know that's an expression.
                 repl.is_none().then_some((range, start))
             })
@@ -581,7 +596,11 @@ impl<'a> TokenValue<'a, Scanner<'a>> {
             })
             .collect();
 
-        let mut processed = String::with_capacity(src.len() - byte_diff);
+        let mut processed = String::with_capacity(
+            src.len()
+                .checked_sub(byte_diff)
+                .expect("should not remove more bytes than exist in the original string"),
+        );
         let mut prev_end = 0;
         for (range, repl) in replacements {
             processed.push_str(&src[prev_end..range.start]);
@@ -621,11 +640,17 @@ impl std::fmt::Debug for Token<'_> {
 
 /// Returns [`None`] if `src` does not start with `\`
 fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
-    const ESCAPE: char = '\\';
     let mut iter = src.chars();
     iter.next().filter(|ch| *ch == ESCAPE).map(|_| {
         let res = iter.next().ok_or(ESCAPE.len_utf8()).and_then(|ch| {
-            let base_len = ESCAPE.len_utf8() + ch.len_utf8();
+            const {
+                assert!(
+                    char::MAX_LEN_UTF8.checked_mul(2).is_some(),
+                    "proof. 2 UTF8 characters are guaranteed not to exceed usize::MAX"
+                );
+            }
+            // SAFETY: 2 UTF8 characters are guaranteed not to exceed usize::MAX
+            let base_len = unsafe { ESCAPE.len_utf8().unchecked_add(ch.len_utf8()) };
             match ch {
                 '\\' | '"' | '\'' | '`' => Ok((base_len, ch)),
 
@@ -648,8 +673,9 @@ fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
                         _ => unreachable!("guarded by outer branch"),
                     };
                     let num_start = base_len;
-                    let end = num_start + digits; // ASCII digits
-                    let len = base_len + digits;
+                    // ASCII digits
+                    let end = num_start.checked_add(digits).expect("should be a subset of the existing string");
+                    let len = base_len.checked_add(digits).expect("should be a subset of the existing string");
                     src.get(num_start..end)
                         .and_then(|n| u8::from_str_radix(n, base).ok())
                         .map(|num| (len, char::from(num)))
@@ -673,7 +699,10 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>
     escape_char(&src[i..])
         .ok_or(ErrorType::InvalidEscape(&src[i..])) // no remaining characters
         .and_then(|(len, res)| {
-            let range = Range::from(i..i + len);
+            let range = Range::from(
+                i..i.checked_add(len)
+                    .expect("should be at most the length of a string already in memory"),
+            );
             res.map(|ch| (range, ch))
                 .map_err(|()| ErrorType::InvalidEscape(&src[range]))
         })
@@ -684,27 +713,37 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>
 /// # Panics
 /// This function will panic if `i` is not the position of a `${` in `src`
 fn interp_str_expr(src: &str, i: usize) -> Result<(Range<usize>, Scanner<'_>), ErrorType<'_>> {
-    const OPEN: &str = "${";
     let expr = src[i..]
-        .strip_prefix(OPEN)
+        .strip_prefix(INTERP_EXPR_OPEN)
         .expect("`i` should be the position of a `${` in `src`");
-    let mut depth = 0;
+    let mut depth: usize = 0;
     expr.find(|ch: char| {
         match ch {
-            '{' => depth += 1,
+            '{' => {
+                depth = depth
+                    .checked_add(1)
+                    // TODO: should this be an error?
+                    .unwrap_or_else(|| panic!("cannot exceed depth of {}", usize::MAX));
+            }
             '}' => {
-                if depth == 0 {
+                if let Some(n) = depth.checked_sub(1) {
+                    depth = n;
+                } else {
+                    // depth must be 0
                     return true;
                 }
-                depth -= 1;
             }
             _ => (),
         }
         false
     })
     .map(|len| {
+        const DELIMS_LEN: usize = INTERP_EXPR_OPEN.len() + INTERP_EXPR_CLOSE.len_utf8();
         let start_rm = i;
-        let end_rm = start_rm + OPEN.len() + len + '}'.len_utf8();
+        let end_rm = start_rm
+            .checked_add(len)
+            .and_then(|n| n.checked_add(DELIMS_LEN))
+            .expect("should be a subset of an existing string whose len must fit in usize");
         (Range::from(start_rm..end_rm), Scanner::new(&expr[..len]))
     })
     .ok_or(ErrorType::EndlessInterpStrExpr)
@@ -752,7 +791,7 @@ impl<'a> Token<'a> {
             Ok(Some(TokenValue::StringLiteral(StringLiteral {
                 text: Cow::Borrowed(src),
                 escapes,
-            }))) if src.contains('\\') => {
+            }))) if src.contains(ESCAPE) => {
                 debug_assert_eq!(&escapes, &[], "should have no escapes if text is borrowed");
                 TokenValue::string_literal(src)
             }
@@ -765,7 +804,7 @@ impl<'a> Token<'a> {
                         escapes,
                     },
                 expressions,
-            }))) if src.contains('\\') || src.contains("${") => {
+            }))) if src.contains(ESCAPE) || src.contains(INTERP_EXPR_OPEN) => {
                 debug_assert_eq!(&escapes, &[], "should have no escapes if text is borrowed");
                 debug_assert_eq!(
                     &expressions,

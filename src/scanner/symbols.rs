@@ -1,0 +1,12 @@
+pub const CHAR_DELIM: char = '\'';
+pub const STR_DELIM: char = '\"';
+pub const INTERP_STR_DELIM: char = '`';
+pub const ESCAPE: char = '\\';
+pub const INTERP_EXPR_OPEN: &str = "${";
+pub const INTERP_EXPR_CLOSE: char = '}';
+pub const HEX_PREFIX: &str = "0x";
+pub const OCT_PREFIX: &str = "0o";
+pub const BIN_PREFIX: &str = "0b";
+pub const BLOCK_COMMENT_OPEN: &str = "/*";
+pub const BLOCK_COMMENT_CLOSE: &str = "*/";
+pub const LINE_COMMENT_OPEN: &str = "//";

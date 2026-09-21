@@ -94,6 +94,13 @@ impl Style {
     pub const fn end(self) -> EndStyle {
         EndStyle(self)
     }
+
+    pub const fn style<T>(self, what: T) -> Styled<T> {
+        Styled {
+            style: self,
+            inner: what,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -131,7 +138,11 @@ impl std::fmt::Display for BeginStyle {
                 match color {
                     Color::Id(code) => write!(f, "38;5;{code}")?,
                     Color::Rgb(r, g, b) => write!(f, "38;2;{r};{g};{b}")?,
-                    color => write!(f, "{}", color.discriminant() + 30)?,
+                    color => {
+                        // SAFETY: the greatest discriminant of any non-Id, non-Rgb variant in Color is 67; 67+30=97, which is less than 255
+                        let code = unsafe { color.discriminant().unchecked_add(30) };
+                        write!(f, "{code}")?;
+                    }
                 }
                 has_prev = true;
             }
@@ -142,7 +153,11 @@ impl std::fmt::Display for BeginStyle {
                 match background {
                     Color::Id(code) => write!(f, "48;5;{code}")?,
                     Color::Rgb(r, g, b) => write!(f, "48;2;{r};{g};{b}")?,
-                    background => write!(f, "{}", background.discriminant() + 40)?,
+                    background => {
+                        // SAFETY: the greatest discriminant of any non-Id, non-Rgb variant in Color is 67; 67+40=107, which is less than 255
+                        let code = unsafe { background.discriminant().unchecked_add(40) };
+                        write!(f, "{code}")?;
+                    }
                 }
             }
             f.write_str("m")?;

@@ -129,7 +129,7 @@ fn line_col(s: &str, position: usize) -> (usize, usize) {
         .enumerate()
         .last()
         .map_or((0, 0), |(row, line)| {
-            (/* 1-based index */ row + 1, line.len())
+            (/* 1-based index */ row.strict_add(1), line.len())
         })
 }
 

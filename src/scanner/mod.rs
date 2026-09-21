@@ -1,11 +1,13 @@
 use error::{ContextError, Error, ErrorType, NestedTokenResult, SimpleTokenResult};
 use std::range::Range;
+use symbols::*;
 use token::{
     InterpolatedExpr, InterpolatedString, Keyword, KeywordType, Punctuation, Token, TokenType,
     TokenValue,
 };
 
 pub mod error;
+pub mod symbols;
 pub mod token;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +79,9 @@ impl<'a> Scanner<'a> {
             .start;
         Error {
             range: Range {
-                start: end - len,
+                start: end.checked_sub(len).expect(
+                    "len should be the size of a token that was split off from the source string",
+                ),
                 end,
             },
             err,
@@ -101,18 +105,27 @@ impl<'a> Scanner<'a> {
                     return true;
                 }
                 // track escapes
-                is_escaped = !is_escaped && ch == '\\';
+                is_escaped = !is_escaped && ch == ESCAPE;
                 false
             })
-            // why 2x: first for open delimiter, second for close delimiter (both are the same character)
-            .map(|n| n + 2 * open_delim.len_utf8());
+            .map(|n| {
+                // why 2x? first for open delimiter, second for close delimiter (both are the same character)
+                // SAFETY: char::MAX_LEN_UTF8 * 2 fits in usize
+                (unsafe { open_delim.len_utf8().unchecked_mul(2) })
+                    .checked_add(n)
+                    .expect(
+                        "stringlike literal should include both open and close delimiters, \
+                         which must have fit in memory in the original source code and therefore \
+                         have a len that fits in usize",
+                    )
+            });
         len.map(|len| {
             self.split_off_token(
                 len,
                 match open_delim {
-                    '"' => TokenType::StringLiteral,
-                    '\'' => TokenType::CharLiteral,
-                    '`' => TokenType::InterpolatedString,
+                    STR_DELIM => TokenType::StringLiteral,
+                    CHAR_DELIM => TokenType::CharLiteral,
+                    INTERP_STR_DELIM => TokenType::InterpolatedString,
                     _ => unreachable!("should be guarded by if condition"),
                 },
             )
@@ -169,7 +182,10 @@ impl<'a> Scanner<'a> {
                 is_following_e |= is_prev_e;
                 is_end
             })
-            .map_or(self.source.len(), |n| n + start.len_utf8());
+            .map_or(self.source.len(), |n| {
+                n.checked_add(start.len_utf8())
+                    .expect("n should be at most `start.len_utf8()`-less than len")
+            });
         // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
         // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
         len = self.source[..len].trim_end_matches(['.', '-']).len();
@@ -187,24 +203,28 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_block_comment(&mut self) -> Result<Token<'a>, Error<'a>> {
-        const OPEN: &str = "/*";
-        const CLOSE: &str = "*/";
+        const BLOCK_COMMENT_CIRCUMFIX_LEN: usize =
+            BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len();
         let mut prev_char = None;
         let mut depth: usize = 0;
-        let len = self.source[OPEN.len()..]
+        let len = self.source[BLOCK_COMMENT_OPEN.len()..]
             .find(|ch: char| {
                 if prev_char == Some('*') && ch == '/' {
-                    if depth == 0 {
+                    if let Some(n) = depth.checked_sub(1) {
+                        depth = n;
+                    } else {
                         return true;
                     }
-                    depth -= 1;
                 } else if prev_char == Some('/') && ch == '*' {
-                    depth += 1;
+                    depth = depth
+                        .checked_add(1)
+                        .unwrap_or_else(|| panic!("cannot exceed depth of {}", usize::MAX));
                 }
                 prev_char = Some(ch);
                 false
             })
-            .map(|n| n + const { OPEN.len() + CLOSE.len() });
+            .map(|n| n.checked_add(BLOCK_COMMENT_CIRCUMFIX_LEN)
+                .expect("n should describe the non-block-comment-circumfix subset of a string in memory"));
         len.map(|len| self.split_off_token(len, TokenType::Comment))
             .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
     }
@@ -243,7 +263,7 @@ impl<'a> Iterator for Scanner<'a> {
                 }
                 // starts with quote -> string/char literal
                 // note: identifiers can CONTAIN quotes but cannot START with them
-                else if let open_delim @ ('"' | '\'' | '`') = ch {
+                else if let open_delim @ (STR_DELIM | CHAR_DELIM | INTERP_STR_DELIM) = ch {
                     self.scan_strlike_literal(open_delim)
                 }
                 // starts with letter or underscore -> identifier
@@ -251,19 +271,19 @@ impl<'a> Iterator for Scanner<'a> {
                     Ok(self.scan_ident())
                 }
                 // starts with number or hyphen (where allowed) -> number literal
-                else if ch.is_numeric()
-                    || self.can_be_negative
-                        && ch == '-'
-                        && iter.peek().is_some_and(|ch| ch.is_numeric())
+                else if ch == '-'
+                    && self.can_be_negative
+                    && iter.peek().is_some_and(|ch| ch.is_numeric())
+                    || ch.is_numeric()
                 {
                     Ok(self.scan_num_literal(ch))
                 }
                 // starts with double forward slashes (`//`) -> (line) comment token
-                else if ch == '/' && iter.peek() == Some(&'/') {
+                else if self.source.starts_with(LINE_COMMENT_OPEN) {
                     Ok(self.scan_line_comment())
                 }
                 // starts with forward slash followed by asterisk (`/*`) -> (block) comment token
-                else if ch == '/' && iter.peek() == Some(&'*') {
+                else if self.source.starts_with(BLOCK_COMMENT_OPEN) {
                     self.scan_block_comment()
                 }
                 // starts with ascii punctuation -> punctuation
@@ -284,6 +304,7 @@ impl<'a> Iterator for Scanner<'a> {
             })
             .map(|res| res.map_err(|e| e.add_context(self.original)))
             .inspect(|res| {
+                // TODO: should an error be able to impact this? how?
                 if let Ok(token) = res {
                     // non-whitespace, non-comment token
                     if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {

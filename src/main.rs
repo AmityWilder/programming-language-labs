@@ -3,7 +3,7 @@
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
-#![warn(clippy::pedantic)]
+#![warn(clippy::pedantic, clippy::indexing_slicing)]
 #![warn(clippy::missing_safety_doc, clippy::missing_panics_doc, clippy::todo)]
 #![deny(clippy::undocumented_unsafe_blocks, reason = "must prove soundness")]
 #![deny(
@@ -12,6 +12,9 @@
     reason = "give a reason for panics"
 )]
 #![warn(clippy::too_many_lines, reason = "yucky. clean that up.")]
+#![allow(clippy::wildcard_imports)]
+#![warn(clippy::arithmetic_side_effects, clippy::as_conversions)]
+// #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 
 use crate::{
     grammar::{
@@ -138,23 +141,31 @@ pub fn run_code(source: &str) {
 
     // grammar highlighted
     println!("```");
-    let mut bracket_depth = 0;
+    let mut bracket_depth: usize = 0;
     for (lexeme, syntax) in highlight(&tokens) {
-        if syntax == Syntax::Bracket {
+        let style = if syntax == Syntax::Bracket {
             match lexeme {
                 "[" | "(" | "{" => {
-                    print!("{}", BRACKET_PAIRS.stylize(bracket_depth, lexeme));
-                    bracket_depth += 1;
+                    let n = bracket_depth
+                        .checked_add(1)
+                        .unwrap_or_else(|| panic!("cannot exceed depth of {}", usize::MAX));
+                    &BRACKET_PAIRS[std::mem::replace(&mut bracket_depth, n)]
                 }
                 "]" | ")" | "}" => {
-                    bracket_depth -= 1;
-                    print!("{}", BRACKET_PAIRS.stylize(bracket_depth, lexeme));
+                    if let Some(n) = bracket_depth.checked_sub(1) {
+                        bracket_depth = n;
+                        &BRACKET_PAIRS[bracket_depth]
+                    } else {
+                        // bracket_depth is 0
+                        &SYNTAX_STYLE.invalid
+                    }
                 }
                 _ => unimplemented!(),
             }
         } else {
-            print!("{}", SYNTAX_STYLE.stylize(syntax, lexeme));
-        }
+            &SYNTAX_STYLE[syntax]
+        };
+        print!("{}", style.style(lexeme));
     }
     println!("\x1b[0m\n```");
 

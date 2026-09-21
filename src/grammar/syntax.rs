@@ -1,5 +1,5 @@
 use crate::{
-    grammar::style::{Style, Styled},
+    grammar::style::Style,
     scanner::{
         error::TokenResult,
         token::{TokenType, TokenValue},
@@ -72,15 +72,6 @@ syntaxes! {
     }
 }
 
-impl SyntaxStyle {
-    pub fn stylize<T>(&self, syntax: Syntax, what: T) -> Styled<T> {
-        Styled {
-            style: self[syntax],
-            inner: what,
-        }
-    }
-}
-
 pub fn syntax_of<'a: 'b, 'b, T>(
     item: &'b TokenResult<'a, T>,
 ) -> (&'a str, Syntax, Option<&'b TokenValue<'a, T>>) {
@@ -129,15 +120,13 @@ impl std::ops::Index<usize> for BracketPair<'_> {
     type Output = Style;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.depth[index % self.depth.len()]
-    }
-}
-
-impl BracketPair<'_> {
-    pub fn stylize<T>(&self, depth: usize, what: T) -> Styled<T> {
-        Styled {
-            style: self[depth],
-            inner: what,
-        }
+        index
+            .checked_rem(self.depth.len())
+            .map(|idx| {
+                self.depth
+                    .get(idx)
+                    .expect("list[n % len(list)] should be valid")
+            })
+            .expect("BracketPair list should be non-empty")
     }
 }
