@@ -19,7 +19,7 @@ use crate::{
         style::{Color, Style},
         syntax::{BracketPair, Syntax, SyntaxStyle},
     },
-    scanner::{ContextError, InterpolatedExpr, Token, TokenType, tokenize},
+    scanner::{InterpolatedExpr, tokenize},
 };
 
 mod grammar;
