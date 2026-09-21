@@ -14,7 +14,7 @@ fn main() {
             "see?" + ' ' + "you can nest strings, even with \"escapes\" and they'll be highlighted!"
         }`;
         let my'text /* there is absolutely no reason for the apostrophe,
-            i just wanted to show it off */ = "hello world";
+            /* i just /* wanted */ to /* show /* it */ off */ */ */ = "hello world";
         print(my'text); // output the contents of `my'text` to the console
     }
 }

@@ -1167,8 +1167,21 @@ impl<'a> Iterator for Scanner<'a> {
                 else if ch == '/' && iter.peek() == Some(&'*') {
                     const OPEN: &str = "/*";
                     const CLOSE: &str = "*/";
+                    let mut prev_char = None;
+                    let mut depth: usize = 0;
                     let len = self.source[OPEN.len()..]
-                        .find(CLOSE)
+                        .find(|ch: char| {
+                            if prev_char == Some('*') && ch == '/' {
+                                if depth == 0 {
+                                    return true;
+                                }
+                                depth -= 1;
+                            } else if prev_char == Some('/') && ch == '*' {
+                                depth += 1;
+                            }
+                            prev_char = Some(ch);
+                            false
+                        })
                         .map(|n| n + const { OPEN.len() + CLOSE.len() });
                     len.map(|len| self.split_off_token(len, TokenType::Comment))
                         .ok_or_else(|| {
