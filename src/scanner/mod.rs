@@ -83,6 +83,137 @@ impl<'a> Scanner<'a> {
             err,
         }
     }
+
+    fn scan_whitespace(&mut self) -> Token<'a> {
+        let len = self
+            .source
+            .find(|ch: char| !ch.is_whitespace())
+            .unwrap_or(self.source.len());
+        self.split_off_token(len, TokenType::Whitespace)
+    }
+
+    fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, Error<'a>> {
+        let mut is_escaped = false;
+        let len = self.source[open_delim.len_utf8()..]
+            .find(|ch: char| {
+                // unescaped delimiter - end of literal
+                if !is_escaped && ch == open_delim {
+                    return true;
+                }
+                // track escapes
+                is_escaped = !is_escaped && ch == '\\';
+                false
+            })
+            // why 2x: first for open delimiter, second for close delimiter (both are the same character)
+            .map(|n| n + 2 * open_delim.len_utf8());
+        len.map(|len| {
+            self.split_off_token(
+                len,
+                match open_delim {
+                    '"' => TokenType::StringLiteral,
+                    '\'' => TokenType::CharLiteral,
+                    '`' => TokenType::InterpolatedString,
+                    _ => unreachable!("should be guarded by if condition"),
+                },
+            )
+        })
+        .ok_or_else(|| {
+            self.error_here(
+                self.source.len(),
+                // the fact there is a closing delimiter that didn't end the string shows it must be escaped
+                // (or else there wouldn't have been an error)
+                if self.source[open_delim.len_utf8()..].contains(open_delim) {
+                    ErrorType::EscapedStringLiteralEnd
+                } else {
+                    ErrorType::EndlessStringLiteral
+                },
+            )
+        })
+    }
+
+    fn scan_ident(&mut self) -> Token<'a> {
+        let len = self
+            .source
+            .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
+            .unwrap_or(self.source.len());
+        let src = self.split_off(len);
+        Token {
+            src,
+            ty: if let Some(kw) = Keyword::from_str(src) {
+                if matches!(kw.kw_type(), KeywordType::Control) {
+                    TokenType::CtrlKeyword
+                } else {
+                    TokenType::Keyword
+                }
+            }
+            // assumes the token has already been split off
+            else if self.source.starts_with('(') {
+                TokenType::Callable
+            } else {
+                TokenType::Identifier
+            },
+        }
+    }
+
+    fn scan_num_literal(&mut self, start: char) -> Token<'a> {
+        let mut is_first_decimal = true; // at most one decimal
+        let mut is_first_e_neg = true; // at most one '-' following an 'e'
+        let mut is_prev_e = false;
+        let mut is_following_e = false;
+        let mut len = self.source[start.len_utf8()..]
+            .find(|ch: char| {
+                let is_end = !(ch.is_alphanumeric()
+                    || ch == '.' && std::mem::take(&mut is_first_decimal) && !is_following_e
+                    || ch == '-' && is_prev_e && std::mem::take(&mut is_first_e_neg));
+                is_prev_e = matches!(ch, 'e' | 'E');
+                is_following_e |= is_prev_e;
+                is_end
+            })
+            .map_or(self.source.len(), |n| n + start.len_utf8());
+        // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
+        // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
+        len = self.source[..len].trim_end_matches(['.', '-']).len();
+        self.split_off_token(len, TokenType::NumberLiteral)
+    }
+
+    fn scan_line_comment(&mut self) -> Token<'a> {
+        let len = self
+            .source
+            .lines()
+            .next() // take the first line (excluding newline/return)
+            .expect("the existence of characters should imply the existence of a line")
+            .len();
+        self.split_off_token(len, TokenType::Comment)
+    }
+
+    fn scan_block_comment(&mut self) -> Result<Token<'a>, Error<'a>> {
+        const OPEN: &str = "/*";
+        const CLOSE: &str = "*/";
+        let mut prev_char = None;
+        let mut depth: usize = 0;
+        let len = self.source[OPEN.len()..]
+            .find(|ch: char| {
+                if prev_char == Some('*') && ch == '/' {
+                    if depth == 0 {
+                        return true;
+                    }
+                    depth -= 1;
+                } else if prev_char == Some('/') && ch == '*' {
+                    depth += 1;
+                }
+                prev_char = Some(ch);
+                false
+            })
+            .map(|n| n + const { OPEN.len() + CLOSE.len() });
+        len.map(|len| self.split_off_token(len, TokenType::Comment))
+            .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
+    }
+
+    fn scan_punc(&mut self) -> Result<Token<'a>, Error<'a>> {
+        let len = Punctuation::from_prefix(self.source).map(|x| x.as_str().len());
+        len.map(|len| self.split_off_token(len, TokenType::Punctuation))
+            .ok_or_else(|| self.error_here(1, ErrorType::UnknownToken))
+    }
 }
 
 impl<'a> Iterator for Scanner<'a> {
@@ -108,76 +239,16 @@ impl<'a> Iterator for Scanner<'a> {
 
                 // starts with whitespace -> whitespace token
                 if ch.is_whitespace() {
-                    let len = self
-                        .source
-                        .find(|ch: char| !ch.is_whitespace())
-                        .unwrap_or(self.source.len());
-                    Ok(self.split_off_token(len, TokenType::Whitespace))
+                    Ok(self.scan_whitespace())
                 }
                 // starts with quote -> string/char literal
                 // note: identifiers can CONTAIN quotes but cannot START with them
                 else if let open_delim @ ('"' | '\'' | '`') = ch {
-                    const ESCAPE: char = '\\';
-                    let mut is_escaped = false;
-                    let len = self.source[open_delim.len_utf8()..]
-                        .find(|ch: char| {
-                            // unescaped delimiter - end of literal
-                            if !is_escaped && ch == open_delim {
-                                return true;
-                            }
-                            // track escapes
-                            is_escaped = !is_escaped && ch == ESCAPE;
-                            false
-                        })
-                        // why 2x: first for open delimiter, second for close delimiter (both are the same character)
-                        .map(|n| n + 2 * open_delim.len_utf8());
-                    len.map(|len| {
-                        self.split_off_token(
-                            len,
-                            match open_delim {
-                                '"' => TokenType::StringLiteral,
-                                '\'' => TokenType::CharLiteral,
-                                '`' => TokenType::InterpolatedString,
-                                _ => unreachable!("should be guarded by if condition"),
-                            },
-                        )
-                    })
-                    .ok_or_else(|| {
-                        self.error_here(
-                            self.source.len(),
-                            // the fact there is a closing delimiter that didn't end the string shows it must be escaped
-                            // (or else there wouldn't have been an error)
-                            if self.source[open_delim.len_utf8()..].contains(open_delim) {
-                                ErrorType::EscapedStringLiteralEnd
-                            } else {
-                                ErrorType::EndlessStringLiteral
-                            },
-                        )
-                    })
+                    self.scan_strlike_literal(open_delim)
                 }
                 // starts with letter or underscore -> identifier
                 else if ch.is_alphabetic() || ch == '_' {
-                    let len = self
-                        .source
-                        .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
-                        .unwrap_or(self.source.len());
-                    let src = self.split_off(len);
-                    Ok(Token {
-                        src,
-                        ty: if let Some(kw) = Keyword::from_str(src) {
-                            if matches!(kw.kw_type(), KeywordType::Control) {
-                                TokenType::CtrlKeyword
-                            } else {
-                                TokenType::Keyword
-                            }
-                        }
-                        // assumes the token has already been split off
-                        else if self.source.starts_with('(') {
-                            TokenType::Callable
-                        } else {
-                            TokenType::Identifier
-                        },
-                    })
+                    Ok(self.scan_ident())
                 }
                 // starts with number or hyphen (where allowed) -> number literal
                 else if ch.is_numeric()
@@ -185,67 +256,19 @@ impl<'a> Iterator for Scanner<'a> {
                         && ch == '-'
                         && iter.peek().is_some_and(|ch| ch.is_numeric())
                 {
-                    let mut is_first_decimal = true; // at most one decimal
-                    let mut is_first_e_neg = true; // at most one '-' following an 'e'
-                    let mut is_prev_e = false;
-                    let mut is_following_e = false;
-                    let mut len = self.source[ch.len_utf8()..]
-                        .find(|ch: char| {
-                            let is_end = !(ch.is_alphanumeric()
-                                || ch == '.'
-                                    && std::mem::take(&mut is_first_decimal)
-                                    && !is_following_e
-                                || ch == '-' && is_prev_e && std::mem::take(&mut is_first_e_neg));
-                            is_prev_e = matches!(ch, 'e' | 'E');
-                            is_following_e |= is_prev_e;
-                            is_end
-                        })
-                        .map_or(self.source.len(), |n| n + ch.len_utf8());
-                    // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
-                    // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
-                    len = self.source[..len].trim_end_matches(['.', '-']).len();
-                    Ok(self.split_off_token(len, TokenType::NumberLiteral))
+                    Ok(self.scan_num_literal(ch))
                 }
                 // starts with double forward slashes (`//`) -> (line) comment token
                 else if ch == '/' && iter.peek() == Some(&'/') {
-                    let len = self
-                        .source
-                        .lines()
-                        .next() // take the first line (excluding newline/return)
-                        .expect("the existence of characters should imply the existence of a line")
-                        .len();
-                    Ok(self.split_off_token(len, TokenType::Comment))
+                    Ok(self.scan_line_comment())
                 }
                 // starts with forward slash followed by asterisk (`/*`) -> (block) comment token
                 else if ch == '/' && iter.peek() == Some(&'*') {
-                    const OPEN: &str = "/*";
-                    const CLOSE: &str = "*/";
-                    let mut prev_char = None;
-                    let mut depth: usize = 0;
-                    let len = self.source[OPEN.len()..]
-                        .find(|ch: char| {
-                            if prev_char == Some('*') && ch == '/' {
-                                if depth == 0 {
-                                    return true;
-                                }
-                                depth -= 1;
-                            } else if prev_char == Some('/') && ch == '*' {
-                                depth += 1;
-                            }
-                            prev_char = Some(ch);
-                            false
-                        })
-                        .map(|n| n + const { OPEN.len() + CLOSE.len() });
-                    len.map(|len| self.split_off_token(len, TokenType::Comment))
-                        .ok_or_else(|| {
-                            self.error_here(self.source.len(), ErrorType::EndlessBlockComment)
-                        })
+                    self.scan_block_comment()
                 }
                 // starts with ascii punctuation -> punctuation
                 else if ch.is_ascii_punctuation() {
-                    let len = Punctuation::from_prefix(self.source).map(|x| x.as_str().len());
-                    len.map(|len| self.split_off_token(len, TokenType::Punctuation))
-                        .ok_or_else(|| self.error_here(1, ErrorType::UnknownToken))
+                    self.scan_punc()
                 }
                 // no other matching pattern -> unknown token
                 else {
