@@ -350,34 +350,6 @@ pub struct CharLiteral {
     pub is_escaped: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct RemappedEscapes<I> {
-    open_delim_len: usize,
-    iter: I,
-}
-
-impl<I> RemappedEscapes<I> {
-    fn new(open_delim_len: usize, iter: I) -> Self {
-        Self {
-            open_delim_len,
-            iter,
-        }
-    }
-}
-
-impl<I> Iterator for RemappedEscapes<I>
-where
-    I: Iterator<Item = Range<usize>>,
-{
-    type Item = Range<usize>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|range| {
-            Range::from((range.start + self.open_delim_len)..(range.end + self.open_delim_len))
-        })
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringLiteral<'a> {
     /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.
@@ -396,14 +368,6 @@ impl<'a> StringLiteral<'a> {
             text: Cow::Borrowed(text),
             escapes: Vec::new(),
         }
-    }
-
-    /// Remap [`Self::escapes`] to **include** offsets from the quote delimiters
-    pub fn remapped_escapes<'b>(
-        &'b self,
-        open_delim: &str,
-    ) -> RemappedEscapes<std::iter::Copied<std::slice::Iter<'b, Range<usize>>>> {
-        RemappedEscapes::new(open_delim.len(), self.escapes.iter().copied())
     }
 }
 

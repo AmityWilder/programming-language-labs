@@ -90,7 +90,16 @@ pub fn syntax_of<'a: 'b, 'b, T>(
                 TokenType::CharLiteral => Syntax::CharLiteral,
                 TokenType::StringLiteral => Syntax::StringLiteral,
                 TokenType::InterpolatedString => Syntax::InterpStrLiteral,
-                TokenType::Identifier => Syntax::Variable, // TODO: distinguish from constants
+                TokenType::Identifier => {
+                    // constants are all-caps
+                    if token.src.chars().any(char::is_uppercase)
+                        && !token.src.chars().any(char::is_lowercase)
+                    {
+                        Syntax::Constant
+                    } else {
+                        Syntax::Variable
+                    }
+                }
                 TokenType::Callable => Syntax::Callable,
                 TokenType::Keyword => Syntax::Keyword,
                 TokenType::CtrlKeyword => Syntax::CtrlKeyword,
