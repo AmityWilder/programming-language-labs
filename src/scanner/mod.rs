@@ -10,13 +10,34 @@ pub mod error;
 pub mod symbols;
 pub mod token;
 
-fn unescaped(looking_for: char) -> impl FnMut(char) -> bool {
+const fn unescaped(looking_for: char) -> impl FnMut(char) -> bool {
     let mut is_escaped = false;
     move |ch| {
         !is_escaped && ch == looking_for || {
             is_escaped = !is_escaped && ch == ESCAPE;
             false
         }
+    }
+}
+
+/// Finds an instance of `close` that has not been paired with a `open`
+const fn unbalanced(open: char, close: char) -> impl FnMut(char) -> bool {
+    let mut depth: usize = 0;
+    move |ch| {
+        if ch == close {
+            if let Some(n) = depth.checked_sub(1) {
+                depth = n;
+            } else {
+                // depth must be 0
+                return true;
+            }
+        } else if ch == open {
+            depth = depth
+                .checked_add(1)
+                // TODO: should this be an error?
+                .unwrap_or_else(|| panic!("cannot exceed depth of {}", usize::MAX));
+        }
+        false
     }
 }
 

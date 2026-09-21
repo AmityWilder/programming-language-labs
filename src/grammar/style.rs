@@ -1,5 +1,41 @@
 #![allow(dead_code)]
 
+pub trait StyleWrapper {
+    type Begin: std::fmt::Display;
+    type End: std::fmt::Display;
+
+    fn begin(&self) -> Self::Begin;
+    fn end(&self) -> Self::End;
+
+    fn style<T>(&self, what: T) -> Styled<'_, T, Self> {
+        Styled {
+            style: self,
+            inner: what,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Styled<'a, T, U>
+where
+    U: ?Sized + StyleWrapper,
+{
+    pub style: &'a U,
+    pub inner: T,
+}
+
+impl<T: std::fmt::Display, U: StyleWrapper> std::fmt::Display for Styled<'_, T, U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{}{}",
+            self.style.begin(),
+            self.inner,
+            self.style.end()
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum Color {
@@ -94,12 +130,18 @@ impl Style {
     pub const fn end(self) -> EndStyle {
         EndStyle(self)
     }
+}
 
-    pub const fn style<T>(self, what: T) -> Styled<T> {
-        Styled {
-            style: self,
-            inner: what,
-        }
+impl StyleWrapper for Style {
+    type Begin = BeginStyle;
+    type End = EndStyle;
+
+    fn begin(&self) -> Self::Begin {
+        BeginStyle(*self)
+    }
+
+    fn end(&self) -> Self::End {
+        EndStyle(*self)
     }
 }
 
@@ -199,23 +241,5 @@ impl std::fmt::Display for EndStyle {
             f.write_str("m")?;
         }
         Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Styled<T> {
-    pub style: Style,
-    pub inner: T,
-}
-
-impl<T: std::fmt::Display> std::fmt::Display for Styled<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}{}{}",
-            BeginStyle(self.style),
-            self.inner,
-            EndStyle(self.style)
-        )
     }
 }

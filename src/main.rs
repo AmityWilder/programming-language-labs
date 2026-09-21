@@ -19,8 +19,8 @@
 use crate::{
     grammar::{
         highlight,
-        style::{Color, Style},
-        syntax::{BracketPair, Syntax, SyntaxStyle},
+        style::{Color, Style, StyleWrapper},
+        syntax::{Syntax, SyntaxStyle},
     },
     scanner::{
         token::{InterpolatedExpr, InterpolatedString, TokenValue},
@@ -34,7 +34,7 @@ mod scanner;
 #[cfg(test)] // only include testing module in test builds
 mod test;
 
-const SYNTAX_STYLE: SyntaxStyle = SyntaxStyle {
+const SYNTAX_STYLE_ANSII: SyntaxStyle<Style> = SyntaxStyle {
     normal: Style::new(),
 
     comment: Style::new().foreground(Color::Rgb(0x6a, 0x99, 0x55)),
@@ -69,15 +69,13 @@ const SYNTAX_STYLE: SyntaxStyle = SyntaxStyle {
 
     bracket: Style::new().foreground(Color::BrightWhite),
 
-    invalid: Style::new().foreground(Color::Rgb(0xcc, 0x0e, 0x0e)),
-};
-
-const BRACKET_PAIRS: BracketPair = BracketPair {
-    depth: &[
+    bracket_pairs: &[
         Style::new().foreground(Color::Rgb(0xff, 0xd7, 0x00)),
         Style::new().foreground(Color::Rgb(0xda, 0x70, 0xd6)),
         Style::new().foreground(Color::Rgb(0x17, 0x9f, 0xff)),
     ],
+
+    invalid: Style::new().foreground(Color::Rgb(0xcc, 0x0e, 0x0e)),
 };
 
 /// # Panics
@@ -138,21 +136,23 @@ pub fn run_code(source: &str) {
                     let n = bracket_depth
                         .checked_add(1)
                         .unwrap_or_else(|| panic!("cannot exceed depth of {}", usize::MAX));
-                    &BRACKET_PAIRS[std::mem::replace(&mut bracket_depth, n)]
+                    SYNTAX_STYLE_ANSII.bracket_pair(std::mem::replace(&mut bracket_depth, n))
                 }
                 "]" | ")" | "}" => {
                     if let Some(n) = bracket_depth.checked_sub(1) {
                         bracket_depth = n;
-                        &BRACKET_PAIRS[bracket_depth]
+                        SYNTAX_STYLE_ANSII.bracket_pair(bracket_depth)
                     } else {
                         // bracket_depth is 0
-                        &SYNTAX_STYLE.invalid
+                        &SYNTAX_STYLE_ANSII[Syntax::Invalid]
                     }
                 }
-                _ => unimplemented!(),
+                // not "unreachable" because that isn't guaranteed to be true for future updates
+                // and I don't want it assuming that's impossible and breaking in release builds
+                _ => unimplemented!("only `[]`, `()`, and `{{}}` currently supported as brackets"),
             }
         } else {
-            &SYNTAX_STYLE[syntax]
+            &SYNTAX_STYLE_ANSII[syntax]
         };
         print!("{}", style.style(lexeme));
     }

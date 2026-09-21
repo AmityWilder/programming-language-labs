@@ -1,3 +1,5 @@
+use crate::scanner::unbalanced;
+
 use super::{
     Scanner,
     error::{ErrorType, NumLitError},
@@ -309,42 +311,26 @@ impl<'a, T> InterpolatedString<'a, T> {
     }
 }
 
+/// Escape sequences in an interpolated string
 fn interpolated_escapes() -> impl FnMut(char) -> bool {
-    let mut within_inner_literal = None;
+    // [`None`] if in the outer literal
+    let mut inner_literal_delim = None;
     let mut is_esc = false;
     move |ch: char| {
         // we don't want to include escapes that belong to nested literals.
         // those belong to those literals, not this one.
-        let is_inner_delim;
-        if let Some(delim) = within_inner_literal {
-            is_inner_delim = !is_esc && ch == delim;
-            if is_inner_delim {
-                within_inner_literal = None;
-            }
-        } else {
-            is_inner_delim = !is_esc && matches!(ch, CHAR_DELIM | STR_DELIM);
-            if is_inner_delim {
-                within_inner_literal = Some(ch);
-            }
-        }
-        if within_inner_literal.is_some() && !is_inner_delim {
-            print!("{ch}");
-        }
-        if is_inner_delim {
-            if within_inner_literal.is_none() {
-                println!();
-            }
-            println!(
-                "{} within inner literal",
-                if within_inner_literal.is_some() {
-                    "now"
-                } else {
-                    "no longer"
+        if !is_esc {
+            if let Some(delim) = inner_literal_delim {
+                if ch == delim {
+                    inner_literal_delim = None;
                 }
-            );
+            } else if matches!(ch, CHAR_DELIM | STR_DELIM) {
+                inner_literal_delim = Some(ch);
+            }
         }
-        is_esc = !is_esc && ch == '\\';
-        is_esc && within_inner_literal.is_none()
+        is_esc = !is_esc && ch == ESCAPE;
+
+        inner_literal_delim.is_none() && is_esc
     }
 }
 
@@ -754,37 +740,17 @@ fn interp_str_expr(src: &str, i: usize) -> Result<(Range<usize>, Scanner<'_>), E
     let expr = src[i..]
         .strip_prefix(INTERP_EXPR_OPEN)
         .expect("`i` should be the position of a `${` in `src`");
-    let mut depth: usize = 0;
-    expr.find(|ch: char| {
-        match ch {
-            '{' => {
-                depth = depth
-                    .checked_add(1)
-                    // TODO: should this be an error?
-                    .unwrap_or_else(|| panic!("cannot exceed depth of {}", usize::MAX));
-            }
-            '}' => {
-                if let Some(n) = depth.checked_sub(1) {
-                    depth = n;
-                } else {
-                    // depth must be 0
-                    return true;
-                }
-            }
-            _ => (),
-        }
-        false
-    })
-    .map(|len| {
-        const DELIMS_LEN: usize = INTERP_EXPR_OPEN.len() + INTERP_EXPR_CLOSE.len_utf8();
-        let start_rm = i;
-        let end_rm = start_rm
-            .checked_add(len)
-            .and_then(|n| n.checked_add(DELIMS_LEN))
-            .expect("should be a subset of an existing string whose len must fit in usize");
-        (Range::from(start_rm..end_rm), Scanner::new(&expr[..len]))
-    })
-    .ok_or(ErrorType::EndlessInterpStrExpr)
+    expr.find(unbalanced('{', '}'))
+        .map(|len| {
+            const DELIMS_LEN: usize = INTERP_EXPR_OPEN.len() + INTERP_EXPR_CLOSE.len_utf8();
+            let start_rm = i;
+            let end_rm = start_rm
+                .checked_add(len)
+                .and_then(|n| n.checked_add(DELIMS_LEN))
+                .expect("should be a subset of an existing string whose len must fit in usize");
+            (Range::from(start_rm..end_rm), Scanner::new(&expr[..len]))
+        })
+        .ok_or(ErrorType::EndlessInterpStrExpr)
 }
 
 impl<'a> Token<'a> {
