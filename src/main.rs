@@ -28,34 +28,6 @@ mod scanner;
 #[cfg(test)] // only include testing module in test builds
 mod test;
 
-#[deprecated = "use `grammar` module instead"]
-fn token_highlight<'a, T>(
-    item: &Result<(Token<'a>, T), ContextError<'a>>,
-) -> (&'a str, (&'static str, Option<&'static str>)) {
-    match item {
-        Ok((token, _)) => {
-            (
-                token.src,
-                match token.ty {
-                    TokenType::Whitespace => ("0", None),
-                    TokenType::Comment => ("32", None),
-                    TokenType::NumberLiteral => ("92", None),
-                    // TODO: what about escape sequences/expressions within literals?
-                    TokenType::CharLiteral
-                    | TokenType::StringLiteral
-                    | TokenType::InterpolatedString => ("33", None),
-                    TokenType::Identifier => ("4;96", Some("24")),
-                    TokenType::Callable => ("4;93", Some("24")),
-                    TokenType::Keyword => ("94", None),
-                    TokenType::CtrlKeyword => ("95", None),
-                    TokenType::Punctuation => ("37", None),
-                },
-            )
-        }
-        Err(e) => (&e.source[e.range], ("91", None)),
-    }
-}
-
 const SYNTAX_STYLE: SyntaxStyle = SyntaxStyle {
     normal: Style::new(),
 
