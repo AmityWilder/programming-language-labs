@@ -64,6 +64,7 @@ syntaxes! {
         Callable { callable },
         Keyword { keyword },
         CtrlKeyword { ctrl_keyword },
+        Bracket { bracket },
         Invalid { invalid },
     }
 }
@@ -84,7 +85,6 @@ pub fn syntax_of<'a: 'b, 'b, T>(
         Ok((token, value)) => (
             token.src,
             match token.ty {
-                TokenType::Whitespace | TokenType::Punctuation => Syntax::Normal,
                 TokenType::Comment => Syntax::Comment,
                 TokenType::NumberLiteral => Syntax::NumberLiteral,
                 TokenType::CharLiteral => Syntax::CharLiteral,
@@ -94,9 +94,38 @@ pub fn syntax_of<'a: 'b, 'b, T>(
                 TokenType::Callable => Syntax::Callable,
                 TokenType::Keyword => Syntax::Keyword,
                 TokenType::CtrlKeyword => Syntax::CtrlKeyword,
+                TokenType::Punctuation
+                    if matches!(token.src, "[" | "]" | "(" | ")" | "{" | "}") =>
+                {
+                    Syntax::Bracket
+                }
+
+                TokenType::Whitespace | TokenType::Punctuation => Syntax::Normal,
             },
             value.as_ref(),
         ),
         Err(e) => (&e.source[e.range], Syntax::Invalid, None),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct BracketPair<'a> {
+    pub depth: &'a [Style],
+}
+
+impl std::ops::Index<usize> for BracketPair<'_> {
+    type Output = Style;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.depth[index % self.depth.len()]
+    }
+}
+
+impl BracketPair<'_> {
+    pub fn stylize<T>(&self, depth: usize, what: T) -> Styled<T> {
+        Styled {
+            style: self[depth],
+            inner: what,
+        }
     }
 }

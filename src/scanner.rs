@@ -1148,10 +1148,9 @@ impl<'a> Iterator for Scanner<'a> {
                             is_end
                         })
                         .map_or(self.source.len(), |n| n + ch.len_utf8());
-                    // no trailing decimal, e (unless hex), or hyphen
-                    len = self.source[..len]
-                        .trim_end_matches(['.', '-', 'e', 'E']) // TODO: DOESN'T ACCOUNT FOR HEX
-                        .len();
+                    // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
+                    // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
+                    len = self.source[..len].trim_end_matches(['.', '-']).len();
                     Ok(self.split_off_token(len, TokenType::NumberLiteral))
                 }
                 // starts with double forward slashes (`//`) -> (line) comment token

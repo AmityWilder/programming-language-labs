@@ -17,7 +17,7 @@ use crate::{
     grammar::{
         highlight,
         style::{Color, Style},
-        syntax::SyntaxStyle,
+        syntax::{BracketPair, Syntax, SyntaxStyle},
     },
     scanner::{ContextError, InterpolatedExpr, Token, TokenType, tokenize},
 };
@@ -83,7 +83,17 @@ const SYNTAX_STYLE: SyntaxStyle = SyntaxStyle {
 
     ctrl_keyword: Style::new().foreground(Color::BrightMagenta),
 
+    bracket: Style::new().foreground(Color::BrightWhite),
+
     invalid: Style::new().foreground(Color::Red),
+};
+
+const BRACKET_PAIRS: BracketPair = BracketPair {
+    depth: &[
+        Style::new().foreground(Color::BrightYellow),
+        Style::new().foreground(Color::BrightBlue),
+        Style::new().foreground(Color::BrightMagenta),
+    ],
 };
 
 /// # Panics
@@ -149,8 +159,23 @@ pub fn run_code(source: &str) {
 
     // grammar highlighted
     println!("```");
+    let mut bracket_depth = 0;
     for (lexeme, syntax) in highlight(&tokens) {
-        print!("{}", SYNTAX_STYLE.stylize(syntax, lexeme));
+        if syntax == Syntax::Bracket {
+            match lexeme {
+                "[" | "(" | "{" => {
+                    print!("{}", BRACKET_PAIRS.stylize(bracket_depth, lexeme));
+                    bracket_depth += 1;
+                }
+                "]" | ")" | "}" => {
+                    bracket_depth -= 1;
+                    print!("{}", BRACKET_PAIRS.stylize(bracket_depth, lexeme));
+                }
+                _ => unimplemented!(),
+            }
+        } else {
+            print!("{}", SYNTAX_STYLE.stylize(syntax, lexeme));
+        }
     }
     println!("\x1b[0m\n```");
 
