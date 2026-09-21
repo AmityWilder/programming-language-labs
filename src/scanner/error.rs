@@ -1,4 +1,7 @@
-use super::token::{Token, TokenValue};
+use super::{
+    Scanner,
+    token::{Token, TokenValue},
+};
 use std::range::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,3 +157,5 @@ pub type TokenResult<'a, T> = Result<(Token<'a>, Option<TokenValue<'a, T>>), Con
 
 pub type SimpleTokenResult<'a> = TokenResult<'a, !>;
 pub type NestedTokenResult<'a> = TokenResult<'a, Vec<SimpleTokenResult<'a>>>;
+
+pub type TokenValueResult<'a> = Result<Option<TokenValue<'a, Scanner<'a>>>, ErrorType<'a>>;

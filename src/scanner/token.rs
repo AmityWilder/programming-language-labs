@@ -1,6 +1,6 @@
 use super::{
     Scanner,
-    error::{ErrorType, NumLitError},
+    error::{ErrorType, NumLitError, TokenValueResult},
 };
 use std::{borrow::Cow, iter::Peekable, range::Range};
 
@@ -363,6 +363,244 @@ pub enum TokenValue<'a, T> {
     Punctuation(Punctuation),
 }
 
+impl<'a> TokenValue<'a, Scanner<'a>> {
+    fn number_literal(src: &'a str) -> TokenValueResult<'a> {
+        const HEX_PREFIX: &str = "0x";
+        const OCT_PREFIX: &str = "0o";
+        const BIN_PREFIX: &str = "0b";
+
+        // checking the start of a string is easier than looking through every one of its characters, so it goes first.
+        // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
+        if !src.starts_with(HEX_PREFIX) && src.contains(['e', 'E']) || src.contains('.') {
+            src.parse() // turns out parse already handles the "e" syntax on its own
+                .map(|x| Some(TokenValue::FltLiteral(x)))
+                .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::Flt(e)))
+        } else {
+            let stripped = src.strip_prefix('-');
+            let is_negative = stripped.is_some();
+            let magnitude = stripped.unwrap_or(src);
+
+            let (digits, radix) = if let Some(n) = magnitude.strip_prefix(HEX_PREFIX) {
+                (n, 16)
+            } else if let Some(n) = magnitude.strip_prefix(OCT_PREFIX) {
+                (n, 8)
+            } else if let Some(n) = magnitude.strip_prefix(BIN_PREFIX) {
+                (n, 2)
+            } else {
+                (magnitude, 10)
+            };
+            usize::from_str_radix(digits, radix)
+                .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::UInt(e)))
+                .and_then(|value| {
+                    if is_negative {
+                        (isize::try_from(value)
+                            .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::SInt(e)))
+                            .and_then(|x| {
+                                x.checked_neg().ok_or_else(|| {
+                                    ErrorType::InvalidNumLiteral(NumLitError::SInt(
+                                        i8::try_from(i16::from(i8::MIN) - 1)
+                                            .expect_err("should result in negative overflow"),
+                                    ))
+                                })
+                            }))
+                        .map(TokenValue::SIntLiteral)
+                    } else {
+                        Ok(TokenValue::UIntLiteral(value))
+                    }
+                })
+                .map(Some)
+        }
+    }
+
+    fn char_literal(src: &'a str) -> TokenValueResult<'a> {
+        const DELIM: char = '\'';
+        let src = src
+            .strip_prefix(DELIM)
+            .and_then(|s| s.strip_suffix(DELIM))
+            .expect("character literal tokens should include delimiters (`'`)");
+        if let Some((len, res)) = escape_char(src) {
+            // escape sequence
+            res.map_err(|()| ErrorType::InvalidEscape(src))
+                .and_then(|ch| {
+                    (len == src.len())
+                        .then_some(Some(TokenValue::CharLiteral(CharLiteral {
+                            ch,
+                            is_escaped: true,
+                        })))
+                        .ok_or(ErrorType::MultiCharLiteral)
+                })
+        } else {
+            // normal character
+            let mut iter = src.chars();
+            iter.next()
+                .ok_or(ErrorType::EmptyCharLiteral)
+                .and_then(|ch| {
+                    iter.next()
+                        .is_none()
+                        .then_some(Some(TokenValue::CharLiteral(CharLiteral {
+                            ch,
+                            is_escaped: false,
+                        })))
+                        .ok_or(ErrorType::MultiCharLiteral)
+                })
+        }
+    }
+
+    fn string_literal_noalloc(src: &'a str) -> TokenValueResult<'a> {
+        const DELIM: char = '"';
+        const ESCAPE: char = '\\';
+        let src = src
+            .strip_prefix(DELIM)
+            .and_then(|s| s.strip_suffix(DELIM))
+            .expect("string literal tokens should include delimiters (`\"`)");
+        let mut is_esc = false;
+        if src.contains(ESCAPE)
+            && let Some(e) = src
+                .match_indices(|ch: char| {
+                    is_esc = !is_esc && ch == ESCAPE;
+                    is_esc
+                })
+                .find_map(|(i, _)| escape_seq(src, i).err())
+        {
+            Err(e)
+        } else {
+            Ok(Some(TokenValue::StringLiteral(StringLiteral::borrowed(
+                src,
+            ))))
+        }
+    }
+
+    fn string_literal(src: &'a str) -> TokenValueResult<'a> {
+        let mut is_esc = false;
+        let replacements = src
+            .match_indices(|ch: char| {
+                is_esc = !is_esc && ch == '\\';
+                is_esc
+            })
+            .map(|(i, _)| escape_seq(src, i))
+            .collect::<Result<Vec<_>, _>>()?;
+        let escapes = replacements.iter().map(|(range, _)| *range).collect();
+
+        let byte_diff: usize = replacements
+            .iter()
+            .map(|(range, ch)| (range.end - range.start) - ch.len_utf8())
+            .sum();
+        let mut processed = String::with_capacity(src.len() - byte_diff);
+        let mut prev_end = 0;
+        for (range, repl) in replacements {
+            processed.push_str(&src[prev_end..range.start]);
+            processed.push(repl);
+            prev_end = range.end;
+        }
+
+        Ok(Some(TokenValue::StringLiteral(StringLiteral {
+            text: Cow::Owned(processed),
+            escapes,
+        })))
+    }
+
+    fn interpolated_string_noalloc(src: &'a str) -> TokenValueResult<'a> {
+        const DELIM: char = '`';
+        let src = src
+            .strip_prefix(DELIM)
+            .and_then(|s| s.strip_suffix(DELIM))
+            .expect("interpolated string literal tokens should include delimiters (`` ` ``)");
+        if let Some(e) = src
+            .match_indices(interpolated_escapes())
+            .find_map(|(i, _)| escape_seq(src, i).err())
+            .or_else(|| {
+                src.match_indices("${")
+                    .find_map(|(i, _)| interp_str_expr(src, i).err())
+            })
+        {
+            Err(e)
+        } else {
+            Ok(Some(TokenValue::InterpolatedString(
+                InterpolatedString::borrowed(src),
+            )))
+        }
+    }
+
+    fn interpolated_string(src: &'a str) -> TokenValueResult<'a> {
+        let esc_replacements = src
+            .match_indices(interpolated_escapes())
+            .map(|(i, _)| escape_seq(src, i))
+            .collect::<Result<Vec<_>, _>>()?;
+        let escapes = esc_replacements.iter().map(|(range, _)| *range).collect();
+        let (expr_replacements, expr_scanners) = src
+            .match_indices("${")
+            .map(|(i, _)| interp_str_expr(src, i))
+            .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
+        let mut replacements = Vec::with_capacity(esc_replacements.len() + expr_replacements.len());
+        // everything is in order, but expressions and escapes can be interspersed
+        {
+            let mut esc_iter = esc_replacements
+                .into_iter()
+                .map(|(range, ch)| (range, Some(ch)))
+                .peekable();
+
+            let mut expr_iter = expr_replacements
+                .into_iter()
+                .map(|range| (range, None))
+                .peekable();
+
+            replacements.extend(std::iter::from_fn(|| {
+                esc_iter
+                    .next_if(|(esc_range, _)| {
+                        expr_iter
+                            .peek()
+                            .is_none_or(|(expr_range, _)| esc_range.start < expr_range.start)
+                    })
+                    .or_else(|| expr_iter.next())
+            }));
+        }
+
+        // how many bytes of difference between the original string and the processed string
+        let mut byte_diff = 0;
+        // need to get the correct positions of the expression insertions, since their positions change when we replace substrings
+        let expressions = replacements
+            .iter()
+            .copied()
+            .filter_map(|(range, repl)| {
+                assert!(
+                    byte_diff <= range.start,
+                    "shouldn't move tokens backwards\n replacements: {replacements:?}"
+                );
+                let start = range.start - byte_diff;
+                let being_replaced_len = range.end - range.start;
+                let replace_with_len = repl.map_or(0, char::len_utf8);
+                byte_diff += being_replaced_len - replace_with_len;
+                // expression replacements are always None, so if we see a None we know that's an expression.
+                repl.is_none().then_some((range, start))
+            })
+            .zip(expr_scanners)
+            .map(|((range, position), expr)| InterpolatedExpr {
+                range,
+                position,
+                expr,
+            })
+            .collect();
+
+        let mut processed = String::with_capacity(src.len() - byte_diff);
+        let mut prev_end = 0;
+        for (range, repl) in replacements {
+            processed.push_str(&src[prev_end..range.start]);
+            prev_end = range.end;
+            if let Some(ch) = repl {
+                processed.push(ch);
+            }
+        }
+
+        Ok(Some(TokenValue::InterpolatedString(InterpolatedString {
+            text: StringLiteral {
+                text: Cow::Owned(processed),
+                escapes,
+            },
+            expressions,
+        })))
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Token<'a> {
     /// Because this is a pointer into the original source string, we can use pointer arithmetic to find its location.
@@ -481,149 +719,18 @@ impl<'a> Token<'a> {
     /// Obtains the value of a token without allocating
     ///
     /// **Warning:** String literals will be incorrect because of the "no alloc" rule.
-    pub(super) fn value_noalloc(
-        self,
-    ) -> Result<Option<TokenValue<'a, Scanner<'a>>>, ErrorType<'a>> {
+    pub(super) fn value_noalloc(self) -> TokenValueResult<'a> {
         const VALID_TOKENS: &str = "Token::value() expects vaild tokens";
         match self.ty {
             TokenType::Whitespace | TokenType::Comment => Ok(None),
 
-            TokenType::NumberLiteral => {
-                const HEX_PREFIX: &str = "0x";
-                const OCT_PREFIX: &str = "0o";
-                const BIN_PREFIX: &str = "0b";
+            TokenType::NumberLiteral => TokenValue::number_literal(self.src),
 
-                // checking the start of a string is easier than looking through every one of its characters, so it goes first.
-                // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
-                if !self.src.starts_with(HEX_PREFIX) && self.src.contains(['e', 'E'])
-                    || self.src.contains('.')
-                {
-                    self.src
-                        .parse() // turns out parse already handles the "e" syntax on its own
-                        .map(|x| Some(TokenValue::FltLiteral(x)))
-                        .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::Flt(e)))
-                } else {
-                    let stripped = self.src.strip_prefix('-');
-                    let is_negative = stripped.is_some();
-                    let magnitude = stripped.unwrap_or(self.src);
+            TokenType::CharLiteral => TokenValue::char_literal(self.src),
 
-                    let (digits, radix) = if let Some(n) = magnitude.strip_prefix(HEX_PREFIX) {
-                        (n, 16)
-                    } else if let Some(n) = magnitude.strip_prefix(OCT_PREFIX) {
-                        (n, 8)
-                    } else if let Some(n) = magnitude.strip_prefix(BIN_PREFIX) {
-                        (n, 2)
-                    } else {
-                        (magnitude, 10)
-                    };
-                    usize::from_str_radix(digits, radix)
-                        .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::UInt(e)))
-                        .and_then(|value| {
-                            if is_negative {
-                                (isize::try_from(value)
-                                    .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::SInt(e)))
-                                    .and_then(|x| {
-                                        x.checked_neg().ok_or_else(|| {
-                                            ErrorType::InvalidNumLiteral(NumLitError::SInt(
-                                                i8::try_from(i16::from(i8::MIN) - 1).expect_err(
-                                                    "should result in negative overflow",
-                                                ),
-                                            ))
-                                        })
-                                    }))
-                                .map(TokenValue::SIntLiteral)
-                            } else {
-                                Ok(TokenValue::UIntLiteral(value))
-                            }
-                        })
-                        .map(Some)
-                }
-            }
+            TokenType::StringLiteral => TokenValue::string_literal_noalloc(self.src),
 
-            TokenType::CharLiteral => {
-                const DELIM: char = '\'';
-                let src = self
-                    .src
-                    .strip_prefix(DELIM)
-                    .and_then(|s| s.strip_suffix(DELIM))
-                    .expect("character literal tokens should include delimiters (`'`)");
-                if let Some((len, res)) = escape_char(src) {
-                    // escape sequence
-                    res.map_err(|()| ErrorType::InvalidEscape(src))
-                        .and_then(|ch| {
-                            (len == src.len())
-                                .then_some(Some(TokenValue::CharLiteral(CharLiteral {
-                                    ch,
-                                    is_escaped: true,
-                                })))
-                                .ok_or(ErrorType::MultiCharLiteral)
-                        })
-                } else {
-                    // normal character
-                    let mut iter = src.chars();
-                    iter.next()
-                        .ok_or(ErrorType::EmptyCharLiteral)
-                        .and_then(|ch| {
-                            iter.next()
-                                .is_none()
-                                .then_some(Some(TokenValue::CharLiteral(CharLiteral {
-                                    ch,
-                                    is_escaped: false,
-                                })))
-                                .ok_or(ErrorType::MultiCharLiteral)
-                        })
-                }
-            }
-
-            TokenType::StringLiteral => {
-                const DELIM: char = '"';
-                const ESCAPE: char = '\\';
-                let src = self
-                    .src
-                    .strip_prefix(DELIM)
-                    .and_then(|s| s.strip_suffix(DELIM))
-                    .expect("string literal tokens should include delimiters (`\"`)");
-                let mut is_esc = false;
-                if src.contains(ESCAPE)
-                    && let Some(e) = src
-                        .match_indices(|ch: char| {
-                            is_esc = !is_esc && ch == ESCAPE;
-                            is_esc
-                        })
-                        .find_map(|(i, _)| escape_seq(src, i).err())
-                {
-                    Err(e)
-                } else {
-                    Ok(Some(TokenValue::StringLiteral(StringLiteral::borrowed(
-                        src,
-                    ))))
-                }
-            }
-
-            TokenType::InterpolatedString => {
-                const DELIM: char = '`';
-                let src = self
-                    .src
-                    .strip_prefix(DELIM)
-                    .and_then(|s| s.strip_suffix(DELIM))
-                    .expect(
-                        "interpolated string literal tokens should include delimiters (`` ` ``)",
-                    );
-                if let Some(e) = src
-                    .match_indices(interpolated_escapes())
-                    .find_map(|(i, _)| escape_seq(src, i).err())
-                    .or_else(|| {
-                        src.match_indices("${")
-                            .find_map(|(i, _)| interp_str_expr(src, i).err())
-                    })
-                {
-                    Err(e)
-                } else {
-                    Ok(Some(TokenValue::InterpolatedString(
-                        InterpolatedString::borrowed(src),
-                    )))
-                }
-            }
+            TokenType::InterpolatedString => TokenValue::interpolated_string_noalloc(self.src),
 
             TokenType::Identifier | TokenType::Callable => Ok(Some(TokenValue::Direct(self.src))),
 
@@ -638,43 +745,16 @@ impl<'a> Token<'a> {
     }
 
     /// Returns [`None`] if non-code (whitespace/comment)
-    pub fn value(self) -> Result<Option<TokenValue<'a, Scanner<'a>>>, ErrorType<'a>> {
-        const EXPR_START: &str = "${";
-        const ESC_START: char = '\\';
+    pub fn value(self) -> TokenValueResult<'a> {
         let res = self.value_noalloc();
         match res {
             // string literal
             Ok(Some(TokenValue::StringLiteral(StringLiteral {
                 text: Cow::Borrowed(src),
-                mut escapes,
-            }))) if src.contains(ESC_START) => {
+                escapes,
+            }))) if src.contains('\\') => {
                 debug_assert_eq!(&escapes, &[], "should have no escapes if text is borrowed");
-                let mut is_esc = false;
-                let replacements = src
-                    .match_indices(|ch: char| {
-                        is_esc = !is_esc && ch == ESC_START;
-                        is_esc
-                    })
-                    .map(|(i, _)| escape_seq(src, i))
-                    .collect::<Result<Vec<_>, _>>()?;
-                escapes.extend(replacements.iter().map(|(range, _)| range));
-
-                let byte_diff: usize = replacements
-                    .iter()
-                    .map(|(range, ch)| (range.end - range.start) - ch.len_utf8())
-                    .sum();
-                let mut processed = String::with_capacity(src.len() - byte_diff);
-                let mut prev_end = 0;
-                for (range, repl) in replacements {
-                    processed.push_str(&src[prev_end..range.start]);
-                    processed.push(repl);
-                    prev_end = range.end;
-                }
-
-                Ok(Some(TokenValue::StringLiteral(StringLiteral {
-                    text: Cow::Owned(processed),
-                    escapes,
-                })))
+                TokenValue::string_literal(src)
             }
 
             // interpolated string literal
@@ -682,94 +762,17 @@ impl<'a> Token<'a> {
                 text:
                     StringLiteral {
                         text: Cow::Borrowed(src),
-                        mut escapes,
+                        escapes,
                     },
-                mut expressions,
-            }))) if src.contains(ESC_START) || src.contains(EXPR_START) => {
+                expressions,
+            }))) if src.contains('\\') || src.contains("${") => {
                 debug_assert_eq!(&escapes, &[], "should have no escapes if text is borrowed");
                 debug_assert_eq!(
                     &expressions,
                     &[],
                     "should have no expressions if text is borrowed"
                 );
-                let esc_replacements = src
-                    .match_indices(interpolated_escapes())
-                    .map(|(i, _)| escape_seq(src, i))
-                    .collect::<Result<Vec<_>, _>>()?;
-                escapes.extend(esc_replacements.iter().map(|(range, _)| range));
-                let (expr_replacements, expr_scanners) = src
-                    .match_indices(EXPR_START)
-                    .map(|(i, _)| interp_str_expr(src, i))
-                    .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
-                let mut replacements =
-                    Vec::with_capacity(esc_replacements.len() + expr_replacements.len());
-                // everything is in order, but expressions and escapes can be interspersed
-                {
-                    let mut esc_iter = esc_replacements
-                        .into_iter()
-                        .map(|(range, ch)| (range, Some(ch)))
-                        .peekable();
-
-                    let mut expr_iter = expr_replacements
-                        .into_iter()
-                        .map(|range| (range, None))
-                        .peekable();
-
-                    replacements.extend(std::iter::from_fn(|| {
-                        esc_iter
-                            .next_if(|(esc_range, _)| {
-                                expr_iter.peek().is_none_or(|(expr_range, _)| {
-                                    esc_range.start < expr_range.start
-                                })
-                            })
-                            .or_else(|| expr_iter.next())
-                    }));
-                }
-
-                // how many bytes of difference between the original string and the processed string
-                let mut byte_diff = 0;
-                // need to get the correct positions of the expression insertions, since their positions change when we replace substrings
-                expressions.extend(
-                    replacements
-                        .iter()
-                        .copied()
-                        .filter_map(|(range, repl)| {
-                            assert!(
-                                byte_diff <= range.start,
-                                "shouldn't move tokens backwards\n replacements: {replacements:?}"
-                            );
-                            let start = range.start - byte_diff;
-                            let being_replaced_len = range.end - range.start;
-                            let replace_with_len = repl.map_or(0, char::len_utf8);
-                            byte_diff += being_replaced_len - replace_with_len;
-                            // expression replacements are always None, so if we see a None we know that's an expression.
-                            repl.is_none().then_some((range, start))
-                        })
-                        .zip(expr_scanners)
-                        .map(|((range, position), expr)| InterpolatedExpr {
-                            range,
-                            position,
-                            expr,
-                        }),
-                );
-
-                let mut processed = String::with_capacity(src.len() - byte_diff);
-                let mut prev_end = 0;
-                for (range, repl) in replacements {
-                    processed.push_str(&src[prev_end..range.start]);
-                    prev_end = range.end;
-                    if let Some(ch) = repl {
-                        processed.push(ch);
-                    }
-                }
-
-                Ok(Some(TokenValue::InterpolatedString(InterpolatedString {
-                    text: StringLiteral {
-                        text: Cow::Owned(processed),
-                        escapes,
-                    },
-                    expressions,
-                })))
+                TokenValue::interpolated_string(src)
             }
 
             _ => res,
