@@ -2,7 +2,7 @@ use crate::{
     grammar::style::Style,
     scanner::{
         error::TokenResult,
-        token::{TokenType, TokenValue},
+        token::{TokenType, TokenValue, TokenValueSimplicity},
     },
 };
 
@@ -72,9 +72,9 @@ syntaxes! {
     }
 }
 
-pub fn syntax_of<'a: 'b, 'b, T>(
-    item: &'b TokenResult<'a, T>,
-) -> (&'a str, Syntax, Option<&'b TokenValue<'a, T>>) {
+pub fn syntax_of<'a: 'b, 'b, S: TokenValueSimplicity>(
+    item: &'b TokenResult<'a, S>,
+) -> (&'a str, Syntax, &'b TokenValue<'a, S>) {
     match item {
         Ok((token, value)) => (
             token.src,
@@ -105,9 +105,9 @@ pub fn syntax_of<'a: 'b, 'b, T>(
 
                 TokenType::Whitespace | TokenType::Punctuation => Syntax::Normal,
             },
-            value.as_ref(),
+            value,
         ),
-        Err(e) => (&e.source[e.range], Syntax::Invalid, None),
+        Err(e) => (&e.source[e.range], Syntax::Invalid, &TokenValue::Ignore),
     }
 }
 

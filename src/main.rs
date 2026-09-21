@@ -90,49 +90,38 @@ pub fn run_code(source: &str) {
         match item {
             Ok((token, value)) => {
                 print!("{token:?}:\n  ");
-                match value {
-                    None => println!("ignored"),
-                    Some(value) => {
-                        if let TokenValue::InterpolatedString(InterpolatedString {
-                            text,
-                            expressions,
-                        }) = value
-                        {
-                            println!(
-                                "InterpolatedString(InterpolatedString {{ text: {text:?}, expressions: {} }})",
-                                if expressions.is_empty() {
-                                    "[]"
-                                } else {
-                                    "<below>"
-                                }
-                            );
-                            for InterpolatedExpr {
-                                range,
-                                position,
-                                expr,
-                            } in expressions
-                            {
-                                println!(
-                                    "    InterpolatedExpr {{ range: {range:?}, positions: {position:?}, expr: {} }}",
-                                    if expr.is_empty() { "[]" } else { "<below>" }
-                                );
-                                for item in expr {
-                                    match item {
-                                        Ok((token, value)) => {
-                                            print!("      {token:?}:\n        ");
-                                            match value {
-                                                Some(value) => println!("{value:?}"),
-                                                None => println!("ignored"),
-                                            }
-                                        }
-                                        Err(e) => eprintln!("\x1b[91merror: {e}\x1b[0m"),
-                                    }
-                                }
-                            }
+                if let TokenValue::InterpolatedString(InterpolatedString { text, expressions }) =
+                    value
+                {
+                    println!(
+                        "InterpolatedString(InterpolatedString {{ text: {text:?}, expressions: {} }})",
+                        if expressions.is_empty() {
+                            "[]"
                         } else {
-                            println!("{value:?}");
+                            "<below>"
+                        }
+                    );
+                    for InterpolatedExpr {
+                        range,
+                        position,
+                        expr,
+                    } in expressions
+                    {
+                        println!(
+                            "    InterpolatedExpr {{ range: {range:?}, positions: {position:?}, expr: {} }}",
+                            if expr.is_empty() { "[]" } else { "<below>" }
+                        );
+                        for item in expr {
+                            match item {
+                                Ok((token, value)) => {
+                                    println!("      {token:?}:\n        {value:?}");
+                                }
+                                Err(e) => eprintln!("\x1b[91merror: {e}\x1b[0m"),
+                            }
                         }
                     }
+                } else {
+                    println!("{value:?}");
                 }
             }
             Err(e) => eprintln!("\x1b[91merror: {e}\x1b[0m"),

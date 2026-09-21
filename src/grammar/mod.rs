@@ -3,9 +3,9 @@
 use crate::{
     grammar::syntax::{Syntax, syntax_of},
     scanner::{
-        error::TokenResult,
+        error::{NestedTokenResult, TokenResult},
         symbols::{INTERP_EXPR_CLOSE, INTERP_EXPR_OPEN},
-        token::{CharLiteral, InterpolatedString, StringLiteral, TokenValue},
+        token::{AllocNested, CharLiteral, InterpolatedString, StringLiteral, TokenValue},
     },
 };
 use std::range::Range;
@@ -82,24 +82,23 @@ fn escaped_str_literal<'a>(
         .map(|(range, syn)| (&lex[range], syn))
 }
 
-pub fn highlight_simple<'a, T>(
-    tokens: &'a [TokenResult<'a, T>],
+pub fn highlight_simple<'a>(
+    tokens: &'a [TokenResult<'a, AllocNested>],
 ) -> impl Iterator<Item = (&'a str, Syntax)> {
     tokens.iter().map(syntax_of).flat_map(|(lex, syn, val)| {
         match val {
             // char literal with escape - an iterator
-            Some(TokenValue::CharLiteral(CharLiteral {
+            TokenValue::CharLiteral(CharLiteral {
                 is_escaped: true, ..
-            })) => Pick::A(Pick::A(escaped_char_literal(lex, syn))),
+            }) => Pick::A(Pick::A(escaped_char_literal(lex, syn))),
 
             // string literal with escapes or interpolated string with escapes and no expressions - an iterator
-            Some(
-                TokenValue::StringLiteral(literal @ StringLiteral { escapes, .. })
-                | TokenValue::InterpolatedString(InterpolatedString {
-                    text: literal @ StringLiteral { escapes, .. },
-                    ..
-                }),
-            ) if !escapes.is_empty() => Pick::A(Pick::B(escaped_str_literal(lex, syn, literal))),
+            TokenValue::StringLiteral(literal @ StringLiteral { escapes, .. })
+            /* | TokenValue::InterpolatedString(InterpolatedString {
+                text: literal @ StringLiteral { escapes, .. },
+                ..
+            }) */
+            if !escapes.is_empty() => Pick::A(Pick::B(escaped_str_literal(lex, syn, literal))),
 
             // an item
             _ => Pick::B(std::iter::once((lex, syn))),
@@ -107,15 +106,15 @@ pub fn highlight_simple<'a, T>(
     })
 }
 
-pub fn highlight<'a, T>(
-    tokens: &'a [TokenResult<'a, Vec<TokenResult<'a, T>>>],
+pub fn highlight<'a>(
+    tokens: &'a [NestedTokenResult<'a>],
 ) -> impl Iterator<Item = (&'a str, Syntax)> {
     tokens.iter().map(syntax_of).flat_map(|(lex, syn, val)| {
         match val {
             // interpolated string literal with expressions - an iterator of iterators
-            Some(TokenValue::InterpolatedString(
+            TokenValue::InterpolatedString(
                 literal @ InterpolatedString { expressions, .. },
-            )) if !expressions.is_empty() => {
+            ) if !expressions.is_empty() => {
                 let mut prev_end = 0;
                 let iter = literal
                     .replacements()
@@ -169,20 +168,18 @@ pub fn highlight<'a, T>(
             // The rest is essentially [`highlight_simple`]
 
             // char literal with escape - an iterator
-            Some(TokenValue::CharLiteral(CharLiteral {
+            TokenValue::CharLiteral(CharLiteral {
                 is_escaped: true, ..
-            })) => {
+            }) => {
                 Pick::A(Pick::A(escaped_char_literal(lex, syn)))
             }
 
             // string literal with escapes or interpolated string with escapes and no expressions - an iterator
-            Some(
-                TokenValue::StringLiteral(literal @ StringLiteral { escapes, .. })
-                | TokenValue::InterpolatedString(InterpolatedString {
-                    text: literal @ StringLiteral { escapes, .. },
-                    ..
-                }),
-            ) if !escapes.is_empty() => {
+            TokenValue::StringLiteral(literal @ StringLiteral { escapes, .. })
+            | TokenValue::InterpolatedString(InterpolatedString {
+                text: literal @ StringLiteral { escapes, .. },
+                ..
+            }) if !escapes.is_empty() => {
                 Pick::B(Pick::A(escaped_str_literal(lex, syn, literal)))
             }
 

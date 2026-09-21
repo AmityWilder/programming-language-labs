@@ -12,47 +12,56 @@ fn test1() {
         tokens.next(),
         Some(Ok((
             Token::new("let", TokenType::Keyword),
-            Some(TokenValue::Keyword(Keyword::Let))
+            TokenValue::Keyword(Keyword::Let)
         )))
     );
     assert_eq!(
         tokens.next(),
-        Some(Ok((Token::new(" ", TokenType::Whitespace), None)))
+        Some(Ok((
+            Token::new(" ", TokenType::Whitespace),
+            TokenValue::Ignore
+        )))
     );
     assert_eq!(
         tokens.next(),
         Some(Ok((
             Token::new("x", TokenType::Identifier),
-            Some(TokenValue::Direct("x"))
+            TokenValue::Direct("x")
         ))),
     );
     assert_eq!(
         tokens.next(),
-        Some(Ok((Token::new(" ", TokenType::Whitespace), None)))
+        Some(Ok((
+            Token::new(" ", TokenType::Whitespace),
+            TokenValue::Ignore
+        )))
     );
     assert_eq!(
         tokens.next(),
         Some(Ok((
             Token::new("=", TokenType::Punctuation),
-            Some(TokenValue::Punctuation(Punctuation::Assign))
+            TokenValue::Punctuation(Punctuation::Assign)
         ))),
     );
     assert_eq!(
         tokens.next(),
-        Some(Ok((Token::new(" ", TokenType::Whitespace), None)))
+        Some(Ok((
+            Token::new(" ", TokenType::Whitespace),
+            TokenValue::Ignore
+        )))
     );
     assert_eq!(
         tokens.next(),
         Some(Ok((
             Token::new("5", TokenType::NumberLiteral),
-            Some(TokenValue::UIntLiteral(5))
+            TokenValue::UIntLiteral(5)
         ))),
     );
     assert_eq!(
         tokens.next(),
         Some(Ok((
             Token::new(";", TokenType::Punctuation),
-            Some(TokenValue::Punctuation(Punctuation::Semi))
+            TokenValue::Punctuation(Punctuation::Semi)
         ))),
     );
 }
@@ -66,7 +75,10 @@ fn test_multiple_errors() {
     );
     assert_eq!(
         tokens.next(),
-        Some(Ok((Token::new(" ", TokenType::Whitespace), None)))
+        Some(Ok((
+            Token::new(" ", TokenType::Whitespace),
+            TokenValue::Ignore
+        )))
     );
     assert_matches!(
         tokens.next(),

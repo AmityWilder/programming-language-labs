@@ -1,7 +1,4 @@
-use super::{
-    Scanner,
-    token::{Token, TokenValue},
-};
+use super::token::{Allocated, NestedTokenValue, Token, TokenValue};
 use std::range::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,10 +149,6 @@ impl std::error::Error for ContextError<'_> {
     }
 }
 
-/// `T`: The collection that lists [`InterpolatedExpr`] sub-tokens
-pub type TokenResult<'a, T> = Result<(Token<'a>, Option<TokenValue<'a, T>>), ContextError<'a>>;
-
-pub type SimpleTokenResult<'a> = TokenResult<'a, !>;
-pub type NestedTokenResult<'a> = TokenResult<'a, Vec<SimpleTokenResult<'a>>>;
-
-pub type TokenValueResult<'a> = Result<Option<TokenValue<'a, Scanner<'a>>>, ErrorType<'a>>;
+pub type TokenResult<'a, S> = Result<(Token<'a>, TokenValue<'a, S>), ContextError<'a>>;
+pub type SimpleTokenResult<'a> = Result<(Token<'a>, NestedTokenValue<'a>), ContextError<'a>>;
+pub type NestedTokenResult<'a> = TokenResult<'a, Allocated<Vec<SimpleTokenResult<'a>>>>;

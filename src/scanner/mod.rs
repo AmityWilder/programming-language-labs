@@ -2,8 +2,8 @@ use error::{ContextError, Error, ErrorType, NestedTokenResult, SimpleTokenResult
 use std::range::Range;
 use symbols::*;
 use token::{
-    InterpolatedExpr, InterpolatedString, Keyword, KeywordType, Punctuation, Token, TokenType,
-    TokenValue,
+    AllocTokenValue, InterpolatedExpr, InterpolatedString, Keyword, KeywordType, NestedTokenValue,
+    NoAlloc, Punctuation, Token, TokenType, TokenValue,
 };
 
 pub mod error;
@@ -194,24 +194,25 @@ impl<'a> Scanner<'a> {
             .starts_with(char::is_numeric)
     }
 
-    fn scan_num_literal(&mut self, start: char) -> Token<'a> {
-        let mut is_first_decimal = true; // at most one decimal
-        let mut is_first_e_neg = true; // at most one '-' following an 'e'
-        let mut is_prev_e = false;
-        let mut is_following_e = false;
-        let mut len = self.source[start.len_utf8()..]
-            .find(|ch: char| {
+    fn scan_num_literal(&mut self) -> Token<'a> {
+        let number_end = {
+            let mut is_first_char = true;
+            let mut is_first_decimal = true; // at most one decimal
+            let mut is_first_e_neg = true; // at most one '-' following an 'e'
+            let mut is_prev_e = false;
+            let mut is_following_e = false;
+            move |ch: char| {
                 let is_end = !(ch.is_alphanumeric()
                     || ch == '.' && std::mem::take(&mut is_first_decimal) && !is_following_e
-                    || ch == '-' && is_prev_e && std::mem::take(&mut is_first_e_neg));
+                    || ch == '-'
+                        && (is_first_char || is_prev_e && std::mem::take(&mut is_first_e_neg)));
                 is_prev_e = matches!(ch, 'e' | 'E');
                 is_following_e |= is_prev_e;
+                is_first_char = false;
                 is_end
-            })
-            .map_or(self.source.len(), |n| {
-                n.checked_add(start.len_utf8())
-                    .expect("n should be at most `start.len_utf8()`-less than len")
-            });
+            }
+        };
+        let mut len = self.source.find(number_end).unwrap_or(self.source.len());
         // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
         // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
         len = self.source[..len].trim_end_matches(['.', '-']).len();
@@ -276,63 +277,55 @@ impl<'a> Scanner<'a> {
 }
 
 impl<'a> Iterator for Scanner<'a> {
-    type Item = Result<Token<'a>, ContextError<'a>>;
+    type Item = Result<(Token<'a>, TokenValue<'a, NoAlloc>), ContextError<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut iter = self.source.chars().peekable();
         // if there are no characters remaining, this will return None and stop iterating.
-        iter.next()
-            // the first character
-            .map(|ch| {
-                // we check for the pattern of the token with "if/else" instead of "if { return }"
-                // because once we have identified what type of token it should be, there must be an error if it isn't that.
-                // if we continued going down the list of possible tokens until one succeeded, we would be doing
-                // more processing and miss the fact that it wasn't a *different* token, it was just an *invalid* token.
+        self.source.chars().next().map(|ch| {
+            // we check for the pattern of the token with "if/else" instead of "if { return }"
+            // because once we have identified what type of token it should be, there must be an error if it isn't that.
+            // if we continued going down the list of possible tokens until one succeeded, we would be doing
+            // more processing and miss the fact that it wasn't a *different* token, it was just an *invalid* token.
 
-                // branches ordered by:
-                // 1. if a pattern might fit multiple branches, the most specific one must come before a less specific one;
-                //    so that we don't eliminate the opportunity to check if it's more specific.
-                // 2. if branches are equally simple or do not overlap, simplest conditions first; so that we aren't testing
-                //    a complex condition on tokens that don't satisfy them, when they might have satisfied a less expensive
-                //    condition for a different branch.
+            // branches ordered by:
+            // 1. if a pattern might fit multiple branches, the most specific one must come before a less specific one;
+            //    so that we don't eliminate the opportunity to check if it's more specific.
+            // 2. if branches are equally simple or do not overlap, simplest conditions first; so that we aren't testing
+            //    a complex condition on tokens that don't satisfy them, when they might have satisfied a less expensive
+            //    condition for a different branch.
 
-                if self.starts_with_whitespace() {
-                    Ok(self.scan_whitespace())
-                } else if let Some(open_delim) = self.starts_with_strlike_literal() {
-                    self.scan_strlike_literal(open_delim)
-                } else if self.starts_with_ident() {
-                    Ok(self.scan_ident())
-                } else if self.starts_with_num_literal() {
-                    Ok(self.scan_num_literal(ch))
-                } else if self.starts_with_line_comment() {
-                    Ok(self.scan_line_comment())
-                } else if self.starts_with_block_comment() {
-                    self.scan_block_comment()
-                } else if self.starts_with_punc() {
-                    self.scan_punc()
-                } else {
-                    Err(self.error_here(1, ErrorType::UnknownToken))
+            if self.starts_with_whitespace() {
+                Ok(self.scan_whitespace())
+            } else if let Some(open_delim) = self.starts_with_strlike_literal() {
+                self.scan_strlike_literal(open_delim)
+            } else if self.starts_with_ident() {
+                Ok(self.scan_ident())
+            } else if self.starts_with_num_literal() {
+                Ok(self.scan_num_literal())
+            } else if self.starts_with_line_comment() {
+                Ok(self.scan_line_comment())
+            } else if self.starts_with_block_comment() {
+                self.scan_block_comment()
+            } else if self.starts_with_punc() {
+                self.scan_punc()
+            } else {
+                Err(self.error_here(ch.len_utf8(), ErrorType::UnknownToken))
+            }
+            .and_then(|tkn| {
+                tkn.value_noalloc()
+                    .map(|val| (tkn, val))
+                    .map_err(|err| self.error_prev(tkn.src.len(), err))
+            })
+            .map_err(|e| e.add_context(self.original))
+            .inspect(|(token, _)| {
+                // non-whitespace, non-comment token
+                if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
+                    // punctuation except for close bracket
+                    self.can_be_negative = matches!(token.ty, TokenType::Punctuation)
+                        && !matches!(token.src, ")" | "]" | "}");
                 }
             })
-            .map(|res| {
-                res.and_then(|tkn| {
-                    tkn.value_noalloc()
-                        .map(|_| tkn)
-                        .map_err(|err| self.error_prev(tkn.src.len(), err))
-                })
-            })
-            .map(|res| res.map_err(|e| e.add_context(self.original)))
-            .inspect(|res| {
-                // TODO: should an error be able to impact this? how?
-                if let Ok(token) = res {
-                    // non-whitespace, non-comment token
-                    if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
-                        // punctuation except for close bracket
-                        self.can_be_negative = matches!(token.ty, TokenType::Punctuation)
-                            && !matches!(token.src, ")" | "]" | "}");
-                    }
-                }
-            })
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -345,26 +338,11 @@ impl std::iter::FusedIterator for Scanner<'_> {}
 
 fn tokenize_uninterpolated(tokens: Scanner<'_>) -> impl Iterator<Item = SimpleTokenResult<'_>> {
     tokens.map(|item| {
-        item.map(|token| {
-            let value = token
-                .value()
-                .expect("should have been caught by scanner")
-                .map(|value| {
-                    match value {
-                    TokenValue::InterpolatedString(..) => {
-                        unreachable!(
-                            "nested interpolated strings should not be possible; the delimiter does not distinguish open from close"
-                        )
-                    }
-                    TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
-                    TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
-                    TokenValue::FltLiteral(x) => TokenValue::FltLiteral(x),
-                    TokenValue::CharLiteral(x) => TokenValue::CharLiteral(x),
-                    TokenValue::StringLiteral(x) => TokenValue::StringLiteral(x),
-                    TokenValue::Direct(x) => TokenValue::Direct(x),
-                    TokenValue::Keyword(x) => TokenValue::Keyword(x),
-                    TokenValue::Punctuation(x) => TokenValue::Punctuation(x),
-                }});
+        item.map(|(token, value)| {
+            let value = NestedTokenValue::from(
+                AllocTokenValue::<Scanner>::try_from(value)
+                    .expect("should have been caught by scanner"),
+            );
             (token, value)
         })
     })
@@ -373,42 +351,42 @@ fn tokenize_uninterpolated(tokens: Scanner<'_>) -> impl Iterator<Item = SimpleTo
 /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
 pub fn tokenize(source: &str) -> impl Iterator<Item = NestedTokenResult<'_>> {
     Scanner::new(source).map(|item| {
-        item.map(|token| {
-            let value = token
-                .value()
+        item.map(|(token, value)| {
+            let value = match AllocTokenValue::<Scanner<'_>>::try_from(value)
                 .expect("should have been caught by scanner")
-                .map(|value| match value {
-                    TokenValue::InterpolatedString(InterpolatedString { text, expressions }) => {
-                        TokenValue::InterpolatedString(InterpolatedString {
-                            text,
-                            expressions: expressions
-                                .into_iter()
-                                .map(
-                                    |InterpolatedExpr {
-                                         range,
-                                         position,
-                                         mut expr,
-                                     }| InterpolatedExpr {
-                                        range,
-                                        position,
-                                        expr: {
-                                            expr.original = source;
-                                            tokenize_uninterpolated(expr).collect()
-                                        },
+            {
+                TokenValue::InterpolatedString(InterpolatedString { text, expressions }) => {
+                    TokenValue::InterpolatedString(InterpolatedString {
+                        text,
+                        expressions: expressions
+                            .into_iter()
+                            .map(
+                                |InterpolatedExpr {
+                                     range,
+                                     position,
+                                     mut expr,
+                                 }| InterpolatedExpr {
+                                    range,
+                                    position,
+                                    expr: {
+                                        expr.original = source;
+                                        tokenize_uninterpolated(expr).collect()
                                     },
-                                )
-                                .collect(),
-                        })
-                    }
-                    TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
-                    TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
-                    TokenValue::FltLiteral(x) => TokenValue::FltLiteral(x),
-                    TokenValue::CharLiteral(x) => TokenValue::CharLiteral(x),
-                    TokenValue::StringLiteral(x) => TokenValue::StringLiteral(x),
-                    TokenValue::Direct(x) => TokenValue::Direct(x),
-                    TokenValue::Keyword(x) => TokenValue::Keyword(x),
-                    TokenValue::Punctuation(x) => TokenValue::Punctuation(x),
-                });
+                                },
+                            )
+                            .collect(),
+                    })
+                }
+                TokenValue::Ignore => TokenValue::Ignore,
+                TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
+                TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
+                TokenValue::FltLiteral(x) => TokenValue::FltLiteral(x),
+                TokenValue::CharLiteral(x) => TokenValue::CharLiteral(x),
+                TokenValue::StringLiteral(x) => TokenValue::StringLiteral(x),
+                TokenValue::Direct(x) => TokenValue::Direct(x),
+                TokenValue::Keyword(x) => TokenValue::Keyword(x),
+                TokenValue::Punctuation(x) => TokenValue::Punctuation(x),
+            };
             (token, value)
         })
     })
