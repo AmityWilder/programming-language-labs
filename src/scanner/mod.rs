@@ -10,6 +10,16 @@ pub mod error;
 pub mod symbols;
 pub mod token;
 
+fn unescaped(looking_for: char) -> impl FnMut(char) -> bool {
+    let mut is_escaped = false;
+    move |ch| {
+        !is_escaped && ch == looking_for || {
+            is_escaped = !is_escaped && ch == ESCAPE;
+            false
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scanner<'a> {
     /// This one doesn't get ripped apart
@@ -88,6 +98,10 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    fn starts_with_whitespace(&self) -> bool {
+        self.source.starts_with(char::is_whitespace)
+    }
+
     fn scan_whitespace(&mut self) -> Token<'a> {
         let len = self
             .source
@@ -96,18 +110,17 @@ impl<'a> Scanner<'a> {
         self.split_off_token(len, TokenType::Whitespace)
     }
 
+    /// Returns the delimiter
+    fn starts_with_strlike_literal(&self) -> Option<char> {
+        self.source
+            .chars()
+            .next()
+            .filter(|ch| matches!(*ch, STR_DELIM | CHAR_DELIM | INTERP_STR_DELIM))
+    }
+
     fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, Error<'a>> {
-        let mut is_escaped = false;
         let len = self.source[open_delim.len_utf8()..]
-            .find(|ch: char| {
-                // unescaped delimiter - end of literal
-                if !is_escaped && ch == open_delim {
-                    return true;
-                }
-                // track escapes
-                is_escaped = !is_escaped && ch == ESCAPE;
-                false
-            })
+            .find(unescaped(open_delim))
             .map(|n| {
                 // why 2x? first for open delimiter, second for close delimiter (both are the same character)
                 // SAFETY: char::MAX_LEN_UTF8 * 2 fits in usize
@@ -144,6 +157,11 @@ impl<'a> Scanner<'a> {
         })
     }
 
+    fn starts_with_ident(&self) -> bool {
+        self.source
+            .starts_with(|ch: char| ch.is_alphabetic() || ch == '_')
+    }
+
     fn scan_ident(&mut self) -> Token<'a> {
         let len = self
             .source
@@ -166,6 +184,14 @@ impl<'a> Scanner<'a> {
                 TokenType::Identifier
             },
         }
+    }
+
+    fn starts_with_num_literal(&self) -> bool {
+        self.source
+            .strip_prefix('-')
+            .filter(|_| self.can_be_negative)
+            .unwrap_or(self.source)
+            .starts_with(char::is_numeric)
     }
 
     fn scan_num_literal(&mut self, start: char) -> Token<'a> {
@@ -192,6 +218,10 @@ impl<'a> Scanner<'a> {
         self.split_off_token(len, TokenType::NumberLiteral)
     }
 
+    fn starts_with_line_comment(&self) -> bool {
+        self.source.starts_with(LINE_COMMENT_OPEN)
+    }
+
     fn scan_line_comment(&mut self) -> Token<'a> {
         let len = self
             .source
@@ -200,6 +230,10 @@ impl<'a> Scanner<'a> {
             .expect("the existence of characters should imply the existence of a line")
             .len();
         self.split_off_token(len, TokenType::Comment)
+    }
+
+    fn starts_with_block_comment(&self) -> bool {
+        self.source.starts_with(BLOCK_COMMENT_OPEN)
     }
 
     fn scan_block_comment(&mut self) -> Result<Token<'a>, Error<'a>> {
@@ -227,6 +261,11 @@ impl<'a> Scanner<'a> {
                 .expect("n should describe the non-block-comment-circumfix subset of a string in memory"));
         len.map(|len| self.split_off_token(len, TokenType::Comment))
             .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
+    }
+
+    fn starts_with_punc(&self) -> bool {
+        self.source
+            .starts_with(|ch: char| ch.is_ascii_punctuation())
     }
 
     fn scan_punc(&mut self) -> Result<Token<'a>, Error<'a>> {
@@ -257,41 +296,21 @@ impl<'a> Iterator for Scanner<'a> {
                 //    a complex condition on tokens that don't satisfy them, when they might have satisfied a less expensive
                 //    condition for a different branch.
 
-                // starts with whitespace -> whitespace token
-                if ch.is_whitespace() {
+                if self.starts_with_whitespace() {
                     Ok(self.scan_whitespace())
-                }
-                // starts with quote -> string/char literal
-                // note: identifiers can CONTAIN quotes but cannot START with them
-                else if let open_delim @ (STR_DELIM | CHAR_DELIM | INTERP_STR_DELIM) = ch {
+                } else if let Some(open_delim) = self.starts_with_strlike_literal() {
                     self.scan_strlike_literal(open_delim)
-                }
-                // starts with letter or underscore -> identifier
-                else if ch.is_alphabetic() || ch == '_' {
+                } else if self.starts_with_ident() {
                     Ok(self.scan_ident())
-                }
-                // starts with number or hyphen (where allowed) -> number literal
-                else if ch == '-'
-                    && self.can_be_negative
-                    && iter.peek().is_some_and(|ch| ch.is_numeric())
-                    || ch.is_numeric()
-                {
+                } else if self.starts_with_num_literal() {
                     Ok(self.scan_num_literal(ch))
-                }
-                // starts with double forward slashes (`//`) -> (line) comment token
-                else if self.source.starts_with(LINE_COMMENT_OPEN) {
+                } else if self.starts_with_line_comment() {
                     Ok(self.scan_line_comment())
-                }
-                // starts with forward slash followed by asterisk (`/*`) -> (block) comment token
-                else if self.source.starts_with(BLOCK_COMMENT_OPEN) {
+                } else if self.starts_with_block_comment() {
                     self.scan_block_comment()
-                }
-                // starts with ascii punctuation -> punctuation
-                else if ch.is_ascii_punctuation() {
+                } else if self.starts_with_punc() {
                     self.scan_punc()
-                }
-                // no other matching pattern -> unknown token
-                else {
+                } else {
                     Err(self.error_here(1, ErrorType::UnknownToken))
                 }
             })
