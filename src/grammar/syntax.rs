@@ -1,6 +1,9 @@
 use crate::{
     grammar::style::{Style, Styled},
-    scanner::{TokenResult, TokenType, TokenValue},
+    scanner::{
+        error::TokenResult,
+        token::{TokenType, TokenValue},
+    },
 };
 
 /// Forces me to make both correctly

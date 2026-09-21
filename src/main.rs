@@ -19,7 +19,10 @@ use crate::{
         style::{Color, Style},
         syntax::{BracketPair, Syntax, SyntaxStyle},
     },
-    scanner::{InterpolatedExpr, tokenize},
+    scanner::{
+        token::{InterpolatedExpr, InterpolatedString, TokenValue},
+        tokenize,
+    },
 };
 
 mod grammar;
@@ -77,8 +80,6 @@ const BRACKET_PAIRS: BracketPair = BracketPair {
 /// # Panics
 /// This method can panic if [`scanner::Scanner`] isn't written correctly
 pub fn run_code(source: &str) {
-    use scanner::{InterpolatedString, TokenValue};
-
     // token debug
     println!("source code:\n```\n{source}\n```");
     let tokens: Vec<_> = tokenize(source).collect();

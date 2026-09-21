@@ -1,4 +1,8 @@
-use crate::scanner::{ErrorType, Keyword, Punctuation, Token, TokenType, TokenValue, tokenize};
+use crate::scanner::{
+    error::ErrorType,
+    token::{Keyword, Punctuation, Token, TokenType, TokenValue},
+    tokenize,
+};
 use std::assert_matches;
 
 #[test]

@@ -2,7 +2,10 @@
 
 use crate::{
     grammar::syntax::{Syntax, syntax_of},
-    scanner::{CharLiteral, InterpolatedString, StringLiteral, TokenResult, TokenValue},
+    scanner::{
+        error::TokenResult,
+        token::{CharLiteral, InterpolatedString, StringLiteral, TokenValue},
+    },
 };
 use std::range::Range;
 
