@@ -7,7 +7,7 @@
 ### Number literals
 
 ```re
--?[0-9][0-9a-zA-Z]*(?:\.[0-9a-zA-Z]+)?
+-?[0-9][0-9a-zA-Z]*(?:\.[0-9a-zA-Z]+)?(?:[eE]\-?[0-9a-zA-Z]+)?
 ```
 
 **Warning:** This is only a rough translation. The actual scanner I wrote does not use regex.
@@ -48,6 +48,22 @@ def string_literal(source):
 
 If a token starts with a double-quote (`"`), it is a string literal without exception.
 Everthing following that character, through the next **unescaped** double-quote (a double-quote (`"`) **not preceded** by an **odd number** of backslashes (`\`)), is part of the string literal token.
+
+Supports escape sequences.
+
+### Interpolated string literal
+
+Same as string literals, but substitutes double quotes (`"`) for graves (`` ` ``).
+
+Supports escape sequences.
+
+Instances of `${...}` have their contents (the `...` part excluding the `${}` part) passed into another `Scanner`. Escape sequences within string/character inside of balanced `${`/`}` pairs are attributed to the inner literal, not the interpreted string.
+
+Attempting to nest an interpolated string within an interpolated string `${}` expression is **intentionally** unsupported and will result in a "missing close brace" error, because `` `${ `inner` }` `` is indistinguishable from \[`` `${ ` ``, `inner`, `` ` }` ``\]. This *could* be solved by choosing delimiters that aren't identical to each other, but this would then require recursion to parse instead of a fixed depth.
+
+### Character literal
+
+Same as string literals, but substitutes double quotes (`"`) for single quotes (`'`) and produces an error if more than one unicode character is contained in the value (not the lexeme) of the token.
 
 ### Identifiers
 

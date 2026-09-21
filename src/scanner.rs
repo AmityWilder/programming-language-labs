@@ -1134,21 +1134,23 @@ impl<'a> Iterator for Scanner<'a> {
                 {
                     let mut is_first_decimal = true; // at most one decimal
                     let mut is_first_e_neg = true; // at most one '-' following an 'e'
+                    let mut is_prev_e = false;
                     let mut is_following_e = false;
                     let mut len = self.source[ch.len_utf8()..]
                         .find(|ch: char| {
                             let is_end = !(ch.is_alphanumeric()
-                                || ch == '.' && std::mem::take(&mut is_first_decimal)
-                                || ch == '-'
-                                    && is_following_e
-                                    && std::mem::take(&mut is_first_e_neg));
-                            is_following_e = matches!(ch, 'e' | 'E');
+                                || ch == '.'
+                                    && std::mem::take(&mut is_first_decimal)
+                                    && !is_following_e
+                                || ch == '-' && is_prev_e && std::mem::take(&mut is_first_e_neg));
+                            is_prev_e = matches!(ch, 'e' | 'E');
+                            is_following_e |= is_prev_e;
                             is_end
                         })
                         .map_or(self.source.len(), |n| n + ch.len_utf8());
-                    // no trailing decimal, e, or hyphen
+                    // no trailing decimal, e (unless hex), or hyphen
                     len = self.source[..len]
-                        .trim_end_matches(['.', '-', 'e', 'E'])
+                        .trim_end_matches(['.', '-', 'e', 'E']) // TODO: DOESN'T ACCOUNT FOR HEX
                         .len();
                     Ok(self.split_off_token(len, TokenType::NumberLiteral))
                 }
