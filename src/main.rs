@@ -59,40 +59,46 @@ fn token_highlight<'a, T>(
 const SYNTAX_STYLE: SyntaxStyle = SyntaxStyle {
     normal: Style::new(),
 
-    comment: Style::new().foreground(Color::Green),
+    comment: Style::new().foreground(Color::Rgb(0x6a, 0x99, 0x55)),
 
-    number_literal: Style::new().foreground(Color::Green),
+    number_literal: Style::new().foreground(Color::Rgb(0xb5, 0xce, 0xa8)),
 
-    char_literal: Style::new().foreground(Color::Yellow),
+    char_literal: Style::new().foreground(Color::Rgb(0xce, 0x91, 0x78)),
 
-    string_literal: Style::new().foreground(Color::Yellow),
+    string_literal: Style::new().foreground(Color::Rgb(0xce, 0x91, 0x78)),
 
-    interp_str_literal: Style::new().foreground(Color::Yellow),
+    interp_str_literal: Style::new().foreground(Color::Rgb(0xce, 0x91, 0x78)),
 
-    escape_seq: Style::new().foreground(Color::Yellow).bold(),
+    escape_seq: Style::new().foreground(Color::Rgb(0xd7, 0xba, 0x7d)),
 
-    interp_expr: Style::new().foreground(Color::BrightBlue),
+    interp_expr: Style::new().foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
 
-    variable: Style::new().underline().foreground(Color::BrightCyan),
+    variable: Style::new()
+        .underline()
+        .foreground(Color::Rgb(0x9c, 0xdc, 0xfe)),
 
-    constant: Style::new().underline().foreground(Color::BrightBlue),
+    constant: Style::new()
+        .underline()
+        .foreground(Color::Rgb(0x4f, 0xc1, 0xff)),
 
-    callable: Style::new().underline().foreground(Color::BrightYellow),
+    callable: Style::new()
+        .underline()
+        .foreground(Color::Rgb(0xdc, 0xdc, 0xaa)),
 
-    keyword: Style::new().foreground(Color::BrightBlue),
+    keyword: Style::new().foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
 
-    ctrl_keyword: Style::new().foreground(Color::BrightMagenta),
+    ctrl_keyword: Style::new().foreground(Color::Rgb(0xc5, 0x86, 0xc0)),
 
     bracket: Style::new().foreground(Color::BrightWhite),
 
-    invalid: Style::new().foreground(Color::Red),
+    invalid: Style::new().foreground(Color::Rgb(0xcc, 0x0e, 0x0e)),
 };
 
 const BRACKET_PAIRS: BracketPair = BracketPair {
     depth: &[
-        Style::new().foreground(Color::BrightYellow),
-        Style::new().foreground(Color::BrightBlue),
-        Style::new().foreground(Color::BrightMagenta),
+        Style::new().foreground(Color::Rgb(0xff, 0xd7, 0x00)),
+        Style::new().foreground(Color::Rgb(0xda, 0x70, 0xd6)),
+        Style::new().foreground(Color::Rgb(0x17, 0x9f, 0xff)),
     ],
 };
 
