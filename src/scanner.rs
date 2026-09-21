@@ -667,9 +667,17 @@ impl<'a> Token<'a> {
             TokenType::Whitespace | TokenType::Comment => Ok(None),
 
             TokenType::NumberLiteral => {
-                if self.src.contains('.') {
+                const HEX_PREFIX: &str = "0x";
+                const OCT_PREFIX: &str = "0o";
+                const BIN_PREFIX: &str = "0b";
+
+                // checking the start of a string is easier than looking through every one of its characters, so it goes first.
+                // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
+                if !self.src.starts_with(HEX_PREFIX) && self.src.contains(['e', 'E'])
+                    || self.src.contains('.')
+                {
                     self.src
-                        .parse()
+                        .parse() // turns out parse already handles the "e" syntax on its own
                         .map(|x| Some(TokenValue::FltLiteral(x)))
                         .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::Flt(e)))
                 } else {
@@ -677,11 +685,11 @@ impl<'a> Token<'a> {
                     let is_negative = stripped.is_some();
                     let magnitude = stripped.unwrap_or(self.src);
 
-                    let (digits, radix) = if let Some(n) = magnitude.strip_prefix("0x") {
+                    let (digits, radix) = if let Some(n) = magnitude.strip_prefix(HEX_PREFIX) {
                         (n, 16)
-                    } else if let Some(n) = magnitude.strip_prefix("0o") {
+                    } else if let Some(n) = magnitude.strip_prefix(OCT_PREFIX) {
                         (n, 8)
-                    } else if let Some(n) = magnitude.strip_prefix("0b") {
+                    } else if let Some(n) = magnitude.strip_prefix(BIN_PREFIX) {
                         (n, 2)
                     } else {
                         (magnitude, 10)
@@ -1124,18 +1132,24 @@ impl<'a> Iterator for Scanner<'a> {
                         && ch == '-'
                         && iter.peek().is_some_and(|ch| ch.is_numeric())
                 {
-                    const DECIMAL: char = '.';
                     let mut is_first_decimal = true; // at most one decimal
+                    let mut is_first_e_neg = true; // at most one '-' following an 'e'
+                    let mut is_following_e = false;
                     let mut len = self.source[ch.len_utf8()..]
                         .find(|ch: char| {
-                            !(ch.is_alphanumeric()
-                                || ch == DECIMAL && std::mem::take(&mut is_first_decimal))
+                            let is_end = !(ch.is_alphanumeric()
+                                || ch == '.' && std::mem::take(&mut is_first_decimal)
+                                || ch == '-'
+                                    && is_following_e
+                                    && std::mem::take(&mut is_first_e_neg));
+                            is_following_e = matches!(ch, 'e' | 'E');
+                            is_end
                         })
                         .map_or(self.source.len(), |n| n + ch.len_utf8());
-                    // no trailing decimal
-                    if self.source[..len].ends_with(DECIMAL) {
-                        len -= DECIMAL.len_utf8();
-                    }
+                    // no trailing decimal, e, or hyphen
+                    len = self.source[..len]
+                        .trim_end_matches(['.', '-', 'e', 'E'])
+                        .len();
                     Ok(self.split_off_token(len, TokenType::NumberLiteral))
                 }
                 // starts with double forward slashes (`//`) -> (line) comment token
