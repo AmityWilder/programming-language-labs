@@ -1,6 +1,8 @@
 pub const CHAR_DELIM: char = '\'';
 pub const STR_DELIM: char = '\"';
 pub const ESCAPE: char = '\\';
+pub const MACRO_PREFIX: char = '\\';
+pub const MACRO_PARAM_PREFIX: char = '$';
 pub const HEX_PREFIX: &str = "0x";
 pub const OCT_PREFIX: &str = "0o";
 pub const BIN_PREFIX: &str = "0b";
