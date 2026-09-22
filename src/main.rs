@@ -31,6 +31,7 @@ use crate::{
         tokenize,
     },
 };
+use std::fmt::Write;
 
 mod grammar;
 mod scanner;
@@ -138,7 +139,7 @@ pub fn run_code(source: &str) {
     }
 
     // grammar highlighted
-    println!("```");
+    let mut buf = String::new();
     let mut bracket_stack = Vec::new();
     for (lexeme, syntax) in highlight(&tokens) {
         let style = if syntax == Syntax::Bracket {
@@ -171,9 +172,17 @@ pub fn run_code(source: &str) {
         } else {
             &SYNTAX_STYLE_ANSII[syntax]
         };
-        print!("{}", style.style(lexeme));
+        _ = write!(buf, "{}", style.style(lexeme));
     }
-    println!("\x1b[0m\n```");
+    _ = write!(buf, "\x1b[0m");
+    println!("```");
+    for (i, line) in buf.lines().enumerate() {
+        // TODO: need to reaffirm ansi styles across lines, or something
+        // TODO: may want to right-align line numbers to the width of the
+        // *longest one*, in case someone has a file with > 99999 lines
+        println!("\x1b[90m{:>5}   {line}", i.strict_add(1));
+    }
+    println!("```");
 
     // error list
     println!("errors:");
