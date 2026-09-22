@@ -86,7 +86,33 @@ To run tests, execute the command `cargo test`.
 
 ## Unit Tests
 
-<!-- TODO -->
+- `test_scan_whitespace_single`
+- `test_scan_whitespace_multi`
+- `test_scan_line_comment_no_newline`
+- `test_scan_line_comment_typical`
+- `test_scan_ident_simple`
+- `test_scan_ident_prime`
+- `test_scan_ident_apostrophe`
+- `test_scan_number_simple`
+- `test_scan_number_multidigit`
+- `test_scan_number_negative`
+- `test_scan_number_decimal`
+- `test_scan_number_multidigit_decimal`
+- `test_scan_number_multidigit_decimal_negative`
+- `test_scan_number_sci_notation`
+- `test_scan_number_neg_sci_notation`
+- `test_scan_number_neg_sci_notation_multidigit_exp`
+- `test_scan_number_neg_sci_notation_multidigit_exp_negative`
+- `test_scan_number_oct`
+- `test_scan_number_oct`
+- `test_scan_number_bin`
+- `test_scan_char_simple`
+- `test_scan_char_multi`
+- `test_scan_char_empty`
+- `test_scan_char_escaped`
+- `test_scan_char_escaped_hex`
+- `test_scan_char_escaped_multi`
+- `test_scan_char_escaped_invalid`
 
 ## Known limitations/Failures
 
@@ -96,3 +122,4 @@ To run tests, execute the command `cargo test`.
 - Graves (`` ` ``) must be escaped (`` \` ``) in string literals within interpolated expression.
 - Interpolated string expressions count `{`/`}` towards balancing even if they are within a comment or string literal.
 - Escaping the `$` in an interpolated string expression delimiter crashes the language.
+- `test_scan_char_escaped_invalid`
