@@ -81,3 +81,16 @@ Identifiers must start with a letter (not restricted to ASCII) or underscore (`_
     - `cargo run` to run in interactive mode
     - `cargo run -- <FILE>` to run the contents of a file (the `--` is needed to distinguish `cargo` arguments from `batscript` arguments; this is equivalent to running `batscript <FILE>`)
 4. To exit interactive mode, input `exit` or `quit`.
+
+To run tests, execute the command `cargo test`.
+
+## Unit Tests
+
+<!-- TODO -->
+
+## Known limitations/Failures
+
+- Interpolated string expression open delimiters (`${`) cannot be escaped and will always open an interpolated expression.
+- Escape sequences stop being identified within an interpolated string literal following an interpolated expression containing a block comment.
+- Error snippets do not display token styling.
+- Escape sequence errors are identified as errors for the entire literal, not just the range of the escape sequence itself.
