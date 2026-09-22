@@ -562,7 +562,7 @@ impl<'a> TokenValue<'a, Allocated<Scanner<'a>>> {
                 .len()
                 .checked_add(expr_replacements.len())
                 .expect("sum of escapes and expressions should not exceed the number of characters in a string, \
-                         since they cannot occupy the same space. the number of characters in the string should\
+                         since they cannot occupy the same space. the number of characters in the string should \
                          not exceed usize::MAX."),
         );
         // everything is in order, but expressions and escapes can be interspersed
