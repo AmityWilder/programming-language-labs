@@ -177,7 +177,7 @@ pub fn run_code(source: &str) {
         Err(e) => Pick::A(Pick::B(std::iter::once(e))),
         _ => Pick::B(std::iter::empty()),
     }) {
-        eprintln!("  \x1b[91m{e}\x1b[0m\n{}\n", e.render());
+        eprintln!("  \x1b[91m{e}\x1b[0m\n{}", e.render());
         any_errors = true;
     }
     if !any_errors {
