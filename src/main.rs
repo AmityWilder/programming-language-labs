@@ -38,6 +38,13 @@ mod scanner;
 #[cfg(test)] // only include testing module in test builds
 mod test;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Bracket {
+    Brack,
+    Paren,
+    Brace,
+}
+
 const SYNTAX_STYLE_ANSII: SyntaxStyle<Style> = SyntaxStyle {
     normal: Style::new(),
 
@@ -132,28 +139,34 @@ pub fn run_code(source: &str) {
 
     // grammar highlighted
     println!("```");
-    let mut bracket_depth: usize = 0;
+    let mut bracket_stack = Vec::new();
     for (lexeme, syntax) in highlight(&tokens) {
         let style = if syntax == Syntax::Bracket {
-            match lexeme {
-                "[" | "(" | "{" => {
-                    let n = bracket_depth
-                        .checked_add(1)
-                        .unwrap_or_else(|| panic!("cannot exceed depth of {}", usize::MAX));
-                    SYNTAX_STYLE_ANSII.bracket_pair(std::mem::replace(&mut bracket_depth, n))
-                }
-                "]" | ")" | "}" => {
-                    if let Some(n) = bracket_depth.checked_sub(1) {
-                        bracket_depth = n;
-                        SYNTAX_STYLE_ANSII.bracket_pair(bracket_depth)
-                    } else {
-                        // bracket_depth is 0
-                        &SYNTAX_STYLE_ANSII[Syntax::Invalid]
-                    }
-                }
+            let (kind, is_open) = match lexeme {
+                "[" => (Bracket::Brack, true),
+                "(" => (Bracket::Paren, true),
+                "{" => (Bracket::Brace, true),
+
+                "]" => (Bracket::Brack, false),
+                ")" => (Bracket::Paren, false),
+                "}" => (Bracket::Brace, false),
+
                 // not "unreachable" because that isn't guaranteed to be true for future updates
                 // and I don't want it assuming that's impossible and breaking in release builds
                 _ => unimplemented!("only `[]`, `()`, and `{{}}` currently supported as brackets"),
+            };
+            if is_open {
+                let n = bracket_stack.len();
+                bracket_stack.push(kind);
+                SYNTAX_STYLE_ANSII.bracket_pair(n)
+            } else if bracket_stack
+                .pop_if(|expecting| *expecting == kind)
+                .is_some()
+            {
+                SYNTAX_STYLE_ANSII.bracket_pair(bracket_stack.len())
+            } else {
+                // bracket_stack is empty
+                &SYNTAX_STYLE_ANSII[Syntax::Invalid]
             }
         } else {
             &SYNTAX_STYLE_ANSII[syntax]

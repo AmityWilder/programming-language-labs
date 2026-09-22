@@ -1,5 +1,9 @@
 def foo#5 {}
 
+{ } } } // unbalanced brackets outside of a string are a visualized as an error, but won't be acknowledged until parsing
+
+[ } ] ]
+
 fn main() {
     for i in 0..5 {
         let ch = 'n';
@@ -13,7 +17,7 @@ fn main() {
             interpolated strings can have inner braces as long as they're balanced */ } &&
             // the only rule is no nested interpolated strings
             "see?" + ' ' + "you can nest strings, even with \"escapes\", including \` and they'll be highlighted!"
-        } to escape an expression, just put a backslash (\\\${}) like usual`;
+        } to escape an expression, just put a backslash (\\\${}) like usual`; // TODO: that part isn't working yet!
         let my'text /* there is absolutely no reason for the apostrophe,
             /* i just /* wanted */ to /* show /* it */ off */ */ */ = "hello world";
             "aaaaa\x
