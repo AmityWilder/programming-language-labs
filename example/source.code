@@ -17,7 +17,7 @@ fn main() {
             interpolated strings can have inner braces as long as they're balanced */ } &&
             // the only rule is no nested interpolated strings
             "see?" + ' ' * 2 + "you can nest strings, even with \"escapes\", including \` and they'll be highlighted!"
-        } to \"escape\" an expression, just put a backslash (\${5}) like usual`; // TODO: that part isn't working yet!
+        } to \"escape\" an expression, just put a backslash ($\{5}) like usual`; // TODO: that part isn't working yet!
         let my'text /* there is absolutely no reason for the apostrophe,
             /* i just /* wanted */ to /* show /* it */ off */ */ */ = "hello world";
             "aaaaa\x

@@ -91,6 +91,8 @@ To run tests, execute the command `cargo test`.
 ## Known limitations/Failures
 
 - Interpolated string expression open delimiters (`${`) cannot be escaped and will always open an interpolated expression.
-- Escape sequences stop being identified within an interpolated string literal following an interpolated expression containing a block comment.
 - Error snippets do not display token styling.
 - Escape sequence errors are identified as errors for the entire literal, not just the range of the escape sequence itself.
+- Graves (`` ` ``) must be escaped (`` \` ``) in string literals within interpolated expression.
+- Interpolated string expressions count `{`/`}` towards balancing even if they are within a comment or string literal.
+- Escaping the `$` in an interpolated string expression delimiter crashes the language.

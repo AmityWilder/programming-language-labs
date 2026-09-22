@@ -312,24 +312,46 @@ impl<'a, T> InterpolatedString<'a, T> {
 
 /// Escape sequences in an interpolated string
 fn interpolated_escapes() -> impl FnMut(char) -> bool {
-    // [`None`] if in the outer literal
-    let mut inner_literal_delim = None;
-    let mut is_esc = false;
-    move |ch: char| {
-        // we don't want to include escapes that belong to nested literals.
-        // those belong to those literals, not this one.
-        if !is_esc {
-            if let Some(delim) = inner_literal_delim {
-                if ch == delim {
-                    inner_literal_delim = None;
-                }
-            } else if matches!(ch, CHAR_DELIM | STR_DELIM) {
-                inner_literal_delim = Some(ch);
+    enum State {
+        OuterLiteral { is_esc: bool, is_prev_dollar: bool },
+        InterpolatedExpr { depth: usize },
+    }
+    let mut state = State::OuterLiteral {
+        is_esc: false,
+        is_prev_dollar: false,
+    };
+    move |ch: char| match state {
+        State::OuterLiteral {
+            ref mut is_esc,
+            ref mut is_prev_dollar,
+        } => {
+            if *is_prev_dollar && ch == '{' {
+                state = State::InterpolatedExpr { depth: 0 };
+                false
+            } else {
+                *is_prev_dollar = ch == '$';
+                *is_esc = !*is_esc && ch == ESCAPE;
+                *is_esc
             }
         }
-        is_esc = !is_esc && ch == ESCAPE;
 
-        inner_literal_delim.is_none() && is_esc
+        State::InterpolatedExpr { ref mut depth } => {
+            if ch == '{' {
+                *depth = depth
+                    .checked_add(1)
+                    .unwrap_or_else(|| panic!("brace depth cannot exceed {}", usize::MAX));
+            } else if ch == '}' {
+                if let Some(n) = depth.checked_sub(1) {
+                    *depth = n;
+                } else {
+                    state = State::OuterLiteral {
+                        is_esc: false,
+                        is_prev_dollar: false,
+                    };
+                }
+            }
+            false
+        } // TODO: comments and string literals
     }
 }
 
@@ -675,7 +697,7 @@ fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
             // SAFETY: 2 UTF8 characters are guaranteed not to exceed usize::MAX
             let base_len = unsafe { ESCAPE.len_utf8().unchecked_add(ch.len_utf8()) };
             match ch {
-                '\\' | '"' | '\'' | '`' => Ok((base_len, ch)),
+                '0'..='9' => Ok((base_len, char::from((u8::try_from(ch).expect("0-9 are ASCII and therefore 1 byte")).checked_sub(b'0').expect("0-9 are guaranteed to be within u8")))),
 
                 'a' => Ok((base_len, '\x07')),
                 'b' => Ok((base_len, '\x08')),
@@ -704,6 +726,11 @@ fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
                         .map(|num| (len, char::from(num)))
                         .ok_or(len)
                 }
+
+                // all other non-alphanumeric just output the literal symbol.
+                // letters and numbers don't, because not all of them mean their literal symbol
+                // and users shouldn't have to be confused why "\a \b \c" results in "\x07 \x08 c" instead of "a b c".
+                _ if !ch.is_alphanumeric() => Ok((base_len, ch)),
 
                 _ => Err(base_len),
             }

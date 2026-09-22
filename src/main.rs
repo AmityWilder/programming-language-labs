@@ -180,7 +180,7 @@ pub fn run_code(source: &str) {
         // TODO: need to reaffirm ansi styles across lines, or something
         // TODO: may want to right-align line numbers to the width of the
         // *longest one*, in case someone has a file with > 99999 lines
-        println!("\x1b[90m{:>5}   {line}", i.strict_add(1));
+        println!("{:>5}   {line}", i.strict_add(1));
     }
     println!("```");
 

@@ -140,11 +140,18 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, Error<'a>> {
-        let len = self.source[open_delim.len_utf8()..]
+        self.source[open_delim.len_utf8()..]
+            // note: this means graves need to be escaped in interpolated expression strings
             .find(unescaped(open_delim))
             .map(|n| {
+                const {
+                    assert!(
+                        char::MAX_LEN_UTF8.checked_mul(2).is_some(),
+                        "proof. char::MAX_LEN_UTF8 * 2 fits in usize"
+                    );
+                }
                 // why 2x? first for open delimiter, second for close delimiter (both are the same character)
-                // SAFETY: char::MAX_LEN_UTF8 * 2 fits in usize
+                // SAFETY: char::MAX_LEN_UTF8 * 2 fits in usize and char::len_utf8() is AT MOST char::MAX_LEN_UTF8.
                 (unsafe { open_delim.len_utf8().unchecked_mul(2) })
                     .checked_add(n)
                     .expect(
@@ -152,30 +159,30 @@ impl<'a> Scanner<'a> {
                          which must have fit in memory in the original source code and therefore \
                          have a len that fits in usize",
                     )
-            });
-        len.map(|len| {
-            self.split_off_token(
-                len,
-                match open_delim {
-                    STR_DELIM => TokenType::StringLiteral,
-                    CHAR_DELIM => TokenType::CharLiteral,
-                    INTERP_STR_DELIM => TokenType::InterpolatedString,
-                    _ => unreachable!("should be guarded by if condition"),
-                },
-            )
-        })
-        .ok_or_else(|| {
-            self.error_here(
-                self.source.len(),
-                // the fact there is a closing delimiter that didn't end the string shows it must be escaped
-                // (or else there wouldn't have been an error)
-                if self.source[open_delim.len_utf8()..].contains(open_delim) {
-                    ErrorType::EscapedStringLiteralEnd
-                } else {
-                    ErrorType::EndlessStringLiteral
-                },
-            )
-        })
+            })
+            .map(|len| {
+                self.split_off_token(
+                    len,
+                    match open_delim {
+                        STR_DELIM => TokenType::StringLiteral,
+                        CHAR_DELIM => TokenType::CharLiteral,
+                        INTERP_STR_DELIM => TokenType::InterpolatedString,
+                        _ => unreachable!("should be guarded by if condition"),
+                    },
+                )
+            })
+            .ok_or_else(|| {
+                self.error_here(
+                    self.source.len(),
+                    // the fact there is a closing delimiter that didn't end the string shows it must be escaped
+                    // (or else there wouldn't have been an error)
+                    if self.source[open_delim.len_utf8()..].contains(open_delim) {
+                        ErrorType::EscapedStringLiteralEnd
+                    } else {
+                        ErrorType::EndlessStringLiteral
+                    },
+                )
+            })
     }
 
     fn starts_with_ident(&self) -> bool {
