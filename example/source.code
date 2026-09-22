@@ -16,6 +16,8 @@ fn main() {
         } to escape an expression, just put a backslash (\\\${}) like usual`;
         let my'text /* there is absolutely no reason for the apostrophe,
             /* i just /* wanted */ to /* show /* it */ off */ */ */ = "hello world";
+            "aaaaa\x
+              aaa" + 1
         print(my'text); // output the contents of `my'text` to the console
     }
 }

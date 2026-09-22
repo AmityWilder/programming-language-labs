@@ -31,7 +31,7 @@ impl<T, I: Iterator<Item = T>, J: Iterator<Item = T>> Iterator for Pick<I, J> {
     }
 }
 
-fn remap_subtoken_range(Range { start, end }: Range<usize>) -> Range<usize> {
+const fn remap_subtoken_range(Range { start, end }: Range<usize>) -> Range<usize> {
     const ASCII_DELIM_LEN: usize = 1;
     Range {
         start: start.strict_add(ASCII_DELIM_LEN),

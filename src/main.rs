@@ -3,7 +3,11 @@
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
-#![warn(clippy::pedantic, clippy::indexing_slicing)]
+#![warn(
+    clippy::pedantic,
+    clippy::indexing_slicing,
+    clippy::missing_const_for_fn
+)]
 #![warn(clippy::missing_safety_doc, clippy::missing_panics_doc, clippy::todo)]
 #![deny(clippy::undocumented_unsafe_blocks, reason = "must prove soundness")]
 #![deny(
@@ -18,7 +22,7 @@
 
 use crate::{
     grammar::{
-        highlight,
+        Pick, highlight,
         style::{Color, Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle},
     },
@@ -161,8 +165,19 @@ pub fn run_code(source: &str) {
     // error list
     println!("errors:");
     let mut any_errors = false;
-    for e in tokens.iter().filter_map(|item| item.as_ref().err()) {
-        eprintln!("  \x1b[91m{e}\x1b[0m");
+    for e in tokens.iter().flat_map(|item| match item {
+        Ok((_, TokenValue::InterpolatedString(InterpolatedString { expressions, .. }))) => {
+            Pick::A(Pick::A(
+                expressions
+                    .iter()
+                    .flat_map(|x| &x.expr)
+                    .filter_map(|x| x.as_ref().err()),
+            ))
+        }
+        Err(e) => Pick::A(Pick::B(std::iter::once(e))),
+        _ => Pick::B(std::iter::empty()),
+    }) {
+        eprintln!("  \x1b[91m{e}\x1b[0m\n{}\n", e.render());
         any_errors = true;
     }
     if !any_errors {

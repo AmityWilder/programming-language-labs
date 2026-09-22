@@ -1,9 +1,8 @@
-use crate::scanner::unbalanced;
-
 use super::{
     Scanner,
     error::{ErrorType, NumLitError},
     symbols::*,
+    unbalanced,
 };
 use std::{borrow::Cow, iter::Peekable, range::Range};
 
