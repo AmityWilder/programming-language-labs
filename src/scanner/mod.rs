@@ -109,6 +109,34 @@ impl<'a> Scanner<'a> {
         self.split_off_token(len, TokenType::Whitespace)
     }
 
+    fn starts_with_macro(&self) -> bool {
+        self.source.starts_with(MACRO_PREFIX)
+    }
+
+    fn scan_macro(&mut self) -> Token<'a> {
+        let len = self.source[MACRO_PREFIX.len_utf8()..]
+            .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
+            .map_or(self.source.len(), |n| {
+                n.checked_add(MACRO_PREFIX.len_utf8())
+                    .expect("n is the length of the string after this character")
+            });
+        self.split_off_token(len, TokenType::Macro)
+    }
+
+    fn starts_with_macro_param(&self) -> bool {
+        self.source.starts_with(MACRO_PARAM_PREFIX)
+    }
+
+    fn scan_macro_param(&mut self) -> Token<'a> {
+        let len = self.source[MACRO_PARAM_PREFIX.len_utf8()..]
+            .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
+            .map_or(self.source.len(), |n| {
+                n.checked_add(MACRO_PARAM_PREFIX.len_utf8())
+                    .expect("n is the length of the string after this character")
+            });
+        self.split_off_token(len, TokenType::MacroParam)
+    }
+
     /// Returns the delimiter
     fn starts_with_strlike_literal(&self) -> Option<char> {
         self.source
@@ -301,6 +329,10 @@ impl<'a> Iterator for Scanner<'a> {
 
             if self.starts_with_whitespace() {
                 Ok(self.scan_whitespace())
+            } else if self.starts_with_macro() {
+                Ok(self.scan_macro())
+            } else if self.starts_with_macro_param() {
+                Ok(self.scan_macro_param())
             } else if let Some(open_delim) = self.starts_with_strlike_literal() {
                 self.scan_strlike_literal(open_delim)
             } else if self.starts_with_ident() {

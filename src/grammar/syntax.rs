@@ -17,6 +17,8 @@ pub enum Syntax {
     Callable,
     Keyword,
     CtrlKeyword,
+    MacroName,
+    MacroParam,
     Bracket,
     Invalid,
 }
@@ -36,6 +38,8 @@ pub struct SyntaxStyle<'a, T> {
     pub callable: T,
     pub keyword: T,
     pub ctrl_keyword: T,
+    pub macro_name: T,
+    pub macro_arg: T,
     pub bracket: T,
     pub bracket_pairs: &'a [T],
     pub invalid: T,
@@ -57,6 +61,8 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
             Syntax::Callable => &self.callable,
             Syntax::Keyword => &self.keyword,
             Syntax::CtrlKeyword => &self.ctrl_keyword,
+            Syntax::MacroName => &self.macro_name,
+            Syntax::MacroParam => &self.macro_arg,
             Syntax::Bracket => &self.bracket,
             Syntax::Invalid => &self.invalid,
         }
@@ -104,6 +110,8 @@ where
                 TokenType::Callable => Syntax::Callable,
                 TokenType::Keyword => Syntax::Keyword,
                 TokenType::CtrlKeyword => Syntax::CtrlKeyword,
+                TokenType::Macro => Syntax::MacroName,
+                TokenType::MacroParam => Syntax::MacroParam,
                 TokenType::Punctuation
                     if matches!(token.src, "[" | "]" | "(" | ")" | "{" | "}") =>
                 {

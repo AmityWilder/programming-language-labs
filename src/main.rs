@@ -20,6 +20,8 @@
 #![warn(clippy::arithmetic_side_effects, clippy::as_conversions)]
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 
+use grammar::syntax::syntax_of;
+
 use crate::{
     grammar::{
         highlight,
@@ -76,6 +78,14 @@ const SYNTAX_STYLE_ANSII: SyntaxStyle<Style> = SyntaxStyle {
 
     ctrl_keyword: Style::new().foreground(Color::Rgb(0xc5, 0x86, 0xc0)),
 
+    macro_name: Style::new()
+        .underline()
+        .foreground(Color::Rgb(0xc5, 0x86, 0xc0)),
+
+    macro_arg: Style::new()
+        .underline()
+        .foreground(Color::Rgb(0x4f, 0xc1, 0xff)),
+
     bracket: Style::new().foreground(Color::BrightWhite),
 
     bracket_pairs: &[
@@ -94,9 +104,18 @@ pub fn run_code(source: &str) {
     println!("source code:\n```\n{source}\n```");
     let tokens: Vec<_> = tokenize(source).collect();
     for item in &tokens {
+        let (lex, syn, _) = syntax_of(item);
         match item {
             Ok((token, value)) => {
-                println!("{token:?}:\n  {value:?}");
+                let style = SYNTAX_STYLE_ANSII[syn];
+                println!(
+                    "{:?}: {}{token:?}:\n  {value:?}{}",
+                    source
+                        .substr_range(lex)
+                        .expect("every lexeme should be a substr of source"),
+                    style.begin(),
+                    style.end()
+                );
             }
             Err(e) => eprintln!("\x1b[91merror: {e}\x1b[0m"),
         }

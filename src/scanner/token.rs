@@ -21,6 +21,8 @@ pub enum TokenType {
     /// Identical to [`Self::Keyword`], but specific to [`KeywordType::Control`]
     /// (because they have a different highlight color)
     CtrlKeyword,
+    Macro,
+    MacroParam,
     Punctuation,
 }
 
@@ -522,7 +524,10 @@ impl<'a> Token<'a> {
             TokenType::NumberLiteral => TokenValue::number_literal(self.src),
             TokenType::CharLiteral => TokenValue::char_literal(self.src),
             TokenType::StringLiteral => TokenValue::string_literal_noalloc(self.src),
-            TokenType::Identifier | TokenType::Callable => Ok(TokenValue::Direct(self.src)),
+            TokenType::Identifier
+            | TokenType::Callable
+            | TokenType::Macro
+            | TokenType::MacroParam => Ok(TokenValue::Direct(self.src)),
             TokenType::Keyword | TokenType::CtrlKeyword => Ok(TokenValue::Keyword(
                 Keyword::from_str(self.src).expect(VALID_TOKENS),
             )),
