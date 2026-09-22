@@ -11,9 +11,7 @@ pub enum Syntax {
     NumberLiteral,
     CharLiteral,
     StringLiteral,
-    InterpStrLiteral,
     EscapeSeq,
-    InterpExpr,
     Variable,
     Constant,
     Callable,
@@ -53,9 +51,7 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
             Syntax::NumberLiteral => &self.number_literal,
             Syntax::CharLiteral => &self.char_literal,
             Syntax::StringLiteral => &self.string_literal,
-            Syntax::InterpStrLiteral => &self.interp_str_literal,
             Syntax::EscapeSeq => &self.escape_seq,
-            Syntax::InterpExpr => &self.interp_expr,
             Syntax::Variable => &self.variable,
             Syntax::Constant => &self.constant,
             Syntax::Callable => &self.callable,
@@ -95,7 +91,6 @@ where
                 TokenType::NumberLiteral => Syntax::NumberLiteral,
                 TokenType::CharLiteral => Syntax::CharLiteral,
                 TokenType::StringLiteral => Syntax::StringLiteral,
-                TokenType::InterpolatedString => Syntax::InterpStrLiteral,
                 TokenType::Identifier => {
                     // constants are all-caps
                     if token.src.chars().any(char::is_uppercase)
