@@ -36,7 +36,6 @@ pub enum ErrorType<'a> {
     MultiCharLiteral,
     EndlessStringLiteral,
     EscapedStringLiteralEnd,
-    EndlessInterpStrExpr,
     InvalidEscape(&'a str),
     InvalidNumLiteral(NumLitError),
 }
@@ -62,9 +61,6 @@ impl std::fmt::Display for ErrorType<'_> {
                 there is a closing double-quote candidate, but it is escaped (`\\\"`). \
                 string literals cannot end with an unescaped backslash (`\\`), \
                 it is indistinguishable from an escaped double-quote (`\\\"`)",
-            ),
-            Self::EndlessInterpStrExpr => f.write_str(
-                "interpolated string expression opened (`${`) but never closes (missing `}`)",
             ),
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s:?}"),
             Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
@@ -153,6 +149,10 @@ impl<'a> ContextError<'a> {
     pub const fn render(&self) -> RenderedContextError<'_, 'a> {
         RenderedContextError(self)
     }
+
+    pub const fn code(&self) -> ContextErrorCode<'_, 'a> {
+        ContextErrorCode(self)
+    }
 }
 
 impl std::fmt::Display for ContextError<'_> {
@@ -169,6 +169,35 @@ impl std::error::Error for ContextError<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextErrorCode<'a, 'b>(&'b ContextError<'a>);
+
+impl std::fmt::Display for ContextErrorCode<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let area = match self.0.err {
+            ErrorType::UnknownToken
+            | ErrorType::EndlessBlockComment
+            | ErrorType::EmptyCharLiteral
+            | ErrorType::MultiCharLiteral
+            | ErrorType::EndlessStringLiteral
+            | ErrorType::EscapedStringLiteralEnd
+            | ErrorType::InvalidEscape(_)
+            | ErrorType::InvalidNumLiteral(_) => "LEX",
+        };
+        let code = match self.0.err {
+            ErrorType::UnknownToken => 0,
+            ErrorType::EndlessBlockComment => 1,
+            ErrorType::EmptyCharLiteral => 2,
+            ErrorType::MultiCharLiteral => 3,
+            ErrorType::EndlessStringLiteral => 4,
+            ErrorType::EscapedStringLiteralEnd => 5,
+            ErrorType::InvalidEscape(_) => 6,
+            ErrorType::InvalidNumLiteral(_) => 7,
+        };
+        write!(f, "err[{area}{code:>03}]")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedContextError<'a, 'b>(&'b ContextError<'a>);
 
 impl std::fmt::Display for RenderedContextError<'_, '_> {
@@ -179,7 +208,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
         let line_start = self.0.source[..self.0.range.start]
             .rfind(['\n', '\r'])
             .map_or(0, |n| {
-                n.checked_add(1 /* ASCII */).expect(
+                n.checked_add(1 /* \n and \r are both ASCII */).expect(
                     "`n` is the position of the start of the char, \
                     we should be able to add the length of that char",
                 )

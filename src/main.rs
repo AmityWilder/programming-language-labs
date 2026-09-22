@@ -22,14 +22,11 @@
 
 use crate::{
     grammar::{
-        Pick, highlight,
+        highlight,
         style::{Color, Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle},
     },
-    scanner::{
-        token::{InterpolatedExpr, InterpolatedString, TokenValue},
-        tokenize,
-    },
+    scanner::tokenize,
 };
 use std::fmt::Write;
 
@@ -99,40 +96,7 @@ pub fn run_code(source: &str) {
     for item in &tokens {
         match item {
             Ok((token, value)) => {
-                print!("{token:?}:\n  ");
-                if let TokenValue::InterpolatedString(InterpolatedString { text, expressions }) =
-                    value
-                {
-                    println!(
-                        "InterpolatedString(InterpolatedString {{ text: {text:?}, expressions: {} }})",
-                        if expressions.is_empty() {
-                            "[]"
-                        } else {
-                            "<below>"
-                        }
-                    );
-                    for InterpolatedExpr {
-                        range,
-                        position,
-                        expr,
-                    } in expressions
-                    {
-                        println!(
-                            "    InterpolatedExpr {{ range: {range:?}, positions: {position:?}, expr: {} }}",
-                            if expr.is_empty() { "[]" } else { "<below>" }
-                        );
-                        for item in expr {
-                            match item {
-                                Ok((token, value)) => {
-                                    println!("      {token:?}:\n        {value:?}");
-                                }
-                                Err(e) => eprintln!("\x1b[91merror: {e}\x1b[0m"),
-                            }
-                        }
-                    }
-                } else {
-                    println!("{value:?}");
-                }
+                println!("{token:?}:\n  {value:?}");
             }
             Err(e) => eprintln!("\x1b[91merror: {e}\x1b[0m"),
         }
@@ -187,19 +151,8 @@ pub fn run_code(source: &str) {
     // error list
     println!("errors:");
     let mut any_errors = false;
-    for e in tokens.iter().flat_map(|item| match item {
-        Ok((_, TokenValue::InterpolatedString(InterpolatedString { expressions, .. }))) => {
-            Pick::A(Pick::A(
-                expressions
-                    .iter()
-                    .flat_map(|x| &x.expr)
-                    .filter_map(|x| x.as_ref().err()),
-            ))
-        }
-        Err(e) => Pick::A(Pick::B(std::iter::once(e))),
-        _ => Pick::B(std::iter::empty()),
-    }) {
-        eprintln!("  \x1b[91m{e}\x1b[0m\n{}", e.render());
+    for e in tokens.iter().filter_map(|item| item.as_ref().err()) {
+        eprintln!("  \x1b[91m{}:\x1b[0m {}\n{}", e.code(), e.err, e.render());
         any_errors = true;
     }
     if !any_errors {

@@ -123,3 +123,4 @@ To run tests, execute the command `cargo test`.
 - Interpolated string expressions count `{`/`}` towards balancing even if they are within a comment or string literal.
 - Escaping the `$` in an interpolated string expression delimiter crashes the language.
 - `test_scan_char_escaped_invalid`
+- `/* /*/ */` acts like a nested block even though it should be indistinguishable from `/* /* / */`

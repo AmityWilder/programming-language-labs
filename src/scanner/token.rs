@@ -2,9 +2,8 @@ use super::{
     Scanner,
     error::{ErrorType, NumLitError},
     symbols::*,
-    unbalanced,
 };
-use std::{borrow::Cow, iter::Peekable, range::Range};
+use std::{borrow::Cow, range::Range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenType {
@@ -14,8 +13,6 @@ pub enum TokenType {
     NumberLiteral,
     CharLiteral,
     StringLiteral,
-    /// A string that can contain expressions
-    InterpolatedString,
     Identifier,
     /// Identical to [`Self::Identifier`], but implies a function by context
     /// i.e. The next token is an open parentheses (`(`)
@@ -229,135 +226,8 @@ impl<'a> StringLiteral<'a> {
     }
 }
 
-/// `T`: The collection that lists expression sub-tokens.
-/// It is typically one of the following:
-/// - [`Scanner`]
-/// - [`Vec`] (or similar) of [`TokenResult`]
-/// - [`!`](https://doc.rust-lang.org/std/primitive.never.html) (because interpolated strings can't be nested)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct InterpolatedExpr<T> {
-    /// The range of the entire `${...}` segment within the original lexeme (quote delimiters excluded) containing this expression
-    ///
-    /// The `${` and `}` delimiters are **included** in this range
-    pub range: Range<usize>,
-
-    /// Position in the processed text where the expression result should be inserted
-    pub position: usize,
-
-    /// Token stream of the expression WITHIN the original lexeme
-    /// (you will need to supply the offset of that lexeme yourself)
-    pub expr: T,
-}
-
-/// `T`: The collection that lists [`InterpolatedExpr`] sub-tokens
-#[derive(Debug, Clone)]
-pub struct ReplacementIter<'a, T> {
-    escapes: Peekable<std::slice::Iter<'a, Range<usize>>>,
-    exprs: Peekable<std::slice::Iter<'a, InterpolatedExpr<T>>>,
-}
-
-impl<'a, T> ReplacementIter<'a, T> {
-    fn new(escapes: &'a [Range<usize>], exprs: &'a [InterpolatedExpr<T>]) -> Self {
-        Self {
-            escapes: escapes.iter().peekable(),
-            exprs: exprs.iter().peekable(),
-        }
-    }
-}
-
-impl<'a, T> Iterator for ReplacementIter<'a, T> {
-    type Item = (Range<usize>, Option<&'a T>);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.escapes
-            .next_if(|range| {
-                self.exprs
-                    .peek()
-                    .is_none_or(|item| range.start < item.range.start)
-            })
-            .map(|&range| (range, None))
-            .or_else(|| self.exprs.next().map(|item| (item.range, Some(&item.expr))))
-    }
-}
-
-/// `T`: The collection that lists [`InterpolatedExpr`] sub-tokens
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct InterpolatedString<'a, T> {
-    /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.
-    ///
-    /// Like a string literal, it's possible no escape sequences or "`${}`"s were present,
-    /// in which case this will be borrowed and [`Self::expressions`] will be empty.
-    pub text: StringLiteral<'a>,
-
-    /// The positions and tokens of the expressions to insert into [`Self::text`]
-    ///
-    /// Note: It is impossible to have an interpolated string *within* an interpolated string expression,
-    /// as the opening delimiter to the inner literal would be identical to the closing delimiter of the outer literal.
-    /// Instead of getting a nested interpolated string, you would get an [`ErrorType::EndlessInterpStrExpr`] error.
-    pub expressions: Vec<InterpolatedExpr<T>>,
-}
-
-impl<'a, T> InterpolatedString<'a, T> {
-    pub const fn borrowed(text: &'a str) -> Self {
-        Self {
-            text: StringLiteral::borrowed(text),
-            expressions: Vec::new(),
-        }
-    }
-
-    pub fn replacements(&self) -> ReplacementIter<'_, T> {
-        ReplacementIter::new(&self.text.escapes, &self.expressions)
-    }
-}
-
-/// Escape sequences in an interpolated string
-fn interpolated_escapes() -> impl FnMut(char) -> bool {
-    enum State {
-        OuterLiteral { is_esc: bool, is_prev_dollar: bool },
-        InterpolatedExpr { depth: usize },
-    }
-    let mut state = State::OuterLiteral {
-        is_esc: false,
-        is_prev_dollar: false,
-    };
-    move |ch: char| match state {
-        State::OuterLiteral {
-            ref mut is_esc,
-            ref mut is_prev_dollar,
-        } => {
-            if *is_prev_dollar && ch == '{' {
-                state = State::InterpolatedExpr { depth: 0 };
-                false
-            } else {
-                *is_prev_dollar = ch == '$';
-                *is_esc = !*is_esc && ch == ESCAPE;
-                *is_esc
-            }
-        }
-
-        State::InterpolatedExpr { ref mut depth } => {
-            if ch == '{' {
-                *depth = depth
-                    .checked_add(1)
-                    .unwrap_or_else(|| panic!("brace depth cannot exceed {}", usize::MAX));
-            } else if ch == '}' {
-                if let Some(n) = depth.checked_sub(1) {
-                    *depth = n;
-                } else {
-                    state = State::OuterLiteral {
-                        is_esc: false,
-                        is_prev_dollar: false,
-                    };
-                }
-            }
-            false
-        } // TODO: comments and string literals
-    }
-}
-
 pub trait TokenValueSimplicity {
     type StringLiteral<'a>;
-    type InterpolatedString<'a>;
 }
 
 /// String literals may contain unconverted escape sequences
@@ -366,7 +236,6 @@ pub struct NoAlloc(());
 
 impl TokenValueSimplicity for NoAlloc {
     type StringLiteral<'a> = &'a str;
-    type InterpolatedString<'a> = &'a str;
 }
 
 /// String literals have escape sequences converted
@@ -375,7 +244,6 @@ pub struct Allocated<T>(std::marker::PhantomData<T>);
 
 impl<T> TokenValueSimplicity for Allocated<T> {
     type StringLiteral<'a> = StringLiteral<'a>;
-    type InterpolatedString<'a> = InterpolatedString<'a, T>;
 }
 
 /// String literals have escape sequences converted
@@ -384,7 +252,6 @@ pub struct AllocNested(());
 
 impl TokenValueSimplicity for AllocNested {
     type StringLiteral<'a> = StringLiteral<'a>;
-    type InterpolatedString<'a> = !;
 }
 
 /// The value represented by a [`Token`]
@@ -403,7 +270,6 @@ pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated<Scanner<'a>>> {
     Punctuation(Punctuation),
     /// Escape sequences are converted (unless there are none)
     StringLiteral(S::StringLiteral<'a>),
-    InterpolatedString(S::InterpolatedString<'a>),
 }
 
 pub type AllocTokenValue<'a, T> = TokenValue<'a, Allocated<T>>;
@@ -508,24 +374,6 @@ impl<'a> TokenValue<'a, NoAlloc> {
             Ok(Self::StringLiteral(src))
         }
     }
-
-    fn interpolated_string_noalloc(src: &'a str) -> Result<Self, ErrorType<'a>> {
-        let src = src
-            .strip_circumfix(INTERP_STR_DELIM, INTERP_STR_DELIM)
-            .expect("interpolated string literal tokens should include delimiters (`` ` ``)");
-        if let Some(e) = src
-            .match_indices(interpolated_escapes())
-            .find_map(|(i, _)| escape_seq(src, i).err())
-            .or_else(|| {
-                src.match_indices(INTERP_EXPR_OPEN)
-                    .find_map(|(i, _)| interp_str_expr(src, i).err())
-            })
-        {
-            Err(e)
-        } else {
-            Ok(Self::InterpolatedString(src))
-        }
-    }
 }
 
 impl<'a> TokenValue<'a, Allocated<Scanner<'a>>> {
@@ -566,101 +414,6 @@ impl<'a> TokenValue<'a, Allocated<Scanner<'a>>> {
         Ok(Self::StringLiteral(StringLiteral {
             text: Cow::Owned(processed),
             escapes,
-        }))
-    }
-
-    fn interpolated_string(src: &'a str) -> Result<Self, ErrorType<'a>> {
-        let esc_replacements = src
-            .match_indices(interpolated_escapes())
-            .map(|(i, _)| escape_seq(src, i))
-            .collect::<Result<Vec<_>, _>>()?;
-        let escapes = esc_replacements.iter().map(|(range, _)| *range).collect();
-        let (expr_replacements, expr_scanners) = src
-            .match_indices(INTERP_EXPR_OPEN)
-            .map(|(i, _)| interp_str_expr(src, i))
-            .collect::<Result<(Vec<_>, Vec<_>), _>>()?;
-        let mut replacements = Vec::with_capacity(
-            esc_replacements
-                .len()
-                .checked_add(expr_replacements.len())
-                .expect("sum of escapes and expressions should not exceed the number of characters in a string, \
-                         since they cannot occupy the same space. the number of characters in the string should \
-                         not exceed usize::MAX."),
-        );
-        // everything is in order, but expressions and escapes can be interspersed
-        {
-            let mut esc_iter = esc_replacements
-                .into_iter()
-                .map(|(range, ch)| (range, Some(ch)))
-                .peekable();
-
-            let mut expr_iter = expr_replacements
-                .into_iter()
-                .map(|range| (range, None))
-                .peekable();
-
-            replacements.extend(std::iter::from_fn(|| {
-                esc_iter
-                    .next_if(|(esc_range, _)| {
-                        expr_iter
-                            .peek()
-                            .is_none_or(|(expr_range, _)| esc_range.start < expr_range.start)
-                    })
-                    .or_else(|| expr_iter.next())
-            }));
-        }
-
-        // how many bytes of difference between the original string and the processed string
-        let mut byte_diff = 0;
-        // need to get the correct positions of the expression insertions, since their positions change when we replace substrings
-        let expressions = replacements
-            .iter()
-            .copied()
-            .filter_map(|(range, repl)| {
-                let start = range.start.checked_sub(byte_diff).unwrap_or_else(|| {
-                    panic!("shouldn't move tokens backwards\n replacements: {replacements:?}")
-                });
-                let being_replaced_len = range
-                    .end
-                    .checked_sub(range.start)
-                    .expect("ranges should be ascending");
-                let replace_with_len = repl.map_or(0, char::len_utf8);
-                byte_diff = byte_diff.strict_add(
-                    being_replaced_len
-                        .checked_sub(replace_with_len)
-                        .expect("replacements should be smaller than the text being replaced"),
-                );
-                // expression replacements are always None, so if we see a None we know that's an expression.
-                repl.is_none().then_some((range, start))
-            })
-            .zip(expr_scanners)
-            .map(|((range, position), expr)| InterpolatedExpr {
-                range,
-                position,
-                expr,
-            })
-            .collect();
-
-        let mut processed = String::with_capacity(
-            src.len()
-                .checked_sub(byte_diff)
-                .expect("should not remove more bytes than exist in the original string"),
-        );
-        let mut prev_end = 0;
-        for (range, repl) in replacements {
-            processed.push_str(&src[prev_end..range.start]);
-            prev_end = range.end;
-            if let Some(ch) = repl {
-                processed.push(ch);
-            }
-        }
-
-        Ok(Self::InterpolatedString(InterpolatedString {
-            text: StringLiteral {
-                text: Cow::Owned(processed),
-                escapes,
-            },
-            expressions,
         }))
     }
 }
@@ -758,33 +511,7 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>
         })
 }
 
-/// Range part of return is the range in the string literal that should get eliminated due to being replaced with a runtime expression
-///
-/// # Panics
-/// This function will panic if `i` is not the position of a `${` in `src`
-fn interp_str_expr(src: &str, i: usize) -> Result<(Range<usize>, Scanner<'_>), ErrorType<'_>> {
-    let expr = src[i..]
-        .strip_prefix(INTERP_EXPR_OPEN)
-        .expect("`i` should be the position of a `${` in `src`");
-    expr.find(unbalanced('{', '}'))
-        .map(|len| {
-            const DELIMS_LEN: usize = INTERP_EXPR_OPEN.len() + INTERP_EXPR_CLOSE.len_utf8();
-            let start_rm = i;
-            let end_rm = start_rm
-                .checked_add(len)
-                .and_then(|n| n.checked_add(DELIMS_LEN))
-                .expect("should be a subset of an existing string whose len must fit in usize");
-            (Range::from(start_rm..end_rm), Scanner::new(&expr[..len]))
-        })
-        .ok_or(ErrorType::EndlessInterpStrExpr)
-}
-
 impl<'a> Token<'a> {
-    #[cfg(test)]
-    pub const fn new(src: &'a str, ty: TokenType) -> Self {
-        Self { src, ty }
-    }
-
     /// Obtains the value of a token without allocating
     ///
     /// **Warning:** String literals will be incorrect because of the "no alloc" rule.
@@ -795,7 +522,6 @@ impl<'a> Token<'a> {
             TokenType::NumberLiteral => TokenValue::number_literal(self.src),
             TokenType::CharLiteral => TokenValue::char_literal(self.src),
             TokenType::StringLiteral => TokenValue::string_literal_noalloc(self.src),
-            TokenType::InterpolatedString => TokenValue::interpolated_string_noalloc(self.src),
             TokenType::Identifier | TokenType::Callable => Ok(TokenValue::Direct(self.src)),
             TokenType::Keyword | TokenType::CtrlKeyword => Ok(TokenValue::Keyword(
                 Keyword::from_str(self.src).expect(VALID_TOKENS),
@@ -821,15 +547,6 @@ impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated<Scanner<'
                 }
             }
 
-            // interpolated string literal
-            TokenValue::InterpolatedString(src) => {
-                if src.contains(ESCAPE) || src.contains(INTERP_EXPR_OPEN) {
-                    TokenValue::interpolated_string(src)
-                } else {
-                    Ok(Self::InterpolatedString(InterpolatedString::borrowed(src)))
-                }
-            }
-
             TokenValue::Ignore => Ok(Self::Ignore),
             TokenValue::UIntLiteral(x) => Ok(Self::UIntLiteral(x)),
             TokenValue::SIntLiteral(x) => Ok(Self::SIntLiteral(x)),
@@ -845,12 +562,6 @@ impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated<Scanner<'
 impl<'a, T> From<TokenValue<'a, Allocated<T>>> for TokenValue<'a, AllocNested> {
     fn from(value: TokenValue<'a, Allocated<T>>) -> Self {
         match value {
-            TokenValue::InterpolatedString(..) => {
-                unreachable!(
-                    "nested interpolated strings should not be possible; the delimiter does not distinguish open from close"
-                )
-            }
-
             TokenValue::Ignore => Self::Ignore,
             TokenValue::UIntLiteral(x) => Self::UIntLiteral(x),
             TokenValue::SIntLiteral(x) => Self::SIntLiteral(x),

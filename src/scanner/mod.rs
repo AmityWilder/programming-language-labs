@@ -1,9 +1,8 @@
-use error::{ContextError, Error, ErrorType, NestedTokenResult, SimpleTokenResult};
+use error::{ContextError, Error, ErrorType, NestedTokenResult};
 use std::range::Range;
 use symbols::*;
 use token::{
-    AllocTokenValue, InterpolatedExpr, InterpolatedString, Keyword, KeywordType, NestedTokenValue,
-    NoAlloc, Punctuation, Token, TokenType, TokenValue,
+    AllocTokenValue, Keyword, KeywordType, NoAlloc, Punctuation, Token, TokenType, TokenValue,
 };
 
 pub mod error;
@@ -20,30 +19,9 @@ const fn unescaped(looking_for: char) -> impl FnMut(char) -> bool {
     }
 }
 
-/// Finds an instance of `close` that has not been paired with a `open`
-const fn unbalanced(open: char, close: char) -> impl FnMut(char) -> bool {
-    let mut depth: usize = 0;
-    move |ch| {
-        if ch == close {
-            if let Some(n) = depth.checked_sub(1) {
-                depth = n;
-            } else {
-                // depth must be 0
-                return true;
-            }
-        } else if ch == open {
-            depth = depth
-                .checked_add(1)
-                // TODO: should this be an error?
-                .unwrap_or_else(|| panic!("cannot exceed depth of {}", usize::MAX));
-        }
-        false
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scanner<'a> {
-    /// This one doesn't get ripped apart
+    /// This one doesn't get ripped apart, it exists for fulfilling context errors
     original: &'a str,
 
     /// A reference to the original source code. Since this is only a copy, it will get ripped apart and fed to the tokens.
@@ -136,7 +114,7 @@ impl<'a> Scanner<'a> {
         self.source
             .chars()
             .next()
-            .filter(|ch| matches!(*ch, STR_DELIM | CHAR_DELIM | INTERP_STR_DELIM))
+            .filter(|ch| matches!(*ch, STR_DELIM | CHAR_DELIM))
     }
 
     fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, Error<'a>> {
@@ -166,7 +144,6 @@ impl<'a> Scanner<'a> {
                     match open_delim {
                         STR_DELIM => TokenType::StringLiteral,
                         CHAR_DELIM => TokenType::CharLiteral,
-                        INTERP_STR_DELIM => TokenType::InterpolatedString,
                         _ => unreachable!("should be guarded by if condition"),
                     },
                 )
@@ -364,18 +341,6 @@ impl<'a> Iterator for Scanner<'a> {
 /// [`Scanner`] will never return another element after outputting [`None`].
 impl std::iter::FusedIterator for Scanner<'_> {}
 
-fn tokenize_uninterpolated(tokens: Scanner<'_>) -> impl Iterator<Item = SimpleTokenResult<'_>> {
-    tokens.map(|item| {
-        item.map(|(token, value)| {
-            let value = NestedTokenValue::from(
-                AllocTokenValue::<Scanner>::try_from(value)
-                    .expect("should have been caught by scanner"),
-            );
-            (token, value)
-        })
-    })
-}
-
 /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
 pub fn tokenize(source: &str) -> impl Iterator<Item = NestedTokenResult<'_>> {
     Scanner::new(source).map(|item| {
@@ -383,28 +348,6 @@ pub fn tokenize(source: &str) -> impl Iterator<Item = NestedTokenResult<'_>> {
             let value = match AllocTokenValue::<Scanner<'_>>::try_from(value)
                 .expect("should have been caught by scanner")
             {
-                TokenValue::InterpolatedString(InterpolatedString { text, expressions }) => {
-                    TokenValue::InterpolatedString(InterpolatedString {
-                        text,
-                        expressions: expressions
-                            .into_iter()
-                            .map(
-                                |InterpolatedExpr {
-                                     range,
-                                     position,
-                                     mut expr,
-                                 }| InterpolatedExpr {
-                                    range,
-                                    position,
-                                    expr: {
-                                        expr.original = source;
-                                        tokenize_uninterpolated(expr).collect()
-                                    },
-                                },
-                            )
-                            .collect(),
-                    })
-                }
                 TokenValue::Ignore => TokenValue::Ignore,
                 TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
                 TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
