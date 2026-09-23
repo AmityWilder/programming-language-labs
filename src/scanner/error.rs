@@ -350,7 +350,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
         let Range { start, end } = self.0.position();
         let line_range = line_containing(self.0.source, self.0.range)
             .expect("range should be a range in source");
-        // numbers get bigger as they get bigger, so the last line should be the biggest number
+        // bigger numbers have more digits so the last line number should have the most digits
         let num_width = end.line.to_string().len(); // ew, an allocation just to count the digits :c
         writeln!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
         for (idx, line) in self.0.source[line_range].lines().enumerate() {
