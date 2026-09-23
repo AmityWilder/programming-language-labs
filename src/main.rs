@@ -168,7 +168,13 @@ pub fn run_code(source: &str) {
     println!("errors:");
     let mut any_errors = false;
     for e in tokens.iter().filter_map(|item| item.as_ref().err()) {
-        eprintln!("  \x1b[91m{}:\x1b[0m {}\n{}", e.code(), e.err, e.render());
+        eprintln!(
+            "  \x1b[91m{}:\x1b[0m {}\n{}  \x1b[92mhelp:\x1b[0m {}\n",
+            e.code(),
+            e.err,
+            e.render(),
+            e.help(),
+        );
         any_errors = true;
     }
     if !any_errors {

@@ -466,7 +466,7 @@ impl std::fmt::Debug for Token<'_> {
 }
 
 /// Returns [`None`] if `src` does not start with `\`
-fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
+pub fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
     let mut iter = src.chars();
     iter.next().filter(|ch| *ch == ESCAPE).map(|_| {
         let res = iter.next().ok_or(ESCAPE.len_utf8()).and_then(|ch| {
@@ -483,12 +483,12 @@ fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
 
                 'a' => Ok((base_len, '\x07')),
                 'b' => Ok((base_len, '\x08')),
-                't' => Ok((base_len, '\t')),
-                'n' => Ok((base_len, '\n')),
-                'v' => Ok((base_len, '\x0b')),
-                'f' => Ok((base_len, '\x0c')),
-                'r' => Ok((base_len, '\r')),
                 'e' => Ok((base_len, '\x1b')),
+                'f' => Ok((base_len, '\x0c')),
+                'n' => Ok((base_len, '\n')),
+                'r' => Ok((base_len, '\r')),
+                't' => Ok((base_len, '\t')),
+                'v' => Ok((base_len, '\x0b')),
 
                 prefix @ ('x' | 'o' /* | 'b' */) => {
                     // digits = ceil(256.log(base))
