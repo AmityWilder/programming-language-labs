@@ -4,7 +4,7 @@ def \foo($fn, $args) { $fn($args, 1) }
 
 { } } } // unbalanced brackets outside of a string are a visualized as an error, but won't be acknowledged until parsing
 
-[ } ] ] // brackets balance visuals are dependent on matching delimiters
+[ } ] ] // bracket balance visuals are dependent on matching delimiters
 
 fn main() {
     // macro calls use braces for arguments, so that arguments can contain commas
