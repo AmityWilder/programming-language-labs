@@ -1,4 +1,4 @@
-use super::token::{Allocated, NestedTokenValue, Token, TokenValue};
+use super::token::{Token, TokenValue};
 use std::range::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,5 +255,3 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
 }
 
 pub type TokenResult<'a, S> = Result<(Token<'a>, TokenValue<'a, S>), ContextError<'a>>;
-pub type SimpleTokenResult<'a> = Result<(Token<'a>, NestedTokenValue<'a>), ContextError<'a>>;
-pub type NestedTokenResult<'a> = TokenResult<'a, Allocated<Vec<SimpleTokenResult<'a>>>>;
