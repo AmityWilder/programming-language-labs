@@ -27,7 +27,7 @@ use crate::grammar::{
     style::{Color, Style, StyleWrapper},
     syntax::{Syntax, SyntaxStyle},
 };
-use std::fmt::Write;
+use std::{fmt::Write, range::Range};
 
 mod grammar;
 mod scanner;
@@ -156,11 +156,24 @@ pub fn run_code(source: &str) {
     }
     _ = write!(buf, "\x1b[0m");
     println!("```");
+    let line_num_width = buf.lines().count().strict_add(1).to_string().len();
     for (i, line) in buf.lines().enumerate() {
-        // TODO: need to reaffirm ansi styles across lines, or something
-        // TODO: may want to right-align line numbers to the width of the
-        // *longest one*, in case someone has a file with > 99999 lines
-        println!("{:>5}   {line}", i.strict_add(1));
+        let Range { start, .. } = buf
+            .substr_range(line)
+            .expect("lines should be substrings of buf");
+        let last_ansi_seq = buf[..start]
+            .rfind("\x1b[")
+            .and_then(|pos| {
+                let s = &buf[pos..];
+                s.find('m')
+                    .map(|n| n.strict_add('m'.len_utf8()))
+                    .map(|n| &s[..n])
+            })
+            .unwrap_or("\x1b[0m");
+        println!(
+            " \x1b[90m{:>line_num_width$}{last_ansi_seq}   {line}",
+            i.strict_add(1)
+        );
     }
     println!("```");
 
