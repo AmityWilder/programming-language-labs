@@ -1,10 +1,7 @@
 use crate::scanner::{
+    Bracket,
     symbols::{BIN_PREFIX, ESCAPE, HEX_PREFIX, OCT_PREFIX},
     token::escape_char,
-};
-
-use super::{
-    Bracket,
     token::{Token, TokenValue},
 };
 use std::range::Range;

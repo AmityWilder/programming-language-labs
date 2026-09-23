@@ -1,11 +1,9 @@
 //! Syntax (not semantic) highlighting
 
 use crate::{
+    error::TokenResult,
     grammar::syntax::{Syntax, syntax_of},
-    scanner::{
-        error::TokenResult,
-        token::{Allocated, CharLiteral, Escapes, NoAlloc, TokenValue, TokenValueSimplicity},
-    },
+    scanner::token::{Allocated, CharLiteral, Escapes, NoAlloc, TokenValue, TokenValueSimplicity},
 };
 use std::range::Range;
 

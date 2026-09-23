@@ -1,9 +1,11 @@
 //! All of these test cases are hand-written. Mostly on a very bumpy bus ride
 
-use crate::scanner::{
+use crate::{
     error::{ContextError, ErrorType},
-    token::{Token, TokenType, TokenValue},
-    tokenize,
+    scanner::{
+        token::{Token, TokenType, TokenValue},
+        tokenize,
+    },
 };
 
 /// [`crate::scanner::Scanner`]
