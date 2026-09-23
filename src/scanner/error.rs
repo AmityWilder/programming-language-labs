@@ -323,18 +323,18 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
 pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
     let line_start = src
         .get(..range.start)?
-        .rfind({
-            let mut prev_is_newline = false;
-            move |ch: char| std::mem::replace(&mut prev_is_newline, matches!(ch, '\n' | '\r'))
-        })
-        .unwrap_or(range.start);
+        .rfind(['\n', '\r'])
+        .map_or(range.start, |n| {
+            // SAFETY: `n` is the position of the start of a 1-byte ASCII char, therefore we can
+            // add the length of that char (1 byte) to get the end, which is at most src.len().
+            unsafe { n.unchecked_add(1) }
+        });
     let line_end = src
         .get(range.end..)?
         .find(['\n', '\r'])
         .map_or(src.len(), |n| {
-            // SAFETY: `n` is be a position in `source[range.end..]` in source,
-            // therefore `range.end + n` is a position in `source[..]`, which must be in memory
-            // and therefore fit in usize
+            // SAFETY: `n` is a position in `source[range.end..]`, therefore `range.end + n`
+            // is a position in `source[..]`, which must be in memory whose len therefore fits in usize.
             unsafe { n.unchecked_add(range.end) }
         });
     Some((line_start..line_end).into())
