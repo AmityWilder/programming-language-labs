@@ -1,6 +1,12 @@
-use crate::scanner::{symbols::ESCAPE, token::escape_char};
+use crate::scanner::{
+    symbols::{BIN_PREFIX, ESCAPE, HEX_PREFIX, OCT_PREFIX},
+    token::escape_char,
+};
 
-use super::token::{Token, TokenValue};
+use super::{
+    Bracket,
+    token::{Token, TokenValue},
+};
 use std::range::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +48,10 @@ pub enum ErrorType<'a> {
     EscapedStringLiteralEnd,
     InvalidEscape(&'a str),
     InvalidNumLiteral(NumLitError),
+    UnbalancedBrackets {
+        expect: Option<Bracket>,
+        actual: Bracket,
+    },
 }
 
 impl std::fmt::Display for ErrorType<'_> {
@@ -63,6 +73,15 @@ impl std::fmt::Display for ErrorType<'_> {
             }
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s:?}"),
             Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
+            Self::UnbalancedBrackets { expect, actual } => {
+                let mut buf = [0; char::MAX_LEN_UTF8];
+                write!(
+                    f,
+                    "unbalanced brackets, expected {}, found {}",
+                    expect.map_or("none", |x| x.close().encode_utf8(buf.as_mut_slice())),
+                    actual.close()
+                )
+            }
         }
     }
 }
@@ -186,7 +205,8 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             | ErrorType::EndlessStringLiteral
             | ErrorType::EscapedStringLiteralEnd
             | ErrorType::InvalidEscape(_)
-            | ErrorType::InvalidNumLiteral(_) => "LEX",
+            | ErrorType::InvalidNumLiteral(_)
+            | ErrorType::UnbalancedBrackets { .. } => "LEX",
         };
         let code = match self.0.err {
             ErrorType::UnknownToken => 0,
@@ -199,6 +219,7 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             ErrorType::EscapedStringLiteralEnd => 7,
             ErrorType::InvalidEscape(_) => 8,
             ErrorType::InvalidNumLiteral(_) => 9,
+            ErrorType::UnbalancedBrackets { .. } => 10,
         };
         write!(f, "err[{area}{code:>03}]")
     }
@@ -208,9 +229,13 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
 pub struct ContextErrorHelp<'a, 'b>(&'b ContextError<'a>);
 
 impl std::fmt::Display for ContextErrorHelp<'_, '_> {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "it would be even more complicated to make a separate function for each of these"
+    )]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let src = &self.0.source[self.0.range];
-        match self.0.err {
+        let src: &str = &self.0.source[self.0.range];
+        match &self.0.err {
             ErrorType::UnknownToken => f.write_str("try removing the character"),
 
             ErrorType::EndlessBlockComment => f.write_str("try adding `*/`"),
@@ -286,7 +311,8 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 );
 
                 if ch.is_alphabetic() {
-                    f.write_str(r"`\a`, `\b`, `\e`, `\f`, `\n`, `\r`, `\t`, and `\v` are the only supported ASCII letters that can be escape sequences")
+                    f.write_str("`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
+                                ASCII letters that can be escape sequences")
                 } else if ch.is_numeric() {
                     f.write_str("only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences")
                 } else if ch == 'x' {
@@ -311,9 +337,117 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 }
             }
 
-            ErrorType::InvalidNumLiteral(_) => {
-                // TODO: "try removing [...]"
-                f.write_str("I'm not sure how to help with this yet")
+            ErrorType::InvalidNumLiteral(e) => {
+                use std::num::IntErrorKind;
+                match e {
+                    NumLitError::UInt(e) => match e.kind() {
+                        IntErrorKind::Empty => unreachable!(
+                            "tokenizer should not emit number tokens that have no number"
+                        ),
+
+                        IntErrorKind::InvalidDigit => {
+                            let (suffix, base_name) =
+                                if let Some(digits) = src.strip_prefix(HEX_PREFIX) {
+                                    digits
+                                        .find(|ch: char| !ch.is_ascii_hexdigit())
+                                        .map(|n| (&digits[n..], "hexadecimal"))
+                                } else if let Some(digits) = src.strip_prefix(OCT_PREFIX) {
+                                    digits
+                                        .find(|ch: char| !ch.is_digit(8))
+                                        .map(|n| (&digits[n..], "octal"))
+                                } else if let Some(digits) = src.strip_prefix(BIN_PREFIX) {
+                                    digits
+                                        .find(|ch: char| !ch.is_digit(2))
+                                        .map(|n| (&digits[n..], "binary"))
+                                } else {
+                                    src.find(|ch: char| !ch.is_ascii_digit())
+                                        .map(|n| (&src[n..], "decimal"))
+                                }
+                                .expect("digits are unexpectedly valid");
+                            write!(
+                                f,
+                                "the suffix `{suffix}` is not valid for {base_name} integer literals",
+                            )
+                        }
+
+                        IntErrorKind::PosOverflow => write!(
+                            f,
+                            "the largest supported unsigned integer value is {}",
+                            usize::MAX
+                        ),
+
+                        _ => unimplemented!(),
+                    },
+
+                    NumLitError::SInt(e) => match e.kind() {
+                        IntErrorKind::Empty => unreachable!(
+                            "tokenizer should not emit number tokens that have no number"
+                        ),
+
+                        IntErrorKind::InvalidDigit => {
+                            let digits = src.strip_prefix('-').unwrap_or(src);
+                            let (suffix, base_name) =
+                                if let Some(digits) = digits.strip_prefix(HEX_PREFIX) {
+                                    digits
+                                        .find(|ch: char| !ch.is_ascii_hexdigit())
+                                        .map(|n| (&digits[n..], "hexadecimal"))
+                                } else if let Some(digits) = digits.strip_prefix(OCT_PREFIX) {
+                                    digits
+                                        .find(|ch: char| !ch.is_digit(8))
+                                        .map(|n| (&digits[n..], "octal"))
+                                } else if let Some(digits) = digits.strip_prefix(BIN_PREFIX) {
+                                    digits
+                                        .find(|ch: char| !ch.is_digit(2))
+                                        .map(|n| (&digits[n..], "binary"))
+                                } else {
+                                    digits
+                                        .find(|ch: char| !ch.is_ascii_digit())
+                                        .map(|n| (&digits[n..], "decimal"))
+                                }
+                                .expect("digits are unexpectedly valid");
+                            write!(
+                                f,
+                                "the suffix `{suffix}` is not valid for {base_name} integer literals",
+                            )
+                        }
+
+                        IntErrorKind::PosOverflow => write!(
+                            f,
+                            "the largest supported signed integer value is {}",
+                            isize::MAX
+                        ),
+
+                        IntErrorKind::NegOverflow => write!(
+                            f,
+                            "the smallest supported signed integer value is {}",
+                            isize::MIN
+                        ),
+
+                        _ => unimplemented!(),
+                    },
+
+                    NumLitError::Flt(_) => f.write_str("I'm not sure how to help with this yet"),
+                }
+            }
+
+            ErrorType::UnbalancedBrackets { expect, actual } => {
+                if let Some(expect) = expect {
+                    write!(
+                        f,
+                        "try inserting a `{}` before the `{}` or add a `{}` before it and after the `{}`",
+                        expect.close(),
+                        actual.close(),
+                        actual.open(),
+                        expect.open(),
+                    )
+                } else {
+                    write!(
+                        f,
+                        "try removing the `{}` or add a `{}` before it",
+                        actual.close(),
+                        actual.open(),
+                    )
+                }
             }
         }
     }

@@ -3,6 +3,7 @@
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
+#![feature(try_from_int_error_kind)]
 #![warn(
     clippy::pedantic,
     clippy::indexing_slicing,
@@ -25,7 +26,7 @@ use scanner::tokenize_noalloc;
 
 use crate::grammar::{
     style::{Color, Style, StyleWrapper},
-    syntax::{Syntax, SyntaxStyle},
+    syntax::SyntaxStyle,
 };
 use std::{fmt::Write, range::Range};
 
@@ -34,13 +35,6 @@ mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
 mod test;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Bracket {
-    Brack,
-    Paren,
-    Brace,
-}
 
 const SYNTAX_STYLE_ANSII: SyntaxStyle<Style> = SyntaxStyle {
     normal: Style::new(),
@@ -83,9 +77,7 @@ const SYNTAX_STYLE_ANSII: SyntaxStyle<Style> = SyntaxStyle {
         .underline()
         .foreground(Color::Rgb(0x4f, 0xc1, 0xff)),
 
-    bracket: Style::new().foreground(Color::BrightWhite),
-
-    bracket_pairs: &[
+    bracket: &[
         Style::new().foreground(Color::Rgb(0xff, 0xd7, 0x00)),
         Style::new().foreground(Color::Rgb(0xda, 0x70, 0xd6)),
         Style::new().foreground(Color::Rgb(0x17, 0x9f, 0xff)),
@@ -120,39 +112,8 @@ pub fn run_code(source: &str) {
 
     // grammar highlighted
     let mut buf = String::new();
-    let mut bracket_stack = Vec::new();
     for (lexeme, syntax) in highlight(&tokens) {
-        let style = if syntax == Syntax::Bracket {
-            let (kind, is_open) = match lexeme {
-                "[" => (Bracket::Brack, true),
-                "(" => (Bracket::Paren, true),
-                "{" => (Bracket::Brace, true),
-
-                "]" => (Bracket::Brack, false),
-                ")" => (Bracket::Paren, false),
-                "}" => (Bracket::Brace, false),
-
-                // not "unreachable" because that isn't guaranteed to be true for future updates
-                // and I don't want it assuming that's impossible and breaking in release builds
-                _ => unimplemented!("only `[]`, `()`, and `{{}}` currently supported as brackets"),
-            };
-            if is_open {
-                let n = bracket_stack.len();
-                bracket_stack.push(kind);
-                SYNTAX_STYLE_ANSII.bracket_pair(n)
-            } else if bracket_stack
-                .pop_if(|expecting| *expecting == kind)
-                .is_some()
-            {
-                SYNTAX_STYLE_ANSII.bracket_pair(bracket_stack.len())
-            } else {
-                // bracket_stack is empty
-                &SYNTAX_STYLE_ANSII[Syntax::Invalid]
-            }
-        } else {
-            &SYNTAX_STYLE_ANSII[syntax]
-        };
-        _ = write!(buf, "{}", style.style(lexeme));
+        _ = write!(buf, "{}", SYNTAX_STYLE_ANSII[syntax].style(lexeme));
     }
     _ = write!(buf, "\x1b[0m");
     println!("```");
