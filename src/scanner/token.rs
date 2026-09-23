@@ -227,8 +227,10 @@ impl<'a> StringLiteral<'a> {
     }
 }
 
-pub trait TokenValueSimplicity {
+pub trait TokenValueSimplicity: Sized + 'static {
     type StringLiteral<'a>;
+
+    fn has_escapes(literal: &Self::StringLiteral<'_>) -> bool;
 }
 
 /// String literals may contain unconverted escape sequences
@@ -237,6 +239,10 @@ pub struct NoAlloc(!);
 
 impl TokenValueSimplicity for NoAlloc {
     type StringLiteral<'a> = &'a str;
+
+    fn has_escapes(literal: &&str) -> bool {
+        literal.contains(ESCAPE)
+    }
 }
 
 /// String literals have escape sequences converted
@@ -245,6 +251,10 @@ pub struct Allocated(!);
 
 impl TokenValueSimplicity for Allocated {
     type StringLiteral<'a> = StringLiteral<'a>;
+
+    fn has_escapes(literal: &Self::StringLiteral<'_>) -> bool {
+        !literal.escapes.is_empty()
+    }
 }
 
 /// The value represented by a [`Token`]
@@ -365,16 +375,44 @@ impl<'a> TokenValue<'a, NoAlloc> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Escapes<I> {
+    iter: I,
+}
+
+#[expect(clippy::type_complexity, reason = "can't impl trait in type aliases")]
+pub fn escapes<'a>(
+    source: &'a str,
+) -> Escapes<
+    std::iter::Map<
+        std::str::MatchIndices<'a, impl FnMut(char) -> bool>,
+        impl 'a + FnMut((usize, &'a str)) -> (usize, &'a str),
+    >,
+> {
+    Escapes {
+        iter: source
+            .match_indices({
+                let mut is_esc = false;
+                move |ch: char| {
+                    is_esc = !is_esc && ch == ESCAPE;
+                    is_esc
+                }
+            })
+            .map(move |(i, _)| (i, source)),
+    }
+}
+
+impl<'a, I: Iterator<Item = (usize, &'a str)>> Iterator for Escapes<I> {
+    type Item = Result<(Range<usize>, char), ErrorType<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(i, src)| escape_seq(src, i))
+    }
+}
+
 impl<'a> TokenValue<'a, Allocated> {
     fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
-        let mut is_esc = false;
-        let replacements = src
-            .match_indices(|ch: char| {
-                is_esc = !is_esc && ch == ESCAPE;
-                is_esc
-            })
-            .map(|(i, _)| escape_seq(src, i))
-            .collect::<Result<Vec<_>, _>>()?;
+        let replacements = escapes(src).collect::<Result<Vec<_>, _>>()?;
         let escapes = replacements.iter().map(|(range, _)| *range).collect();
 
         let byte_diff: usize = replacements

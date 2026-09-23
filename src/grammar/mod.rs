@@ -4,7 +4,7 @@ use crate::{
     grammar::syntax::{Syntax, syntax_of},
     scanner::{
         error::TokenResult,
-        token::{Allocated, CharLiteral, StringLiteral, TokenValue},
+        token::{Allocated, CharLiteral, NoAlloc, TokenValue, TokenValueSimplicity, escapes},
     },
 };
 use std::range::Range;
@@ -38,6 +38,7 @@ const fn remap_subtoken_range(Range { start, end }: Range<usize>) -> Range<usize
     }
 }
 
+/// TODO: should this support errors where there are multiple escapes/an escape followed by/following a non-escaped char?
 fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, Syntax), 3> {
     const DELIM: char = '\'';
     let mid1 = DELIM.len_utf8();
@@ -53,53 +54,105 @@ fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, S
     .into_iter()
 }
 
-fn escaped_str_literal<'a>(
-    lex: &'a str,
-    syn: Syntax,
-    literal: &StringLiteral<'a>,
-) -> impl Iterator<Item = (&'a str, Syntax)> {
-    let mut prev_end = 0;
-    literal
-        .escapes
-        .iter()
-        .copied()
-        .map(remap_subtoken_range)
-        // TODO: this feels wasteful
-        .chain(std::iter::once(Range {
-            start: lex.len(),
-            end: lex.len(),
-        }))
-        .flat_map(move |range| {
-            [
-                (
-                    Range::from(std::mem::replace(&mut prev_end, range.end)..range.start),
-                    syn,
-                ),
-                (range, Syntax::EscapeSeq),
-            ]
-        })
-        .map(|(range, syn)| (&lex[range], syn))
+pub trait Highlighting: TokenValueSimplicity {
+    type Escaped<'a: 'b, 'b>: 'b + Iterator<Item = (&'a str, Syntax)>;
+
+    fn escaped_str_literal<'a, 'b>(
+        lex: &'a str,
+        syn: Syntax,
+        literal: &'b Self::StringLiteral<'a>,
+    ) -> Self::Escaped<'a, 'b>;
 }
 
-pub fn highlight<'a>(
-    tokens: &'a [TokenResult<'a, Allocated>],
-) -> impl Iterator<Item = (&'a str, Syntax)> {
-    tokens.iter().map(syntax_of).flat_map(|(lex, syn, val)| {
-        match val {
-            // char literal with escape - an iterator
-            TokenValue::CharLiteral(CharLiteral {
-                is_escaped: true, ..
-            }) => Pick::A(Pick::A(escaped_char_literal(lex, syn))),
+impl Highlighting for Allocated {
+    type Escaped<'a: 'b, 'b> = impl 'b + Iterator<Item = (&'a str, Syntax)>;
 
-            // string literal with escapes or interpolated string with escapes and no expressions - an iterator
-            TokenValue::StringLiteral(literal @ StringLiteral { escapes, .. })
-                if !escapes.is_empty() =>
-            {
-                Pick::A(Pick::B(escaped_str_literal(lex, syn, literal)))
+    fn escaped_str_literal<'a, 'b>(
+        lex: &'a str,
+        syn: Syntax,
+        literal: &'b Self::StringLiteral<'a>,
+    ) -> Self::Escaped<'a, 'b> {
+        literal
+            .escapes
+            .iter()
+            .copied()
+            .map(remap_subtoken_range)
+            // TODO: this feels wasteful
+            .chain(std::iter::once(Range {
+                start: lex.len(),
+                end: lex.len(),
+            }))
+            .flat_map({
+                let mut prev_end = 0;
+                move |range| {
+                    [
+                        (
+                            Range::from(std::mem::replace(&mut prev_end, range.end)..range.start),
+                            syn,
+                        ),
+                        (range, Syntax::EscapeSeq),
+                    ]
+                }
+            })
+            .map(|(range, syn)| (&lex[range], syn))
+    }
+}
+
+impl Highlighting for NoAlloc {
+    type Escaped<'a: 'b, 'b> = impl 'b + Iterator<Item = (&'a str, Syntax)>;
+
+    fn escaped_str_literal<'a, 'b>(
+        lex: &'a str,
+        syn: Syntax,
+        literal: &'b Self::StringLiteral<'a>,
+    ) -> Self::Escaped<'a, 'b> {
+        escapes(literal)
+            .filter_map(Result::ok)
+            .map(|(range, _)| range)
+            .map(remap_subtoken_range)
+            // TODO: this feels wasteful
+            .chain(std::iter::once(Range {
+                start: lex.len(),
+                end: lex.len(),
+            }))
+            .flat_map({
+                let mut prev_end = 0;
+                move |range| {
+                    [
+                        (
+                            Range::from(std::mem::replace(&mut prev_end, range.end)..range.start),
+                            syn,
+                        ),
+                        (range, Syntax::EscapeSeq),
+                    ]
+                }
+            })
+            .map(|(range, syn)| (&lex[range], syn))
+    }
+}
+
+pub fn highlight<'a, H, I>(tokens: I) -> impl Iterator<Item = (&'a str, Syntax)>
+where
+    H: Highlighting,
+    I: IntoIterator<Item = &'a TokenResult<'a, H>>,
+{
+    tokens
+        .into_iter()
+        .map(syntax_of)
+        .flat_map(|(lex, syn, val)| {
+            match val {
+                // char literal with escape - an iterator
+                TokenValue::CharLiteral(CharLiteral {
+                    is_escaped: true, ..
+                }) => Pick::A(Pick::A(escaped_char_literal(lex, syn))),
+
+                // string literal with escapes or interpolated string with escapes and no expressions - an iterator
+                TokenValue::StringLiteral(literal) if H::has_escapes(literal) => {
+                    Pick::A(Pick::B(H::escaped_str_literal(lex, syn, literal)))
+                }
+
+                // an item
+                _ => Pick::B(std::iter::once((lex, syn))),
             }
-
-            // an item
-            _ => Pick::B(std::iter::once((lex, syn))),
-        }
-    })
+        })
 }
