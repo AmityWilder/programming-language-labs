@@ -3,6 +3,7 @@
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
+#![feature(impl_trait_in_assoc_type)]
 #![warn(
     clippy::pedantic,
     clippy::indexing_slicing,
@@ -20,15 +21,12 @@
 #![warn(clippy::arithmetic_side_effects, clippy::as_conversions)]
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 
-use grammar::syntax::syntax_of;
+use grammar::{highlight, syntax::syntax_of};
+use scanner::tokenize_noalloc;
 
-use crate::{
-    grammar::{
-        highlight,
-        style::{Color, Style, StyleWrapper},
-        syntax::{Syntax, SyntaxStyle},
-    },
-    scanner::tokenize,
+use crate::grammar::{
+    style::{Color, Style, StyleWrapper},
+    syntax::{Syntax, SyntaxStyle},
 };
 use std::fmt::Write;
 
@@ -102,7 +100,7 @@ const SYNTAX_STYLE_ANSII: SyntaxStyle<Style> = SyntaxStyle {
 pub fn run_code(source: &str) {
     // token debug
     println!("source code:\n```\n{source}\n```");
-    let tokens: Vec<_> = tokenize(source).collect();
+    let tokens: Vec<_> = tokenize_noalloc(source).collect();
     for item in &tokens {
         let (lex, syn, _) = syntax_of(item);
         match item {

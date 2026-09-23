@@ -372,8 +372,17 @@ impl<'a> Iterator for Scanner<'a> {
 impl std::iter::FusedIterator for Scanner<'_> {}
 
 /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
+pub fn tokenize_noalloc(source: &str) -> impl Iterator<Item = TokenResult<'_, NoAlloc>> {
+    Scanner::new(source)
+}
+
+/// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "for future use at parser stage")
+)]
 pub fn tokenize(source: &str) -> impl Iterator<Item = TokenResult<'_, Allocated>> {
-    Scanner::new(source).map(|item| {
+    tokenize_noalloc(source).map(|item| {
         item.map(|(token, value)| {
             let value = <TokenValue<Allocated>>::try_from(value)
                 .expect("should have been caught by scanner");
