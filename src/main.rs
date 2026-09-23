@@ -168,13 +168,22 @@ pub fn run_code(source: &str) {
     println!("errors:");
     let mut any_errors = false;
     for e in tokens.iter().filter_map(|item| item.as_ref().err()) {
-        eprintln!(
-            "  \x1b[91m{}:\x1b[0m {}\n{}  \x1b[92mhelp:\x1b[0m {}\n",
+        const INDENT: &str = "          ";
+        eprint!(
+            "  \x1b[91m{}:\x1b[0m {}\n{}    \x1b[92mhelp:\x1b[0m ",
             e.code(),
             e.err,
             e.render(),
-            e.help(),
         );
+        let mut has_prev = false;
+        for line in e.help().to_string().lines() {
+            if has_prev {
+                eprint!("{INDENT}");
+            }
+            eprintln!("{line}");
+            has_prev = true;
+        }
+        eprintln!();
         any_errors = true;
     }
     if !any_errors {

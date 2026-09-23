@@ -211,7 +211,7 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let src = &self.0.source[self.0.range];
         match self.0.err {
-            ErrorType::UnknownToken => write!(f, "remove the character"),
+            ErrorType::UnknownToken => f.write_str("try removing the character"),
 
             ErrorType::EndlessBlockComment => f.write_str("try adding `*/`"),
 
@@ -248,10 +248,11 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                     .expect("string literal should include delimiter");
                 write!(
                     f,
-                    "there is a closing single-quote candidate, but it is escaped (`\\'`). \
+                    "there is a closing single-quote candidate, but it is escaped (`\\'`). \n\
                      char literals cannot end with an unescaped backslash (`\\`), \
-                     it is indistinguishable from an escaped single-quote (`\\'`). \
-                     try adding a `'` to the end of the string or remove the `\\` from `\\'` to make the string `'{substr}'`"
+                     it is indistinguishable from an escaped single-quote (`\\'`). \n\
+                     try adding a `'` to the end of the string or remove the `\\` from `\\'` \
+                     to make the string `'{substr}'`"
                 )
             }
 
@@ -267,10 +268,11 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                     .expect("string literal should include delimiter");
                 write!(
                     f,
-                    "there is a closing double-quote candidate, but it is escaped (`\\\"`). \
-                     char literals cannot end with an unescaped backslash (`\\`), \
-                     it is indistinguishable from an escaped double-quote (`\\\"`). \
-                     try adding a `\"` to the end of the string or remove the `\\` from `\\\"` to make the string `\"{substr}\"`"
+                    "there is a closing double-quote candidate, but it is escaped (`\\\"`).\n\
+                     string literals cannot end with an unescaped backslash (`\\`), \
+                     it is indistinguishable from an escaped double-quote (`\\\"`).\n\
+                     try adding a `\"` to the end of the string or remove the `\\` from `\\\"` \
+                     to make the string `\"{substr}\"`"
                 )
             }
 
@@ -286,7 +288,7 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 if ch.is_alphabetic() {
                     f.write_str(r"`\a`, `\b`, `\e`, `\f`, `\n`, `\r`, `\t`, and `\v` are the only supported ASCII letters that can be escape sequences")
                 } else if ch.is_numeric() {
-                    f.write_str("only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences. ")
+                    f.write_str("only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences")
                 } else if ch == 'x' {
                     let n = iter.take(2).filter(char::is_ascii_hexdigit).count();
                     assert!(n < 2, "why is this an error?");
@@ -302,7 +304,10 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                         "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}"
                     )
                 } else {
-                    todo!("unknown pattern")
+                    f.write_str(
+                        "supported escape sequences: `\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, `\\0`-`\\9`,\n\\
+                        `\\x##` (where # is a hexadecimal digit), `\\o###` (where # is an octal digit)"
+                    )
                 }
             }
 
