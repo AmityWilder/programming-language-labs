@@ -23,6 +23,8 @@ pub enum TokenType {
     Macro,
     MacroParam,
     Punctuation,
+    /// A subset of [`Self::Punctuation`] with depth
+    Bracket(usize),
 }
 
 /// Helper macro for preventing issues with missed variants when adding new ones
@@ -271,6 +273,7 @@ pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated> {
     Direct(&'a str),
     Keyword(Keyword),
     Punctuation(Punctuation),
+    Bracket(usize),
     /// Escape sequences are converted (unless there are none)
     StringLiteral(S::StringLiteral<'a>),
 }
@@ -561,6 +564,7 @@ impl<'a> Token<'a> {
             TokenType::Punctuation => Ok(TokenValue::Punctuation(
                 Punctuation::from_str(self.src).expect(VALID_TOKENS),
             )),
+            TokenType::Bracket(depth) => Ok(TokenValue::Bracket(depth)),
         }
     }
 }
@@ -587,6 +591,7 @@ impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated> {
             TokenValue::Direct(x) => Ok(Self::Direct(x)),
             TokenValue::Keyword(x) => Ok(Self::Keyword(x)),
             TokenValue::Punctuation(x) => Ok(Self::Punctuation(x)),
+            TokenValue::Bracket(x) => Ok(Self::Bracket(x)),
         }
     }
 }

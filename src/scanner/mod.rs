@@ -17,6 +17,31 @@ const fn unescaped(looking_for: char) -> impl FnMut(char) -> bool {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Bracket {
+    Brack,
+    Paren,
+    Brace,
+}
+
+impl Bracket {
+    pub const fn open(self) -> char {
+        match self {
+            Self::Brack => '[',
+            Self::Paren => '(',
+            Self::Brace => '{',
+        }
+    }
+
+    pub const fn close(self) -> char {
+        match self {
+            Self::Brack => ']',
+            Self::Paren => ')',
+            Self::Brace => '}',
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scanner<'a> {
     /// This one doesn't get ripped apart, it exists for fulfilling context errors
@@ -29,6 +54,8 @@ pub struct Scanner<'a> {
     /// The most recent non-whitespace, non-comment token was either the start of the source code or [`TokenType::Punctuation`]
     /// **and not** `)`, `]`, or `}`.
     can_be_negative: bool,
+
+    bracket_pairs: Vec<Bracket>,
 }
 
 impl<'a> Scanner<'a> {
@@ -38,6 +65,7 @@ impl<'a> Scanner<'a> {
             source,
             // start off true because we are at the start of the source code
             can_be_negative: true,
+            bracket_pairs: Vec::new(),
         }
     }
 
@@ -310,8 +338,61 @@ impl<'a> Scanner<'a> {
 
     fn scan_punc(&mut self) -> Result<Token<'a>, Error<'a>> {
         let len = Punctuation::from_prefix(self.source).map(|x| x.as_str().len());
-        len.map(|len| self.split_off_token(len, TokenType::Punctuation))
-            .ok_or_else(|| self.error_here(1, ErrorType::UnknownToken))
+        len.map(|len| self.split_off(len))
+            .ok_or_else(|| {
+                self.error_here(
+                    self.source
+                        .chars()
+                        .next()
+                        .expect("source should have at least one char to start with punctuation")
+                        .len_utf8(),
+                    ErrorType::UnknownToken,
+                )
+            })
+            .and_then(|lex| {
+                let (kind, is_open) = match lex {
+                    "[" => (Bracket::Brack, true),
+                    "(" => (Bracket::Paren, true),
+                    "{" => (Bracket::Brace, true),
+
+                    "]" => (Bracket::Brack, false),
+                    ")" => (Bracket::Paren, false),
+                    "}" => (Bracket::Brace, false),
+
+                    _ => {
+                        return Ok(Token {
+                            src: lex,
+                            ty: TokenType::Punctuation,
+                        });
+                    }
+                };
+                if is_open {
+                    let n = self.bracket_pairs.len();
+                    self.bracket_pairs.push(kind);
+                    Ok(Token {
+                        src: lex,
+                        ty: TokenType::Bracket(n),
+                    })
+                } else if self
+                    .bracket_pairs
+                    .pop_if(|expecting| *expecting == kind)
+                    .is_some()
+                {
+                    Ok(Token {
+                        src: lex,
+                        ty: TokenType::Bracket(self.bracket_pairs.len()),
+                    })
+                } else {
+                    // bracket_stack is empty
+                    Err(self.error_prev(
+                        lex.len(),
+                        ErrorType::UnbalancedBrackets {
+                            expect: self.bracket_pairs.last().copied(),
+                            actual: kind,
+                        },
+                    ))
+                }
+            })
     }
 }
 

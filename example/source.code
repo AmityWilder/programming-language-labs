@@ -2,7 +2,7 @@
 // their syntax is similar to LaTeX commands.
 def \foo($fn, $args) { $fn($args, 1) }
 
-{ } } } // unbalanced brackets outside of a string are a visualized as an error, but won't be acknowledged until parsing
+{ } } } // unbalanced brackets outside of a string are an error
 
 [ } ] ] // bracket balance visuals are dependent on matching delimiters
 
@@ -20,6 +20,8 @@ fn main() {
         let float = 1.6343e24;
         let float1 = 1.6343e-24;
         const FOO_BAR = 3.1415;
+        let bad = 35invalid;
+        let too_big = 10000000000000000000000000;
         my'text = "this \"text\" is \x1b[91mred\x1b[0m";
         let my'text /* there is absolutely no reason for the apostrophe,
             /* i just /* wanted */ to /* show /* it */ off */ */ */ = "hello world";

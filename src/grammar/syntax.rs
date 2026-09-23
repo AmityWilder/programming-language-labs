@@ -19,7 +19,7 @@ pub enum Syntax {
     CtrlKeyword,
     MacroName,
     MacroParam,
-    Bracket,
+    Bracket(usize),
     Invalid,
 }
 
@@ -40,8 +40,7 @@ pub struct SyntaxStyle<'a, T> {
     pub ctrl_keyword: T,
     pub macro_name: T,
     pub macro_arg: T,
-    pub bracket: T,
-    pub bracket_pairs: &'a [T],
+    pub bracket: &'a [T],
     pub invalid: T,
 }
 
@@ -63,22 +62,17 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
             Syntax::CtrlKeyword => &self.ctrl_keyword,
             Syntax::MacroName => &self.macro_name,
             Syntax::MacroParam => &self.macro_arg,
-            Syntax::Bracket => &self.bracket,
+            Syntax::Bracket(depth) => self
+                .bracket
+                .get(
+                    depth
+                        .checked_rem(self.bracket.len())
+                        .expect("BracketPair list should be non-empty"),
+                )
+                .expect("arr[n % len(arr)] should always be valid"),
+
             Syntax::Invalid => &self.invalid,
         }
-    }
-}
-
-impl<T> SyntaxStyle<'_, T> {
-    pub fn bracket_pair(&self, index: usize) -> &T {
-        index
-            .checked_rem(self.bracket_pairs.len())
-            .map(|idx| {
-                self.bracket_pairs
-                    .get(idx)
-                    .expect("list[n % len(list)] should always be valid")
-            })
-            .expect("BracketPair list should be non-empty")
     }
 }
 
@@ -112,11 +106,7 @@ where
                 TokenType::CtrlKeyword => Syntax::CtrlKeyword,
                 TokenType::Macro => Syntax::MacroName,
                 TokenType::MacroParam => Syntax::MacroParam,
-                TokenType::Punctuation
-                    if matches!(token.src, "[" | "]" | "(" | ")" | "{" | "}") =>
-                {
-                    Syntax::Bracket
-                }
+                TokenType::Bracket(depth) => Syntax::Bracket(depth),
 
                 TokenType::Whitespace | TokenType::Punctuation => Syntax::Normal,
             },
