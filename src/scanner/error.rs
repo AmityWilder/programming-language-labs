@@ -319,6 +319,27 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
     }
 }
 
+/// Returns [`None`] if `range` is out of bounds for `src`
+pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
+    let line_start = src
+        .get(..range.start)?
+        .rfind({
+            let mut prev_is_newline = false;
+            move |ch: char| std::mem::replace(&mut prev_is_newline, matches!(ch, '\n' | '\r'))
+        })
+        .unwrap_or(range.start);
+    let line_end = src
+        .get(range.end..)?
+        .find(['\n', '\r'])
+        .map_or(src.len(), |n| {
+            // SAFETY: `n` is be a position in `source[range.end..]` in source,
+            // therefore `range.end + n` is a position in `source[..]`, which must be in memory
+            // and therefore fit in usize
+            unsafe { n.unchecked_add(range.end) }
+        });
+    Some((line_start..line_end).into())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedContextError<'a, 'b>(&'b ContextError<'a>);
 
@@ -327,27 +348,12 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
         const PRE_NUM: &str = "   \x1b[94m";
         const POST_NUM: &str = " |\x1b[0m  ";
         let Range { start, end } = self.0.position();
-        let line_start = self.0.source[..self.0.range.start]
-            .rfind(['\n', '\r'])
-            .map_or(0, |n| {
-                n.checked_add(1 /* \n and \r are both ASCII */).expect(
-                    "`n` is the position of the start of the char, \
-                    we should be able to add the length of that char",
-                )
-            });
-        let line_end =
-            self.0.source[self.0.range.end..]
-                .find(['\n', '\r'])
-                .map_or(self.0.source.len(), |n| {
-                    n.checked_add(self.0.range.end).expect(
-                        "`n` should be an offset from self.0.range.end in source, \
-                        which is a string in memory whose len must fit in usize",
-                    )
-                });
+        let line_range = line_containing(self.0.source, self.0.range)
+            .expect("range should be a range in source");
         // numbers get bigger as they get bigger, so the last line should be the biggest number
         let num_width = end.line.to_string().len(); // ew, an allocation just to count the digits :c
         writeln!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
-        for (idx, line) in self.0.source[line_start..line_end].lines().enumerate() {
+        for (idx, line) in self.0.source[line_range].lines().enumerate() {
             let line_number = start
                 .line
                 .checked_add(idx)
