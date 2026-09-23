@@ -12,7 +12,11 @@ fn main() {
 
     for i in 0..5 {
         let ch = 'n';
-        let ch = '\n';
+        let esc_ch = '\n';
+        let empty_ch = '';
+        let multi_ch = 'aa';
+        let multi_esc_ch = '\n\n';
+        let multi_esc_ch = '\x1b2';
         let float = 1.6343e24;
         let float1 = 1.6343e-24;
         const FOO_BAR = 3.1415;
@@ -24,3 +28,5 @@ fn main() {
         print(my'text); // output the contents of `my'text` to the console
     }
 }
+
+const FOO = "apple \"or\" orange

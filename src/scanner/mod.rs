@@ -180,9 +180,17 @@ impl<'a> Scanner<'a> {
                     // the fact there is a closing delimiter that didn't end the string shows it must be escaped
                     // (or else there wouldn't have been an error)
                     if self.source[open_delim.len_utf8()..].contains(open_delim) {
-                        ErrorType::EscapedStringLiteralEnd
+                        match open_delim {
+                            '\'' => ErrorType::EscapedCharLiteralEnd,
+                            '"' => ErrorType::EscapedStringLiteralEnd,
+                            _ => unimplemented!(),
+                        }
                     } else {
-                        ErrorType::EndlessStringLiteral
+                        match open_delim {
+                            '\'' => ErrorType::EndlessCharLiteral,
+                            '"' => ErrorType::EndlessStringLiteral,
+                            _ => unimplemented!(),
+                        }
                     },
                 )
             })

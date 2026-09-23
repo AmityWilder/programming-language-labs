@@ -12,7 +12,6 @@ use crate::scanner::{
 /// - [-] [`TokenType::NumberLiteral`]
 /// - [ ] [`TokenType::CharLiteral`]
 /// - [ ] [`TokenType::StringLiteral`]
-/// - [ ] [`TokenType::InterpolatedString`]
 /// - [x] [`TokenType::Identifier`]
 /// - [ ] [`TokenType::Callable`]
 /// - [ ] [`TokenType::Keyword`]
