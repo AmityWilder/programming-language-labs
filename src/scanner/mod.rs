@@ -1,9 +1,8 @@
-use error::{ContextError, Error, ErrorType, TokenResult};
+use crate::error::{ContextError, Error, ErrorType, TokenResult};
 use std::range::Range;
 use symbols::*;
 use token::{Allocated, Keyword, KeywordType, NoAlloc, Punctuation, Token, TokenType, TokenValue};
 
-pub mod error;
 pub mod symbols;
 pub mod token;
 

@@ -30,6 +30,7 @@ use crate::grammar::{
 };
 use std::{fmt::Write, range::Range};
 
+mod error;
 mod grammar;
 mod scanner;
 

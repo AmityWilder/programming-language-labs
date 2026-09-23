@@ -1,7 +1,5 @@
-use super::{
-    error::{ErrorType, NumLitError},
-    symbols::*,
-};
+use super::symbols::*;
+use crate::error::{ErrorType, NumLitError};
 use std::{borrow::Cow, range::Range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

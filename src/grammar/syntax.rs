@@ -1,6 +1,6 @@
-use crate::scanner::{
+use crate::{
     error::TokenResult,
-    token::{TokenType, TokenValue, TokenValueSimplicity},
+    scanner::token::{TokenType, TokenValue, TokenValueSimplicity},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
