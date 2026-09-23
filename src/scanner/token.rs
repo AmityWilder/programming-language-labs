@@ -376,43 +376,45 @@ impl<'a> TokenValue<'a, NoAlloc> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Escapes<I> {
-    iter: I,
+pub struct Escapes<'a> {
+    source: &'a str,
+    offset: usize,
+    is_esc: bool,
 }
 
-#[expect(clippy::type_complexity, reason = "can't impl trait in type aliases")]
-pub fn escapes<'a>(
-    source: &'a str,
-) -> Escapes<
-    std::iter::Map<
-        std::str::MatchIndices<'a, impl FnMut(char) -> bool>,
-        impl 'a + FnMut((usize, &'a str)) -> (usize, &'a str),
-    >,
-> {
-    Escapes {
-        iter: source
-            .match_indices({
-                let mut is_esc = false;
-                move |ch: char| {
-                    is_esc = !is_esc && ch == ESCAPE;
-                    is_esc
-                }
-            })
-            .map(move |(i, _)| (i, source)),
+impl<'a> Escapes<'a> {
+    pub const fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            offset: 0,
+            is_esc: false,
+        }
     }
 }
 
-impl<'a, I: Iterator<Item = (usize, &'a str)>> Iterator for Escapes<I> {
+impl<'a> Iterator for Escapes<'a> {
     type Item = Result<(Range<usize>, char), ErrorType<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|(i, src)| escape_seq(src, i))
+        self.source[self.offset..]
+            .match_indices(|ch: char| {
+                self.is_esc = !self.is_esc && ch == ESCAPE;
+                self.is_esc
+            })
+            .next()
+            .map(|(i, _)| {
+                self.offset = self.offset.checked_add(i).expect(
+                    "`i` should be a position after `offset` in `source`, \
+                     a string in memory whose len must fit in usize",
+                );
+                escape_seq(self.source, self.offset)
+            })
     }
 }
 
 impl<'a> TokenValue<'a, Allocated> {
     fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
-        let replacements = escapes(src).collect::<Result<Vec<_>, _>>()?;
+        let replacements = Escapes::new(src).collect::<Result<Vec<_>, _>>()?;
         let escapes = replacements.iter().map(|(range, _)| *range).collect();
 
         let byte_diff: usize = replacements
