@@ -73,7 +73,7 @@ impl<'a> Scanner<'a> {
                 .expect("source should be a substring of original"),
             err,
         };
-        _ = self.split_off(1);
+        _ = self.split_off(len);
         err
     }
 
