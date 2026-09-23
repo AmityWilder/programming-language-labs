@@ -3,8 +3,8 @@
 use crate::{
     grammar::syntax::{Syntax, syntax_of},
     scanner::{
-        error::NestedTokenResult,
-        token::{CharLiteral, StringLiteral, TokenValue},
+        error::TokenResult,
+        token::{Allocated, CharLiteral, StringLiteral, TokenValue},
     },
 };
 use std::range::Range;
@@ -82,7 +82,7 @@ fn escaped_str_literal<'a>(
 }
 
 pub fn highlight<'a>(
-    tokens: &'a [NestedTokenResult<'a>],
+    tokens: &'a [TokenResult<'a, Allocated>],
 ) -> impl Iterator<Item = (&'a str, Syntax)> {
     tokens.iter().map(syntax_of).flat_map(|(lex, syn, val)| {
         match val {

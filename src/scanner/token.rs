@@ -1,5 +1,4 @@
 use super::{
-    Scanner,
     error::{ErrorType, NumLitError},
     symbols::*,
 };
@@ -233,32 +232,24 @@ pub trait TokenValueSimplicity {
 }
 
 /// String literals may contain unconverted escape sequences
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct NoAlloc(());
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NoAlloc(!);
 
 impl TokenValueSimplicity for NoAlloc {
     type StringLiteral<'a> = &'a str;
 }
 
 /// String literals have escape sequences converted
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Allocated<T>(std::marker::PhantomData<T>);
+#[derive(Debug, Clone, PartialEq)]
+pub struct Allocated(!);
 
-impl<T> TokenValueSimplicity for Allocated<T> {
-    type StringLiteral<'a> = StringLiteral<'a>;
-}
-
-/// String literals have escape sequences converted
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct AllocNested(());
-
-impl TokenValueSimplicity for AllocNested {
+impl TokenValueSimplicity for Allocated {
     type StringLiteral<'a> = StringLiteral<'a>;
 }
 
 /// The value represented by a [`Token`]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated<Scanner<'a>>> {
+pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated> {
     /// Whitespace/comments
     #[default]
     Ignore,
@@ -273,10 +264,6 @@ pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated<Scanner<'a>>> {
     /// Escape sequences are converted (unless there are none)
     StringLiteral(S::StringLiteral<'a>),
 }
-
-pub type AllocTokenValue<'a, T> = TokenValue<'a, Allocated<T>>;
-pub type NoAllocTokenValue<'a> = TokenValue<'a, NoAlloc>;
-pub type NestedTokenValue<'a> = TokenValue<'a, AllocNested>;
 
 impl<'a, S: TokenValueSimplicity> TokenValue<'a, S> {
     fn number_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
@@ -378,7 +365,7 @@ impl<'a> TokenValue<'a, NoAlloc> {
     }
 }
 
-impl<'a> TokenValue<'a, Allocated<Scanner<'a>>> {
+impl<'a> TokenValue<'a, Allocated> {
     fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         let mut is_esc = false;
         let replacements = src
@@ -517,7 +504,7 @@ impl<'a> Token<'a> {
     /// Obtains the value of a token without allocating
     ///
     /// **Warning:** String literals will be incorrect because of the "no alloc" rule.
-    pub(super) fn value_noalloc(self) -> Result<NoAllocTokenValue<'a>, ErrorType<'a>> {
+    pub(super) fn value_noalloc(self) -> Result<TokenValue<'a, NoAlloc>, ErrorType<'a>> {
         const VALID_TOKENS: &str = "Token::value() expects vaild tokens";
         match self.ty {
             TokenType::Whitespace | TokenType::Comment => Ok(TokenValue::Ignore),
@@ -538,7 +525,7 @@ impl<'a> Token<'a> {
     }
 }
 
-impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated<Scanner<'a>>> {
+impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated> {
     type Error = ErrorType<'a>;
 
     fn try_from(value: TokenValue<'a, NoAlloc>) -> Result<Self, Self::Error> {
@@ -560,22 +547,6 @@ impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated<Scanner<'
             TokenValue::Direct(x) => Ok(Self::Direct(x)),
             TokenValue::Keyword(x) => Ok(Self::Keyword(x)),
             TokenValue::Punctuation(x) => Ok(Self::Punctuation(x)),
-        }
-    }
-}
-
-impl<'a, T> From<TokenValue<'a, Allocated<T>>> for TokenValue<'a, AllocNested> {
-    fn from(value: TokenValue<'a, Allocated<T>>) -> Self {
-        match value {
-            TokenValue::Ignore => Self::Ignore,
-            TokenValue::UIntLiteral(x) => Self::UIntLiteral(x),
-            TokenValue::SIntLiteral(x) => Self::SIntLiteral(x),
-            TokenValue::FltLiteral(x) => Self::FltLiteral(x),
-            TokenValue::CharLiteral(x) => Self::CharLiteral(x),
-            TokenValue::StringLiteral(x) => Self::StringLiteral(x),
-            TokenValue::Direct(x) => Self::Direct(x),
-            TokenValue::Keyword(x) => Self::Keyword(x),
-            TokenValue::Punctuation(x) => Self::Punctuation(x),
         }
     }
 }

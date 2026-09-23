@@ -1,9 +1,7 @@
-use error::{ContextError, Error, ErrorType, NestedTokenResult};
+use error::{ContextError, Error, ErrorType, TokenResult};
 use std::range::Range;
 use symbols::*;
-use token::{
-    AllocTokenValue, Keyword, KeywordType, NoAlloc, Punctuation, Token, TokenType, TokenValue,
-};
+use token::{Allocated, Keyword, KeywordType, NoAlloc, Punctuation, Token, TokenType, TokenValue};
 
 pub mod error;
 pub mod symbols;
@@ -374,22 +372,11 @@ impl<'a> Iterator for Scanner<'a> {
 impl std::iter::FusedIterator for Scanner<'_> {}
 
 /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
-pub fn tokenize(source: &str) -> impl Iterator<Item = NestedTokenResult<'_>> {
+pub fn tokenize(source: &str) -> impl Iterator<Item = TokenResult<'_, Allocated>> {
     Scanner::new(source).map(|item| {
         item.map(|(token, value)| {
-            let value = match AllocTokenValue::<Scanner<'_>>::try_from(value)
-                .expect("should have been caught by scanner")
-            {
-                TokenValue::Ignore => TokenValue::Ignore,
-                TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
-                TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
-                TokenValue::FltLiteral(x) => TokenValue::FltLiteral(x),
-                TokenValue::CharLiteral(x) => TokenValue::CharLiteral(x),
-                TokenValue::StringLiteral(x) => TokenValue::StringLiteral(x),
-                TokenValue::Direct(x) => TokenValue::Direct(x),
-                TokenValue::Keyword(x) => TokenValue::Keyword(x),
-                TokenValue::Punctuation(x) => TokenValue::Punctuation(x),
-            };
+            let value = <TokenValue<Allocated>>::try_from(value)
+                .expect("should have been caught by scanner");
             (token, value)
         })
     })
