@@ -118,8 +118,8 @@ pub fn run_code(source: &str) {
     }
     _ = write!(buf, "\x1b[0m");
     println!("```");
-    let line_num_width = buf.lines().count().strict_add(1).to_string().len();
-    for (i, line) in buf.lines().enumerate() {
+    let line_num_width = buf.split('\n').count().strict_add(1).to_string().len();
+    for (i, line) in buf.split('\n').enumerate() {
         let Range { start, .. } = buf
             .substr_range(line)
             .expect("lines should be substrings of buf");
