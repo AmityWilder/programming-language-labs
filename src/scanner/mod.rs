@@ -220,9 +220,11 @@ impl<'a> Scanner<'a> {
                         "proof. char::MAX_LEN_UTF8 * 2 fits in usize"
                     );
                 }
-                // why 2x? first for open delimiter, second for close delimiter (both are the same character)
-                // SAFETY: char::MAX_LEN_UTF8 * 2 fits in usize and char::len_utf8() is AT MOST char::MAX_LEN_UTF8.
+                // SAFETY: As shown above, `char::MAX_LEN_UTF8 * 2` fits in usize.
+                // By definition of `char::MAX_LEN_UTF8`, `c.len_utf8()` is at most `char::MAX_LEN_UTF8` for all `c: char`.
+                // Therefore, `c.len_utf8() * 2` fits in usize for all `c: char`.
                 (unsafe { open_delim.len_utf8().unchecked_mul(2) })
+                    // why 2x? first for open delimiter, second for close delimiter (both are the same character)
                     .checked_add(n)
                     .expect(
                         "stringlike literal should include both open and close delimiters, \

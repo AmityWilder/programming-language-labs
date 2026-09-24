@@ -231,7 +231,9 @@ impl std::fmt::Display for BeginStyle {
                     Color::Id(code) => write!(f, "38;5;{code}")?,
                     Color::Rgb(r, g, b) => write!(f, "38;2;{r};{g};{b}")?,
                     color => {
-                        // SAFETY: the greatest discriminant of any non-Id, non-Rgb variant in Color is 67; 67+30=97, which is less than 255
+                        // SAFETY: Because we have handled the Id and Rgb variants, this branch cannot be either of those.
+                        // The greatest discriminant of any non-Id, non-Rgb variant in Color is 67 (`BrightWhite`).
+                        // Observe: 67+30=97. We know 97 <= 255, therefore it fits inside u8 without overflowing.
                         let code = unsafe { color.discriminant().unchecked_add(30) };
                         write!(f, "{code}")?;
                     }
@@ -246,7 +248,9 @@ impl std::fmt::Display for BeginStyle {
                     Color::Id(code) => write!(f, "48;5;{code}")?,
                     Color::Rgb(r, g, b) => write!(f, "48;2;{r};{g};{b}")?,
                     background => {
-                        // SAFETY: the greatest discriminant of any non-Id, non-Rgb variant in Color is 67; 67+40=107, which is less than 255
+                        // SAFETY: Because we have handled the Id and Rgb variants, this branch cannot be either of those.
+                        // The greatest discriminant of any non-Id, non-Rgb variant in Color is 67 (`BrightWhite`).
+                        // Observe: 67+40=107. We know 107 <= 255, therefore it fits inside u8 without overflowing.
                         let code = unsafe { background.discriminant().unchecked_add(40) };
                         write!(f, "{code}")?;
                     }
