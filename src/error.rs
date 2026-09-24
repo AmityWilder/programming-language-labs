@@ -569,47 +569,54 @@ fn line_ref(
 
 impl std::fmt::Display for RenderedContextError<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // error
+        let mut has_prev = false;
 
-        line_ref(
-            f,
-            self.0.source,
-            self.0.range,
-            "\x1b[91m",
-            '^',
-            match self.0.err {
-                ErrorType::UnknownToken => "what is this?",
-                ErrorType::EndlessBlockComment
-                | ErrorType::EndlessCharLiteral
-                | ErrorType::EndlessStringLiteral => "never ends",
-                ErrorType::EmptyCharLiteral => "empty",
-                ErrorType::MultiCharLiteral => "a char should be 1 char",
-                ErrorType::EscapedCharLiteralEnd | ErrorType::EscapedStringLiteralEnd => {
-                    "never ends, unless you remove the `\\`"
-                }
-                ErrorType::InvalidEscape(_) => "has an invalid escape sequence",
-                ErrorType::InvalidNumLiteral(_) => "not a valid number",
-                ErrorType::IncorrectCloseBracket { .. } => "incorrect partner",
-                ErrorType::ExcessCloseBracket { .. } | ErrorType::MissingCloseBracket { .. } => {
-                    "missing a partner"
-                }
-            },
-        )?;
+        // error
+        if !self.0.range.is_empty() {
+            line_ref(
+                f,
+                self.0.source,
+                self.0.range,
+                "\x1b[91m",
+                '^',
+                match self.0.err {
+                    ErrorType::UnknownToken => "what is this?",
+                    ErrorType::EndlessBlockComment
+                    | ErrorType::EndlessCharLiteral
+                    | ErrorType::EndlessStringLiteral => "never ends",
+                    ErrorType::EmptyCharLiteral => "empty",
+                    ErrorType::MultiCharLiteral => "a char should be 1 char",
+                    ErrorType::EscapedCharLiteralEnd | ErrorType::EscapedStringLiteralEnd => {
+                        "never ends, unless you remove the `\\`"
+                    }
+                    ErrorType::InvalidEscape(_) => "has an invalid escape sequence",
+                    ErrorType::InvalidNumLiteral(_) => "not a valid number",
+                    ErrorType::IncorrectCloseBracket { .. } => "incorrect partner",
+                    ErrorType::ExcessCloseBracket { .. } => "missing a partner",
+                    ErrorType::MissingCloseBracket { .. } => "",
+                },
+            )?;
+            has_prev = true;
+        }
 
         // info
         let items = match self.0.err {
             ErrorType::IncorrectCloseBracket {
                 expect: (_, range), ..
-            }
-            | ErrorType::MissingCloseBracket { expect: (_, range) } => {
-                &[(range, "bracket type introduced here")]
+            } => &[(range, "bracket type introduced here")],
+
+            ErrorType::MissingCloseBracket { expect: (_, range) } => {
+                &[(range, "missing a partner")]
             }
 
             _ => [].as_slice(),
         };
         for &(range, explanation) in items {
-            writeln!(f)?;
+            if has_prev {
+                writeln!(f)?;
+            }
             line_ref(f, self.0.source, range, "\x1b[96m", '-', explanation)?;
+            has_prev = true;
         }
 
         Ok(())

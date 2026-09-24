@@ -434,57 +434,69 @@ impl<'a> Iterator for Scanner<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         // if there are no characters remaining, this will return None and stop iterating.
-        self.source.chars().next().map(|ch| {
-            // we check for the pattern of the token with "if/else" instead of "if { return }"
-            // because once we have identified what type of token it should be, there must be an error if it isn't that.
-            // if we continued going down the list of possible tokens until one succeeded, we would be doing
-            // more processing and miss the fact that it wasn't a *different* token, it was just an *invalid* token.
+        self.source
+            .chars()
+            .next()
+            .map(|ch| {
+                // we check for the pattern of the token with "if/else" instead of "if { return }"
+                // because once we have identified what type of token it should be, there must be an error if it isn't that.
+                // if we continued going down the list of possible tokens until one succeeded, we would be doing
+                // more processing and miss the fact that it wasn't a *different* token, it was just an *invalid* token.
 
-            // branches ordered by:
-            // 1. if a pattern might fit multiple branches, the most specific one must come before a less specific one;
-            //    so that we don't eliminate the opportunity to check if it's more specific.
-            // 2. if branches are equally simple or do not overlap, simplest conditions first; so that we aren't testing
-            //    a complex condition on tokens that don't satisfy them, when they might have satisfied a less expensive
-            //    condition for a different branch.
+                // branches ordered by:
+                // 1. if a pattern might fit multiple branches, the most specific one must come before a less specific one;
+                //    so that we don't eliminate the opportunity to check if it's more specific.
+                // 2. if branches are equally simple or do not overlap, simplest conditions first; so that we aren't testing
+                //    a complex condition on tokens that don't satisfy them, when they might have satisfied a less expensive
+                //    condition for a different branch.
 
-            if self.starts_with_whitespace() {
-                Ok(self.scan_whitespace())
-            } else if self.starts_with_macro() {
-                Ok(self.scan_macro())
-            } else if self.starts_with_macro_param() {
-                Ok(self.scan_macro_param())
-            } else if let Some(open_delim) = self.starts_with_strlike_literal() {
-                self.scan_strlike_literal(open_delim)
-            } else if self.starts_with_ident() {
-                Ok(self.scan_ident())
-            } else if self.starts_with_num_literal() {
-                Ok(self.scan_num_literal())
-            } else if self.starts_with_line_comment() {
-                Ok(self.scan_line_comment())
-            } else if self.starts_with_block_comment() {
-                self.scan_block_comment()
-            } else if self.starts_with_brack() {
-                self.scan_brack()
-            } else if self.starts_with_punc() {
-                self.scan_punc()
-            } else {
-                Err(self.error_here(ch.len_utf8(), ErrorType::UnknownToken))
-            }
-            .and_then(|tkn| {
-                tkn.value_noalloc()
-                    .map(|val| (tkn, val))
-                    .map_err(|err| self.error_prev(tkn.src.len(), err))
-            })
-            .inspect(|(token, _)| {
-                // non-whitespace, non-comment token
-                if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
-                    // punctuation except for close bracket
-                    self.can_be_negative =
-                        matches!(token.ty, TokenType::Punctuation | TokenType::Bracket(_))
-                            && !matches!(token.src, ")" | "]" | "}");
+                if self.starts_with_whitespace() {
+                    Ok(self.scan_whitespace())
+                } else if self.starts_with_macro() {
+                    Ok(self.scan_macro())
+                } else if self.starts_with_macro_param() {
+                    Ok(self.scan_macro_param())
+                } else if let Some(open_delim) = self.starts_with_strlike_literal() {
+                    self.scan_strlike_literal(open_delim)
+                } else if self.starts_with_ident() {
+                    Ok(self.scan_ident())
+                } else if self.starts_with_num_literal() {
+                    Ok(self.scan_num_literal())
+                } else if self.starts_with_line_comment() {
+                    Ok(self.scan_line_comment())
+                } else if self.starts_with_block_comment() {
+                    self.scan_block_comment()
+                } else if self.starts_with_brack() {
+                    self.scan_brack()
+                } else if self.starts_with_punc() {
+                    self.scan_punc()
+                } else {
+                    Err(self.error_here(ch.len_utf8(), ErrorType::UnknownToken))
                 }
+                .and_then(|tkn| {
+                    tkn.value_noalloc()
+                        .map(|val| (tkn, val))
+                        .map_err(|err| self.error_prev(tkn.src.len(), err))
+                })
+                .inspect(|(token, _)| {
+                    // non-whitespace, non-comment token
+                    if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
+                        // punctuation except for close bracket
+                        self.can_be_negative =
+                            matches!(token.ty, TokenType::Punctuation | TokenType::Bracket(_))
+                                && !matches!(token.src, ")" | "]" | "}");
+                    }
+                })
             })
-        })
+            .or_else(|| {
+                self.bracket_pairs.pop().map(|(brack, position)| {
+                    let end = position
+                        .checked_add(brack.open().len_utf8())
+                        .expect("should be a range within source, which is in memory and whose len therefore fits in usize");
+                    let range = Range::from(position..end,);
+                    Err(self.error_here(0, ErrorType::MissingCloseBracket { expect: (brack, range) }))
+                })
+            })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
