@@ -1,46 +1,81 @@
+//! Syntax used for highlighting
+
 use crate::{
     error::TokenResult,
     scanner::token::{TokenType, TokenValue, TokenValueSimplicity},
 };
 
+/// Syntactic element category for highlighting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Syntax {
+    /// Any element not described by other syntax categories
     #[default]
     Normal,
+    /// Comments
     Comment,
+    /// Any number literal
     NumberLiteral,
+    /// A character literal (excluding escape sequences)
     CharLiteral,
+    /// A string literal (excluding escape sequences)
     StringLiteral,
+    /// The escape sequence of either a character or string literal
     EscapeSeq,
+    /// A local variable, field, or function parameter
     Variable,
+    /// A value that does not change at runtime
     Constant,
+    /// A function, method, or variable being called
     Callable,
+    /// A language keyword that defines items or variables
     Keyword,
+    /// A language keyword that affects runtime state
     CtrlKeyword,
+    /// The name of a macro
     MacroName,
+    /// The name of a macro parameter
     MacroParam,
+    /// A bracket with depth-based coloring (other punctuation handled with [`Self::Normal`])
     Bracket(usize),
+    /// Syntax errors
     Invalid,
 }
 
+/// A style table for [`Syntax`] elements.
+/// `T`: The type used for styling
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SyntaxStyle<'a, T> {
+    /// Style for [`Syntax::Normal`]
     pub normal: T,
+    /// Style for [`Syntax::Comment`]
     pub comment: T,
+    /// Style for [`Syntax::NumberLiteral`]
     pub number_literal: T,
+    /// Style for [`Syntax::CharLiteral`]
     pub char_literal: T,
+    /// Style for [`Syntax::StringLiteral`]
     pub string_literal: T,
-    pub interp_str_literal: T,
+    /// Style for [`Syntax::EscapeSeq`]
     pub escape_seq: T,
+    /// Style for [`Syntax::InterpExpr`]
     pub interp_expr: T,
+    /// Style for [`Syntax::Variable`]
     pub variable: T,
+    /// Style for [`Syntax::Constant`]
     pub constant: T,
+    /// Style for [`Syntax::Callable`]
     pub callable: T,
+    /// Style for [`Syntax::Keyword`]
     pub keyword: T,
+    /// Style for [`Syntax::CtrlKeyword`]
     pub ctrl_keyword: T,
+    /// Style for [`Syntax::MacroName`]
     pub macro_name: T,
+    /// Style for [`Syntax::MacroArg`]
     pub macro_arg: T,
+    /// Style for [`Syntax::Bracket`]
     pub bracket: &'a [T],
+    /// Style for [`Syntax::Invalid`]
     pub invalid: T,
 }
 
@@ -76,6 +111,8 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
     }
 }
 
+/// Identifies the [`Syntax`] of a [`TokenResult`].
+/// All [`Err`]s are [`Syntax::Invalid`].
 pub fn syntax_of<'a, 'b, S>(
     item: &'b TokenResult<'a, S>,
 ) -> (&'a str, Syntax, &'b TokenValue<'a, S>)

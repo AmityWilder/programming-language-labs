@@ -1,3 +1,5 @@
+//! Errors regarding code validity
+
 use crate::scanner::{
     Bracket,
     symbols::{BIN_PREFIX, ESCAPE, HEX_PREFIX, OCT_PREFIX},
@@ -6,10 +8,14 @@ use crate::scanner::{
 };
 use std::range::Range;
 
+/// Invalid number literal
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NumLitError {
+    /// Unsigned integer
     UInt(std::num::ParseIntError),
+    /// Signed integer
     SInt(std::num::TryFromIntError),
+    /// Floating point
     Flt(std::num::ParseFloatError),
 }
 
@@ -33,21 +39,45 @@ impl std::error::Error for NumLitError {
     }
 }
 
+/// The kind of error describing a [`ContextError`]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorType<'a> {
+    /// Token type could not be identified from the initial character, and so is not a valid token
     UnknownToken,
+    /// A block comment has no `*/` to end it
     EndlessBlockComment,
+    /// A character literal that is just `''`
     EmptyCharLiteral,
+    /// A character literal with multiple codepoints
     MultiCharLiteral,
+    /// A character literal has no `'` to end it
     EndlessCharLiteral,
+    /// A character literal has no `'` to end it, but contains a `\'`
     EscapedCharLiteralEnd,
+    /// A string literal has no `"` to end it
     EndlessStringLiteral,
+    /// A string literal has no `"` to end it, but contains a `\"`
     EscapedStringLiteralEnd,
+    /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
     InvalidEscape(&'a str),
+    /// A number literal could not be evaluated as a number
     InvalidNumLiteral(NumLitError),
-    UnbalancedBrackets {
-        expect: Option<(Bracket, Range<usize>)>,
+    /// A closing bracket is of the wrong type for the open bracket at its depth
+    IncorrectCloseBracket {
+        /// The bracket type being expected based on the opening side
+        expect: (Bracket, Range<usize>),
+        /// The bracket type that was found
         actual: Bracket,
+    },
+    /// A closing bracket was found with no open bracket
+    ExcessCloseBracket {
+        /// The bracket type that was found
+        actual: Bracket,
+    },
+    /// An open bracket was found with no close bracket
+    MissingCloseBracket {
+        /// The bracket type being expected based on the opening side
+        expect: (Bracket, Range<usize>),
     },
 }
 
@@ -70,15 +100,22 @@ impl std::fmt::Display for ErrorType<'_> {
             }
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s:?}"),
             Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
-            Self::UnbalancedBrackets { expect, actual } => {
-                f.write_str("unbalanced brackets: expected ")?;
-                if let Some((expect, _)) = expect {
-                    write!(f, "`{}`", expect.close())?;
-                } else {
-                    f.write_str("none")?;
-                }
-                write!(f, ", found `{}`", actual.close())
-            }
+            Self::IncorrectCloseBracket { expect, actual } => write!(
+                f,
+                "incorrect close bracket: expected `{}`, found `{}`",
+                expect.0.close(),
+                actual.close()
+            ),
+            Self::ExcessCloseBracket { actual } => write!(
+                f,
+                "too many close brackets: expected none, found `{}`",
+                actual.close()
+            ),
+            Self::MissingCloseBracket { expect } => write!(
+                f,
+                "missing close bracket: expected `{}`, found none",
+                expect.0.close()
+            ),
         }
     }
 }
@@ -92,10 +129,14 @@ impl std::error::Error for ErrorType<'_> {
     }
 }
 
+/// A code error with the range of the error in the source code
 #[derive(Clone, PartialEq, Eq)]
 pub struct ContextError<'a> {
+    /// A string view of the FULL, ENTIRE source code
     pub source: &'a str,
+    /// The range in [`Self::source`] of precisely where the error occurred
     pub range: Range<usize>,
+    /// The exact error that was found
     pub err: ErrorType<'a>,
 }
 
@@ -109,11 +150,19 @@ impl std::fmt::Debug for ContextError<'_> {
     }
 }
 
+/// The line (row) and position (column) of a position in a string
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct LineCol {
+    /// The row
+    ///
     /// 1-based index
-    line: usize,
-    col: usize,
+    pub line: usize,
+
+    /// The position within the row
+    ///
+    /// 0-based index
+    // TODO: why are they different? would it make sense for both to be 1-based?
+    pub col: usize,
 }
 
 impl std::fmt::Display for LineCol {
@@ -139,14 +188,20 @@ fn line_col_range(s: &str, range: Range<usize>) -> Range<LineCol> {
 }
 
 impl<'a> ContextError<'a> {
+    /// Returns a struct that implements [`std::fmt::Display`] to show detailed line reference information
+    #[must_use]
     pub const fn render(&self) -> RenderedContextError<'_, 'a> {
         RenderedContextError(self)
     }
 
+    /// Returns a struct that implements [`std::fmt::Display`] to show the error code (number)
+    #[must_use]
     pub const fn code(&self) -> ContextErrorCode<'_, 'a> {
         ContextErrorCode(self)
     }
 
+    /// Returns a struct that implements [`std::fmt::Display`] to show tips for resolving the error
+    #[must_use]
     pub const fn help(&self) -> ContextErrorHelp<'_, 'a> {
         ContextErrorHelp(self)
     }
@@ -165,6 +220,7 @@ impl std::error::Error for ContextError<'_> {
     }
 }
 
+/// [`std::fmt::Display`] the error code (number)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextErrorCode<'a, 'b>(&'b ContextError<'a>);
 
@@ -181,7 +237,9 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             | ErrorType::EscapedStringLiteralEnd
             | ErrorType::InvalidEscape(_)
             | ErrorType::InvalidNumLiteral(_)
-            | ErrorType::UnbalancedBrackets { .. } => "LEX",
+            | ErrorType::IncorrectCloseBracket { .. }
+            | ErrorType::ExcessCloseBracket { .. }
+            | ErrorType::MissingCloseBracket { .. } => "LEX",
         };
         let code = match self.0.err {
             ErrorType::UnknownToken => 0,
@@ -194,12 +252,15 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             ErrorType::EscapedStringLiteralEnd => 7,
             ErrorType::InvalidEscape(_) => 8,
             ErrorType::InvalidNumLiteral(_) => 9,
-            ErrorType::UnbalancedBrackets { .. } => 10,
+            ErrorType::IncorrectCloseBracket { .. } => 10,
+            ErrorType::ExcessCloseBracket { .. } => 11,
+            ErrorType::MissingCloseBracket { .. } => 12,
         };
         write!(f, "err[{area}{code:>03}]")
     }
 }
 
+/// [`std::fmt::Display`] tips for resolving an error
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextErrorHelp<'a, 'b>(&'b ContextError<'a>);
 
@@ -405,30 +466,34 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 }
             }
 
-            ErrorType::UnbalancedBrackets { expect, actual } => {
-                if let Some(expect) = expect {
-                    write!(
-                        f,
-                        "try inserting a `{}` before the `{}` or add a `{}` before it and after the `{}`",
-                        expect.0.close(),
-                        actual.close(),
-                        actual.open(),
-                        expect.0.open(),
-                    )
-                } else {
-                    write!(
-                        f,
-                        "try removing the `{}` or add a `{}` before it",
-                        actual.close(),
-                        actual.open(),
-                    )
-                }
-            }
+            ErrorType::IncorrectCloseBracket { expect, actual } => write!(
+                f,
+                "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or `{}`",
+                expect.0.close(),
+                actual.close(),
+                actual.open(),
+                expect.0.open(),
+                expect.0.open(),
+                actual.close(),
+            ),
+            ErrorType::ExcessCloseBracket { actual } => write!(
+                f,
+                "try removing the `{}` or add a `{}` before it",
+                actual.close(),
+                actual.open(),
+            ),
+            ErrorType::MissingCloseBracket { expect } => write!(
+                f,
+                "try inserting a `{}` or remove the `{}`",
+                expect.0.close(),
+                expect.0.open(),
+            ),
         }
     }
 }
 
 /// Returns [`None`] if `range` is out of bounds for `src`
+#[must_use]
 pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
     let line_start = src
         .get(..range.start)?
@@ -449,6 +514,7 @@ pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
     Some((line_start..line_end).into())
 }
 
+/// [`std::fmt::Display`] advanced error information with line references for a context error
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedContextError<'a, 'b>(&'b ContextError<'a>);
 
@@ -523,16 +589,21 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
                 }
                 ErrorType::InvalidEscape(_) => "has an invalid escape sequence",
                 ErrorType::InvalidNumLiteral(_) => "not a valid number",
-                ErrorType::UnbalancedBrackets { .. } => "missing a partner",
+                ErrorType::IncorrectCloseBracket { .. } => "incorrect partner",
+                ErrorType::ExcessCloseBracket { .. } | ErrorType::MissingCloseBracket { .. } => {
+                    "missing a partner"
+                }
             },
         )?;
 
         // info
         let items = match self.0.err {
-            ErrorType::UnbalancedBrackets {
-                expect: Some((_, range)),
-                ..
-            } => &[(range, "bracket type introduced here")],
+            ErrorType::IncorrectCloseBracket {
+                expect: (_, range), ..
+            }
+            | ErrorType::MissingCloseBracket { expect: (_, range) } => {
+                &[(range, "bracket type introduced here")]
+            }
 
             _ => [].as_slice(),
         };
@@ -545,4 +616,5 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
     }
 }
 
+/// A [`Token`] and its [`TokenValue`], or a [`ContextError`]
 pub type TokenResult<'a, S> = Result<(Token<'a>, TokenValue<'a, S>), ContextError<'a>>;

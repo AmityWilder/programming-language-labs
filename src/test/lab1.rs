@@ -1,4 +1,5 @@
-//! All of these test cases are hand-written. Mostly on a very bumpy bus ride
+//! Scanner tests.
+//! All of these test cases are hand-written. Mostly on a very bumpy bus ride.
 
 use crate::{
     error::{ContextError, ErrorType},

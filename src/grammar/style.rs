@@ -1,12 +1,18 @@
-#![allow(dead_code)]
+//! ANSI text styling
 
+/// A type that can wrap an item in a style
 pub trait StyleWrapper {
+    /// The type used for opening the style
     type Begin: std::fmt::Display;
+    /// The type used for finishing the style
     type End: std::fmt::Display;
 
+    /// Gives the style opener
     fn begin(&self) -> Self::Begin;
+    /// Gives the style closer
     fn end(&self) -> Self::End;
 
+    /// Constructs a [`Styled`] for this type
     fn style<T>(&self, what: T) -> Styled<'_, T, Self> {
         Styled {
             style: self,
@@ -15,13 +21,14 @@ pub trait StyleWrapper {
     }
 }
 
+/// Encloses `T` with the styling of `U`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Styled<'a, T, U>
 where
     U: ?Sized + StyleWrapper,
 {
-    pub style: &'a U,
-    pub inner: T,
+    style: &'a U,
+    inner: T,
 }
 
 impl<T: std::fmt::Display, U: StyleWrapper> std::fmt::Display for Styled<'_, T, U> {
@@ -36,28 +43,48 @@ impl<T: std::fmt::Display, U: StyleWrapper> std::fmt::Display for Styled<'_, T, 
     }
 }
 
+/// An ANSI color
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum Color {
+    /// 3-bit black
     Black = 0,
+    /// 3-bit red
     Red,
+    /// 3-bit green
     Green,
+    /// 3-bit yellow
     Yellow,
+    /// 3-bit blue
     Blue,
+    /// 3-bit magenta
     Magenta,
+    /// 3-bit cyan
     Cyan,
+    /// 3-bit white
     White,
+    /// Reset the color
     #[default]
     Default = 9,
+    /// 3-bit black - bright
     BrightBlack = 60,
+    /// 3-bit red - bright
     BrightRed,
+    /// 3-bit green - bright
     BrightGreen,
+    /// 3-bit yellow - bright
     BrightYellow,
+    /// 3-bit blue - bright
     BrightBlue,
+    /// 3-bit magenta - bright
     BrightMagenta,
+    /// 3-bit cyan - bright
     BrightCyan,
+    /// 3-bit white - bright
     BrightWhite,
+    /// 8-bit color
     Id(u8),
+    /// 24-bit truecolor
     Rgb(u8, u8, u8),
 }
 
@@ -71,11 +98,14 @@ impl Color {
     }
 }
 
-#[allow(clippy::struct_excessive_bools, reason = "flags")]
+/// An ANSI style
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Style {
+    /// Bitflags defining bold, italic, underline, and strikethrough
     pub flags: u8,
+    /// The foreground color
     pub color: Option<Color>,
+    /// The background color
     pub background: Option<Color>,
 }
 
@@ -85,6 +115,8 @@ impl Style {
     const UNDERLINE_FLAG: u8 = 4;
     const STRIKETHROUGH_FLAG: u8 = 8;
 
+    /// Construct a new, default [`Style`]
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             flags: 0,
@@ -93,42 +125,46 @@ impl Style {
         }
     }
 
+    /// Make this style bold
+    #[must_use]
     pub const fn bold(mut self) -> Self {
         self.flags |= Self::BOLD_FLAG;
         self
     }
 
+    /// Make this style italic
+    #[must_use]
     pub const fn italic(mut self) -> Self {
         self.flags |= Self::ITALIC_FLAG;
         self
     }
 
+    /// Make this style underline
+    #[must_use]
     pub const fn underline(mut self) -> Self {
         self.flags |= Self::UNDERLINE_FLAG;
         self
     }
 
+    /// Make this style strikethrough
+    #[must_use]
     pub const fn strikethrough(mut self) -> Self {
         self.flags |= Self::STRIKETHROUGH_FLAG;
         self
     }
 
+    /// Set the foreground color for this style
+    #[must_use]
     pub const fn foreground(mut self, value: Color) -> Self {
         self.color = Some(value);
         self
     }
 
+    /// Set the background color for this style
+    #[must_use]
     pub const fn background(mut self, value: Color) -> Self {
         self.background = Some(value);
         self
-    }
-
-    pub const fn begin(self) -> BeginStyle {
-        BeginStyle(self)
-    }
-
-    pub const fn end(self) -> EndStyle {
-        EndStyle(self)
     }
 }
 
@@ -145,6 +181,7 @@ impl StyleWrapper for Style {
     }
 }
 
+/// Creates the ANSI sequence for starting a styled segment
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct BeginStyle(Style);
 
@@ -208,6 +245,7 @@ impl std::fmt::Display for BeginStyle {
     }
 }
 
+/// Creates the ANSI sequence for ending (undoing) a styled segment
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct EndStyle(Style);
 

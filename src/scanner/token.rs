@@ -1,25 +1,37 @@
+//! Definitions of tokens and their values.
+
 use super::symbols::*;
 use crate::error::{ErrorType, NumLitError};
 use std::{borrow::Cow, range::Range};
 
+/// The classification of a [`Token`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenType {
     /// An entire chunk of whitespace, not just one character
     Whitespace,
+    /// A comment (either block or line)
     Comment,
+    /// A number literal (int or float)
     NumberLiteral,
+    /// A character literal
     CharLiteral,
+    /// A string literal
     StringLiteral,
+    /// The name of an item in code
     Identifier,
     /// Identical to [`Self::Identifier`], but implies a function by context
     /// i.e. The next token is an open parentheses (`(`)
     Callable,
+    /// A language keyword
     Keyword,
     /// Identical to [`Self::Keyword`], but specific to [`KeywordType::Control`]
     /// (because they have a different highlight color)
     CtrlKeyword,
+    /// An [`Self::Identifier`] preceded by `\`
     Macro,
+    /// An [`Self::Identifier`] preceded by `$`
     MacroParam,
+    /// Operators and other non-alphanumeric tokens
     Punctuation,
     /// A subset of [`Self::Punctuation`] with depth
     Bracket(usize),
@@ -59,13 +71,14 @@ macro_rules! define_token_eq {
             }
 
             /// Like [`Self::from_prefix`] but matches the full string
-            pub fn from_str(s: &str) -> Option<Self> {
+            pub fn try_from_str(s: &str) -> Option<Self> {
                 match s {
                     $($value => Some(Self::$Variant),)+
                     _ => None,
                 }
             }
 
+            /// The constant string name of the token
             pub const fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$Variant => $value,)+
@@ -81,14 +94,19 @@ macro_rules! define_token_eq {
     };
 }
 
+/// The categorization of a [`Keyword`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeywordType {
+    /// Keywords used for defining an item
     Definition,
+    /// Keywords used for declaring a variable
     Value,
+    /// Keywords used for flow control
     Control,
 }
 
 define_token_eq! {
+    /// Language-defined reserved words for defining behavior or form
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum Keyword {
         // Definitions
@@ -119,6 +137,8 @@ define_token_eq! {
 }
 
 impl Keyword {
+    /// The type of keyword
+    #[must_use]
     pub const fn kw_type(self) -> KeywordType {
         match self {
             Self::Struct | Self::Union | Self::Enum | Self::Type => KeywordType::Definition,
@@ -144,14 +164,33 @@ impl Keyword {
 }
 
 define_token_eq! {
+    /// Operators and other punctuation (but not brackets)
+    ///
+    /// # Where are the logical operators?
+    ///
+    /// No distinction is made between bitwise and logical operators.
+    /// Booleans are always logical, everything else is always bitwise.
+    ///
+    /// The only operations that output booleans are
+    /// - Boolean literals (`true`/`false`)
+    /// - Comparisons
+    /// - "Bitwise" operations on booleans
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum Punctuation {
         // 3-char
+        ExponentAssign = "**=",
         ShlAssign = "<<=",
         ShrAssign = ">>=",
+        NandAssign = "!&=",
+        NorAssign = "!|=",
+        XnorAssign = "!^=",
 
         // 2-char
         Neq = "!=",
+        Nand = "!&",
+        Nor = "!|",
+        Xnor = "!^",
+        MacroConcatenate = "##",
         RemAssign = "%=",
         AndAssign = "&=",
         MulAssign = "*=",
@@ -172,7 +211,7 @@ define_token_eq! {
 
         // 1-char
         Not = "!",
-        MacroArgCount = "#",
+        MacroStringify = "#",
         Ref = "$",
         Remainder = "%",
         And = "&",
@@ -188,18 +227,21 @@ define_token_eq! {
         Assign = "=",
         Gt = ">",
         QMark = "?",
-        MacroStart = "\\",
         Xor = "^",
         Or = "|",
     }
 }
 
+/// Information about a character literal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CharLiteral {
+    /// The character being represented
     pub ch: char,
+    /// Whether the character is an escape sequence in the lexeme
     pub is_escaped: bool,
 }
 
+/// Information about a string literal
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct StringLiteral<'a> {
     /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.
@@ -213,7 +255,7 @@ pub struct StringLiteral<'a> {
 }
 
 impl<'a> StringLiteral<'a> {
-    pub const fn borrowed(text: &'a str) -> Self {
+    const fn borrowed(text: &'a str) -> Self {
         Self {
             text: Cow::Borrowed(text),
             escapes: Vec::new(),
@@ -221,9 +263,13 @@ impl<'a> StringLiteral<'a> {
     }
 }
 
+/// A trait for distinguishing [`TokenValue`]s by whether they are [`NoAlloc`] vs [`Allocated`]
 pub trait TokenValueSimplicity: Sized + 'static {
+    /// The type used for [`TokenValue::StringLiteral`].
+    /// Either a [`StringLiteral<'a>`] or a [`&'a str`](`str`).
     type StringLiteral<'a>;
 
+    /// Identify whether a string literal contains escape sequences.
     fn has_escapes(literal: &Self::StringLiteral<'_>) -> bool;
 }
 
@@ -257,14 +303,21 @@ pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated> {
     /// Whitespace/comments
     #[default]
     Ignore,
+    /// Unsigned integer literal
     UIntLiteral(usize),
+    /// Signed integer literal
     SIntLiteral(isize),
+    /// Floating point literal
     FltLiteral(f64),
+    /// Character literal
     CharLiteral(CharLiteral),
-    /// Value is the token source itself
+    /// Value is the token source itself (in-code name)
     Direct(&'a str),
+    /// A language keyword
     Keyword(Keyword),
+    /// Punctuation (except for [`Self::Bracket`]s)
     Punctuation(Punctuation),
+    /// A [`super::Bracket`]
     Bracket(usize),
     /// Escape sequences are converted (unless there are none)
     StringLiteral(S::StringLiteral<'a>),
@@ -370,6 +423,7 @@ impl<'a> TokenValue<'a, NoAlloc> {
     }
 }
 
+/// An iterator over unescaped escape characters ([`ESCAPE`]) in a string
 #[derive(Debug, Clone)]
 pub struct Escapes<'a> {
     source: &'a str,
@@ -378,6 +432,8 @@ pub struct Escapes<'a> {
 }
 
 impl<'a> Escapes<'a> {
+    /// Construct a new [`Escapes`] iterator from a source string
+    #[must_use]
     pub const fn new(source: &'a str) -> Self {
         Self {
             source,
@@ -442,6 +498,8 @@ impl<'a> TokenValue<'a, Allocated> {
     }
 }
 
+/// A single token - its lexeme ([`Self::src`]) and type ([`Self::ty`]).
+/// Does not contain the token's value, but can have the value obtained with [`Self::value_noalloc`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Token<'a> {
     /// Because this is a pointer into the original source string, we can use pointer arithmetic to find its location.
@@ -461,6 +519,10 @@ impl std::fmt::Debug for Token<'_> {
 }
 
 /// Returns [`None`] if `src` does not start with `\`
+///
+/// # Panics
+/// This method can panic if its internal assumptions prove false
+#[must_use]
 pub fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
     let mut iter = src.chars();
     iter.next().filter(|ch| *ch == ESCAPE).map(|_| {
@@ -551,10 +613,10 @@ impl<'a> Token<'a> {
             | TokenType::Macro
             | TokenType::MacroParam => Ok(TokenValue::Direct(self.src)),
             TokenType::Keyword | TokenType::CtrlKeyword => Ok(TokenValue::Keyword(
-                Keyword::from_str(self.src).expect(VALID_TOKENS),
+                Keyword::try_from_str(self.src).expect(VALID_TOKENS),
             )),
             TokenType::Punctuation => Ok(TokenValue::Punctuation(
-                Punctuation::from_str(self.src).expect(VALID_TOKENS),
+                Punctuation::try_from_str(self.src).expect(VALID_TOKENS),
             )),
             TokenType::Bracket(depth) => Ok(TokenValue::Bracket(depth)),
         }

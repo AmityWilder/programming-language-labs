@@ -1,4 +1,4 @@
-//! Syntax (not semantic) highlighting
+//! Syntax (not semantic, yet) highlighting
 
 use crate::{
     error::TokenResult,
@@ -33,6 +33,7 @@ fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, S
     .into_iter()
 }
 
+/// An iterator over sub-tokens (like escape sequences in char/string literals)
 #[derive(Debug, Clone)]
 pub struct SubTokenSyntax<'a, I: Iterator<Item = (Range<usize>, Syntax)>> {
     /// Full lexeme
@@ -115,6 +116,7 @@ mod subtoken_syn_tests {
     }
 }
 
+/// Offsets [`Range`]s by the length of a char/string delimiter and tuples them with [`Syntax::EscapeSeq`]
 #[derive(Debug, Clone)]
 pub struct EscapedRanges<I> {
     iter: I,
@@ -143,9 +145,12 @@ where
     }
 }
 
+/// An extension to [`TokenValueSimplicity`] defining helpers for syntax highlighting
 pub trait Highlighting: TokenValueSimplicity {
+    /// The type returned by [`Self::escaped_str_literal`]
     type Escaped<'a: 'b, 'b>: 'b + Iterator<Item = (&'a str, Syntax)>;
 
+    /// Returns a syntax iterator over subtokens of a char/string literal
     fn escaped_str_literal<'a, 'b>(
         lex: &'a str,
         syn: Syntax,
@@ -170,6 +175,7 @@ impl Highlighting for Allocated {
     }
 }
 
+/// Not related to [`EscapedRanges`], actually. Just adapts an [`Escapes`] iterator into its non-error ranges.
 #[derive(Debug, Clone)]
 pub struct EscapeRanges<'a> {
     iter: Escapes<'a>,
@@ -205,10 +211,14 @@ impl Highlighting for NoAlloc {
     }
 }
 
+/// An iterator over the subtokens of any valid token, since each has its own method of iterating
 #[derive(Debug, Clone)]
 pub enum HighlightToken<'a: 'b, 'b, H: Highlighting> {
+    /// Character literal containing escapes - the open delimiter, the escape sequence, then the close delimiter
     CharLiteral(std::array::IntoIter<(&'a str, Syntax), 3>),
+    /// String literal containing escapes - interleaves the escape sequences between un-escaped chunks
     StrLiteral(H::Escaped<'a, 'b>),
+    /// Any token that doesn't have subtokens
     Simple(std::iter::Once<(&'a str, Syntax)>),
 }
 
@@ -240,6 +250,7 @@ impl<'a: 'b, 'b, H: Highlighting> Iterator for HighlightToken<'a, 'b, H> {
     }
 }
 
+/// An iterator over tokens, outputting their lexeme and [Syntax]
 #[derive(Debug, Clone)]
 pub struct HighlightIter<I> {
     iter: I,
@@ -277,6 +288,7 @@ impl<'a: 'b, 'b, H: Highlighting, I: Iterator<Item = &'b TokenResult<'a, H>>> It
     }
 }
 
+/// An iterator over each lexeme and [`Syntax`] in the [`TokenResult`] list
 pub fn highlight<'a: 'b, 'b, H, I>(tokens: I) -> std::iter::Flatten<HighlightIter<I::IntoIter>>
 where
     H: Highlighting,
