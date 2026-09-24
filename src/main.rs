@@ -107,7 +107,7 @@ pub fn run_code(source: &str) {
                     style.end()
                 );
             }
-            Err(e) => eprintln!("\x1b[91merror: {e}\x1b[0m"),
+            Err(e) => eprintln!("\x1b[91merror: {e:#?}\x1b[0m"),
         }
     }
 
