@@ -40,7 +40,8 @@
     clippy::string_slice,
     reason = "be careful about edge-cases"
 )]
-// #![warn(clippy::expect_used, clippy::panic, unsafe_code)] // not actually a problem, just be aware
+// #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
+// #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use grammar::{
     highlight,

@@ -238,6 +238,21 @@ define_token_eq! {
     }
 }
 
+/// Produces a `IntErrorKind::NegOverflow`, since those are private :/
+fn number_underflow() -> std::num::TryFromIntError {
+    {
+        #[allow(clippy::as_conversions, reason = "into is not const")]
+        #[expect(clippy::invalid_upcast_comparisons, reason = "further proves my point")]
+        const {
+            assert!(i16::MIN < i8::MIN as i16, "proof. i16::MIN < i8::MIN");
+        }
+        // SAFETY: `i16::MIN < i8::MIN`. Because it is `<` and not `<=`, and both are integers,
+        // there must be a difference of at least 1.
+        i8::try_from(unsafe { i16::from(i8::MIN).unchecked_sub(1) })
+            .expect_err("should result in negative overflow")
+    }
+}
+
 /// Information about a character literal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CharLiteral {
@@ -349,12 +364,9 @@ impl<'a, S: TokenValueSimplicity> TokenValue<'a, S> {
                             .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::SInt(e)))
                             .and_then(|x| {
                                 x.checked_neg().ok_or_else(|| {
-                                    ErrorType::InvalidNumLiteral(NumLitError::SInt({
-                                        // SAFETY: i8::MIN-1 fits in i16. I tried asserting to prove this,
-                                        // but got an `invalid_upcast_comparisons` warning, which prove it by itself.
-                                        i8::try_from(unsafe { i16::from(i8::MIN).unchecked_sub(1) })
-                                            .expect_err("should result in negative overflow")
-                                    }))
+                                    ErrorType::InvalidNumLiteral(NumLitError::SInt(
+                                        number_underflow(),
+                                    ))
                                 })
                             }))
                         .map(|x| Self::SIntLiteral(x))
@@ -538,7 +550,9 @@ pub fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
                     "proof. 2 UTF8 characters are guaranteed not to exceed usize::MAX"
                 );
             }
-            // SAFETY: 2 UTF8 characters are guaranteed not to exceed usize::MAX
+            // SAFETY: As shown above, `char::MAX_LEN_UTF8 * 2` fits in usize.
+            // By definition of `char::MAX_LEN_UTF8`, `c.len_utf8()` is at most `char::MAX_LEN_UTF8` for all `c: char`.
+            // Therefore, `c.len_utf8() + d.len_utf8()` fits in usize for all `c,d: char`.
             let base_len = unsafe { ESCAPE.len_utf8().unchecked_add(ch.len_utf8()) };
             match ch {
                 '0'..='9' => Ok((base_len, char::from((u8::try_from(ch).expect("0-9 are ASCII and therefore 1 byte")).checked_sub(b'0').expect("0-9 are guaranteed to be within u8")))),
