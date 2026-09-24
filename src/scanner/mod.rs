@@ -7,7 +7,7 @@ use crate::{
         MACRO_PARAM_PREFIX, MACRO_PREFIX, STR_DELIM,
     },
 };
-use std::{debug_assert_matches, range::Range};
+use std::range::Range;
 use token::{Allocated, Keyword, KeywordType, NoAlloc, Punctuation, Token, TokenType, TokenValue};
 
 pub mod symbols;
@@ -69,8 +69,6 @@ pub struct Scanner<'a> {
     /// The most recent non-whitespace, non-comment token was either the start of the source code or [`TokenType::Punctuation`]
     /// **and not** `)`, `]`, or `}`.
     can_be_negative: bool,
-
-    bracket_pairs: Vec<(Bracket, usize)>,
 }
 
 impl<'a> Scanner<'a> {
@@ -80,7 +78,6 @@ impl<'a> Scanner<'a> {
             source,
             // start off true because we are at the start of the source code
             can_be_negative: true,
-            bracket_pairs: Vec::new(),
         }
     }
 
@@ -353,70 +350,6 @@ impl<'a> Scanner<'a> {
             .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
     }
 
-    fn starts_with_brack(&self) -> bool {
-        self.source.starts_with(['[', '(', '{', ']', ')', '}'])
-    }
-
-    fn scan_brack(&mut self) -> Result<Token<'a>, ContextError<'a>> {
-        let lex = self.split_off(1); // 1 ASCII char
-        let (kind, is_open) = match lex {
-            "[" => (Bracket::Brack, true),
-            "(" => (Bracket::Paren, true),
-            "{" => (Bracket::Brace, true),
-
-            "]" => (Bracket::Brack, false),
-            ")" => (Bracket::Paren, false),
-            "}" => (Bracket::Brace, false),
-
-            _ => unreachable!("should not call `scan_brack` if `starts_with_brack` is false"),
-        };
-        if is_open {
-            let n = self.bracket_pairs.len();
-            debug_assert_matches!(lex, "[" | "(" | "{", "position should belong to a bracket");
-            self.bracket_pairs.push((
-                kind,
-                self.original
-                    .substr_range(lex)
-                    .expect("lex should be a substr of original")
-                    .start,
-            ));
-            Ok(Token {
-                src: lex,
-                ty: TokenType::Bracket(n),
-            })
-        } else if self
-            .bracket_pairs
-            .pop_if(|(expecting, _)| *expecting == kind)
-            .is_some()
-        {
-            Ok(Token {
-                src: lex,
-                ty: TokenType::Bracket(self.bracket_pairs.len()),
-            })
-        } else {
-            // bracket_stack is empty
-            Err(self.error_prev(
-                lex.len(),
-                match self.bracket_pairs.last().copied().map(|(brack, pos)| {
-                    (
-                        brack,
-                        Range::from(
-                            pos..pos
-                                .checked_add(brack.open().len_utf8())
-                                .expect("bracket should be in string"),
-                        ),
-                    )
-                }) {
-                    Some(expect) => ErrorType::IncorrectCloseBracket {
-                        expect,
-                        actual: kind,
-                    },
-                    None => ErrorType::ExcessCloseBracket { actual: kind },
-                },
-            ))
-        }
-    }
-
     fn starts_with_punc(&self) -> bool {
         self.source
             .starts_with(|ch: char| ch.is_ascii_punctuation())
@@ -444,69 +377,54 @@ impl<'a> Iterator for Scanner<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         // if there are no characters remaining, this will return None and stop iterating.
-        self.source
-            .chars()
-            .next()
-            .map(|ch| {
-                // we check for the pattern of the token with "if/else" instead of "if { return }"
-                // because once we have identified what type of token it should be, there must be an error if it isn't that.
-                // if we continued going down the list of possible tokens until one succeeded, we would be doing
-                // more processing and miss the fact that it wasn't a *different* token, it was just an *invalid* token.
+        self.source.chars().next().map(|ch| {
+            // we check for the pattern of the token with "if/else" instead of "if { return }"
+            // because once we have identified what type of token it should be, there must be an error if it isn't that.
+            // if we continued going down the list of possible tokens until one succeeded, we would be doing
+            // more processing and miss the fact that it wasn't a *different* token, it was just an *invalid* token.
 
-                // branches ordered by:
-                // 1. if a pattern might fit multiple branches, the most specific one must come before a less specific one;
-                //    so that we don't eliminate the opportunity to check if it's more specific.
-                // 2. if branches are equally simple or do not overlap, simplest conditions first; so that we aren't testing
-                //    a complex condition on tokens that don't satisfy them, when they might have satisfied a less expensive
-                //    condition for a different branch.
+            // branches ordered by:
+            // 1. if a pattern might fit multiple branches, the most specific one must come before a less specific one;
+            //    so that we don't eliminate the opportunity to check if it's more specific.
+            // 2. if branches are equally simple or do not overlap, simplest conditions first; so that we aren't testing
+            //    a complex condition on tokens that don't satisfy them, when they might have satisfied a less expensive
+            //    condition for a different branch.
 
-                if self.starts_with_whitespace() {
-                    Ok(self.scan_whitespace())
-                } else if self.starts_with_macro() {
-                    Ok(self.scan_macro())
-                } else if self.starts_with_macro_param() {
-                    Ok(self.scan_macro_param())
-                } else if let Some(open_delim) = self.starts_with_strlike_literal() {
-                    self.scan_strlike_literal(open_delim)
-                } else if self.starts_with_ident() {
-                    Ok(self.scan_ident())
-                } else if self.starts_with_num_literal() {
-                    Ok(self.scan_num_literal())
-                } else if self.starts_with_line_comment() {
-                    Ok(self.scan_line_comment())
-                } else if self.starts_with_block_comment() {
-                    self.scan_block_comment()
-                } else if self.starts_with_brack() {
-                    self.scan_brack()
-                } else if self.starts_with_punc() {
-                    self.scan_punc()
-                } else {
-                    Err(self.error_here(ch.len_utf8(), ErrorType::UnknownToken))
+            if self.starts_with_whitespace() {
+                Ok(self.scan_whitespace())
+            } else if self.starts_with_macro() {
+                Ok(self.scan_macro())
+            } else if self.starts_with_macro_param() {
+                Ok(self.scan_macro_param())
+            } else if let Some(open_delim) = self.starts_with_strlike_literal() {
+                self.scan_strlike_literal(open_delim)
+            } else if self.starts_with_ident() {
+                Ok(self.scan_ident())
+            } else if self.starts_with_num_literal() {
+                Ok(self.scan_num_literal())
+            } else if self.starts_with_line_comment() {
+                Ok(self.scan_line_comment())
+            } else if self.starts_with_block_comment() {
+                self.scan_block_comment()
+            } else if self.starts_with_punc() {
+                self.scan_punc()
+            } else {
+                Err(self.error_here(ch.len_utf8(), ErrorType::UnknownToken))
+            }
+            .and_then(|tkn| {
+                tkn.value_noalloc()
+                    .map(|val| (tkn, val))
+                    .map_err(|err| self.error_prev(tkn.src.len(), err))
+            })
+            .inspect(|(token, _)| {
+                // non-whitespace, non-comment token
+                if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
+                    // punctuation except for close bracket
+                    self.can_be_negative = matches!(token.ty, TokenType::Punctuation)
+                        && !matches!(token.src, ")" | "]" | "}");
                 }
-                .and_then(|tkn| {
-                    tkn.value_noalloc()
-                        .map(|val| (tkn, val))
-                        .map_err(|err| self.error_prev(tkn.src.len(), err))
-                })
-                .inspect(|(token, _)| {
-                    // non-whitespace, non-comment token
-                    if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
-                        // punctuation except for close bracket
-                        self.can_be_negative =
-                            matches!(token.ty, TokenType::Punctuation | TokenType::Bracket(_))
-                                && !matches!(token.src, ")" | "]" | "}");
-                    }
-                })
             })
-            .or_else(|| {
-                self.bracket_pairs.pop().map(|(brack, position)| {
-                    let end = position
-                        .checked_add(brack.open().len_utf8())
-                        .expect("should be a range within source, which is in memory and whose len therefore fits in usize");
-                    let range = Range::from(position..end,);
-                    Err(self.error_here(0, ErrorType::MissingCloseBracket { expect: (brack, range) }))
-                })
-            })
+        })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
