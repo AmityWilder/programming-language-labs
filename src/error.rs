@@ -148,7 +148,7 @@ impl std::fmt::Debug for ContextError<'_> {
         f.debug_struct("ContextError")
             .field(
                 "source[range]",
-                // this closure looks pointless, but it's actually coercing `s` from `&&str` into `&std::fmt::Debug`
+                // this closure looks pointless, but it's actually coercing `s` from `&&str` into `&dyn std::fmt::Debug`
                 self.source.get(self.range).as_ref().map_or(&Invalid, |s| s),
             )
             .field("range", &self.range)
