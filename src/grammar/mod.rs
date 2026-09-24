@@ -4,8 +4,72 @@
 
 use crate::{
     error::{ContextError, ErrorType},
-    scanner::token::{Keyword, Punctuation, StrLiteral, Token, TokenValue},
+    scanner::token::{Keyword, Punctuation, StrLiteral, Token, TokenType, TokenValue},
 };
+
+pub trait TerminatingRule<'a, T: StrLiteral>: Sized {
+    type Output;
+
+    fn try_pull_matching<'b>(
+        self,
+        source: &'a str,
+        tokens: &'b [Token<'a, T>],
+        expecting: &'static str,
+    ) -> Result<(Self::Output, &'b [Token<'a, T>]), ContextError<'a>>;
+}
+
+macro_rules! rule {
+    (($source:expr, $tokens:expr) $expecting:literal: $pattern:pat => $res:expr) => {
+        (|token| {
+            if let $pattern = token {
+                Some($res)
+            } else {
+                None
+            }
+        })
+        .try_pull_matching($source, $tokens, $expecting)
+    };
+}
+
+impl<'a, T, U, F> TerminatingRule<'a, T> for F
+where
+    Token<'a, T>: Into<Token<'a, &'a str>>,
+    T: StrLiteral + Clone,
+    F: FnOnce(Token<'a, T>) -> Option<U>,
+{
+    type Output = U;
+
+    fn try_pull_matching<'b>(
+        self,
+        source: &'a str,
+        mut tokens: &'b [Token<'a, T>],
+        expect: &'static str,
+    ) -> Result<(Self::Output, &'b [Token<'a, T>]), ContextError<'a>> {
+        tokens
+            .split_off_first()
+            .ok_or(ContextError {
+                source,
+                range: (source.len()..source.len()).into(),
+                err: ErrorType::MissingToken { expect },
+            })
+            .and_then(|token| {
+                if let Some(x) = self(token.clone()) {
+                    Ok((x, tokens))
+                } else {
+                    Err(ContextError {
+                        source,
+                        range: source
+                            .substr_range(token.src)
+                            .expect("token src should be a substring of the source code"),
+                        err: ErrorType::UnexpectedToken {
+                            expect,
+                            actual: token.clone().into(),
+                        },
+                    })
+                }
+            })
+    }
+}
 
 pub trait Rule<'a, T: StrLiteral>: Sized {
     fn try_pull<'b>(
@@ -29,69 +93,13 @@ where
 {
     fn try_pull<'b>(
         source: &'a str,
-        mut tokens: &'b [Token<'a, T>],
+        tokens: &'b [Token<'a, T>],
     ) -> Result<(Self, &'b [Token<'a, T>]), ContextError<'a>> {
-        let let_kw = tokens
-            .split_off_first()
-            .cloned()
-            .ok_or(ContextError {
-                source,
-                range: (source.len()..source.len()).into(),
-                err: ErrorType::MissingToken { expect: "`let`" },
-            })
-            .and_then(|token| {
-                if let Token {
-                    src,
-                    val: TokenValue::Keyword(Keyword::Let),
-                    ..
-                } = token
-                {
-                    Ok(src)
-                } else {
-                    Err(ContextError {
-                        source,
-                        range: source
-                            .substr_range(token.src)
-                            .expect("token src should be a substring of the source code"),
-                        err: ErrorType::UnexpectedToken {
-                            expect: "`let`",
-                            actual: token.into(),
-                        },
-                    })
-                }
-            })?;
+        let (let_kw, tokens) = rule!((source, tokens) "`let`": Token { src, val: TokenValue::Keyword(Keyword::Let), .. } => src)?;
 
-        let (binding, mut tokens) = Binding::try_pull(source, tokens)?;
+        let (binding, tokens) = Binding::try_pull(source, tokens)?;
 
-        let assign_kw = tokens
-            .split_off_first()
-            .cloned()
-            .ok_or(ContextError {
-                source,
-                range: (source.len()..source.len()).into(),
-                err: ErrorType::MissingToken { expect: "`=`" },
-            })
-            .and_then(|token| {
-                if let Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::Assign),
-                    ..
-                } = token
-                {
-                    Ok(src)
-                } else {
-                    Err(ContextError {
-                        source,
-                        range: source
-                            .substr_range(token.src)
-                            .expect("token src should be a substring of the source code"),
-                        err: ErrorType::UnexpectedToken {
-                            expect: "`=`",
-                            actual: token.into(),
-                        },
-                    })
-                }
-            })?;
+        let (assign_kw, tokens) = rule!((source, tokens) "`=`": Token { src, val: TokenValue::Punctuation(Punctuation::Assign), .. } => src)?;
 
         let (expression, tokens) = Expression::try_pull(source, tokens)?;
 
@@ -120,37 +128,9 @@ where
 {
     fn try_pull<'b>(
         source: &'a str,
-        mut tokens: &'b [Token<'a, T>],
+        tokens: &'b [Token<'a, T>],
     ) -> Result<(Self, &'b [Token<'a, T>]), ContextError<'a>> {
-        let name = tokens
-            .split_off_first()
-            .cloned()
-            .ok_or(ContextError {
-                source,
-                range: (source.len()..source.len()).into(),
-                err: ErrorType::MissingToken { expect: "`let`" },
-            })
-            .and_then(|token| {
-                if let Token {
-                    src,
-                    val: TokenValue::Keyword(Keyword::Let),
-                    ..
-                } = token
-                {
-                    Ok(src)
-                } else {
-                    Err(ContextError {
-                        source,
-                        range: source
-                            .substr_range(token.src)
-                            .expect("token src should be a substring of the source code"),
-                        err: ErrorType::UnexpectedToken {
-                            expect: "`let`",
-                            actual: token.into(),
-                        },
-                    })
-                }
-            })?;
+        let (name, tokens) = rule!((source, tokens) "identifier": Token { src, ty: TokenType::Identifier, .. } => src)?;
 
         Ok((Self { name }, tokens))
     }
