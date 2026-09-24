@@ -7,7 +7,8 @@
 #![warn(
     clippy::pedantic,
     clippy::indexing_slicing,
-    clippy::missing_const_for_fn
+    clippy::missing_const_for_fn,
+    missing_docs
 )]
 #![warn(clippy::missing_safety_doc, clippy::missing_panics_doc, clippy::todo)]
 #![deny(clippy::undocumented_unsafe_blocks, reason = "must prove soundness")]
@@ -21,18 +22,17 @@
 #![warn(clippy::arithmetic_side_effects, clippy::as_conversions)]
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 
-use grammar::{highlight, syntax::syntax_of};
-use scanner::tokenize_noalloc;
-
-use crate::grammar::{
+use grammar::{
+    highlight,
     style::{Color, Style, StyleWrapper},
-    syntax::SyntaxStyle,
+    syntax::{SyntaxStyle, syntax_of},
 };
+use scanner::tokenize_noalloc;
 use std::{fmt::Write, range::Range};
 
-mod error;
-mod grammar;
-mod scanner;
+pub mod error;
+pub mod grammar;
+pub mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
 mod test;
@@ -47,8 +47,6 @@ const SYNTAX_STYLE_ANSII: SyntaxStyle<Style> = SyntaxStyle {
     char_literal: Style::new().foreground(Color::Rgb(0xce, 0x91, 0x78)),
 
     string_literal: Style::new().foreground(Color::Rgb(0xce, 0x91, 0x78)),
-
-    interp_str_literal: Style::new().foreground(Color::Rgb(0xce, 0x91, 0x78)),
 
     escape_seq: Style::new().foreground(Color::Rgb(0xd7, 0xba, 0x7d)),
 

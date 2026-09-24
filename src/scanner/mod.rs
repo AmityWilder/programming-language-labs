@@ -1,3 +1,5 @@
+//! The iterator that breaks source code into tokens (which are defined in [`token`] module).
+
 use crate::error::{ContextError, ErrorType, TokenResult};
 use std::{debug_assert_matches, range::Range};
 use symbols::*;
@@ -16,14 +18,20 @@ const fn unescaped(looking_for: char) -> impl FnMut(char) -> bool {
     }
 }
 
+/// A bracket character
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Bracket {
+    /// `[`/`]`
     Brack,
+    /// `(`/`)`
     Paren,
+    /// `{`/`}`
     Brace,
 }
 
 impl Bracket {
+    /// The open partner of the bracket
+    #[must_use]
     pub const fn open(self) -> char {
         match self {
             Self::Brack => '[',
@@ -32,6 +40,8 @@ impl Bracket {
         }
     }
 
+    /// The close partner of the bracket
+    #[must_use]
     pub const fn close(self) -> char {
         match self {
             Self::Brack => ']',
@@ -41,6 +51,7 @@ impl Bracket {
     }
 }
 
+/// An iterator that breaks down text into tokens
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scanner<'a> {
     /// This one doesn't get ripped apart, it exists for fulfilling context errors
@@ -58,7 +69,7 @@ pub struct Scanner<'a> {
 }
 
 impl<'a> Scanner<'a> {
-    pub const fn new(source: &'a str) -> Self {
+    const fn new(source: &'a str) -> Self {
         Self {
             original: source,
             source,
@@ -238,7 +249,7 @@ impl<'a> Scanner<'a> {
         let src = self.split_off(len);
         Token {
             src,
-            ty: if let Some(kw) = Keyword::from_str(src) {
+            ty: if let Some(kw) = Keyword::try_from_str(src) {
                 if matches!(kw.kw_type(), KeywordType::Control) {
                     TokenType::CtrlKeyword
                 } else {
@@ -376,18 +387,21 @@ impl<'a> Scanner<'a> {
             // bracket_stack is empty
             Err(self.error_prev(
                 lex.len(),
-                ErrorType::UnbalancedBrackets {
-                    expect: self.bracket_pairs.last().copied().map(|(brack, pos)| {
-                        (
-                            brack,
-                            Range::from(
-                                pos..pos
-                                    .checked_add(brack.open().len_utf8())
-                                    .expect("bracket should be in string"),
-                            ),
-                        )
-                    }),
-                    actual: kind,
+                match self.bracket_pairs.last().copied().map(|(brack, pos)| {
+                    (
+                        brack,
+                        Range::from(
+                            pos..pos
+                                .checked_add(brack.open().len_utf8())
+                                .expect("bracket should be in string"),
+                        ),
+                    )
+                }) {
+                    Some(expect) => ErrorType::IncorrectCloseBracket {
+                        expect,
+                        actual: kind,
+                    },
+                    None => ErrorType::ExcessCloseBracket { actual: kind },
                 },
             ))
         }
@@ -487,10 +501,10 @@ pub fn tokenize_noalloc(source: &str) -> impl Iterator<Item = TokenResult<'_, No
 }
 
 /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "for future use at parser stage")
-)]
+///
+/// # Panics
+/// This method can panic if an error is found in the value allocation step that was not identified in
+/// the scanning step
 pub fn tokenize(source: &str) -> impl Iterator<Item = TokenResult<'_, Allocated>> {
     tokenize_noalloc(source).map(|item| {
         item.map(|(token, value)| {
