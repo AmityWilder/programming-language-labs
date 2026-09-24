@@ -27,7 +27,9 @@ pub struct Styled<'a, T, U>
 where
     U: ?Sized + StyleWrapper,
 {
+    /// The style to wrap [`Self::inner`] with
     style: &'a U,
+    /// The content being styled
     inner: T,
 }
 
@@ -46,6 +48,7 @@ impl<T: std::fmt::Display, U: StyleWrapper> std::fmt::Display for Styled<'_, T, 
 /// An ANSI color
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
+#[allow(dead_code, reason = "flexibility")]
 pub enum Color {
     /// 3-bit black
     Black = 0,
@@ -110,9 +113,13 @@ pub struct Style {
 }
 
 impl Style {
+    /// Bitflag for [`Style::flags`] representing the bold style
     const BOLD_FLAG: u8 = 1;
+    /// Bitflag for [`Style::flags`] representing the italic style
     const ITALIC_FLAG: u8 = 2;
+    /// Bitflag for [`Style::flags`] representing the underline style
     const UNDERLINE_FLAG: u8 = 4;
+    /// Bitflag for [`Style::flags`] representing the strikethrough style
     const STRIKETHROUGH_FLAG: u8 = 8;
 
     /// Construct a new, default [`Style`]
@@ -127,6 +134,7 @@ impl Style {
 
     /// Make this style bold
     #[must_use]
+    #[allow(dead_code, reason = "flexibility")]
     pub const fn bold(mut self) -> Self {
         self.flags |= Self::BOLD_FLAG;
         self
@@ -134,6 +142,7 @@ impl Style {
 
     /// Make this style italic
     #[must_use]
+    #[allow(dead_code, reason = "flexibility")]
     pub const fn italic(mut self) -> Self {
         self.flags |= Self::ITALIC_FLAG;
         self
@@ -141,6 +150,7 @@ impl Style {
 
     /// Make this style underline
     #[must_use]
+    #[allow(dead_code, reason = "flexibility")]
     pub const fn underline(mut self) -> Self {
         self.flags |= Self::UNDERLINE_FLAG;
         self
@@ -148,6 +158,7 @@ impl Style {
 
     /// Make this style strikethrough
     #[must_use]
+    #[allow(dead_code, reason = "flexibility")]
     pub const fn strikethrough(mut self) -> Self {
         self.flags |= Self::STRIKETHROUGH_FLAG;
         self
@@ -155,6 +166,7 @@ impl Style {
 
     /// Set the foreground color for this style
     #[must_use]
+    #[allow(dead_code, reason = "flexibility")]
     pub const fn foreground(mut self, value: Color) -> Self {
         self.color = Some(value);
         self
@@ -162,6 +174,7 @@ impl Style {
 
     /// Set the background color for this style
     #[must_use]
+    #[allow(dead_code, reason = "flexibility")]
     pub const fn background(mut self, value: Color) -> Self {
         self.background = Some(value);
         self

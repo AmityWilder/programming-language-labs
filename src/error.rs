@@ -64,6 +64,7 @@ pub enum ErrorType<'a> {
     /// A number literal could not be evaluated as a number
     InvalidNumLiteral(NumLitError),
     /// A closing bracket is of the wrong type for the open bracket at its depth
+    #[expect(dead_code, reason = "reserved for future use")]
     IncorrectCloseBracket {
         /// The bracket type being expected based on the opening side
         expect: (Bracket, Range<usize>),
@@ -71,11 +72,13 @@ pub enum ErrorType<'a> {
         actual: Bracket,
     },
     /// A closing bracket was found with no open bracket
+    #[expect(dead_code, reason = "reserved for future use")]
     ExcessCloseBracket {
         /// The bracket type that was found
         actual: Bracket,
     },
     /// An open bracket was found with no close bracket
+    #[expect(dead_code, reason = "reserved for future use")]
     MissingCloseBracket {
         /// The bracket type being expected based on the opening side
         expect: (Bracket, Range<usize>),
@@ -85,19 +88,28 @@ pub enum ErrorType<'a> {
 impl std::fmt::Display for ErrorType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UnknownToken => f.write_str("unknown token"),
+            Self::UnknownToken => write!(f, "unknown token"),
             Self::EndlessBlockComment => {
-                f.write_str("block comment opens (`/*`) but never closes (missing `*/`)")
+                write!(
+                    f,
+                    "block comment opens (`/*`) but never closes (missing `*/`)"
+                )
             }
-            Self::EmptyCharLiteral => f.write_str("empty character literal"),
+            Self::EmptyCharLiteral => write!(f, "empty character literal"),
             Self::MultiCharLiteral => {
-                f.write_str("character literal may only contain one codepoint")
+                write!(f, "character literal may only contain one codepoint")
             }
             Self::EndlessCharLiteral | Self::EscapedCharLiteralEnd => {
-                f.write_str("char literal opens (`'`) but never closes (missing unescaped `'`)")
+                write!(
+                    f,
+                    "char literal opens (`'`) but never closes (missing unescaped `'`)"
+                )
             }
             Self::EndlessStringLiteral | Self::EscapedStringLiteralEnd => {
-                f.write_str("string literal opens (`\"`) but never closes (missing unescaped `\"`)")
+                write!(
+                    f,
+                    "string literal opens (`\"`) but never closes (missing unescaped `\"`)"
+                )
             }
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s:?}"),
             Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
@@ -179,7 +191,8 @@ impl std::fmt::Display for LineCol {
     }
 }
 
-fn line_col(s: &str, position: usize) -> Option<LineCol> {
+/// The line and column of `position` within `s`
+pub fn line_col(s: &str, position: usize) -> Option<LineCol> {
     s.get(..position).map(|s| {
         s.split('\n') // assumes \n\r will never happen, except for \r\n\r\n
             .enumerate()
@@ -191,6 +204,7 @@ fn line_col(s: &str, position: usize) -> Option<LineCol> {
     })
 }
 
+/// The lines and columns of `start` and `end` within `s`
 fn line_col_range(s: &str, range: Range<usize>) -> Option<Range<LineCol>> {
     line_col(s, range.start)
         .zip(line_col(s, range.end))
@@ -287,7 +301,7 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
             .get(self.0.range)
             .expect("range should be a range in source");
         match &self.0.err {
-            ErrorType::UnknownToken => f.write_str("try removing the character"),
+            ErrorType::UnknownToken => write!(f, "try removing the character"),
 
             ErrorType::EndlessBlockComment => write!(f, "try adding `{BLOCK_COMMENT_CLOSE}`"),
 
@@ -380,12 +394,19 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                         "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}"
                     )
                 } else if ch.is_alphabetic() {
-                    f.write_str("`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
-                                ASCII letters that can be escape sequences")
+                    write!(
+                        f,
+                        "`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
+                                ASCII letters that can be escape sequences"
+                    )
                 } else if ch.is_numeric() {
-                    f.write_str("only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences")
+                    write!(
+                        f,
+                        "only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences"
+                    )
                 } else {
-                    f.write_str(
+                    write!(
+                        f,
                         "supported escape sequences: `\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, `\\0`-`\\9`,\n\\
                         `\\x##` (where # is a hexadecimal digit), `\\o###` (where # is an octal digit)"
                     )
@@ -481,7 +502,7 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                         _ => unimplemented!(),
                     },
 
-                    NumLitError::Flt(_) => f.write_str("I'm not sure how to help with this yet"),
+                    NumLitError::Flt(_) => write!(f, "I'm not sure how to help with this yet"),
                 }
             }
 
@@ -537,6 +558,14 @@ pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedContextError<'a, 'b>(&'b ContextError<'a>);
 
+/// Outputs a line reference to `f`.
+///
+/// Example:
+/// ```not_code
+///    |
+///  1 |    let foo = 5;
+///    |        ~~~ message
+/// ```
 fn line_ref(
     f: &mut std::fmt::Formatter<'_>,
     source: &str,
@@ -578,9 +607,9 @@ fn line_ref(
         writeln!(f, "{PRE_NUM}{line_number:>num_width$}{POST_NUM}{line}")?;
         write!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
         for _ in 0..start_col {
-            f.write_str(" ")?;
+            write!(f, " ")?;
         }
-        f.write_str(underline_style)?;
+        write!(f, "{underline_style}")?;
         for _ in start_col..end_col {
             write!(f, "{underline_char}")?;
         }

@@ -22,7 +22,7 @@
 #![warn(
     clippy::pedantic,
     clippy::missing_const_for_fn,
-    missing_docs,
+    clippy::missing_docs_in_private_items,
     clippy::too_many_lines,
     reason = "yucky. clean that up."
 )]
@@ -47,17 +47,19 @@ use grammar::{
     style::{Color, Style, StyleWrapper},
     syntax::{SyntaxStyle, syntax_of},
 };
-use scanner::tokenize_noalloc;
+use scanner::{Tokenize, token::NoAlloc};
 use std::{fmt::Write, range::Range};
 
-pub mod error;
-pub mod grammar;
-pub mod scanner;
+mod error;
+mod grammar;
+mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
 mod test;
 
-const SYNTAX_STYLE_ANSII: SyntaxStyle<Style> = SyntaxStyle {
+/// The style table currently being used
+// TODO: make this configurable by file(?)
+const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
     normal: Style::new(),
 
     comment: Style::new().foreground(Color::Rgb(0x6a, 0x99, 0x55)),
@@ -110,12 +112,12 @@ const SYNTAX_STYLE_ANSII: SyntaxStyle<Style> = SyntaxStyle {
 pub fn run_code(source: &str) {
     // token debug
     println!("source code:\n```\n{source}\n```");
-    let tokens: Vec<_> = tokenize_noalloc(source).collect();
+    let tokens: Vec<_> = NoAlloc::tokenize(source).collect();
     for item in &tokens {
         let (lex, syn, _) = syntax_of(item);
         match item {
             Ok((token, value)) => {
-                let style = SYNTAX_STYLE_ANSII[syn];
+                let style = SYNTAX_STYLE_ANSI[syn];
                 println!(
                     "{:?}: {}{token:?}:\n  {value:?}{}",
                     source
@@ -132,7 +134,7 @@ pub fn run_code(source: &str) {
     // grammar highlighted
     let mut buf = String::new();
     for (lexeme, syntax) in highlight(&tokens) {
-        _ = write!(buf, "{}", SYNTAX_STYLE_ANSII[syntax].style(lexeme));
+        _ = write!(buf, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
     }
     _ = write!(buf, "\x1b[0m");
     println!("```");

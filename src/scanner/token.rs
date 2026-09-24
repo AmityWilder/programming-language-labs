@@ -260,15 +260,6 @@ pub struct StringLiteral<'a> {
     pub escapes: Vec<Range<usize>>,
 }
 
-impl<'a> StringLiteral<'a> {
-    const fn borrowed(text: &'a str) -> Self {
-        Self {
-            text: Cow::Borrowed(text),
-            escapes: Vec::new(),
-        }
-    }
-}
-
 /// A trait for distinguishing [`TokenValue`]s by whether they are [`NoAlloc`] vs [`Allocated`]
 pub trait TokenValueSimplicity: Sized + 'static {
     /// The type used for [`TokenValue::StringLiteral`].
@@ -321,15 +312,14 @@ pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated> {
     Direct(&'a str),
     /// A language keyword
     Keyword(Keyword),
-    /// Punctuation (except for [`Self::Bracket`]s)
+    /// Punctuation
     Punctuation(Punctuation),
-    /// A [`super::Bracket`]
-    Bracket(usize),
     /// Escape sequences are converted (unless there are none)
     StringLiteral(S::StringLiteral<'a>),
 }
 
 impl<'a, S: TokenValueSimplicity> TokenValue<'a, S> {
+    /// Parses a number literal lexeme into its value
     fn number_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.
         // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
@@ -375,6 +365,7 @@ impl<'a, S: TokenValueSimplicity> TokenValue<'a, S> {
         }
     }
 
+    /// Parses a character literal lexeme into its value
     fn char_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         let src = src
             .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
@@ -409,7 +400,8 @@ impl<'a, S: TokenValueSimplicity> TokenValue<'a, S> {
 }
 
 impl<'a> TokenValue<'a, NoAlloc> {
-    fn string_literal_noalloc(src: &'a str) -> Result<Self, ErrorType<'a>> {
+    /// Parses a string literal lexeme into its value, without allocating
+    fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         let src = src
             .strip_circumfix(STR_DELIM, STR_DELIM)
             .expect("string literal tokens should include delimiters (`\"`)");
@@ -432,8 +424,11 @@ impl<'a> TokenValue<'a, NoAlloc> {
 /// An iterator over unescaped escape characters ([`ESCAPE`]) in a string
 #[derive(Debug, Clone)]
 pub struct Escapes<'a> {
+    /// Source code
     source: &'a str,
+    /// Tracking of offset into [`Self::source`]
     offset: usize,
+    /// Whether the upcoming character is escaped
     is_esc: bool,
 }
 
@@ -472,6 +467,7 @@ impl<'a> Iterator for Escapes<'a> {
 }
 
 impl<'a> TokenValue<'a, Allocated> {
+    /// Parses a string literal lexeme into its value, without allocating
     fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         let replacements = Escapes::new(src).collect::<Result<Vec<_>, _>>()?;
         let escapes = replacements.iter().map(|(range, _)| *range).collect();
@@ -622,7 +618,7 @@ impl<'a> Token<'a> {
             TokenType::Whitespace | TokenType::Comment => Ok(TokenValue::Ignore),
             TokenType::NumberLiteral => TokenValue::number_literal(self.src),
             TokenType::CharLiteral => TokenValue::char_literal(self.src),
-            TokenType::StringLiteral => TokenValue::string_literal_noalloc(self.src),
+            TokenType::StringLiteral => <TokenValue<NoAlloc>>::string_literal(self.src),
             TokenType::Identifier
             | TokenType::Callable
             | TokenType::Macro
@@ -645,9 +641,12 @@ impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated> {
             // string literal
             TokenValue::StringLiteral(src) => {
                 if src.contains(ESCAPE) {
-                    TokenValue::string_literal(src)
+                    <TokenValue<Allocated>>::string_literal(src)
                 } else {
-                    Ok(Self::StringLiteral(StringLiteral::borrowed(src)))
+                    Ok(Self::StringLiteral(StringLiteral {
+                        text: Cow::Borrowed(src),
+                        escapes: Vec::new(),
+                    }))
                 }
             }
 
@@ -659,7 +658,6 @@ impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated> {
             TokenValue::Direct(x) => Ok(Self::Direct(x)),
             TokenValue::Keyword(x) => Ok(Self::Keyword(x)),
             TokenValue::Punctuation(x) => Ok(Self::Punctuation(x)),
-            TokenValue::Bracket(x) => Ok(Self::Bracket(x)),
         }
     }
 }
