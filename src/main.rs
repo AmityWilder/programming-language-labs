@@ -52,6 +52,7 @@ use scanner::{Tokenize, token::NoAlloc};
 use std::{fmt::Write, range::Range};
 
 mod error;
+mod grammar;
 mod highlight;
 mod scanner;
 
@@ -72,6 +73,8 @@ const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
     string_literal: Style::new().foreground(Color::Rgb(0xce, 0x91, 0x78)),
 
     escape_seq: Style::new().foreground(Color::Rgb(0xd7, 0xba, 0x7d)),
+
+    language_defined: Style::new().foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
 
     interp_expr: Style::new().foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
 

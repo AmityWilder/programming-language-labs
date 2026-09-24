@@ -19,6 +19,8 @@ pub enum TokenType {
     CharLiteral,
     /// A string literal
     StringLiteral,
+    /// A boolean literal
+    BoolLiteral,
     /// The name of an item in code
     Identifier,
     /// Identical to [`Self::Identifier`], but implies a function by context
@@ -258,6 +260,7 @@ fn number_underflow() -> std::num::TryFromIntError {
 pub struct CharLiteral {
     /// The character being represented
     pub ch: char,
+
     /// Whether the character is an escape sequence in the lexeme
     pub is_escaped: bool,
 }
@@ -265,10 +268,10 @@ pub struct CharLiteral {
 /// Information about a string literal
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct StringLiteral<'a> {
-    /// The text content of the string literal; escape sequences converted, "`${}`"s removed, and delimiters excluded.
+    /// The text content of the string literal; escape sequences converted and delimiters excluded.
     ///
-    /// Like a string literal, it's possible no escape sequences or "`${}`"s were present,
-    /// in which case this will be borrowed and [`Self::expressions`] will be empty.
+    /// It's possible no escape sequences were present,
+    /// in which case this will be borrowed and [`Self::escapes`] will be empty.
     pub text: Cow<'a, str>,
 
     /// Ranges of the original lexeme (quote delimiters excluded) that refer to escape sequences
@@ -323,14 +326,16 @@ pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated> {
     FltLiteral(f64),
     /// Character literal
     CharLiteral(CharLiteral),
+    /// String literal
+    StringLiteral(S::StringLiteral<'a>),
+    /// Boolean literal
+    BoolLiteral(bool),
     /// Value is the token source itself (in-code name)
     Direct(&'a str),
     /// A language keyword
     Keyword(Keyword),
     /// Punctuation
     Punctuation(Punctuation),
-    /// Escape sequences are converted (unless there are none)
-    StringLiteral(S::StringLiteral<'a>),
 }
 
 impl<'a, S: TokenValueSimplicity> TokenValue<'a, S> {
@@ -633,6 +638,9 @@ impl<'a> Token<'a> {
             TokenType::NumberLiteral => TokenValue::number_literal(self.src),
             TokenType::CharLiteral => TokenValue::char_literal(self.src),
             TokenType::StringLiteral => <TokenValue<NoAlloc>>::string_literal(self.src),
+            TokenType::BoolLiteral => self.src.parse().map(TokenValue::BoolLiteral).map_err(|e| {
+                panic!("should not identify a token as a BoolLiteral if it is not one: {e}")
+            }),
             TokenType::Identifier
             | TokenType::Callable
             | TokenType::Macro
@@ -669,6 +677,7 @@ impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated> {
             TokenValue::SIntLiteral(x) => Ok(Self::SIntLiteral(x)),
             TokenValue::FltLiteral(x) => Ok(Self::FltLiteral(x)),
             TokenValue::CharLiteral(x) => Ok(Self::CharLiteral(x)),
+            TokenValue::BoolLiteral(x) => Ok(Self::BoolLiteral(x)),
             TokenValue::Direct(x) => Ok(Self::Direct(x)),
             TokenValue::Keyword(x) => Ok(Self::Keyword(x)),
             TokenValue::Punctuation(x) => Ok(Self::Punctuation(x)),

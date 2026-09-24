@@ -10,6 +10,10 @@ fn main() {
     // macro calls use braces for arguments, so that arguments can contain commas
     \foo{my_fn}{9, 3}
 
+    if true {
+        print(false);
+    }
+
     for i in 0..5 {
         let ch = 'n';
         let esc_ch = '\n';
