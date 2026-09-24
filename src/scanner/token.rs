@@ -176,8 +176,6 @@ define_token_eq! {
         Ref = "$",
         Remainder = "%",
         And = "&",
-        LParen = "(",
-        RParen = ")",
         Mul = "*",
         Add = "+",
         Comma = ",",
@@ -190,13 +188,9 @@ define_token_eq! {
         Assign = "=",
         Gt = ">",
         QMark = "?",
-        LBrack = "[",
         MacroStart = "\\",
-        RBrack = "]",
         Xor = "^",
-        LBrace = "{",
         Or = "|",
-        RBrace = "}",
     }
 }
 

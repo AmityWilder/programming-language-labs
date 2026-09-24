@@ -46,7 +46,7 @@ pub enum ErrorType<'a> {
     InvalidEscape(&'a str),
     InvalidNumLiteral(NumLitError),
     UnbalancedBrackets {
-        expect: Option<Bracket>,
+        expect: Option<(Bracket, Range<usize>)>,
         actual: Bracket,
     },
 }
@@ -74,8 +74,8 @@ impl std::fmt::Display for ErrorType<'_> {
                 let mut buf = [0; char::MAX_LEN_UTF8];
                 write!(
                     f,
-                    "unbalanced brackets, expected {}, found {}",
-                    expect.map_or("none", |x| x.close().encode_utf8(buf.as_mut_slice())),
+                    "unbalanced brackets, expected `{}`, found `{}`",
+                    expect.map_or("none", |(x, _)| x.close().encode_utf8(buf.as_mut_slice())),
                     actual.close()
                 )
             }
@@ -92,43 +92,21 @@ impl std::error::Error for ErrorType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Error<'a> {
-    pub range: Range<usize>,
-    pub err: ErrorType<'a>,
-}
-
-impl std::fmt::Display for Error<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self {
-            range: Range { start, end },
-            err,
-        } = self;
-        write!(f, "at {start}..{end}: {err}")
-    }
-}
-
-impl std::error::Error for Error<'_> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.err.source()
-    }
-}
-
-impl<'a> Error<'a> {
-    pub const fn add_context(self, source: &'a str) -> ContextError<'a> {
-        ContextError {
-            source,
-            range: self.range,
-            err: self.err,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ContextError<'a> {
     pub source: &'a str,
     pub range: Range<usize>,
     pub err: ErrorType<'a>,
+}
+
+impl std::fmt::Debug for ContextError<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContextError")
+            .field("source[range]", &&self.source[self.range])
+            .field("range", &self.range)
+            .field("err", &self.err)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -147,20 +125,20 @@ impl std::fmt::Display for LineCol {
 
 fn line_col(s: &str, position: usize) -> LineCol {
     s[..position]
-        .lines()
+        .split('\n') // assumes \n\r will never happen, except for \r\n\r\n
         .enumerate()
         .last()
         .map_or_default(|(row, line)| LineCol {
-            line: row.strict_add(1),
+            line: row.strict_add(1), // +1 to convert from 0-based to 1-based
             col: line.len(),
         })
 }
 
-impl<'a> ContextError<'a> {
-    pub fn position(&self) -> Range<LineCol> {
-        (line_col(self.source, self.range.start)..line_col(self.source, self.range.end)).into()
-    }
+fn line_col_range(s: &str, range: Range<usize>) -> Range<LineCol> {
+    (line_col(s, range.start)..line_col(s, range.end)).into()
+}
 
+impl<'a> ContextError<'a> {
     pub const fn render(&self) -> RenderedContextError<'_, 'a> {
         RenderedContextError(self)
     }
@@ -176,7 +154,7 @@ impl<'a> ContextError<'a> {
 
 impl std::fmt::Display for ContextError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Range { start, end } = self.position();
+        let Range { start, end } = line_col_range(self.source, self.range);
         write!(f, "at {start}-{end}: {}", self.err)
     }
 }
@@ -307,12 +285,7 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                     "should have at least 2 characters or else be an EscapedStringLiteralEnd",
                 );
 
-                if ch.is_alphabetic() {
-                    f.write_str("`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
-                                ASCII letters that can be escape sequences")
-                } else if ch.is_numeric() {
-                    f.write_str("only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences")
-                } else if ch == 'x' {
+                if ch == 'x' {
                     let n = iter.take(2).filter(char::is_ascii_hexdigit).count();
                     assert!(n < 2, "why is this an error?");
                     write!(
@@ -326,6 +299,11 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                         f,
                         "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}"
                     )
+                } else if ch.is_alphabetic() {
+                    f.write_str("`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
+                                ASCII letters that can be escape sequences")
+                } else if ch.is_numeric() {
+                    f.write_str("only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences")
                 } else {
                     f.write_str(
                         "supported escape sequences: `\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, `\\0`-`\\9`,\n\\
@@ -432,10 +410,10 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                     write!(
                         f,
                         "try inserting a `{}` before the `{}` or add a `{}` before it and after the `{}`",
-                        expect.close(),
+                        expect.0.close(),
                         actual.close(),
                         actual.open(),
-                        expect.open(),
+                        expect.0.open(),
                     )
                 } else {
                     write!(
@@ -474,41 +452,95 @@ pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedContextError<'a, 'b>(&'b ContextError<'a>);
 
+fn line_ref(
+    f: &mut std::fmt::Formatter<'_>,
+    source: &str,
+    range: Range<usize>,
+    underline_style: &str,
+    underline_char: char,
+    msg: &str,
+) -> std::fmt::Result {
+    const PRE_NUM: &str = "   \x1b[94m";
+    const POST_NUM: &str = " |\x1b[0m  ";
+
+    let Range { start, end } = line_col_range(source, range);
+    let line_range = line_containing(source, range).expect("range should be a range in source");
+    // bigger numbers have more digits so the last line number should have the most digits
+    let num_width = end.line.to_string().len(); // ew, an allocation just to count the digits :c
+    writeln!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
+    let num_lines = end
+        .line
+        .checked_sub(start.line)
+        .expect("range should be ascending order");
+    for (idx, line) in source[line_range].lines().enumerate() {
+        let line_number = start
+            .line
+            .checked_add(idx)
+            .expect("the number of lines should be at most the number of bytes in source");
+        let start_col = if idx == 0 { start.col } else { 0 };
+        let end_col = if idx == num_lines {
+            end.col
+        } else {
+            line.len()
+        };
+
+        writeln!(f, "{PRE_NUM}{line_number:>num_width$}{POST_NUM}{line}")?;
+        write!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
+        for _ in 0..start_col {
+            f.write_str(" ")?;
+        }
+        f.write_str(underline_style)?;
+        for _ in start_col..end_col {
+            write!(f, "{underline_char}")?;
+        }
+        if idx == num_lines {
+            write!(f, " {msg}")?;
+        }
+        writeln!(f, "\x1b[0m")?;
+    }
+    Ok(())
+}
+
 impl std::fmt::Display for RenderedContextError<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const PRE_NUM: &str = "   \x1b[94m";
-        const POST_NUM: &str = " |\x1b[0m  ";
-        let Range { start, end } = self.0.position();
-        let line_range = line_containing(self.0.source, self.0.range)
-            .expect("range should be a range in source");
-        // bigger numbers have more digits so the last line number should have the most digits
-        let num_width = end.line.to_string().len(); // ew, an allocation just to count the digits :c
-        writeln!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
-        for (idx, line) in self.0.source[line_range].lines().enumerate() {
-            let line_number = start
-                .line
-                .checked_add(idx)
-                .expect("the number of lines should be at most the number of bytes in source");
-            let is_first_line = idx == 0;
-            let is_last_line = idx
-                == end
-                    .line
-                    .checked_sub(start.line)
-                    .expect("range should be ascending order");
-            let start_col = if is_first_line { start.col } else { 0 };
-            let end_col = if is_last_line { end.col } else { line.len() };
+        // error
 
-            writeln!(f, "{PRE_NUM}{line_number:>num_width$}{POST_NUM}{line}")?;
-            write!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
-            for _ in 0..start_col {
-                f.write_str(" ")?;
-            }
-            f.write_str("\x1b[91m")?;
-            for _ in start_col..end_col {
-                f.write_str("~")?;
-            }
-            f.write_str("\x1b[0m\n")?;
+        line_ref(
+            f,
+            self.0.source,
+            self.0.range,
+            "\x1b[91m",
+            '^',
+            match self.0.err {
+                ErrorType::UnknownToken => "what is this?",
+                ErrorType::EndlessBlockComment
+                | ErrorType::EndlessCharLiteral
+                | ErrorType::EndlessStringLiteral => "never ends",
+                ErrorType::EmptyCharLiteral => "empty",
+                ErrorType::MultiCharLiteral => "a char should be 1 char",
+                ErrorType::EscapedCharLiteralEnd | ErrorType::EscapedStringLiteralEnd => {
+                    "never ends, unless you remove the `\\`"
+                }
+                ErrorType::InvalidEscape(_) => "has an invalid escape sequence",
+                ErrorType::InvalidNumLiteral(_) => "not a valid number",
+                ErrorType::UnbalancedBrackets { .. } => "missing a partner",
+            },
+        )?;
+
+        // info
+        let items = match self.0.err {
+            ErrorType::UnbalancedBrackets {
+                expect: Some((_, range)),
+                ..
+            } => &[(range, "bracket type introduced here")],
+
+            _ => [].as_slice(),
+        };
+        for &(range, explanation) in items {
+            writeln!(f)?;
+            line_ref(f, self.0.source, range, "\x1b[96m", '-', explanation)?;
         }
+
         Ok(())
     }
 }

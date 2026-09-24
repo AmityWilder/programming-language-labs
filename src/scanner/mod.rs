@@ -1,5 +1,5 @@
-use crate::error::{ContextError, Error, ErrorType, TokenResult};
-use std::range::Range;
+use crate::error::{ContextError, ErrorType, TokenResult};
+use std::{debug_assert_matches, range::Range};
 use symbols::*;
 use token::{Allocated, Keyword, KeywordType, NoAlloc, Punctuation, Token, TokenType, TokenValue};
 
@@ -54,7 +54,7 @@ pub struct Scanner<'a> {
     /// **and not** `)`, `]`, or `}`.
     can_be_negative: bool,
 
-    bracket_pairs: Vec<Bracket>,
+    bracket_pairs: Vec<(Bracket, usize)>,
 }
 
 impl<'a> Scanner<'a> {
@@ -92,8 +92,9 @@ impl<'a> Scanner<'a> {
     /// Generate an error starting at the current (incomplete) token
     ///
     /// [Splits off](Self::split_off) the erroneous segment so we can find more errors
-    fn error_here(&mut self, len: usize, err: ErrorType<'a>) -> Error<'a> {
-        let err = Error {
+    fn error_here(&mut self, len: usize, err: ErrorType<'a>) -> ContextError<'a> {
+        let err = ContextError {
+            source: self.original,
             range: self
                 .original
                 .substr_range(&self.source[..len])
@@ -105,13 +106,14 @@ impl<'a> Scanner<'a> {
     }
 
     /// Generate an error on the most recent (complete) token
-    fn error_prev(&mut self, len: usize, err: ErrorType<'a>) -> Error<'a> {
+    fn error_prev(&mut self, len: usize, err: ErrorType<'a>) -> ContextError<'a> {
         let end = self
             .original
             .substr_range(self.source)
             .expect("source should be a substring of original")
             .start;
-        Error {
+        ContextError {
+            source: self.original,
             range: Range {
                 start: end.checked_sub(len).expect(
                     "len should be the size of a token that was split off from the source string",
@@ -170,7 +172,7 @@ impl<'a> Scanner<'a> {
             .filter(|ch| matches!(*ch, STR_DELIM | CHAR_DELIM))
     }
 
-    fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, Error<'a>> {
+    fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, ContextError<'a>> {
         self.source[open_delim.len_utf8()..]
             // note: this means graves need to be escaped in interpolated expression strings
             .find(unescaped(open_delim))
@@ -303,7 +305,7 @@ impl<'a> Scanner<'a> {
         self.source.starts_with(BLOCK_COMMENT_OPEN)
     }
 
-    fn scan_block_comment(&mut self) -> Result<Token<'a>, Error<'a>> {
+    fn scan_block_comment(&mut self) -> Result<Token<'a>, ContextError<'a>> {
         const BLOCK_COMMENT_CIRCUMFIX_LEN: usize =
             BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len();
         let mut prev_char = None;
@@ -330,14 +332,76 @@ impl<'a> Scanner<'a> {
             .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
     }
 
+    fn starts_with_brack(&self) -> bool {
+        self.source.starts_with(['[', '(', '{', ']', ')', '}'])
+    }
+
+    fn scan_brack(&mut self) -> Result<Token<'a>, ContextError<'a>> {
+        let lex = self.split_off(1); // 1 ASCII char
+        let (kind, is_open) = match lex {
+            "[" => (Bracket::Brack, true),
+            "(" => (Bracket::Paren, true),
+            "{" => (Bracket::Brace, true),
+
+            "]" => (Bracket::Brack, false),
+            ")" => (Bracket::Paren, false),
+            "}" => (Bracket::Brace, false),
+
+            _ => unreachable!("should not call `scan_brack` if `starts_with_brack` is false"),
+        };
+        if is_open {
+            let n = self.bracket_pairs.len();
+            debug_assert_matches!(lex, "[" | "(" | "{", "position should belong to a bracket");
+            self.bracket_pairs.push((
+                kind,
+                self.original
+                    .substr_range(lex)
+                    .expect("lex should be a substr of original")
+                    .start,
+            ));
+            Ok(Token {
+                src: lex,
+                ty: TokenType::Bracket(n),
+            })
+        } else if self
+            .bracket_pairs
+            .pop_if(|(expecting, _)| *expecting == kind)
+            .is_some()
+        {
+            Ok(Token {
+                src: lex,
+                ty: TokenType::Bracket(self.bracket_pairs.len()),
+            })
+        } else {
+            // bracket_stack is empty
+            Err(self.error_prev(
+                lex.len(),
+                ErrorType::UnbalancedBrackets {
+                    expect: self.bracket_pairs.last().copied().map(|(brack, pos)| {
+                        (
+                            brack,
+                            Range::from(
+                                pos..pos
+                                    .checked_add(brack.open().len_utf8())
+                                    .expect("bracket should be in string"),
+                            ),
+                        )
+                    }),
+                    actual: kind,
+                },
+            ))
+        }
+    }
+
     fn starts_with_punc(&self) -> bool {
         self.source
             .starts_with(|ch: char| ch.is_ascii_punctuation())
     }
 
-    fn scan_punc(&mut self) -> Result<Token<'a>, Error<'a>> {
+    /// Also scans brackets
+    fn scan_punc(&mut self) -> Result<Token<'a>, ContextError<'a>> {
         let len = Punctuation::from_prefix(self.source).map(|x| x.as_str().len());
-        len.map(|len| self.split_off(len))
+        len.map(|len| self.split_off_token(len, TokenType::Punctuation))
             .ok_or_else(|| {
                 self.error_here(
                     self.source
@@ -347,50 +411,6 @@ impl<'a> Scanner<'a> {
                         .len_utf8(),
                     ErrorType::UnknownToken,
                 )
-            })
-            .and_then(|lex| {
-                let (kind, is_open) = match lex {
-                    "[" => (Bracket::Brack, true),
-                    "(" => (Bracket::Paren, true),
-                    "{" => (Bracket::Brace, true),
-
-                    "]" => (Bracket::Brack, false),
-                    ")" => (Bracket::Paren, false),
-                    "}" => (Bracket::Brace, false),
-
-                    _ => {
-                        return Ok(Token {
-                            src: lex,
-                            ty: TokenType::Punctuation,
-                        });
-                    }
-                };
-                if is_open {
-                    let n = self.bracket_pairs.len();
-                    self.bracket_pairs.push(kind);
-                    Ok(Token {
-                        src: lex,
-                        ty: TokenType::Bracket(n),
-                    })
-                } else if self
-                    .bracket_pairs
-                    .pop_if(|expecting| *expecting == kind)
-                    .is_some()
-                {
-                    Ok(Token {
-                        src: lex,
-                        ty: TokenType::Bracket(self.bracket_pairs.len()),
-                    })
-                } else {
-                    // bracket_stack is empty
-                    Err(self.error_prev(
-                        lex.len(),
-                        ErrorType::UnbalancedBrackets {
-                            expect: self.bracket_pairs.last().copied(),
-                            actual: kind,
-                        },
-                    ))
-                }
             })
     }
 }
@@ -429,6 +449,8 @@ impl<'a> Iterator for Scanner<'a> {
                 Ok(self.scan_line_comment())
             } else if self.starts_with_block_comment() {
                 self.scan_block_comment()
+            } else if self.starts_with_brack() {
+                self.scan_brack()
             } else if self.starts_with_punc() {
                 self.scan_punc()
             } else {
@@ -439,13 +461,13 @@ impl<'a> Iterator for Scanner<'a> {
                     .map(|val| (tkn, val))
                     .map_err(|err| self.error_prev(tkn.src.len(), err))
             })
-            .map_err(|e| e.add_context(self.original))
             .inspect(|(token, _)| {
                 // non-whitespace, non-comment token
                 if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
                     // punctuation except for close bracket
-                    self.can_be_negative = matches!(token.ty, TokenType::Punctuation)
-                        && !matches!(token.src, ")" | "]" | "}");
+                    self.can_be_negative =
+                        matches!(token.ty, TokenType::Punctuation | TokenType::Bracket(_))
+                            && !matches!(token.src, ")" | "]" | "}");
                 }
             })
         })
