@@ -113,6 +113,9 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
 
 /// Identifies the [`Syntax`] of a [`TokenResult`].
 /// All [`Err`]s are [`Syntax::Invalid`].
+///
+/// # Panics
+/// This method may panic if `item` is an error with a malformed [`range`](crate::error::ContextError::range).
 pub fn syntax_of<'a, 'b, S>(
     item: &'b TokenResult<'a, S>,
 ) -> (&'a str, Syntax, &'b TokenValue<'a, S>)
@@ -149,6 +152,12 @@ where
             },
             value,
         ),
-        Err(e) => (&e.source[e.range], Syntax::Invalid, &TokenValue::Ignore),
+        Err(e) => (
+            e.source
+                .get(e.range)
+                .expect("range should be a range of source"),
+            Syntax::Invalid,
+            &TokenValue::Ignore,
+        ),
     }
 }

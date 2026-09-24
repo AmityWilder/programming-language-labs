@@ -1,8 +1,13 @@
 //! The iterator that breaks source code into tokens (which are defined in [`token`] module).
 
-use crate::error::{ContextError, ErrorType, TokenResult};
+use crate::{
+    error::{ContextError, ErrorType, TokenResult},
+    scanner::symbols::{
+        BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
+        MACRO_PARAM_PREFIX, MACRO_PREFIX, STR_DELIM,
+    },
+};
 use std::{debug_assert_matches, range::Range};
-use symbols::*;
 use token::{Allocated, Keyword, KeywordType, NoAlloc, Punctuation, Token, TokenType, TokenValue};
 
 pub mod symbols;
@@ -100,22 +105,6 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    /// Generate an error starting at the current (incomplete) token
-    ///
-    /// [Splits off](Self::split_off) the erroneous segment so we can find more errors
-    fn error_here(&mut self, len: usize, err: ErrorType<'a>) -> ContextError<'a> {
-        let err = ContextError {
-            source: self.original,
-            range: self
-                .original
-                .substr_range(&self.source[..len])
-                .expect("source should be a substring of original"),
-            err,
-        };
-        _ = self.split_off(len);
-        err
-    }
-
     /// Generate an error on the most recent (complete) token
     fn error_prev(&mut self, len: usize, err: ErrorType<'a>) -> ContextError<'a> {
         let end = self
@@ -135,6 +124,14 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    /// Generate an error starting at the current (incomplete) token
+    ///
+    /// [Splits off](Self::split_off) the erroneous segment so we can find more errors
+    fn error_here(&mut self, len: usize, err: ErrorType<'a>) -> ContextError<'a> {
+        _ = self.split_off(len);
+        self.error_prev(len, err)
+    }
+
     fn starts_with_whitespace(&self) -> bool {
         self.source.starts_with(char::is_whitespace)
     }
@@ -152,7 +149,10 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_macro(&mut self) -> Token<'a> {
-        let len = self.source[MACRO_PREFIX.len_utf8()..]
+        let len = self
+            .source
+            .strip_prefix(MACRO_PREFIX)
+            .expect("should not call `scan_macro` if `starts_with_macro` is false")
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
             .map_or(self.source.len(), |n| {
                 n.checked_add(MACRO_PREFIX.len_utf8())
@@ -166,7 +166,10 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_macro_param(&mut self) -> Token<'a> {
-        let len = self.source[MACRO_PARAM_PREFIX.len_utf8()..]
+        let len = self
+            .source
+            .strip_prefix(MACRO_PARAM_PREFIX)
+            .expect("should not call `scan_macro_param` if `starts_with_macro_param` is false")
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
             .map_or(self.source.len(), |n| {
                 n.checked_add(MACRO_PARAM_PREFIX.len_utf8())
@@ -184,7 +187,10 @@ impl<'a> Scanner<'a> {
     }
 
     fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, ContextError<'a>> {
-        self.source[open_delim.len_utf8()..]
+        let rest = self.source.strip_prefix(open_delim).expect(
+            "should not call `scan_strlike_literal` if `starts_with_strlike_literal` is false",
+        );
+        rest
             // note: this means graves need to be escaped in interpolated expression strings
             .find(unescaped(open_delim))
             .map(|n| {
@@ -219,7 +225,7 @@ impl<'a> Scanner<'a> {
                     self.source.len(),
                     // the fact there is a closing delimiter that didn't end the string shows it must be escaped
                     // (or else there wouldn't have been an error)
-                    if self.source[open_delim.len_utf8()..].contains(open_delim) {
+                    if rest.contains(open_delim) {
                         match open_delim {
                             '\'' => ErrorType::EscapedCharLiteralEnd,
                             '"' => ErrorType::EscapedStringLiteralEnd,
@@ -291,10 +297,13 @@ impl<'a> Scanner<'a> {
                 is_end
             }
         };
-        let mut len = self.source.find(number_end).unwrap_or(self.source.len());
+        let number = self
+            .source
+            .split_once(number_end)
+            .map_or(self.source, |(pre, _)| pre);
         // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
         // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
-        len = self.source[..len].trim_end_matches(['.', '-']).len();
+        let len = number.trim_end_matches(['.', '-']).len();
         self.split_off_token(len, TokenType::NumberLiteral)
     }
 
@@ -321,7 +330,8 @@ impl<'a> Scanner<'a> {
             BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len();
         let mut prev_char = None;
         let mut depth: usize = 0;
-        let len = self.source[BLOCK_COMMENT_OPEN.len()..]
+        let len = self.source.strip_prefix(BLOCK_COMMENT_OPEN)
+            .expect("should not call `scan_block_comment` if `starts_with_block_comment` is false")
             .find(|ch: char| {
                 if prev_char == Some('*') && ch == '/' {
                     if let Some(n) = depth.checked_sub(1) {

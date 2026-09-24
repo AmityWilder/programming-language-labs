@@ -1,7 +1,9 @@
 //! Definitions of tokens and their values.
 
-use super::symbols::*;
-use crate::error::{ErrorType, NumLitError};
+use crate::{
+    error::{ErrorType, NumLitError},
+    scanner::symbols::{BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM},
+};
 use std::{borrow::Cow, range::Range};
 
 /// The classification of a [`Token`]
@@ -447,7 +449,9 @@ impl<'a> Iterator for Escapes<'a> {
     type Item = Result<(Range<usize>, char), ErrorType<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.source[self.offset..]
+        self.source
+            .get(self.offset..)
+            .expect("offset should never be within a UTF-8 character")
             .match_indices(|ch: char| {
                 self.is_esc = !self.is_esc && ch == ESCAPE;
                 self.is_esc
@@ -486,7 +490,8 @@ impl<'a> TokenValue<'a, Allocated> {
         );
         let mut prev_end = 0;
         for (range, repl) in replacements {
-            processed.push_str(&src[prev_end..range.start]);
+            processed.push_str(src.get(prev_end..range.start)
+                .expect("range should never start/end within a UTF-8 character, and prev_end should always be from such a range (or 0)"));
             processed.push(repl);
             prev_end = range.end;
         }
@@ -585,15 +590,21 @@ pub fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
 ///
 /// Errors if `i` is not the position of a `\` in `src`
 fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>> {
-    escape_char(&src[i..])
-        .ok_or(ErrorType::InvalidEscape(&src[i..])) // no remaining characters
+    let esc_rest = src
+        .get(i..)
+        .expect("`i` should not be within a UTF-8 character");
+    escape_char(esc_rest)
+        .ok_or(ErrorType::InvalidEscape(esc_rest)) // no remaining characters
         .and_then(|(len, res)| {
+            let esc = esc_rest.get(..len).expect(
+                "return of escape_char, starting at `i`, should not be within a UTF-8 character",
+            );
             let range = Range::from(
                 i..i.checked_add(len)
                     .expect("should be at most the length of a string already in memory"),
             );
             res.map(|ch| (range, ch))
-                .map_err(|()| ErrorType::InvalidEscape(&src[range]))
+                .map_err(|()| ErrorType::InvalidEscape(esc))
         })
 }
 
