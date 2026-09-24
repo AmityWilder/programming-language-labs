@@ -48,7 +48,7 @@ use highlight::{
     style::{Color, Style, StyleWrapper},
     syntax::{SyntaxStyle, syntax_of},
 };
-use scanner::{Tokenize, token::NoAlloc};
+use scanner::Tokenize;
 use std::{fmt::Write, range::Range};
 
 mod error;
@@ -116,14 +116,14 @@ const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
 pub fn run_code(source: &str) {
     // token debug
     println!("source code:\n```\n{source}\n```");
-    let tokens: Vec<_> = NoAlloc::tokenize(source).collect();
+    let tokens: Vec<_> = <&str>::tokenize(source).collect();
     for item in &tokens {
         let (lex, syn, _) = syntax_of(item);
         match item {
-            Ok((token, value)) => {
+            Ok(token) => {
                 let style = SYNTAX_STYLE_ANSI[syn];
                 println!(
-                    "{:?}: {}{token:?}:\n  {value:?}{}",
+                    "{:?}: {}{token:?}{}",
                     source
                         .substr_range(lex)
                         .expect("every lexeme should be a substr of source"),

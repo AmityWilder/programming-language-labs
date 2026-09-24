@@ -5,7 +5,7 @@ use crate::scanner::{
     symbols::{
         BIN_PREFIX, BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM,
     },
-    token::{Token, TokenValue, escape_char},
+    token::{Token, escape_char},
 };
 use std::range::Range;
 
@@ -41,8 +41,10 @@ impl std::error::Error for NumLitError {
 }
 
 /// The kind of error describing a [`ContextError`]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ErrorType<'a> {
+    // lex
+    // ------
     /// Token type could not be identified from the initial character, and so is not a valid token
     UnknownToken,
     /// A block comment has no `*/` to end it
@@ -63,8 +65,10 @@ pub enum ErrorType<'a> {
     InvalidEscape(&'a str),
     /// A number literal could not be evaluated as a number
     InvalidNumLiteral(NumLitError),
+
+    // parse
+    // ------
     /// A closing bracket is of the wrong type for the open bracket at its depth
-    #[expect(dead_code, reason = "reserved for future use")]
     IncorrectCloseBracket {
         /// The bracket type being expected based on the opening side
         expect: (Bracket, Range<usize>),
@@ -72,16 +76,26 @@ pub enum ErrorType<'a> {
         actual: Bracket,
     },
     /// A closing bracket was found with no open bracket
-    #[expect(dead_code, reason = "reserved for future use")]
     ExcessCloseBracket {
         /// The bracket type that was found
         actual: Bracket,
     },
     /// An open bracket was found with no close bracket
-    #[expect(dead_code, reason = "reserved for future use")]
     MissingCloseBracket {
         /// The bracket type being expected based on the opening side
         expect: (Bracket, Range<usize>),
+    },
+    /// A token was expected, but instead found EOF
+    MissingToken {
+        /// The token pattern expected
+        expect: &'static str,
+    },
+    /// A token was expected, but instead found `actual`
+    UnexpectedToken {
+        /// The token pattern expected
+        expect: &'static str,
+        /// The token found
+        actual: Token<'a, &'a str>,
     },
 }
 
@@ -129,6 +143,13 @@ impl std::fmt::Display for ErrorType<'_> {
                 "missing close bracket: expected `{}`, found none",
                 expect.0.close()
             ),
+            Self::MissingToken { expect } => write!(f, "missing {expect}"),
+            Self::UnexpectedToken {
+                expect,
+                actual: found,
+            } => {
+                write!(f, "expected {expect}, found {found:?}")
+            }
         }
     }
 }
@@ -143,7 +164,7 @@ impl std::error::Error for ErrorType<'_> {
 }
 
 /// A code error with the range of the error in the source code
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 pub struct ContextError<'a> {
     /// A string view of the FULL, ENTIRE source code
     pub source: &'a str,
@@ -246,7 +267,7 @@ impl std::error::Error for ContextError<'_> {
 }
 
 /// [`std::fmt::Display`] the error code (number)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ContextErrorCode<'a, 'b>(&'b ContextError<'a>);
 
 impl std::fmt::Display for ContextErrorCode<'_, '_> {
@@ -261,10 +282,12 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             | ErrorType::EndlessStringLiteral
             | ErrorType::EscapedStringLiteralEnd
             | ErrorType::InvalidEscape(_)
-            | ErrorType::InvalidNumLiteral(_)
-            | ErrorType::IncorrectCloseBracket { .. }
+            | ErrorType::InvalidNumLiteral(_) => "LEX",
+            ErrorType::IncorrectCloseBracket { .. }
             | ErrorType::ExcessCloseBracket { .. }
-            | ErrorType::MissingCloseBracket { .. } => "LEX",
+            | ErrorType::MissingCloseBracket { .. }
+            | ErrorType::MissingToken { .. }
+            | ErrorType::UnexpectedToken { .. } => "GRA",
         };
         let code = match self.0.err {
             ErrorType::UnknownToken => 0,
@@ -280,13 +303,16 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             ErrorType::IncorrectCloseBracket { .. } => 10,
             ErrorType::ExcessCloseBracket { .. } => 11,
             ErrorType::MissingCloseBracket { .. } => 12,
+
+            ErrorType::MissingToken { .. } => 21,
+            ErrorType::UnexpectedToken { .. } => 22,
         };
         write!(f, "err[{area}{code:>03}]")
     }
 }
 
 /// [`std::fmt::Display`] tips for resolving an error
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ContextErrorHelp<'a, 'b>(&'b ContextError<'a>);
 
 impl std::fmt::Display for ContextErrorHelp<'_, '_> {
@@ -528,6 +554,16 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 expect.0.close(),
                 expect.0.open(),
             ),
+            ErrorType::MissingToken { expect } => write!(f, "try inserting {expect}"),
+            ErrorType::UnexpectedToken {
+                expect,
+                actual: Token { src: found, .. },
+            } => {
+                write!(
+                    f,
+                    "try inserting {expect} before `{found}` or remove `{found}`"
+                )
+            }
         }
     }
 }
@@ -555,7 +591,7 @@ pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
 }
 
 /// [`std::fmt::Display`] advanced error information with line references for a context error
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct RenderedContextError<'a, 'b>(&'b ContextError<'a>);
 
 /// Outputs a line reference to `f`.
@@ -647,7 +683,9 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
                     ErrorType::InvalidNumLiteral(_) => "not a valid number",
                     ErrorType::IncorrectCloseBracket { .. } => "incorrect partner",
                     ErrorType::ExcessCloseBracket { .. } => "missing a partner",
-                    ErrorType::MissingCloseBracket { .. } => "",
+                    ErrorType::MissingCloseBracket { .. } => "missing close bracket",
+                    ErrorType::MissingToken { .. } => "missing token",
+                    ErrorType::UnexpectedToken { .. } => "wrong token",
                 },
             )?;
             has_prev = true;
@@ -678,4 +716,4 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
 }
 
 /// A [`Token`] and its [`TokenValue`], or a [`ContextError`]
-pub type TokenResult<'a, S> = Result<(Token<'a>, TokenValue<'a, S>), ContextError<'a>>;
+pub type TokenResult<'a, S> = Result<Token<'a, S>, ContextError<'a>>;

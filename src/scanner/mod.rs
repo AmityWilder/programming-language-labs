@@ -2,16 +2,16 @@
 
 use crate::{
     error::{ContextError, ErrorType, TokenResult},
-    scanner::symbols::{
-        BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
-        MACRO_PARAM_PREFIX, MACRO_PREFIX, STR_DELIM,
+    scanner::{
+        symbols::{
+            BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
+            MACRO_PARAM_PREFIX, MACRO_PREFIX, STR_DELIM,
+        },
+        token::{StrLiteral, StringLiteral},
     },
 };
 use std::range::Range;
-use token::{
-    Allocated, Keyword, KeywordType, NoAlloc, Punctuation, Token, TokenType, TokenValue,
-    TokenValueSimplicity,
-};
+use token::{Keyword, KeywordType, Punctuation, Token, TokenType, TokenValue};
 
 pub mod symbols;
 pub mod token;
@@ -98,11 +98,6 @@ impl<'a> Scanner<'a> {
         })
     }
 
-    /// [`Self::split_off`] and route the lexeme directly into a [`Token`]
-    fn split_off_token(&mut self, len: usize, ty: TokenType) -> Option<Token<'a>> {
-        self.split_off(len).map(|src| Token { src, ty })
-    }
-
     /// Generate an error on the most recent (complete) token
     fn error_prev(&mut self, len: usize, err: ErrorType<'a>) -> ContextError<'a> {
         let end = self
@@ -139,13 +134,18 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_whitespace`] would not have returned true
-    fn scan_whitespace(&mut self) -> Token<'a> {
+    fn scan_whitespace(&mut self) -> Token<'a, &'a str> {
         let len = self
             .source
             .find(|ch: char| !ch.is_whitespace())
             .unwrap_or(self.source.len());
-        self.split_off_token(len, TokenType::Whitespace)
-            .expect("find and len should return safe positions within source")
+        Token {
+            src: self
+                .split_off(len)
+                .expect("find and len should return safe positions within source"),
+            ty: TokenType::Whitespace,
+            val: TokenValue::Ignore,
+        }
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -157,7 +157,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_macro(&mut self) -> Token<'a> {
+    fn scan_macro(&mut self) -> Token<'a, &'a str> {
         let len = self
             .source
             .strip_prefix(MACRO_PREFIX)
@@ -167,8 +167,14 @@ impl<'a> Scanner<'a> {
                 n.checked_add(MACRO_PREFIX.len_utf8())
                     .expect("n is the length of the string after this character")
             });
-        self.split_off_token(len, TokenType::Macro)
-            .expect("find and len should return safe positions to split at")
+        let src = self
+            .split_off(len)
+            .expect("find and len should return safe positions to split at");
+        Token {
+            src,
+            ty: TokenType::Macro,
+            val: TokenValue::Direct(src),
+        }
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -180,7 +186,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_macro_param(&mut self) -> Token<'a> {
+    fn scan_macro_param(&mut self) -> Token<'a, &'a str> {
         let len = self
             .source
             .strip_prefix(MACRO_PARAM_PREFIX)
@@ -190,8 +196,14 @@ impl<'a> Scanner<'a> {
                 n.checked_add(MACRO_PARAM_PREFIX.len_utf8())
                     .expect("n is the length of the string after this character")
             });
-        self.split_off_token(len, TokenType::MacroParam)
-            .expect("find and len should return safe positions to split at")
+        let src = self
+            .split_off(len)
+            .expect("find and len should return safe positions to split at");
+        Token {
+            src,
+            ty: TokenType::MacroParam,
+            val: TokenValue::Direct(src),
+        }
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -208,7 +220,10 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, ContextError<'a>> {
+    fn scan_strlike_literal(
+        &mut self,
+        open_delim: char,
+    ) -> Result<Token<'a, &'a str>, ContextError<'a>> {
         let rest = self.source.strip_prefix(open_delim).expect(
             "should not call `scan_strlike_literal` if `starts_with_strlike_literal` is false",
         );
@@ -232,17 +247,6 @@ impl<'a> Scanner<'a> {
                          have a len that fits in usize",
                     )
             })
-            .map(|len| {
-                self.split_off_token(
-                    len,
-                    match open_delim {
-                        STR_DELIM => TokenType::StringLiteral,
-                        CHAR_DELIM => TokenType::CharLiteral,
-                        _ => unreachable!("should be guarded by if condition"),
-                    },
-                )
-                .expect("find and len should return safe positions to split at")
-            })
             .ok_or_else(|| {
                 self.error_here(
                     self.source.len(),
@@ -263,6 +267,27 @@ impl<'a> Scanner<'a> {
                     },
                 )
             })
+            .and_then(|len| {
+                let src = self
+                    .split_off(len)
+                    .expect("find and len should return safe positions to split at");
+                match open_delim {
+                    STR_DELIM => <TokenValue<&'a str>>::string_literal(src).map(|val| Token {
+                        src,
+                        ty: TokenType::StringLiteral,
+                        val,
+                    }),
+
+                    CHAR_DELIM => TokenValue::char_literal(src).map(|val| Token {
+                        src,
+                        ty: TokenType::CharLiteral,
+                        val,
+                    }),
+
+                    _ => unreachable!("should be guarded by if condition"),
+                }
+                .map_err(|err| self.error_prev(len, err))
+            })
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -275,7 +300,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_ident(&mut self) -> Token<'a> {
+    fn scan_ident(&mut self) -> Token<'a, &'a str> {
         let len = self
             .source
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
@@ -283,24 +308,32 @@ impl<'a> Scanner<'a> {
         let src = self
             .split_off(len)
             .expect("find and len should return safe positions to split at");
-        Token {
-            src,
-            ty: if let Some(kw) = Keyword::try_from_str(src) {
+        let (ty, val) = if let Some(kw) = Keyword::try_from_str(src) {
+            (
                 if matches!(kw.kw_type(), KeywordType::Control) {
                     TokenType::CtrlKeyword
                 } else {
                     TokenType::Keyword
-                }
-            } else if matches!(src, "true" | "false") {
-                TokenType::BoolLiteral
-            }
-            // assumes the token has already been split off
-            else if self.source.starts_with('(') {
-                TokenType::Callable
-            } else {
-                TokenType::Identifier
-            },
+                },
+                TokenValue::Keyword(kw),
+            )
         }
+        // assumes the token has already been split off
+        else {
+            match src {
+                "true" => (TokenType::BoolLiteral, TokenValue::BoolLiteral(true)),
+                "false" => (TokenType::BoolLiteral, TokenValue::BoolLiteral(false)),
+                _ => (
+                    if self.source.starts_with('(') {
+                        TokenType::Callable
+                    } else {
+                        TokenType::Identifier
+                    },
+                    TokenValue::Direct(src),
+                ),
+            }
+        };
+        Token { src, ty, val }
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -316,7 +349,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_num_literal(&mut self) -> Token<'a> {
+    fn scan_num_literal(&mut self) -> Result<Token<'a, &'a str>, ContextError<'a>> {
         let number_end = {
             let mut is_first_char = true;
             let mut is_first_decimal = true; // at most one decimal
@@ -341,8 +374,16 @@ impl<'a> Scanner<'a> {
         // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
         // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
         let len = number.trim_end_matches(['.', '-']).len();
-        self.split_off_token(len, TokenType::NumberLiteral)
-            .expect("should be a safe position to split at")
+        let src = self
+            .split_off(len)
+            .expect("should be a safe position to split at");
+        TokenValue::number_literal(src)
+            .map(|val| Token {
+                src,
+                ty: TokenType::NumberLiteral,
+                val,
+            })
+            .map_err(|err| self.error_prev(len, err))
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -354,15 +395,20 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_line_comment(&mut self) -> Token<'a> {
+    fn scan_line_comment(&mut self) -> Token<'a, &'a str> {
         let len = self
             .source
             .lines()
             .next() // take the first line (excluding newline/return)
             .expect("the existence of characters should imply the existence of a line")
             .len();
-        self.split_off_token(len, TokenType::Comment)
-            .expect("should be a safe position to split at")
+        Token {
+            src: self
+                .split_off(len)
+                .expect("should be a safe position to split at"),
+            ty: TokenType::Comment,
+            val: TokenValue::Ignore,
+        }
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -374,7 +420,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_block_comment(&mut self) -> Result<Token<'a>, ContextError<'a>> {
+    fn scan_block_comment(&mut self) -> Result<Token<'a, &'a str>, ContextError<'a>> {
         const BLOCK_COMMENT_CIRCUMFIX_LEN: usize =
             BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len();
         let mut prev_char = None;
@@ -398,9 +444,12 @@ impl<'a> Scanner<'a> {
             })
             .map(|n| n.checked_add(BLOCK_COMMENT_CIRCUMFIX_LEN)
                 .expect("n should describe the non-block-comment-circumfix subset of a string in memory"));
-        len.map(|len| {
-            self.split_off_token(len, TokenType::Comment)
-                .expect("should be a safe position to split at")
+        len.map(|len| Token {
+            src: self
+                .split_off(len)
+                .expect("should be a safe position to split at"),
+            ty: TokenType::Comment,
+            val: TokenValue::Ignore,
         })
         .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
     }
@@ -415,27 +464,33 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_punc(&mut self) -> Result<Token<'a>, ContextError<'a>> {
-        let len = Punctuation::from_prefix(self.source).map(|x| x.as_str().len());
-        len.map(|len| {
-            self.split_off_token(len, TokenType::Punctuation)
-                .expect("should be a safe position to split at")
-        })
-        .ok_or_else(|| {
-            self.error_here(
-                self.source
-                    .chars()
-                    .next()
-                    .expect("source should have at least one char to start with punctuation")
-                    .len_utf8(),
-                ErrorType::UnknownToken,
-            )
-        })
+    fn scan_punc(&mut self) -> Result<Token<'a, &'a str>, ContextError<'a>> {
+        Punctuation::from_prefix(self.source)
+            .map(|punc| {
+                let src = self
+                    .split_off(punc.as_str().len())
+                    .expect("should be a safe position to split at");
+                Token {
+                    src,
+                    ty: TokenType::Punctuation,
+                    val: TokenValue::Punctuation(punc),
+                }
+            })
+            .ok_or_else(|| {
+                self.error_here(
+                    self.source
+                        .chars()
+                        .next()
+                        .expect("source should have at least one char to start with punctuation")
+                        .len_utf8(),
+                    ErrorType::UnknownToken,
+                )
+            })
     }
 }
 
 impl<'a> Iterator for Scanner<'a> {
-    type Item = Result<(Token<'a>, TokenValue<'a, NoAlloc>), ContextError<'a>>;
+    type Item = Result<Token<'a, &'a str>, ContextError<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // if there are no characters remaining, this will return None and stop iterating.
@@ -463,7 +518,7 @@ impl<'a> Iterator for Scanner<'a> {
             } else if self.starts_with_ident() {
                 Ok(self.scan_ident())
             } else if self.starts_with_num_literal() {
-                Ok(self.scan_num_literal())
+                self.scan_num_literal()
             } else if self.starts_with_line_comment() {
                 Ok(self.scan_line_comment())
             } else if self.starts_with_block_comment() {
@@ -473,17 +528,12 @@ impl<'a> Iterator for Scanner<'a> {
             } else {
                 Err(self.error_here(ch.len_utf8(), ErrorType::UnknownToken))
             }
-            .and_then(|tkn| {
-                tkn.value_noalloc()
-                    .map(|val| (tkn, val))
-                    .map_err(|err| self.error_prev(tkn.src.len(), err))
-            })
-            .inspect(|(token, _)| {
+            .inspect(|token| {
                 // non-whitespace, non-comment token
                 if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
                     // punctuation except for close bracket
-                    self.can_be_negative = matches!(token.ty, TokenType::Punctuation)
-                        && !matches!(token.src, ")" | "]" | "}");
+                    self.can_be_negative = matches!(token.val, TokenValue::Punctuation(punc) if
+                        !matches!(punc, Punctuation::RParen | Punctuation::RBrack | Punctuation::RBrace));
                 }
             })
         })
@@ -498,7 +548,7 @@ impl<'a> Iterator for Scanner<'a> {
 impl std::iter::FusedIterator for Scanner<'_> {}
 
 /// Trait for methods by source code can be tokenized
-pub trait Tokenize: TokenValueSimplicity {
+pub trait Tokenize: StrLiteral {
     /// The iterator over tokens
     type Iter<'a>;
 
@@ -506,7 +556,7 @@ pub trait Tokenize: TokenValueSimplicity {
     fn tokenize(source: &str) -> Self::Iter<'_>;
 }
 
-impl Tokenize for NoAlloc {
+impl Tokenize for &str {
     type Iter<'a> = Scanner<'a>;
 
     fn tokenize(source: &str) -> Self::Iter<'_> {
@@ -514,10 +564,10 @@ impl Tokenize for NoAlloc {
     }
 }
 
-/// Adapts an iterator over [`NoAlloc`] tokens into [`Allocated`] tokens
+/// Adapts an iterator over [`&'a str`] tokens into [`Allocated`] tokens
 #[derive(Debug, Clone)]
 pub struct AllocateTokens<I> {
-    /// The iterator over [`NoAlloc`] tokens
+    /// The iterator over [`&'a str`] tokens
     iter: I,
 }
 
@@ -530,28 +580,28 @@ impl<I> AllocateTokens<I> {
 
 impl<'a, I> Iterator for AllocateTokens<I>
 where
-    I: Iterator<Item = TokenResult<'a, NoAlloc>>,
+    I: Iterator<Item = TokenResult<'a, &'a str>>,
 {
-    type Item = TokenResult<'a, Allocated>;
+    type Item = TokenResult<'a, StringLiteral<'a>>;
 
     /// # Panics
     /// This method can panic if an error is found in the value allocation step that was not identified in
     /// the scanning step
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|item| {
-            item.map(|(token, value)| {
-                let value = <TokenValue<Allocated>>::try_from(value)
+            item.map(|Token { src, ty, val }| {
+                let val = <TokenValue<StringLiteral<'a>>>::try_from(val)
                     .expect("should have been caught by scanner");
-                (token, value)
+                Token { src, ty, val }
             })
         })
     }
 }
 
-impl Tokenize for Allocated {
-    type Iter<'a> = AllocateTokens<<NoAlloc as Tokenize>::Iter<'a>>;
+impl Tokenize for StringLiteral<'_> {
+    type Iter<'a> = AllocateTokens<<&'a str as Tokenize>::Iter<'a>>;
 
     fn tokenize(source: &str) -> Self::Iter<'_> {
-        AllocateTokens::new(NoAlloc::tokenize(source))
+        AllocateTokens::new(<&str>::tokenize(source))
     }
 }

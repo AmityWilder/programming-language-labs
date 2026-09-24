@@ -1,56 +1,170 @@
 //! Context-free grammar
-//!
-//! ```not_code
-//! <let_statement> ::= "let" <binding> "=" <expression>
-//! <expression> ::=
-//!     <literal>
-//!     | "(" <expression> ")"
-//!     | <expression> "+" <expression>
-//!     | <expression> "-" <expression>
-//!     | <expression> "*" <expression>
-//!     | <expression> "/" <expression>
-//!     | ...
-//! <literal> = <number literal> | <string literal> | <char literal> | <bool literal>
-//! ```
 
 #![allow(clippy::missing_docs_in_private_items, reason = "under construction")]
 
 use crate::{
-    error::ContextError,
-    scanner::token::{Punctuation, Token, TokenValue, TokenValueSimplicity},
+    error::{ContextError, ErrorType},
+    scanner::token::{Keyword, Punctuation, StrLiteral, Token, TokenValue},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum NonTerminal {
-    Add,
+pub trait Rule<'a, T: StrLiteral>: Sized {
+    fn try_pull<'b>(
+        source: &'a str,
+        tokens: &'b [Token<'a, T>],
+    ) -> Result<(Self, &'b [Token<'a, T>]), ContextError<'a>>;
 }
 
-impl NonTerminal {
-    pub fn rule<'a, S: TokenValueSimplicity>(
-        &self,
-        (token, value): (Token<'a>, &TokenValue<'a, S>),
-    ) -> Result<Symbol<'a>, ContextError<'a>> {
-        match self {
-            Self::Add => {
-                if matches!(value, TokenValue::Punctuation(Punctuation::Add)) {
-                    Ok(Symbol::Terminal(token))
+/// `<let_statement> ::= "let" <binding> "=" <expression>`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct LetStatement<'a> {
+    pub let_kw: &'a str,
+    pub binding: Binding<'a>,
+    pub assign_kw: &'a str,
+    pub expression: Expression,
+}
+
+impl<'a, T: StrLiteral + Clone> Rule<'a, T> for LetStatement<'a>
+where
+    Token<'a, T>: Into<Token<'a, &'a str>>,
+{
+    fn try_pull<'b>(
+        source: &'a str,
+        mut tokens: &'b [Token<'a, T>],
+    ) -> Result<(Self, &'b [Token<'a, T>]), ContextError<'a>> {
+        let let_kw = tokens
+            .split_off_first()
+            .cloned()
+            .ok_or(ContextError {
+                source,
+                range: (source.len()..source.len()).into(),
+                err: ErrorType::MissingToken { expect: "`let`" },
+            })
+            .and_then(|token| {
+                if let Token {
+                    src,
+                    val: TokenValue::Keyword(Keyword::Let),
+                    ..
+                } = token
+                {
+                    Ok(src)
                 } else {
-                    Err(todo!())
+                    Err(ContextError {
+                        source,
+                        range: source
+                            .substr_range(token.src)
+                            .expect("token src should be a substring of the source code"),
+                        err: ErrorType::UnexpectedToken {
+                            expect: "`let`",
+                            actual: token.into(),
+                        },
+                    })
                 }
-            }
-        }
+            })?;
+
+        let (binding, mut tokens) = Binding::try_pull(source, tokens)?;
+
+        let assign_kw = tokens
+            .split_off_first()
+            .cloned()
+            .ok_or(ContextError {
+                source,
+                range: (source.len()..source.len()).into(),
+                err: ErrorType::MissingToken { expect: "`=`" },
+            })
+            .and_then(|token| {
+                if let Token {
+                    src,
+                    val: TokenValue::Punctuation(Punctuation::Assign),
+                    ..
+                } = token
+                {
+                    Ok(src)
+                } else {
+                    Err(ContextError {
+                        source,
+                        range: source
+                            .substr_range(token.src)
+                            .expect("token src should be a substring of the source code"),
+                        err: ErrorType::UnexpectedToken {
+                            expect: "`=`",
+                            actual: token.into(),
+                        },
+                    })
+                }
+            })?;
+
+        let (expression, tokens) = Expression::try_pull(source, tokens)?;
+
+        Ok((
+            Self {
+                let_kw,
+                binding,
+                assign_kw,
+                expression,
+            },
+            tokens,
+        ))
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Symbol<'a> {
-    Terminal(Token<'a>),
-    NonTerminal(NonTerminal),
+/// `<binding> ::= IDENTIFIER`
+// TODO: this can be way cooler
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Binding<'a> {
+    name: &'a str,
 }
 
-// Productions
+impl<'a, T: StrLiteral + Clone> Rule<'a, T> for Binding<'a>
+where
+    Token<'a, T>: Into<Token<'a, &'a str>>,
+{
+    fn try_pull<'b>(
+        source: &'a str,
+        mut tokens: &'b [Token<'a, T>],
+    ) -> Result<(Self, &'b [Token<'a, T>]), ContextError<'a>> {
+        let name = tokens
+            .split_off_first()
+            .cloned()
+            .ok_or(ContextError {
+                source,
+                range: (source.len()..source.len()).into(),
+                err: ErrorType::MissingToken { expect: "`let`" },
+            })
+            .and_then(|token| {
+                if let Token {
+                    src,
+                    val: TokenValue::Keyword(Keyword::Let),
+                    ..
+                } = token
+                {
+                    Ok(src)
+                } else {
+                    Err(ContextError {
+                        source,
+                        range: source
+                            .substr_range(token.src)
+                            .expect("token src should be a substring of the source code"),
+                        err: ErrorType::UnexpectedToken {
+                            expect: "`let`",
+                            actual: token.into(),
+                        },
+                    })
+                }
+            })?;
 
-pub struct Rule<'a> {
-    head: Symbol<'a>,
-    body: Vec<Symbol<'a>>,
+        Ok((Self { name }, tokens))
+    }
+}
+
+/// `<expression> ::= ` TODO
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Expression {}
+
+impl<'a, T: StrLiteral> Rule<'a, T> for Expression {
+    fn try_pull<'b>(
+        _source: &'a str,
+        _tokens: &'b [Token<'a, T>],
+    ) -> Result<(Self, &'b [Token<'a, T>]), ContextError<'a>> {
+        todo!()
+    }
 }
