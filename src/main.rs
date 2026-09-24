@@ -43,7 +43,7 @@
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
-use grammar::{
+use highlight::{
     highlight,
     style::{Color, Style, StyleWrapper},
     syntax::{SyntaxStyle, syntax_of},
@@ -52,7 +52,7 @@ use scanner::{Tokenize, token::NoAlloc};
 use std::{fmt::Write, range::Range};
 
 mod error;
-mod grammar;
+mod highlight;
 mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
