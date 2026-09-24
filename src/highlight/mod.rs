@@ -5,7 +5,7 @@ use crate::{
     highlight::syntax::{Syntax, syntax_of},
     scanner::{
         symbols::{CHAR_DELIM, STR_DELIM},
-        token::{Allocated, CharLiteral, Escapes, NoAlloc, TokenValue, TokenValueSimplicity},
+        token::{CharLiteral, Escapes, StrLiteral, StringLiteral, TokenValue},
     },
 };
 use std::range::Range;
@@ -171,28 +171,20 @@ where
     }
 }
 
-/// An extension to [`TokenValueSimplicity`] defining helpers for syntax highlighting
-pub trait Highlighting: TokenValueSimplicity {
+/// An extension to [`StrLiteral`] defining helpers for syntax highlighting
+pub trait Highlighting<'a: 'b, 'b>: 'b + StrLiteral {
     /// The type returned by [`Self::escaped_str_literal`]
-    type Escaped<'a: 'b, 'b>: 'b + Iterator<Item = (&'a str, Syntax)>;
+    type Escaped: 'b + Iterator<Item = (&'a str, Syntax)>;
 
     /// Returns a syntax iterator over subtokens of a char/string literal
-    fn escaped_str_literal<'a, 'b>(
-        lex: &'a str,
-        syn: Syntax,
-        literal: &'b Self::StringLiteral<'a>,
-    ) -> Self::Escaped<'a, 'b>;
+    fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped;
 }
 
-impl Highlighting for Allocated {
-    type Escaped<'a: 'b, 'b> =
+impl<'a: 'b, 'b> Highlighting<'a, 'b> for StringLiteral<'a> {
+    type Escaped =
         SubTokenSyntax<'a, EscapedRanges<std::iter::Copied<std::slice::Iter<'b, Range<usize>>>>>;
 
-    fn escaped_str_literal<'a, 'b>(
-        lex: &'a str,
-        syn: Syntax,
-        literal: &'b Self::StringLiteral<'a>,
-    ) -> Self::Escaped<'a, 'b> {
+    fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped {
         SubTokenSyntax::new(
             lex,
             syn,
@@ -223,14 +215,10 @@ impl Iterator for EscapeRanges<'_> {
     }
 }
 
-impl Highlighting for NoAlloc {
-    type Escaped<'a: 'b, 'b> = SubTokenSyntax<'a, EscapedRanges<EscapeRanges<'b>>>;
+impl<'a: 'b, 'b> Highlighting<'a, 'b> for &'a str {
+    type Escaped = SubTokenSyntax<'a, EscapedRanges<EscapeRanges<'b>>>;
 
-    fn escaped_str_literal<'a, 'b>(
-        lex: &'a str,
-        syn: Syntax,
-        literal: &'b Self::StringLiteral<'a>,
-    ) -> Self::Escaped<'a, 'b> {
+    fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped {
         SubTokenSyntax::new(
             lex,
             syn,
@@ -241,16 +229,16 @@ impl Highlighting for NoAlloc {
 
 /// An iterator over the subtokens of any valid token, since each has its own method of iterating
 #[derive(Debug, Clone)]
-pub enum HighlightToken<'a: 'b, 'b, H: Highlighting> {
+pub enum HighlightToken<'a: 'b, 'b, H: Highlighting<'a, 'b>> {
     /// Character literal containing escapes - the open delimiter, the escape sequence, then the close delimiter
     CharLiteral(std::array::IntoIter<(&'a str, Syntax), 3>),
     /// String literal containing escapes - interleaves the escape sequences between un-escaped chunks
-    StrLiteral(H::Escaped<'a, 'b>),
+    StrLiteral(H::Escaped),
     /// Any token that doesn't have subtokens
     Simple(std::iter::Once<(&'a str, Syntax)>),
 }
 
-impl<'a: 'b, 'b, H: Highlighting> Iterator for HighlightToken<'a, 'b, H> {
+impl<'a: 'b, 'b, H: Highlighting<'a, 'b>> Iterator for HighlightToken<'a, 'b, H> {
     type Item = (&'a str, Syntax);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -292,7 +280,7 @@ impl<I> HighlightIter<I> {
     }
 }
 
-impl<'a: 'b, 'b, H: Highlighting, I: Iterator<Item = &'b TokenResult<'a, H>>> Iterator
+impl<'a: 'b, 'b, H: Highlighting<'a, 'b>, I: Iterator<Item = &'b TokenResult<'a, H>>> Iterator
     for HighlightIter<I>
 {
     type Item = HighlightToken<'a, 'b, H>;
@@ -321,7 +309,7 @@ impl<'a: 'b, 'b, H: Highlighting, I: Iterator<Item = &'b TokenResult<'a, H>>> It
 /// An iterator over each lexeme and [`Syntax`] in the [`TokenResult`] list
 pub fn highlight<'a: 'b, 'b, H, I>(tokens: I) -> std::iter::Flatten<HighlightIter<I::IntoIter>>
 where
-    H: Highlighting,
+    H: Highlighting<'a, 'b>,
     I: IntoIterator<Item = &'b TokenResult<'a, H>>,
 {
     HighlightIter::new(tokens.into_iter()).flatten()

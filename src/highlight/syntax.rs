@@ -2,7 +2,7 @@
 
 use crate::{
     error::TokenResult,
-    scanner::token::{TokenType, TokenValue, TokenValueSimplicity},
+    scanner::token::{StrLiteral, TokenType, TokenValue},
 };
 
 /// Syntactic element category for highlighting
@@ -127,10 +127,10 @@ pub fn syntax_of<'a, 'b, S>(
 ) -> (&'a str, Syntax, &'b TokenValue<'a, S>)
 where
     'a: 'b,
-    S: TokenValueSimplicity,
+    S: StrLiteral,
 {
     match item {
-        Ok((token, value)) => (
+        Ok(token) => (
             token.src,
             match token.ty {
                 TokenType::Comment => Syntax::Comment,
@@ -156,7 +156,7 @@ where
 
                 TokenType::Whitespace | TokenType::Punctuation => Syntax::Normal,
             },
-            value,
+            &token.val,
         ),
         Err(e) => (
             e.source

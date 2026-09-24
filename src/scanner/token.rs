@@ -7,9 +7,10 @@ use crate::{
 use std::{borrow::Cow, range::Range};
 
 /// The classification of a [`Token`]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TokenType {
     /// An entire chunk of whitespace, not just one character
+    #[default]
     Whitespace,
     /// A comment (either block or line)
     Comment,
@@ -57,6 +58,7 @@ macro_rules! define_token_eq {
             $Variant,
         )+}
 
+        #[allow(dead_code, reason = "not always used in all expressions of this macro")]
         impl $Enum {
             /// Descending length, so bigger tokens aren't broken apart by subset tokens
             pub const OPTIONS: [(&str, Self); [$(Self::$Variant),+].len()] = [
@@ -64,7 +66,6 @@ macro_rules! define_token_eq {
             ];
 
             /// Matches the prefix of `s` to a [`Self`]. Tries to find the longest one possible.
-            #[allow(dead_code)]
             pub fn from_prefix(s: &str) -> Option<Self> {
                 Self::OPTIONS
                     .into_iter()
@@ -278,43 +279,30 @@ pub struct StringLiteral<'a> {
     pub escapes: Vec<Range<usize>>,
 }
 
-/// A trait for distinguishing [`TokenValue`]s by whether they are [`NoAlloc`] vs [`Allocated`]
-pub trait TokenValueSimplicity: Sized + 'static {
-    /// The type used for [`TokenValue::StringLiteral`].
-    /// Either a [`StringLiteral<'a>`] or a [`&'a str`](`str`).
-    type StringLiteral<'a>;
-
+/// The type used for [`TokenValue::StringLiteral`].
+/// Either a [`StringLiteral<'a>`] or a [`&'a str`](`str`).
+pub trait StrLiteral: Sized {
     /// Identify whether a string literal contains escape sequences.
-    fn has_escapes(literal: &Self::StringLiteral<'_>) -> bool;
+    fn has_escapes(&self) -> bool;
 }
 
 /// String literals may contain unconverted escape sequences
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct NoAlloc(!);
-
-impl TokenValueSimplicity for NoAlloc {
-    type StringLiteral<'a> = &'a str;
-
-    fn has_escapes(literal: &&str) -> bool {
-        literal.contains(ESCAPE)
+impl StrLiteral for &str {
+    fn has_escapes(&self) -> bool {
+        self.contains(ESCAPE)
     }
 }
 
 /// String literals have escape sequences converted
-#[derive(Debug, Clone, PartialEq)]
-pub struct Allocated(!);
-
-impl TokenValueSimplicity for Allocated {
-    type StringLiteral<'a> = StringLiteral<'a>;
-
-    fn has_escapes(literal: &Self::StringLiteral<'_>) -> bool {
-        !literal.escapes.is_empty()
+impl StrLiteral for StringLiteral<'_> {
+    fn has_escapes(&self) -> bool {
+        !self.escapes.is_empty()
     }
 }
 
 /// The value represented by a [`Token`]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated> {
+pub enum TokenValue<'a, T: StrLiteral> {
     /// Whitespace/comments
     #[default]
     Ignore,
@@ -327,7 +315,7 @@ pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated> {
     /// Character literal
     CharLiteral(CharLiteral),
     /// String literal
-    StringLiteral(S::StringLiteral<'a>),
+    StringLiteral(T),
     /// Boolean literal
     BoolLiteral(bool),
     /// Value is the token source itself (in-code name)
@@ -338,9 +326,9 @@ pub enum TokenValue<'a, S: TokenValueSimplicity = Allocated> {
     Punctuation(Punctuation),
 }
 
-impl<'a, S: TokenValueSimplicity> TokenValue<'a, S> {
+impl<'a, T: StrLiteral> TokenValue<'a, T> {
     /// Parses a number literal lexeme into its value
-    fn number_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
+    pub fn number_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.
         // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
         if !src.starts_with(HEX_PREFIX) && src.contains(['e', 'E']) || src.contains('.') {
@@ -383,7 +371,7 @@ impl<'a, S: TokenValueSimplicity> TokenValue<'a, S> {
     }
 
     /// Parses a character literal lexeme into its value
-    fn char_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
+    pub fn char_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         let src = src
             .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
             .expect("character literal tokens should include delimiters (`'`)");
@@ -416,9 +404,9 @@ impl<'a, S: TokenValueSimplicity> TokenValue<'a, S> {
     }
 }
 
-impl<'a> TokenValue<'a, NoAlloc> {
+impl<'a> TokenValue<'a, &'a str> {
     /// Parses a string literal lexeme into its value, without allocating
-    fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
+    pub fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         let src = src
             .strip_circumfix(STR_DELIM, STR_DELIM)
             .expect("string literal tokens should include delimiters (`\"`)");
@@ -483,9 +471,9 @@ impl<'a> Iterator for Escapes<'a> {
     }
 }
 
-impl<'a> TokenValue<'a, Allocated> {
+impl<'a> TokenValue<'a, StringLiteral<'a>> {
     /// Parses a string literal lexeme into its value, without allocating
-    fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
+    pub fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         let replacements = Escapes::new(src).collect::<Result<Vec<_>, _>>()?;
         let escapes = replacements.iter().map(|(range, _)| *range).collect();
 
@@ -522,8 +510,8 @@ impl<'a> TokenValue<'a, Allocated> {
 
 /// A single token - its lexeme ([`Self::src`]) and type ([`Self::ty`]).
 /// Does not contain the token's value, but can have the value obtained with [`Self::value_noalloc`].
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Token<'a> {
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct Token<'a, T: StrLiteral> {
     /// Because this is a pointer into the original source string, we can use pointer arithmetic to find its location.
     /// If a program has a thousand tokens, why allocate a new string and store two additional integers in case of error
     /// when we can just keep the original string around and calculate those integers *on demand*?
@@ -531,12 +519,37 @@ pub struct Token<'a> {
 
     /// Couldn't be named `type` because that's a keyword in Rust
     pub ty: TokenType,
+
+    /// The value of the token
+    pub val: TokenValue<'a, T>,
 }
 
-impl std::fmt::Debug for Token<'_> {
+impl<T: StrLiteral + std::fmt::Debug> std::fmt::Debug for Token<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { src, ty } = self;
-        write!(f, "{ty:?}({src:?})")
+        let Self { src, ty, val } = self;
+        write!(f, "{ty:?}({src:?}): {val:?}")
+    }
+}
+
+impl<'a> From<Token<'a, StringLiteral<'a>>> for Token<'a, &'a str> {
+    fn from(Token { src, ty, val }: Token<'a, StringLiteral<'a>>) -> Self {
+        Token {
+            src,
+            ty,
+            val: match val {
+                TokenValue::StringLiteral(_) => TokenValue::StringLiteral(src),
+
+                TokenValue::Ignore => TokenValue::Ignore,
+                TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
+                TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
+                TokenValue::FltLiteral(x) => TokenValue::FltLiteral(x),
+                TokenValue::CharLiteral(x) => TokenValue::CharLiteral(x),
+                TokenValue::BoolLiteral(x) => TokenValue::BoolLiteral(x),
+                TokenValue::Direct(x) => TokenValue::Direct(x),
+                TokenValue::Keyword(x) => TokenValue::Keyword(x),
+                TokenValue::Punctuation(x) => TokenValue::Punctuation(x),
+            },
+        }
     }
 }
 
@@ -627,43 +640,15 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>
         })
 }
 
-impl<'a> Token<'a> {
-    /// Obtains the value of a token without allocating
-    ///
-    /// **Warning:** String literals will be incorrect because of the "no alloc" rule.
-    pub(super) fn value_noalloc(self) -> Result<TokenValue<'a, NoAlloc>, ErrorType<'a>> {
-        const VALID_TOKENS: &str = "Token::value() expects vaild tokens";
-        match self.ty {
-            TokenType::Whitespace | TokenType::Comment => Ok(TokenValue::Ignore),
-            TokenType::NumberLiteral => TokenValue::number_literal(self.src),
-            TokenType::CharLiteral => TokenValue::char_literal(self.src),
-            TokenType::StringLiteral => <TokenValue<NoAlloc>>::string_literal(self.src),
-            TokenType::BoolLiteral => self.src.parse().map(TokenValue::BoolLiteral).map_err(|e| {
-                panic!("should not identify a token as a BoolLiteral if it is not one: {e}")
-            }),
-            TokenType::Identifier
-            | TokenType::Callable
-            | TokenType::Macro
-            | TokenType::MacroParam => Ok(TokenValue::Direct(self.src)),
-            TokenType::Keyword | TokenType::CtrlKeyword => Ok(TokenValue::Keyword(
-                Keyword::try_from_str(self.src).expect(VALID_TOKENS),
-            )),
-            TokenType::Punctuation => Ok(TokenValue::Punctuation(
-                Punctuation::try_from_str(self.src).expect(VALID_TOKENS),
-            )),
-        }
-    }
-}
-
-impl<'a> TryFrom<TokenValue<'a, NoAlloc>> for TokenValue<'a, Allocated> {
+impl<'a> TryFrom<TokenValue<'a, &'a str>> for TokenValue<'a, StringLiteral<'a>> {
     type Error = ErrorType<'a>;
 
-    fn try_from(value: TokenValue<'a, NoAlloc>) -> Result<Self, Self::Error> {
+    fn try_from(value: TokenValue<'a, &'a str>) -> Result<Self, Self::Error> {
         match value {
             // string literal
             TokenValue::StringLiteral(src) => {
                 if src.contains(ESCAPE) {
-                    <TokenValue<Allocated>>::string_literal(src)
+                    <TokenValue<StringLiteral<'a>>>::string_literal(src)
                 } else {
                     Ok(Self::StringLiteral(StringLiteral {
                         text: Cow::Borrowed(src),
