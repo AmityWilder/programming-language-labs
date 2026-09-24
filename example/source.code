@@ -31,4 +31,5 @@ fn main() {
     }
 }
 
-const FOO = "apple \"or\" orange
+{[(
+    const FOO = "apple \"or\" orange
