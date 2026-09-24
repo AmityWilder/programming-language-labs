@@ -71,13 +71,13 @@ impl std::fmt::Display for ErrorType<'_> {
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s:?}"),
             Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
             Self::UnbalancedBrackets { expect, actual } => {
-                let mut buf = [0; char::MAX_LEN_UTF8];
-                write!(
-                    f,
-                    "unbalanced brackets, expected `{}`, found `{}`",
-                    expect.map_or("none", |(x, _)| x.close().encode_utf8(buf.as_mut_slice())),
-                    actual.close()
-                )
+                f.write_str("unbalanced brackets: expected ")?;
+                if let Some((expect, _)) = expect {
+                    write!(f, "`{}`", expect.close())?;
+                } else {
+                    f.write_str("none")?;
+                }
+                write!(f, ", found `{}`", actual.close())
             }
         }
     }
@@ -472,7 +472,7 @@ fn line_ref(
         .line
         .checked_sub(start.line)
         .expect("range should be ascending order");
-    for (idx, line) in source[line_range].lines().enumerate() {
+    for (idx, line) in source[line_range].split('\n').enumerate() {
         let line_number = start
             .line
             .checked_add(idx)
