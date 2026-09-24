@@ -36,6 +36,7 @@ pub enum Syntax {
     /// The name of a macro parameter
     MacroParam,
     /// A bracket with depth-based coloring (other punctuation handled with [`Self::Normal`])
+    #[expect(dead_code, reason = "reserved for future use")]
     Bracket(usize),
     /// Syntax errors
     Invalid,

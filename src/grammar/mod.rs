@@ -4,7 +4,7 @@ use crate::{
     error::TokenResult,
     grammar::syntax::{Syntax, syntax_of},
     scanner::{
-        symbols::CHAR_DELIM,
+        symbols::{CHAR_DELIM, STR_DELIM},
         token::{Allocated, CharLiteral, Escapes, NoAlloc, TokenValue, TokenValueSimplicity},
     },
 };
@@ -13,14 +13,22 @@ use std::range::Range;
 pub mod style;
 pub mod syntax;
 
+/// Remaps input ranges to be offset by the length of a delimiter ([`CHAR_DELIM`]/[`STR_DELIM`])
 const fn remap_subtoken_range(Range { start, end }: Range<usize>) -> Range<usize> {
     const ASCII_DELIM_LEN: usize = 1;
+    const {
+        assert!(
+            CHAR_DELIM.len_utf8() == ASCII_DELIM_LEN && STR_DELIM.len_utf8() == ASCII_DELIM_LEN,
+            "proof. ASCII_DELIM_LEN is the length of a delimiter"
+        );
+    }
     Range {
         start: start.strict_add(ASCII_DELIM_LEN),
         end: end.strict_add(ASCII_DELIM_LEN),
     }
 }
 
+/// Returns an iterator over char subtokens (assumes the character is escaped)
 fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, Syntax), 3> {
     let start = lex
         .strip_suffix(CHAR_DELIM)
@@ -54,6 +62,7 @@ pub struct SubTokenSyntax<'a, I: Iterator<Item = (Range<usize>, Syntax)>> {
 }
 
 impl<'a, I: Iterator<Item = (Range<usize>, Syntax)>> SubTokenSyntax<'a, I> {
+    /// Constructs a new [`SubTokenSyntax`]
     fn new(lex: &'a str, syn: Syntax, iter: I) -> Self {
         Self {
             lex,
@@ -128,10 +137,12 @@ mod subtoken_syn_tests {
 /// Offsets [`Range`]s by the length of a char/string delimiter and tuples them with [`Syntax::EscapeSeq`]
 #[derive(Debug, Clone)]
 pub struct EscapedRanges<I> {
+    /// The iterator being adapted
     iter: I,
 }
 
 impl<I> EscapedRanges<I> {
+    /// Constructs a new [`EscapedRanges`]
     const fn new(iter: I) -> Self {
         Self { iter }
     }
@@ -187,10 +198,12 @@ impl Highlighting for Allocated {
 /// Not related to [`EscapedRanges`], actually. Just adapts an [`Escapes`] iterator into its non-error ranges.
 #[derive(Debug, Clone)]
 pub struct EscapeRanges<'a> {
+    /// Iterator being adapted
     iter: Escapes<'a>,
 }
 
 impl<'a> EscapeRanges<'a> {
+    /// Creates a new iterator over [`EscapeRanges`]
     const fn new(iter: Escapes<'a>) -> Self {
         Self { iter }
     }
@@ -262,10 +275,12 @@ impl<'a: 'b, 'b, H: Highlighting> Iterator for HighlightToken<'a, 'b, H> {
 /// An iterator over tokens, outputting their lexeme and [Syntax]
 #[derive(Debug, Clone)]
 pub struct HighlightIter<I> {
+    /// Iterator being adapted
     iter: I,
 }
 
 impl<I> HighlightIter<I> {
+    /// Constructs a new [`HighlightIter`] iterator
     const fn new(iter: I) -> Self {
         Self { iter }
     }
