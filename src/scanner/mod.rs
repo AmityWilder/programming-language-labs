@@ -291,6 +291,8 @@ impl<'a> Scanner<'a> {
                 } else {
                     TokenType::Keyword
                 }
+            } else if matches!(src, "true" | "false") {
+                TokenType::BoolLiteral
             }
             // assumes the token has already been split off
             else if self.source.starts_with('(') {

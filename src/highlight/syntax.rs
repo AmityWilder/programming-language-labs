@@ -21,6 +21,8 @@ pub enum Syntax {
     StringLiteral,
     /// The escape sequence of either a character or string literal
     EscapeSeq,
+    /// A language-defined constant
+    LanguageDefined,
     /// A local variable, field, or function parameter
     Variable,
     /// A value that does not change at runtime
@@ -58,6 +60,8 @@ pub struct SyntaxStyle<'a, T> {
     pub string_literal: T,
     /// Style for [`Syntax::EscapeSeq`]
     pub escape_seq: T,
+    /// Language-defined constants like `true`/`false`
+    pub language_defined: T,
     /// Style for [`Syntax::InterpExpr`]
     pub interp_expr: T,
     /// Style for [`Syntax::Variable`]
@@ -91,6 +95,7 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
             Syntax::CharLiteral => &self.char_literal,
             Syntax::StringLiteral => &self.string_literal,
             Syntax::EscapeSeq => &self.escape_seq,
+            Syntax::LanguageDefined => &self.language_defined,
             Syntax::Variable => &self.variable,
             Syntax::Constant => &self.constant,
             Syntax::Callable => &self.callable,
@@ -132,6 +137,7 @@ where
                 TokenType::NumberLiteral => Syntax::NumberLiteral,
                 TokenType::CharLiteral => Syntax::CharLiteral,
                 TokenType::StringLiteral => Syntax::StringLiteral,
+                TokenType::BoolLiteral => Syntax::LanguageDefined,
                 TokenType::Identifier => {
                     // constants are all-caps
                     if token.src.chars().any(char::is_uppercase)
