@@ -2,7 +2,7 @@
 
 use crate::{
     error::TokenResult,
-    grammar::syntax::{Syntax, syntax_of},
+    highlight::syntax::{Syntax, syntax_of},
     scanner::{
         symbols::{CHAR_DELIM, STR_DELIM},
         token::{Allocated, CharLiteral, Escapes, NoAlloc, TokenValue, TokenValueSimplicity},
