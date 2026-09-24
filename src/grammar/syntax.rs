@@ -146,7 +146,6 @@ where
                 TokenType::CtrlKeyword => Syntax::CtrlKeyword,
                 TokenType::Macro => Syntax::MacroName,
                 TokenType::MacroParam => Syntax::MacroParam,
-                TokenType::Bracket(depth) => Syntax::Bracket(depth),
 
                 TokenType::Whitespace | TokenType::Punctuation => Syntax::Normal,
             },

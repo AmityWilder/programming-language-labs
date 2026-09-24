@@ -4,12 +4,20 @@
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
 #![feature(
-    try_from_int_error_kind // used in number literal error
+    try_from_int_error_kind, // used in number literal error
+    iter_next_chunk,
 )]
 #![forbid(
     clippy::missing_safety_doc,
     clippy::undocumented_unsafe_blocks,
+    clippy::correctness, // actually mandates correctness
     reason = "write sound code"
+)]
+#![deny(
+    unused_unsafe,
+    clippy::unnecessary_safety_doc,
+    clippy::unnecessary_safety_comment,
+    reason = "could cause mistakes"
 )]
 #![warn(
     clippy::pedantic,
@@ -32,7 +40,7 @@
     clippy::string_slice,
     reason = "be careful about edge-cases"
 )]
-// #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
+// #![warn(clippy::expect_used, clippy::panic, unsafe_code)] // not actually a problem, just be aware
 
 use grammar::{
     highlight,
@@ -128,8 +136,13 @@ pub fn run_code(source: &str) {
     }
     _ = write!(buf, "\x1b[0m");
     println!("```");
-    let line_num_width = buf.split('\n').count().strict_add(1).to_string().len();
-    for (i, line) in buf.split('\n').enumerate() {
+    let line_num_width = buf
+        .split('\n')
+        .count()
+        .strict_add(' '.len_utf8())
+        .to_string()
+        .len();
+    for (i, line) in buf.lines().enumerate() {
         let Range { start, .. } = buf
             .substr_range(line)
             .expect("lines should be substrings of buf");

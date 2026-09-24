@@ -35,8 +35,6 @@ pub enum TokenType {
     MacroParam,
     /// Operators and other non-alphanumeric tokens
     Punctuation,
-    /// A subset of [`Self::Punctuation`] with depth
-    Bracket(usize),
 }
 
 /// Helper macro for preventing issues with missed variants when adding new ones
@@ -217,6 +215,8 @@ define_token_eq! {
         Ref = "$",
         Remainder = "%",
         And = "&",
+        LParen = "(",
+        RParen = ")",
         Mul = "*",
         Add = "+",
         Comma = ",",
@@ -229,8 +229,12 @@ define_token_eq! {
         Assign = "=",
         Gt = ">",
         QMark = "?",
+        LBrack = "[",
+        RBrack = "]",
         Xor = "^",
+        LBrace = "{",
         Or = "|",
+        RBrace = "}",
     }
 }
 
@@ -629,7 +633,6 @@ impl<'a> Token<'a> {
             TokenType::Punctuation => Ok(TokenValue::Punctuation(
                 Punctuation::try_from_str(self.src).expect(VALID_TOKENS),
             )),
-            TokenType::Bracket(depth) => Ok(TokenValue::Bracket(depth)),
         }
     }
 }

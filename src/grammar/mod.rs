@@ -26,15 +26,13 @@ fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, S
         .strip_suffix(CHAR_DELIM)
         .expect("char literal should include delimiters");
 
-    // SAFETY: start.len() is lex minus one char
+    // SAFETY: start is a subset of lex, so its len cannot be within a UTF-8 character by the requirements of str.
     let post = unsafe { lex.get_unchecked(start.len()..) };
 
-    let inner = start
-        .strip_prefix(CHAR_DELIM)
+    let [pre, inner] = start
+        .split_inclusive(CHAR_DELIM)
+        .next_chunk::<2>()
         .expect("char literal should include delimiters");
-
-    // SAFETY: strip_prefix(CHAR_DELIM) would have returned None if lex did not start with CHAR_DELIM
-    let pre = unsafe { lex.get_unchecked(..CHAR_DELIM.len_utf8()) };
 
     [(pre, syn), (inner, Syntax::EscapeSeq), (post, syn)].into_iter()
 }
@@ -85,9 +83,7 @@ where
             .inspect(|(range, _)| self.prev_end = range.end)
             .map(|(range, syn)| {
                 (
-                    self.lex
-                        .get(range)
-                        .expect("range should be a subset of lex"),
+                    self.lex.get(range).expect("range should be a range in lex"),
                     syn,
                 )
             })
