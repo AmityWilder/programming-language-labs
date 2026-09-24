@@ -3,7 +3,10 @@
 use crate::{
     error::TokenResult,
     grammar::syntax::{Syntax, syntax_of},
-    scanner::token::{Allocated, CharLiteral, Escapes, NoAlloc, TokenValue, TokenValueSimplicity},
+    scanner::{
+        symbols::CHAR_DELIM,
+        token::{Allocated, CharLiteral, Escapes, NoAlloc, TokenValue, TokenValueSimplicity},
+    },
 };
 use std::range::Range;
 
@@ -19,18 +22,21 @@ const fn remap_subtoken_range(Range { start, end }: Range<usize>) -> Range<usize
 }
 
 fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, Syntax), 3> {
-    const DELIM: char = '\'';
-    let mid1 = DELIM.len_utf8();
-    let mid2 = lex
-        .len()
-        .checked_sub(DELIM.len_utf8())
-        .expect("char literal with escape should not be empty");
-    [
-        (&lex[..mid1], syn),
-        (&lex[mid1..mid2], Syntax::EscapeSeq),
-        (&lex[mid2..], syn),
-    ]
-    .into_iter()
+    let start = lex
+        .strip_suffix(CHAR_DELIM)
+        .expect("char literal should include delimiters");
+
+    // SAFETY: start.len() is lex minus one char
+    let post = unsafe { lex.get_unchecked(start.len()..) };
+
+    let inner = start
+        .strip_prefix(CHAR_DELIM)
+        .expect("char literal should include delimiters");
+
+    // SAFETY: strip_prefix(CHAR_DELIM) would have returned None if lex did not start with CHAR_DELIM
+    let pre = unsafe { lex.get_unchecked(..CHAR_DELIM.len_utf8()) };
+
+    [(pre, syn), (inner, Syntax::EscapeSeq), (post, syn)].into_iter()
 }
 
 /// An iterator over sub-tokens (like escape sequences in char/string literals)
@@ -77,7 +83,14 @@ where
                     .map(|end| (Range::from(self.prev_end..end), self.syn))
             })
             .inspect(|(range, _)| self.prev_end = range.end)
-            .map(|(range, syn)| (&self.lex[range], syn))
+            .map(|(range, syn)| {
+                (
+                    self.lex
+                        .get(range)
+                        .expect("range should be a subset of lex"),
+                    syn,
+                )
+            })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

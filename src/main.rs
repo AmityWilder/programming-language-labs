@@ -3,23 +3,35 @@
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
-#![feature(try_from_int_error_kind)]
+#![feature(
+    try_from_int_error_kind // used in number literal error
+)]
+#![forbid(
+    clippy::missing_safety_doc,
+    clippy::undocumented_unsafe_blocks,
+    reason = "write sound code"
+)]
 #![warn(
     clippy::pedantic,
-    clippy::indexing_slicing,
     clippy::missing_const_for_fn,
-    missing_docs
+    missing_docs,
+    clippy::too_many_lines,
+    reason = "yucky. clean that up."
 )]
-#![warn(clippy::missing_safety_doc, clippy::missing_panics_doc, clippy::todo)]
-#![deny(clippy::undocumented_unsafe_blocks, reason = "must prove soundness")]
-#![deny(
+#![warn(clippy::todo, reason = "finish your code")]
+#![warn(
+    clippy::missing_panics_doc,
     clippy::unwrap_used,
     clippy::missing_assert_message,
-    reason = "give a reason for panics"
+    reason = "avoid panics, or at least give a reason for them"
 )]
-#![warn(clippy::too_many_lines, reason = "yucky. clean that up.")]
-#![allow(clippy::wildcard_imports)]
-#![warn(clippy::arithmetic_side_effects, clippy::as_conversions)]
+#![warn(
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::indexing_slicing,
+    clippy::string_slice,
+    reason = "be careful about edge-cases"
+)]
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 
 use grammar::{
@@ -121,13 +133,17 @@ pub fn run_code(source: &str) {
         let Range { start, .. } = buf
             .substr_range(line)
             .expect("lines should be substrings of buf");
-        let last_ansi_seq = buf[..start]
+        let pre = buf
+            .get(..start)
+            .expect("substr_range start should not be within a UTF-8 character");
+        let last_ansi_seq = pre
             .rfind("\x1b[")
             .and_then(|pos| {
-                let s = &buf[pos..];
-                s.find('m')
-                    .map(|n| n.strict_add('m'.len_utf8()))
-                    .map(|n| &s[..n])
+                let s = buf.get(pos..).expect(
+                    "rfind should return a valid position within buf. \
+                    pre only shortens the end, not the start, so pos should still be a valid start position.",
+                );
+                s.split_inclusive('m').next()
             })
             .unwrap_or("\x1b[0m");
         println!(

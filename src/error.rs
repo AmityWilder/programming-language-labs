@@ -2,9 +2,10 @@
 
 use crate::scanner::{
     Bracket,
-    symbols::{BIN_PREFIX, ESCAPE, HEX_PREFIX, OCT_PREFIX},
-    token::escape_char,
-    token::{Token, TokenValue},
+    symbols::{
+        BIN_PREFIX, BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM,
+    },
+    token::{Token, TokenValue, escape_char},
 };
 use std::range::Range;
 
@@ -142,8 +143,14 @@ pub struct ContextError<'a> {
 
 impl std::fmt::Debug for ContextError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #[derive(Debug)]
+        struct Invalid;
         f.debug_struct("ContextError")
-            .field("source[range]", &&self.source[self.range])
+            .field(
+                "source[range]",
+                // this closure looks pointless, but it's actually coercing `s` from `&&str` into `&std::fmt::Debug`
+                self.source.get(self.range).as_ref().map_or(&Invalid, |s| s),
+            )
             .field("range", &self.range)
             .field("err", &self.err)
             .finish()
@@ -172,19 +179,22 @@ impl std::fmt::Display for LineCol {
     }
 }
 
-fn line_col(s: &str, position: usize) -> LineCol {
-    s[..position]
-        .split('\n') // assumes \n\r will never happen, except for \r\n\r\n
-        .enumerate()
-        .last()
-        .map_or_default(|(row, line)| LineCol {
-            line: row.strict_add(1), // +1 to convert from 0-based to 1-based
-            col: line.len(),
-        })
+fn line_col(s: &str, position: usize) -> Option<LineCol> {
+    s.get(..position).map(|s| {
+        s.split('\n') // assumes \n\r will never happen, except for \r\n\r\n
+            .enumerate()
+            .last()
+            .map_or_default(|(row, line)| LineCol {
+                line: row.strict_add(1), // +1 to convert from 0-based to 1-based
+                col: line.len(),
+            })
+    })
 }
 
-fn line_col_range(s: &str, range: Range<usize>) -> Range<LineCol> {
-    (line_col(s, range.start)..line_col(s, range.end)).into()
+fn line_col_range(s: &str, range: Range<usize>) -> Option<Range<LineCol>> {
+    line_col(s, range.start)
+        .zip(line_col(s, range.end))
+        .map(|(a, b)| (a..b).into())
 }
 
 impl<'a> ContextError<'a> {
@@ -209,7 +219,8 @@ impl<'a> ContextError<'a> {
 
 impl std::fmt::Display for ContextError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Range { start, end } = line_col_range(self.source, self.range);
+        let Range { start, end } =
+            line_col_range(self.source, self.range).expect("range should be a range within source");
         write!(f, "at {start}-{end}: {}", self.err)
     }
 }
@@ -270,19 +281,24 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
         reason = "it would be even more complicated to make a separate function for each of these"
     )]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let src: &str = &self.0.source[self.0.range];
+        let src = self
+            .0
+            .source
+            .get(self.0.range)
+            .expect("range should be a range in source");
         match &self.0.err {
             ErrorType::UnknownToken => f.write_str("try removing the character"),
 
-            ErrorType::EndlessBlockComment => f.write_str("try adding `*/`"),
+            ErrorType::EndlessBlockComment => write!(f, "try adding `{BLOCK_COMMENT_CLOSE}`"),
 
-            ErrorType::EmptyCharLiteral => f.write_str(
-                "chars can't be empty, try replacing `''` with `\"\"` or insert a character",
+            ErrorType::EmptyCharLiteral => write!(
+                f,
+                "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` with `{STR_DELIM}{STR_DELIM}` or insert a character",
             ),
 
             ErrorType::MultiCharLiteral => {
                 let inner = src
-                    .strip_circumfix("'", "'")
+                    .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
                     .expect("char literals should include delimiters");
                 let (first, rest) = inner.split_at(match escape_char(inner) {
                     Some((len, _)) => len,
@@ -295,45 +311,48 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 write!(
                     f,
                     "try removing the character(s) after `{first}` (remove trailing `{rest}`) \
-                     or change this to a string (\"{inner}\")"
+                     or change this to a string ({STR_DELIM}{inner}{STR_DELIM})"
                 )
             }
 
-            ErrorType::EndlessCharLiteral => f.write_str("try adding a `'` to the end of the char"),
+            ErrorType::EndlessCharLiteral => {
+                write!(f, "try adding a `{CHAR_DELIM}` to the end of the char")
+            }
 
             ErrorType::EscapedCharLiteralEnd => {
-                let substr = src[..src
-                    .find("\\'")
-                    .expect("should be EscapedCharLiteralEnd if this is not present")]
-                    .strip_prefix('\"')
-                    .expect("string literal should include delimiter");
+                let substr = src.strip_prefix(CHAR_DELIM)
+                    .expect("string literal should include at least the open delimiter, in EscapedCharLiteralEnd")
+                    .split_once("\\'")
+                    .expect("should be EscapedCharLiteralEnd if this is not present")
+                    .0;
                 write!(
                     f,
-                    "there is a closing single-quote candidate, but it is escaped (`\\'`). \n\
-                     char literals cannot end with an unescaped backslash (`\\`), \
-                     it is indistinguishable from an escaped single-quote (`\\'`). \n\
-                     try adding a `'` to the end of the string or remove the `\\` from `\\'` \
-                     to make the string `'{substr}'`"
+                    "there is a closing single-quote candidate, but it is escaped (`{ESCAPE}{CHAR_DELIM}`). \n\
+                     char literals cannot end with an unescaped backslash (`{ESCAPE}`), \
+                     it is indistinguishable from an escaped single-quote (`{ESCAPE}{CHAR_DELIM}`). \n\
+                     try adding a `{CHAR_DELIM}` to the end of the char or remove the `{ESCAPE}` from `{ESCAPE}{CHAR_DELIM}` \
+                     to make the char `{CHAR_DELIM}{substr}{CHAR_DELIM}`"
                 )
             }
 
             ErrorType::EndlessStringLiteral => {
-                f.write_str("try adding a `\"` to the end of the string")
+                write!(f, "try adding a `{STR_DELIM}` to the end of the string")
             }
 
             ErrorType::EscapedStringLiteralEnd => {
-                let substr = src[..src
-                    .find("\\\"")
-                    .expect("should be EndlessStringLiteral if this is not present")]
-                    .strip_prefix('"')
-                    .expect("string literal should include delimiter");
+                let substr = src
+                    .strip_prefix(STR_DELIM)
+                    .expect("string literal should include delimiter")
+                    .split_once("\\\"")
+                    .expect("should be EndlessStringLiteral if this is not present")
+                    .0;
                 write!(
                     f,
-                    "there is a closing double-quote candidate, but it is escaped (`\\\"`).\n\
-                     string literals cannot end with an unescaped backslash (`\\`), \
-                     it is indistinguishable from an escaped double-quote (`\\\"`).\n\
-                     try adding a `\"` to the end of the string or remove the `\\` from `\\\"` \
-                     to make the string `\"{substr}\"`"
+                    "there is a closing double-quote candidate, but it is escaped (`{ESCAPE}{STR_DELIM}`).\n\
+                     string literals cannot end with an unescaped backslash (`{ESCAPE}`), \
+                     it is indistinguishable from an escaped double-quote (`{ESCAPE}{STR_DELIM}`).\n\
+                     try adding a `{STR_DELIM}` to the end of the string or remove the `{ESCAPE}` from `{ESCAPE}{STR_DELIM}` \
+                     to make the string `{STR_DELIM}{substr}{STR_DELIM}`"
                 )
             }
 
@@ -385,19 +404,19 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                             let (suffix, base_name) =
                                 if let Some(digits) = src.strip_prefix(HEX_PREFIX) {
                                     digits
-                                        .find(|ch: char| !ch.is_ascii_hexdigit())
-                                        .map(|n| (&digits[n..], "hexadecimal"))
+                                        .split_once(|ch: char| !ch.is_ascii_hexdigit())
+                                        .map(|(_, suffix)| (suffix, "hexadecimal"))
                                 } else if let Some(digits) = src.strip_prefix(OCT_PREFIX) {
                                     digits
-                                        .find(|ch: char| !ch.is_digit(8))
-                                        .map(|n| (&digits[n..], "octal"))
+                                        .split_once(|ch: char| !ch.is_digit(8))
+                                        .map(|(_, suffix)| (suffix, "octal"))
                                 } else if let Some(digits) = src.strip_prefix(BIN_PREFIX) {
                                     digits
-                                        .find(|ch: char| !ch.is_digit(2))
-                                        .map(|n| (&digits[n..], "binary"))
+                                        .split_once(|ch: char| !ch.is_digit(2))
+                                        .map(|(_, suffix)| (suffix, "binary"))
                                 } else {
-                                    src.find(|ch: char| !ch.is_ascii_digit())
-                                        .map(|n| (&src[n..], "decimal"))
+                                    src.split_once(|ch: char| !ch.is_ascii_digit())
+                                        .map(|(_, suffix)| (suffix, "decimal"))
                                 }
                                 .expect("digits are unexpectedly valid");
                             write!(
@@ -425,20 +444,20 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                             let (suffix, base_name) =
                                 if let Some(digits) = digits.strip_prefix(HEX_PREFIX) {
                                     digits
-                                        .find(|ch: char| !ch.is_ascii_hexdigit())
-                                        .map(|n| (&digits[n..], "hexadecimal"))
+                                        .split_once(|ch: char| !ch.is_ascii_hexdigit())
+                                        .map(|(_, suffix)| (suffix, "hexadecimal"))
                                 } else if let Some(digits) = digits.strip_prefix(OCT_PREFIX) {
                                     digits
-                                        .find(|ch: char| !ch.is_digit(8))
-                                        .map(|n| (&digits[n..], "octal"))
+                                        .split_once(|ch: char| !ch.is_digit(8))
+                                        .map(|(_, suffix)| (suffix, "octal"))
                                 } else if let Some(digits) = digits.strip_prefix(BIN_PREFIX) {
                                     digits
-                                        .find(|ch: char| !ch.is_digit(2))
-                                        .map(|n| (&digits[n..], "binary"))
+                                        .split_once(|ch: char| !ch.is_digit(2))
+                                        .map(|(_, suffix)| (suffix, "binary"))
                                 } else {
                                     digits
-                                        .find(|ch: char| !ch.is_ascii_digit())
-                                        .map(|n| (&digits[n..], "decimal"))
+                                        .split_once(|ch: char| !ch.is_ascii_digit())
+                                        .map(|(_, suffix)| (suffix, "decimal"))
                                 }
                                 .expect("digits are unexpectedly valid");
                             write!(
@@ -529,8 +548,9 @@ fn line_ref(
     const PRE_NUM: &str = "   \x1b[94m";
     const POST_NUM: &str = " |\x1b[0m  ";
 
-    let Range { start, end } = line_col_range(source, range);
-    let line_range = line_containing(source, range).expect("range should be a range in source");
+    let (Range { start, end }, line_range) = line_col_range(source, range)
+        .zip(line_containing(source, range))
+        .expect("range should be a range in source");
     // bigger numbers have more digits so the last line number should have the most digits
     let num_width = end.line.to_string().len(); // ew, an allocation just to count the digits :c
     writeln!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
@@ -538,7 +558,12 @@ fn line_ref(
         .line
         .checked_sub(start.line)
         .expect("range should be ascending order");
-    for (idx, line) in source[line_range].split('\n').enumerate() {
+    for (idx, line) in source
+        .get(line_range)
+        .expect("line_containing should return a valid range within the source string")
+        .split('\n')
+        .enumerate()
+    {
         let line_number = start
             .line
             .checked_add(idx)
