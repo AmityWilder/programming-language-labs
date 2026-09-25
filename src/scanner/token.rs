@@ -271,11 +271,13 @@ pub struct CharLiteral {
 /// Allocating version of [`StrLiteral`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StringLiteral<'a> {
+    /// The string literal doesn't have any escape sequences
     NoEscapes {
         /// No escape sequences are present
         text: &'a str,
     },
-    Escaped {
+    /// The string literal has at least one escape sequence
+    HasEscaped {
         /// The text content of the string literal; escape sequences converted and delimiters excluded.
         text: String,
 
@@ -340,7 +342,7 @@ impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral<'a> {
                 prev_end = range.end;
             }
 
-            Ok(StringLiteral::Escaped {
+            Ok(StringLiteral::HasEscaped {
                 text: processed,
                 escapes,
             })

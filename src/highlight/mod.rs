@@ -184,17 +184,13 @@ impl<'a: 'b, 'b> Highlighting<'a, 'b> for StringLiteral<'a> {
     type Escaped =
         SubTokenSyntax<'a, EscapedRanges<std::iter::Copied<std::slice::Iter<'b, Range<usize>>>>>;
 
-    fn escaped_str_literal(
-        lex: &'a str,
-        syn: Syntax,
-        literal: &'b Self,
-    ) -> <Self as Highlighting<'a, 'b>>::Escaped {
+    fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped {
         SubTokenSyntax::new(
             lex,
             syn,
             EscapedRanges::new(
                 match literal {
-                    Self::Escaped { escapes, .. } => escapes.as_slice(),
+                    Self::HasEscaped { escapes, .. } => escapes.as_slice(),
                     Self::NoEscapes { .. } => [].as_slice(),
                 }
                 .iter()
