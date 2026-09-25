@@ -4,7 +4,7 @@ use crate::{
     error::{ErrorType, NumLitError},
     scanner::symbols::{BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM},
 };
-use std::{borrow::Cow, range::Range};
+use std::range::Range;
 
 /// The classification of a [`Token`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -267,42 +267,92 @@ pub struct CharLiteral {
 }
 
 /// Information about a string literal
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct StringLiteral<'a> {
-    /// The text content of the string literal; escape sequences converted and delimiters excluded.
-    ///
-    /// It's possible no escape sequences were present,
-    /// in which case this will be borrowed and [`Self::escapes`] will be empty.
-    pub text: Cow<'a, str>,
+///
+/// Allocating version of [`StrLiteral`]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum StringLiteral<'a> {
+    NoEscapes {
+        /// No escape sequences are present
+        text: &'a str,
+    },
+    Escaped {
+        /// The text content of the string literal; escape sequences converted and delimiters excluded.
+        text: String,
 
-    /// Ranges of the original lexeme (quote delimiters excluded) that refer to escape sequences
-    pub escapes: Vec<Range<usize>>,
+        /// Ranges of the original lexeme (quote delimiters excluded) that refer to escape sequences
+        escapes: Vec<Range<usize>>,
+    },
 }
 
-/// The type used for [`TokenValue::StringLiteral`].
-/// Either a [`StringLiteral<'a>`] or a [`&'a str`](`str`).
-pub trait StrLiteral: Sized {
-    /// Identify whether a string literal contains escape sequences.
-    fn has_escapes(&self) -> bool;
-}
-
-/// String literals may contain unconverted escape sequences
-impl StrLiteral for &str {
-    fn has_escapes(&self) -> bool {
-        self.contains(ESCAPE)
+impl Default for StringLiteral<'_> {
+    fn default() -> Self {
+        Self::NoEscapes {
+            text: Default::default(),
+        }
     }
 }
 
-/// String literals have escape sequences converted
-impl StrLiteral for StringLiteral<'_> {
-    fn has_escapes(&self) -> bool {
-        !self.escapes.is_empty()
+/// No-alloc version of [`StringLiteral`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct StrLiteral<'a> {
+    /// May contain unconverted escape sequences
+    pub lex: &'a str,
+}
+
+impl StrLiteral<'_> {
+    /// Identify whether a string literal contains escape sequences.
+    pub fn has_escapes(&self) -> bool {
+        self.lex.contains(ESCAPE)
+    }
+}
+
+impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral<'a> {
+    type Error = ErrorType<'a>;
+
+    fn try_from(value: StrLiteral<'a>) -> Result<Self, Self::Error> {
+        if value.has_escapes() {
+            let replacements = Escapes::new(value.lex).collect::<Result<Vec<_>, _>>()?;
+            let escapes = replacements.iter().map(|(range, _)| *range).collect();
+
+            let byte_diff: usize = replacements
+                .iter()
+                .map(|(range, ch)| {
+                    (range
+                        .end
+                        .checked_sub(range.start)
+                        .expect("range should be ascending order"))
+                    .checked_sub(ch.len_utf8())
+                    .expect("should not be replacing an empty range")
+                })
+                .sum();
+            let mut processed = String::with_capacity(
+                value
+                    .lex
+                    .len()
+                    .checked_sub(byte_diff)
+                    .expect("should only be removing bytes, not adding"),
+            );
+            let mut prev_end = 0;
+            for (range, repl) in replacements {
+                processed.push_str(value.lex.get(prev_end..range.start)
+                    .expect("range should never start/end within a UTF-8 character, and prev_end should always be from such a range (or 0)"));
+                processed.push(repl);
+                prev_end = range.end;
+            }
+
+            Ok(StringLiteral::Escaped {
+                text: processed,
+                escapes,
+            })
+        } else {
+            Ok(StringLiteral::NoEscapes { text: value.lex })
+        }
     }
 }
 
 /// The value represented by a [`Token`]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum TokenValue<'a, T: StrLiteral> {
+pub enum TokenValue<'a> {
     /// Whitespace/comments
     #[default]
     Ignore,
@@ -315,7 +365,7 @@ pub enum TokenValue<'a, T: StrLiteral> {
     /// Character literal
     CharLiteral(CharLiteral),
     /// String literal
-    StringLiteral(T),
+    StringLiteral(StrLiteral<'a>),
     /// Boolean literal
     BoolLiteral(bool),
     /// Value is the token source itself (in-code name)
@@ -326,7 +376,7 @@ pub enum TokenValue<'a, T: StrLiteral> {
     Punctuation(Punctuation),
 }
 
-impl<'a, T: StrLiteral> TokenValue<'a, T> {
+impl<'a> TokenValue<'a> {
     /// Parses a number literal lexeme into its value
     pub fn number_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.
@@ -362,7 +412,7 @@ impl<'a, T: StrLiteral> TokenValue<'a, T> {
                                     ))
                                 })
                             }))
-                        .map(|x| Self::SIntLiteral(x))
+                        .map(Self::SIntLiteral)
                     } else {
                         Ok(Self::UIntLiteral(value))
                     }
@@ -404,7 +454,7 @@ impl<'a, T: StrLiteral> TokenValue<'a, T> {
     }
 }
 
-impl<'a> TokenValue<'a, &'a str> {
+impl<'a> TokenValue<'a> {
     /// Parses a string literal lexeme into its value, without allocating
     pub fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
         let src = src
@@ -421,7 +471,7 @@ impl<'a> TokenValue<'a, &'a str> {
         {
             Err(e)
         } else {
-            Ok(Self::StringLiteral(src))
+            Ok(Self::StringLiteral(StrLiteral { lex: src }))
         }
     }
 }
@@ -471,47 +521,10 @@ impl<'a> Iterator for Escapes<'a> {
     }
 }
 
-impl<'a> TokenValue<'a, StringLiteral<'a>> {
-    /// Parses a string literal lexeme into its value, without allocating
-    pub fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
-        let replacements = Escapes::new(src).collect::<Result<Vec<_>, _>>()?;
-        let escapes = replacements.iter().map(|(range, _)| *range).collect();
-
-        let byte_diff: usize = replacements
-            .iter()
-            .map(|(range, ch)| {
-                (range
-                    .end
-                    .checked_sub(range.start)
-                    .expect("range should be ascending order"))
-                .checked_sub(ch.len_utf8())
-                .expect("should not be replacing an empty range")
-            })
-            .sum();
-        let mut processed = String::with_capacity(
-            src.len()
-                .checked_sub(byte_diff)
-                .expect("should only be removing bytes, not adding"),
-        );
-        let mut prev_end = 0;
-        for (range, repl) in replacements {
-            processed.push_str(src.get(prev_end..range.start)
-                .expect("range should never start/end within a UTF-8 character, and prev_end should always be from such a range (or 0)"));
-            processed.push(repl);
-            prev_end = range.end;
-        }
-
-        Ok(Self::StringLiteral(StringLiteral {
-            text: Cow::Owned(processed),
-            escapes,
-        }))
-    }
-}
-
 /// A single token - its lexeme ([`Self::src`]) and type ([`Self::ty`]).
 /// Does not contain the token's value, but can have the value obtained with [`Self::value_noalloc`].
 #[derive(Clone, Copy, PartialEq, Default)]
-pub struct Token<'a, T: StrLiteral> {
+pub struct Token<'a> {
     /// Because this is a pointer into the original source string, we can use pointer arithmetic to find its location.
     /// If a program has a thousand tokens, why allocate a new string and store two additional integers in case of error
     /// when we can just keep the original string around and calculate those integers *on demand*?
@@ -521,35 +534,13 @@ pub struct Token<'a, T: StrLiteral> {
     pub ty: TokenType,
 
     /// The value of the token
-    pub val: TokenValue<'a, T>,
+    pub val: TokenValue<'a>,
 }
 
-impl<T: StrLiteral + std::fmt::Debug> std::fmt::Debug for Token<'_, T> {
+impl std::fmt::Debug for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { src, ty, val } = self;
         write!(f, "{ty:?}({src:?}): {val:?}")
-    }
-}
-
-impl<'a> From<Token<'a, StringLiteral<'a>>> for Token<'a, &'a str> {
-    fn from(Token { src, ty, val }: Token<'a, StringLiteral<'a>>) -> Self {
-        Token {
-            src,
-            ty,
-            val: match val {
-                TokenValue::StringLiteral(_) => TokenValue::StringLiteral(src),
-
-                TokenValue::Ignore => TokenValue::Ignore,
-                TokenValue::UIntLiteral(x) => TokenValue::UIntLiteral(x),
-                TokenValue::SIntLiteral(x) => TokenValue::SIntLiteral(x),
-                TokenValue::FltLiteral(x) => TokenValue::FltLiteral(x),
-                TokenValue::CharLiteral(x) => TokenValue::CharLiteral(x),
-                TokenValue::BoolLiteral(x) => TokenValue::BoolLiteral(x),
-                TokenValue::Direct(x) => TokenValue::Direct(x),
-                TokenValue::Keyword(x) => TokenValue::Keyword(x),
-                TokenValue::Punctuation(x) => TokenValue::Punctuation(x),
-            },
-        }
     }
 }
 
@@ -638,34 +629,4 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>
             res.map(|ch| (range, ch))
                 .map_err(|()| ErrorType::InvalidEscape(esc))
         })
-}
-
-impl<'a> TryFrom<TokenValue<'a, &'a str>> for TokenValue<'a, StringLiteral<'a>> {
-    type Error = ErrorType<'a>;
-
-    fn try_from(value: TokenValue<'a, &'a str>) -> Result<Self, Self::Error> {
-        match value {
-            // string literal
-            TokenValue::StringLiteral(src) => {
-                if src.contains(ESCAPE) {
-                    <TokenValue<StringLiteral<'a>>>::string_literal(src)
-                } else {
-                    Ok(Self::StringLiteral(StringLiteral {
-                        text: Cow::Borrowed(src),
-                        escapes: Vec::new(),
-                    }))
-                }
-            }
-
-            TokenValue::Ignore => Ok(Self::Ignore),
-            TokenValue::UIntLiteral(x) => Ok(Self::UIntLiteral(x)),
-            TokenValue::SIntLiteral(x) => Ok(Self::SIntLiteral(x)),
-            TokenValue::FltLiteral(x) => Ok(Self::FltLiteral(x)),
-            TokenValue::CharLiteral(x) => Ok(Self::CharLiteral(x)),
-            TokenValue::BoolLiteral(x) => Ok(Self::BoolLiteral(x)),
-            TokenValue::Direct(x) => Ok(Self::Direct(x)),
-            TokenValue::Keyword(x) => Ok(Self::Keyword(x)),
-            TokenValue::Punctuation(x) => Ok(Self::Punctuation(x)),
-        }
-    }
 }

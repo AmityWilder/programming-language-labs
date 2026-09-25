@@ -2,7 +2,7 @@
 
 use crate::{
     error::TokenResult,
-    scanner::token::{StrLiteral, TokenType, TokenValue},
+    scanner::token::{TokenType, TokenValue},
 };
 
 /// Syntactic element category for highlighting
@@ -122,12 +122,9 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
 ///
 /// # Panics
 /// This method may panic if `item` is an error with a malformed [`range`](crate::error::ContextError::range).
-pub fn syntax_of<'a, 'b, S>(
-    item: &'b TokenResult<'a, S>,
-) -> (&'a str, Syntax, &'b TokenValue<'a, S>)
+pub fn syntax_of<'a, 'b>(item: &'b TokenResult<'a>) -> (&'a str, Syntax, &'b TokenValue<'a>)
 where
     'a: 'b,
-    S: StrLiteral,
 {
     match item {
         Ok(token) => (

@@ -95,7 +95,7 @@ pub enum ErrorType<'a> {
         /// The token pattern expected
         expect: &'static str,
         /// The token found
-        actual: Token<'a, &'a str>,
+        actual: Token<'a>,
     },
 }
 
@@ -172,6 +172,47 @@ pub struct ContextError<'a> {
     pub range: Range<usize>,
     /// The exact error that was found
     pub err: ErrorType<'a>,
+}
+
+impl<'a> ContextError<'a> {
+    pub fn unexpected(
+        token: Token<'a>,
+        source: &'a str,
+        expected: &'static str,
+    ) -> ContextError<'a> {
+        ContextError {
+            source,
+            range: source
+                .substr_range(token.src)
+                .expect("token src should be a substring of the source code"),
+            err: ErrorType::UnexpectedToken {
+                expect: expected,
+                actual: token,
+            },
+        }
+    }
+
+    pub const fn missing(source: &'a str, expected: &'static str) -> ContextError<'a> {
+        ContextError {
+            source,
+            range: Range {
+                start: source.len(),
+                end: source.len(),
+            },
+            err: ErrorType::MissingToken { expect: expected },
+        }
+    }
+
+    pub fn missing_or_unexpected(
+        token: Option<&Token<'a>>,
+        source: &'a str,
+        expected: &'static str,
+    ) -> ContextError<'a> {
+        match token.copied() {
+            Some(token) => Self::unexpected(token, source, expected),
+            None => Self::missing(source, expected),
+        }
+    }
 }
 
 impl std::fmt::Debug for ContextError<'_> {
@@ -716,4 +757,4 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
 }
 
 /// A [`Token`] and its [`TokenValue`], or a [`ContextError`]
-pub type TokenResult<'a, S> = Result<Token<'a, S>, ContextError<'a>>;
+pub type TokenResult<'a> = Result<Token<'a>, ContextError<'a>>;
