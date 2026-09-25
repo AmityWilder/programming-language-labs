@@ -24,8 +24,8 @@ pub enum TokenType {
     BoolLiteral,
     /// The name of an item in code
     Identifier,
-    /// Identical to [`Self::Identifier`], but implies a function by context
-    /// i.e. The next token is an open parentheses (`(`)
+    /// Identical to [`Self::Identifier`], but implies a function by context.
+    /// i.e. The next token is an open parenthesis (`(`)
     Callable,
     /// A language keyword
     Keyword,

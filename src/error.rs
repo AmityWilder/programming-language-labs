@@ -9,6 +9,81 @@ use crate::scanner::{
 };
 use std::range::Range;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Article {
+    A,
+    An,
+}
+
+impl std::fmt::Display for Article {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Article::A => "a",
+            Article::An => "an",
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Expecting {
+    pub expect: &'static str,
+
+    /// Determines "a/an".
+    ///
+    /// **Note:** This cannot be determined programatically by whether a word is prefixed with a vowel.
+    ///
+    /// 1. Sometimes words start with a silent consonant followed by a not-silent vowel.
+    ///
+    ///     **Examples:**
+    ///     - honest ("on-est")
+    ///     - hour ("our")
+    ///     - heir ("air")
+    ///     - honor ("on-or")
+    ///
+    /// 2. Additionally, letters saying their names (such as initialisms) may be pronounced starting
+    ///    with a vowel despite *being* a consonant.
+    ///
+    ///     **Examples:**
+    ///     - F ("eff")
+    ///     - H ("ayche")
+    ///     - L ("el")
+    ///     - M ("em")
+    ///     - N ("en")
+    ///     - R ("are")
+    ///     - S ("ess")
+    ///     - X ("ecks")
+    ///
+    /// 3. And to make it even more confusing, sometimes 'u' (a vowel) will make a **consonant** sound
+    ///    when saying its name, something vowels tend to do when followed by a consonant-vowel pair.
+    ///
+    ///     **Examples:**
+    ///     - unit ("you-nit"; 'u' is made to say its name by 'i' on the other side of 'n')
+    ///     - urine ("yer-in"; 'u' is made to say its name by 'i' on the other side of 'r')
+    ///     - utility ("you-till-itty"; 'u' is made to say its name by 'i' on the other side of 't')
+    ///
+    /// And of course there are limitless exceptions when it comes to English, because while all
+    /// languages are formulated by culture rather than committees, English in particular was
+    /// formulated by three separate cultures all doing their own thing independently before
+    /// deciding to mash all their languages together with little regard for bistanders.
+    pub article: Article,
+}
+
+impl Expecting {
+    pub const fn a(expect: &'static str) -> Self {
+        Self {
+            expect,
+            article: Article::A,
+        }
+    }
+
+    pub const fn an(expect: &'static str) -> Self {
+        Self {
+            expect,
+            article: Article::An,
+        }
+    }
+}
+
 /// Invalid number literal
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NumLitError {
@@ -88,12 +163,12 @@ pub enum ErrorType<'a> {
     /// A token was expected, but instead found EOF
     MissingToken {
         /// The token pattern expected
-        expect: &'static str,
+        expect: Expecting,
     },
     /// A token was expected, but instead found `actual`
     UnexpectedToken {
         /// The token pattern expected
-        expect: &'static str,
+        expect: Expecting,
         /// The token found
         actual: Token<'a>,
     },
@@ -103,52 +178,66 @@ impl std::fmt::Display for ErrorType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownToken => write!(f, "unknown token"),
+
             Self::EndlessBlockComment => {
                 write!(
                     f,
                     "block comment opens (`/*`) but never closes (missing `*/`)"
                 )
             }
+
             Self::EmptyCharLiteral => write!(f, "empty character literal"),
+
             Self::MultiCharLiteral => {
                 write!(f, "character literal may only contain one codepoint")
             }
+
             Self::EndlessCharLiteral | Self::EscapedCharLiteralEnd => {
                 write!(
                     f,
                     "char literal opens (`'`) but never closes (missing unescaped `'`)"
                 )
             }
+
             Self::EndlessStringLiteral | Self::EscapedStringLiteralEnd => {
                 write!(
                     f,
                     "string literal opens (`\"`) but never closes (missing unescaped `\"`)"
                 )
             }
+
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s:?}"),
+
             Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
+
             Self::IncorrectCloseBracket { expect, actual } => write!(
                 f,
                 "incorrect close bracket: expected `{}`, found `{}`",
                 expect.0.close(),
                 actual.close()
             ),
+
             Self::ExcessCloseBracket { actual } => write!(
                 f,
                 "too many close brackets: expected none, found `{}`",
                 actual.close()
             ),
+
             Self::MissingCloseBracket { expect } => write!(
                 f,
                 "missing close bracket: expected `{}`, found none",
                 expect.0.close()
             ),
-            Self::MissingToken { expect } => write!(f, "missing {expect}"),
+
+            Self::MissingToken {
+                expect: Expecting { expect, article },
+            } => write!(f, "missing {article} {expect}"),
+
             Self::UnexpectedToken {
-                expect,
+                expect: Expecting { expect, article },
                 actual: found,
             } => {
-                write!(f, "expected {expect}, found {found:?}")
+                write!(f, "expected {article} {expect}, found {found:?}")
             }
         }
     }
@@ -175,11 +264,7 @@ pub struct ContextError<'a> {
 }
 
 impl<'a> ContextError<'a> {
-    pub fn unexpected(
-        token: Token<'a>,
-        source: &'a str,
-        expected: &'static str,
-    ) -> ContextError<'a> {
+    pub fn unexpected(token: Token<'a>, source: &'a str, expected: Expecting) -> ContextError<'a> {
         ContextError {
             source,
             range: source
@@ -192,7 +277,7 @@ impl<'a> ContextError<'a> {
         }
     }
 
-    pub const fn missing(source: &'a str, expected: &'static str) -> ContextError<'a> {
+    pub const fn missing(source: &'a str, expected: Expecting) -> ContextError<'a> {
         ContextError {
             source,
             range: Range {
@@ -206,7 +291,7 @@ impl<'a> ContextError<'a> {
     pub fn missing_or_unexpected(
         token: Option<&Token<'a>>,
         source: &'a str,
-        expected: &'static str,
+        expected: Expecting,
     ) -> ContextError<'a> {
         match token.copied() {
             Some(token) => Self::unexpected(token, source, expected),
@@ -583,26 +668,32 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 expect.0.open(),
                 actual.close(),
             ),
+
             ErrorType::ExcessCloseBracket { actual } => write!(
                 f,
                 "try removing the `{}` or add a `{}` before it",
                 actual.close(),
                 actual.open(),
             ),
+
             ErrorType::MissingCloseBracket { expect } => write!(
                 f,
                 "try inserting a `{}` or remove the `{}`",
                 expect.0.close(),
                 expect.0.open(),
             ),
-            ErrorType::MissingToken { expect } => write!(f, "try inserting {expect}"),
+
+            ErrorType::MissingToken {
+                expect: Expecting { expect, article },
+            } => write!(f, "try inserting {article} {expect}"),
+
             ErrorType::UnexpectedToken {
-                expect,
+                expect: Expecting { expect, article },
                 actual: Token { src: found, .. },
             } => {
                 write!(
                     f,
-                    "try inserting {expect} before `{found}` or remove `{found}`"
+                    "try inserting {article} {expect} before `{found}` or remove `{found}`"
                 )
             }
         }
