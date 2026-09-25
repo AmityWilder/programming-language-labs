@@ -1,13 +1,10 @@
 //! The iterator that breaks source code into tokens (which are defined in [`token`] module).
 
 use crate::{
-    error::{ContextError, ErrorType, TokenResult},
-    scanner::{
-        symbols::{
-            BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
-            MACRO_PARAM_PREFIX, MACRO_PREFIX, STR_DELIM,
-        },
-        token::{StrLiteral, StringLiteral},
+    error::{ContextError, ErrorType},
+    scanner::symbols::{
+        BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
+        MACRO_PARAM_PREFIX, MACRO_PREFIX, STR_DELIM,
     },
 };
 use std::range::Range;
@@ -134,7 +131,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_whitespace`] would not have returned true
-    fn scan_whitespace(&mut self) -> Token<'a, &'a str> {
+    fn scan_whitespace(&mut self) -> Token<'a> {
         let len = self
             .source
             .find(|ch: char| !ch.is_whitespace())
@@ -157,7 +154,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_macro(&mut self) -> Token<'a, &'a str> {
+    fn scan_macro(&mut self) -> Token<'a> {
         let len = self
             .source
             .strip_prefix(MACRO_PREFIX)
@@ -186,7 +183,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_macro_param(&mut self) -> Token<'a, &'a str> {
+    fn scan_macro_param(&mut self) -> Token<'a> {
         let len = self
             .source
             .strip_prefix(MACRO_PARAM_PREFIX)
@@ -220,10 +217,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_strlike_literal(
-        &mut self,
-        open_delim: char,
-    ) -> Result<Token<'a, &'a str>, ContextError<'a>> {
+    fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, ContextError<'a>> {
         let rest = self.source.strip_prefix(open_delim).expect(
             "should not call `scan_strlike_literal` if `starts_with_strlike_literal` is false",
         );
@@ -272,7 +266,7 @@ impl<'a> Scanner<'a> {
                     .split_off(len)
                     .expect("find and len should return safe positions to split at");
                 match open_delim {
-                    STR_DELIM => <TokenValue<&'a str>>::string_literal(src).map(|val| Token {
+                    STR_DELIM => TokenValue::string_literal(src).map(|val| Token {
                         src,
                         ty: TokenType::StringLiteral,
                         val,
@@ -300,7 +294,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_ident(&mut self) -> Token<'a, &'a str> {
+    fn scan_ident(&mut self) -> Token<'a> {
         let len = self
             .source
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
@@ -349,7 +343,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_num_literal(&mut self) -> Result<Token<'a, &'a str>, ContextError<'a>> {
+    fn scan_num_literal(&mut self) -> Result<Token<'a>, ContextError<'a>> {
         let number_end = {
             let mut is_first_char = true;
             let mut is_first_decimal = true; // at most one decimal
@@ -395,7 +389,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_line_comment(&mut self) -> Token<'a, &'a str> {
+    fn scan_line_comment(&mut self) -> Token<'a> {
         let len = self
             .source
             .lines()
@@ -420,7 +414,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_block_comment(&mut self) -> Result<Token<'a, &'a str>, ContextError<'a>> {
+    fn scan_block_comment(&mut self) -> Result<Token<'a>, ContextError<'a>> {
         const BLOCK_COMMENT_CIRCUMFIX_LEN: usize =
             BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len();
         let mut prev_char = None;
@@ -464,7 +458,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_punc(&mut self) -> Result<Token<'a, &'a str>, ContextError<'a>> {
+    fn scan_punc(&mut self) -> Result<Token<'a>, ContextError<'a>> {
         Punctuation::from_prefix(self.source)
             .map(|punc| {
                 let src = self
@@ -490,7 +484,7 @@ impl<'a> Scanner<'a> {
 }
 
 impl<'a> Iterator for Scanner<'a> {
-    type Item = Result<Token<'a, &'a str>, ContextError<'a>>;
+    type Item = Result<Token<'a>, ContextError<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // if there are no characters remaining, this will return None and stop iterating.
@@ -548,7 +542,7 @@ impl<'a> Iterator for Scanner<'a> {
 impl std::iter::FusedIterator for Scanner<'_> {}
 
 /// Trait for methods by source code can be tokenized
-pub trait Tokenize: StrLiteral {
+pub trait Tokenize {
     /// The iterator over tokens
     type Iter<'a>;
 
@@ -561,47 +555,5 @@ impl Tokenize for &str {
 
     fn tokenize(source: &str) -> Self::Iter<'_> {
         Scanner::new(source)
-    }
-}
-
-/// Adapts an iterator over [`&'a str`] tokens into [`Allocated`] tokens
-#[derive(Debug, Clone)]
-pub struct AllocateTokens<I> {
-    /// The iterator over [`&'a str`] tokens
-    iter: I,
-}
-
-impl<I> AllocateTokens<I> {
-    /// Construct a new [`AllocateTokens`] iterator
-    const fn new(iter: I) -> Self {
-        Self { iter }
-    }
-}
-
-impl<'a, I> Iterator for AllocateTokens<I>
-where
-    I: Iterator<Item = TokenResult<'a, &'a str>>,
-{
-    type Item = TokenResult<'a, StringLiteral<'a>>;
-
-    /// # Panics
-    /// This method can panic if an error is found in the value allocation step that was not identified in
-    /// the scanning step
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|item| {
-            item.map(|Token { src, ty, val }| {
-                let val = <TokenValue<StringLiteral<'a>>>::try_from(val)
-                    .expect("should have been caught by scanner");
-                Token { src, ty, val }
-            })
-        })
-    }
-}
-
-impl Tokenize for StringLiteral<'_> {
-    type Iter<'a> = AllocateTokens<<&'a str as Tokenize>::Iter<'a>>;
-
-    fn tokenize(source: &str) -> Self::Iter<'_> {
-        AllocateTokens::new(<&str>::tokenize(source))
     }
 }

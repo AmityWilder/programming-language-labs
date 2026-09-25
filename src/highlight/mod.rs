@@ -172,7 +172,7 @@ where
 }
 
 /// An extension to [`StrLiteral`] defining helpers for syntax highlighting
-pub trait Highlighting<'a: 'b, 'b>: 'b + StrLiteral {
+pub trait Highlighting<'a: 'b, 'b>: 'b {
     /// The type returned by [`Self::escaped_str_literal`]
     type Escaped: 'b + Iterator<Item = (&'a str, Syntax)>;
 
@@ -184,11 +184,22 @@ impl<'a: 'b, 'b> Highlighting<'a, 'b> for StringLiteral<'a> {
     type Escaped =
         SubTokenSyntax<'a, EscapedRanges<std::iter::Copied<std::slice::Iter<'b, Range<usize>>>>>;
 
-    fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped {
+    fn escaped_str_literal(
+        lex: &'a str,
+        syn: Syntax,
+        literal: &'b Self,
+    ) -> <Self as Highlighting<'a, 'b>>::Escaped {
         SubTokenSyntax::new(
             lex,
             syn,
-            EscapedRanges::new(literal.escapes.iter().copied()),
+            EscapedRanges::new(
+                match literal {
+                    Self::Escaped { escapes, .. } => escapes.as_slice(),
+                    Self::NoEscapes { .. } => [].as_slice(),
+                }
+                .iter()
+                .copied(),
+            ),
         )
     }
 }
@@ -215,14 +226,14 @@ impl Iterator for EscapeRanges<'_> {
     }
 }
 
-impl<'a: 'b, 'b> Highlighting<'a, 'b> for &'a str {
+impl<'a: 'b, 'b> Highlighting<'a, 'b> for StrLiteral<'a> {
     type Escaped = SubTokenSyntax<'a, EscapedRanges<EscapeRanges<'b>>>;
 
     fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped {
         SubTokenSyntax::new(
             lex,
             syn,
-            EscapedRanges::new(EscapeRanges::new(Escapes::new(literal))),
+            EscapedRanges::new(EscapeRanges::new(Escapes::new(literal.lex))),
         )
     }
 }
@@ -280,10 +291,8 @@ impl<I> HighlightIter<I> {
     }
 }
 
-impl<'a: 'b, 'b, H: Highlighting<'a, 'b>, I: Iterator<Item = &'b TokenResult<'a, H>>> Iterator
-    for HighlightIter<I>
-{
-    type Item = HighlightToken<'a, 'b, H>;
+impl<'a: 'b, 'b, I: Iterator<Item = &'b TokenResult<'a>>> Iterator for HighlightIter<I> {
+    type Item = HighlightToken<'a, 'b, StrLiteral<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|res| {
@@ -295,8 +304,8 @@ impl<'a: 'b, 'b, H: Highlighting<'a, 'b>, I: Iterator<Item = &'b TokenResult<'a,
                 }) => HighlightToken::CharLiteral(escaped_char_literal(lex, syn)),
 
                 // string literal with escapes or interpolated string with escapes and no expressions - an iterator
-                TokenValue::StringLiteral(literal) if H::has_escapes(literal) => {
-                    HighlightToken::StrLiteral(H::escaped_str_literal(lex, syn, literal))
+                TokenValue::StringLiteral(literal) if literal.has_escapes() => {
+                    HighlightToken::StrLiteral(StrLiteral::escaped_str_literal(lex, syn, literal))
                 }
 
                 // an item
@@ -307,10 +316,9 @@ impl<'a: 'b, 'b, H: Highlighting<'a, 'b>, I: Iterator<Item = &'b TokenResult<'a,
 }
 
 /// An iterator over each lexeme and [`Syntax`] in the [`TokenResult`] list
-pub fn highlight<'a: 'b, 'b, H, I>(tokens: I) -> std::iter::Flatten<HighlightIter<I::IntoIter>>
+pub fn highlight<'a: 'b, 'b, I>(tokens: I) -> std::iter::Flatten<HighlightIter<I::IntoIter>>
 where
-    H: Highlighting<'a, 'b>,
-    I: IntoIterator<Item = &'b TokenResult<'a, H>>,
+    I: IntoIterator<Item = &'b TokenResult<'a>>,
 {
     HighlightIter::new(tokens.into_iter()).flatten()
 }
