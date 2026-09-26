@@ -48,7 +48,7 @@ use highlight::{
     style::{Color, Style, StyleWrapper},
     syntax::{SyntaxStyle, syntax_of},
 };
-use scanner::Tokenize;
+use scanner::tokenize;
 use std::{fmt::Write, range::Range};
 
 mod error;
@@ -116,7 +116,7 @@ const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
 pub fn run_code(source: &str) {
     // token debug
     println!("source code:\n```\n{source}\n```");
-    let tokens: Vec<_> = <&str>::tokenize(source).collect();
+    let tokens: Vec<_> = tokenize(source).collect();
     for item in &tokens {
         let (lex, syn, _) = syntax_of(item);
         match item {

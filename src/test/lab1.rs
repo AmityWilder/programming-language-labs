@@ -4,8 +4,8 @@
 use crate::{
     error::{ContextError, ErrorType},
     scanner::{
-        Tokenize,
         token::{Token, TokenType, TokenValue},
+        tokenize,
     },
 };
 
@@ -31,7 +31,7 @@ mod scan {
         fn test_scan_whitespace_single() {
             const SOURCE: &str = " ";
             assert_eq!(
-                <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     src: SOURCE,
                     ty: TokenType::Whitespace,
@@ -44,7 +44,7 @@ mod scan {
         fn test_scan_whitespace_multi() {
             const SOURCE: &str = " \n\r\t ";
             assert_eq!(
-                <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     src: SOURCE,
                     ty: TokenType::Whitespace,
@@ -66,7 +66,7 @@ mod scan {
             fn test_scan_line_comment_no_newline() {
                 const SOURCE: &str = "// apple";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::Comment,
@@ -78,9 +78,7 @@ mod scan {
             #[test]
             fn test_scan_line_comment_typical() {
                 assert_eq!(
-                    <&str>::tokenize("// apple\n")
-                        .collect::<Vec<_>>()
-                        .as_slice(),
+                    tokenize("// apple\n").collect::<Vec<_>>().as_slice(),
                     &[
                         Ok(Token {
                             src: "// apple",
@@ -109,7 +107,7 @@ mod scan {
         fn test_scan_ident_simple() {
             const SOURCE: &str = "foo";
             assert_eq!(
-                <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     src: SOURCE,
                     ty: TokenType::Identifier,
@@ -122,7 +120,7 @@ mod scan {
         fn test_scan_ident_prime() {
             const SOURCE: &str = "x'";
             assert_eq!(
-                <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     src: SOURCE,
                     ty: TokenType::Identifier,
@@ -135,7 +133,7 @@ mod scan {
         fn test_scan_ident_apostrophe() {
             const SOURCE: &str = "can't";
             assert_eq!(
-                <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     src: SOURCE,
                     ty: TokenType::Identifier,
@@ -157,7 +155,7 @@ mod scan {
             fn test_scan_number_simple() {
                 const SOURCE: &str = "5";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -170,7 +168,7 @@ mod scan {
             fn test_scan_number_multidigit() {
                 const SOURCE: &str = "35";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -183,7 +181,7 @@ mod scan {
             fn test_scan_number_negative() {
                 const SOURCE: &str = "-5";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -196,7 +194,7 @@ mod scan {
             fn test_scan_number_decimal() {
                 const SOURCE: &str = "2.5";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -209,7 +207,7 @@ mod scan {
             fn test_scan_number_multidigit_decimal() {
                 const SOURCE: &str = "25.25";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -222,7 +220,7 @@ mod scan {
             fn test_scan_number_multidigit_decimal_negative() {
                 const SOURCE: &str = "-25.25";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -240,7 +238,7 @@ mod scan {
             fn test_scan_number_sci_notation() {
                 const SOURCE: &str = "5e0";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -253,7 +251,7 @@ mod scan {
             fn test_scan_number_neg_sci_notation() {
                 const SOURCE: &str = "5e-5";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -266,7 +264,7 @@ mod scan {
             fn test_scan_number_neg_sci_notation_multidigit_exp() {
                 const SOURCE: &str = "5e-50";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -279,7 +277,7 @@ mod scan {
             fn test_scan_number_neg_sci_notation_multidigit_exp_negative() {
                 const SOURCE: &str = "-5e-50";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -297,7 +295,7 @@ mod scan {
             fn test_scan_number_oct() {
                 const SOURCE: &str = "0x9F";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -315,7 +313,7 @@ mod scan {
             fn test_scan_number_oct() {
                 const SOURCE: &str = "0o253";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -333,7 +331,7 @@ mod scan {
             fn test_scan_number_bin() {
                 const SOURCE: &str = "0b11011011";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::NumberLiteral,
@@ -352,7 +350,7 @@ mod scan {
         fn test_scan_char_simple() {
             const SOURCE: &str = "'a'";
             assert_eq!(
-                <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     src: SOURCE,
                     ty: TokenType::CharLiteral,
@@ -368,7 +366,7 @@ mod scan {
         fn test_scan_char_multi() {
             const SOURCE: &str = "'aa'";
             assert_eq!(
-                <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
@@ -381,7 +379,7 @@ mod scan {
         fn test_scan_char_empty() {
             const SOURCE: &str = "''";
             assert_eq!(
-                <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
@@ -397,7 +395,7 @@ mod scan {
             fn test_scan_char_escaped() {
                 const SOURCE: &str = "'\\0'";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::CharLiteral,
@@ -413,7 +411,7 @@ mod scan {
             fn test_scan_char_escaped_hex() {
                 const SOURCE: &str = "'\\x1b'";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         src: SOURCE,
                         ty: TokenType::CharLiteral,
@@ -429,7 +427,7 @@ mod scan {
             fn test_scan_char_escaped_multi() {
                 const SOURCE: &str = "'\\1b'";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Err(ContextError {
                         source: SOURCE,
                         range: (0..SOURCE.len()).into(),
@@ -442,7 +440,7 @@ mod scan {
             fn test_scan_char_escaped_invalid() {
                 const SOURCE: &str = "'\\'";
                 assert_eq!(
-                    <&str>::tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Err(ContextError {
                         source: SOURCE,
                         range: (0..SOURCE.len()).into(),

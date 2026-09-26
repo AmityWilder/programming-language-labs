@@ -64,7 +64,7 @@ pub struct Expecting {
     /// And of course there are limitless exceptions when it comes to English, because while all
     /// languages are formulated by culture rather than committees, English in particular was
     /// formulated by three separate cultures all doing their own thing independently before
-    /// deciding to mash all their languages together with little regard for bistanders.
+    /// deciding to mash all their languages together with little regard for bystanders.
     pub article: Article,
 }
 
@@ -235,9 +235,9 @@ impl std::fmt::Display for ErrorType<'_> {
 
             Self::UnexpectedToken {
                 expect: Expecting { expect, article },
-                actual: found,
+                actual: Token { src: found, .. },
             } => {
-                write!(f, "expected {article} {expect}, found {found:?}")
+                write!(f, "expected {article} {expect}, found `{found}`")
             }
         }
     }
@@ -289,11 +289,11 @@ impl<'a> ContextError<'a> {
     }
 
     pub fn missing_or_unexpected(
-        token: Option<&Token<'a>>,
+        token: Option<Token<'a>>,
         source: &'a str,
         expected: Expecting,
     ) -> ContextError<'a> {
-        match token.copied() {
+        match token {
             Some(token) => Self::unexpected(token, source, expected),
             None => Self::missing(source, expected),
         }
@@ -409,6 +409,7 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             | ErrorType::EscapedStringLiteralEnd
             | ErrorType::InvalidEscape(_)
             | ErrorType::InvalidNumLiteral(_) => "LEX",
+
             ErrorType::IncorrectCloseBracket { .. }
             | ErrorType::ExcessCloseBracket { .. }
             | ErrorType::MissingCloseBracket { .. }
@@ -426,10 +427,10 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             ErrorType::EscapedStringLiteralEnd => 7,
             ErrorType::InvalidEscape(_) => 8,
             ErrorType::InvalidNumLiteral(_) => 9,
+
             ErrorType::IncorrectCloseBracket { .. } => 10,
             ErrorType::ExcessCloseBracket { .. } => 11,
             ErrorType::MissingCloseBracket { .. } => 12,
-
             ErrorType::MissingToken { .. } => 21,
             ErrorType::UnexpectedToken { .. } => 22,
         };
