@@ -3,19 +3,109 @@
 #![allow(clippy::missing_docs_in_private_items, reason = "under construction")]
 
 use crate::{
-    error::{ContextError, Expecting},
-    scanner::token::{Keyword, Punctuation, Token, TokenType, TokenValue},
+    error::{ContextError, ErrorType, Expecting},
+    scanner::{
+        Bracket,
+        token::{Keyword, Punctuation, Token, TokenType, TokenValue},
+    },
 };
+use std::range::Range;
+
+macro_rules! matching {
+    ($value:expr, $pattern:pat $(if $guard:expr)? => $result:expr) => {
+        match $value {
+            $pattern $(if $guard)? => Some($result),
+            _ => None,
+        }
+    };
+}
+
+macro_rules! pattern {
+    ($pattern:pat $(if $guard:expr)? => $result:expr) => {
+        |value| matching!(value, $pattern $(if $guard)? => $result)
+    };
+}
+
+macro_rules! token_pattern {
+    ($($field:ident$(: $pattern:pat)?),* $(if $guard:expr)? => $result:expr) => {
+        pattern!(Token { $($field$(: $pattern)?,)* .. } $(if $guard)? => $result)
+    };
+}
+
+/// A rule that is just a sequence of one rule after another
+macro_rules! simple_rule {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $Struct:ident<$lt:lifetime> {$(
+            $(#[$fmeta:meta])*
+            $fvis:vis $field:ident: $Type:ty
+        ),* $(,)?}
+    ) => {
+        $(#[$meta])*
+        $vis struct $Struct<$lt> {
+            $(
+                $(#[$fmeta])*
+                $fvis $field: $Type
+            ),*
+        }
+
+        impl<'a> Rule<'a> for $Struct<'a> {
+            fn try_pull<'b>(
+                source: &'a str,
+                tokens: &'b [Token<'a>],
+            ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
+                $(let ($field, tokens) = Rule::try_pull(source, tokens)?;)*
+                Ok((Self { $($field),* }, tokens))
+            }
+        }
+    };
+}
+
+/// A rule that is a single token matching a specific pattern
+macro_rules! terminal_rule {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $Struct:ident<$lt:lifetime>($fvis:vis $Type:ty)
+            := ($($field:ident$(: $pattern:pat)?),+ $(,)? $(if $($guard:tt)+)?) => ($result:expr)
+            as $article:ident $desc:literal;
+    ) => {
+        $(#[$meta])*
+        $vis struct $Struct<$lt>($fvis $Type);
+
+        impl<'a> Rule<'a> for $Struct<'a> {
+            fn try_pull<'b>(
+                source: &'a str,
+                tokens: &'b [Token<'a>],
+            ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
+                MatchRule::try_pull(
+                    |token| match token {
+                        Token { $($field$(: $pattern)?,)+ .. } $(if $($guard)+)? => Some($result),
+                        _ => None,
+                    },
+                    tokens,
+                )
+                .map_err(|token| {
+                    ContextError::missing_or_unexpected(token, source, Expecting::$article($desc))
+                })
+            }
+        }
+    };
+}
+
+fn map_pull<'a, 'b, T, U, F>(f: F) -> impl FnOnce((T, &'b [Token<'a>])) -> (U, &'b [Token<'a>])
+where
+    F: FnOnce(T) -> U,
+{
+    move |(x, tokens)| (f(x), tokens)
+}
 
 pub trait MatchRule<'a>: Sized {
     type Output;
 
     fn try_pull<'b>(
         self,
-        source: &'a str,
         tokens: &'b [Token<'a>],
-        expecting: Expecting,
-    ) -> Result<(Self::Output, &'b [Token<'a>]), ContextError<'a>>;
+    ) -> Result<(Self::Output, &'b [Token<'a>]), Option<Token<'a>>>;
 }
 
 impl<'a, U, F> MatchRule<'a> for F
@@ -26,18 +116,12 @@ where
 
     fn try_pull<'b>(
         self,
-        source: &'a str,
         mut tokens: &'b [Token<'a>],
-        expecting: Expecting,
-    ) -> Result<(Self::Output, &'b [Token<'a>]), ContextError<'a>> {
+    ) -> Result<(Self::Output, &'b [Token<'a>]), Option<Token<'a>>> {
         tokens
             .split_off_first()
-            .ok_or_else(|| ContextError::missing(source, expecting))
-            .and_then(|&token| {
-                self(token)
-                    .map(|x| (x, tokens))
-                    .ok_or_else(|| ContextError::unexpected(token, source, expecting))
-            })
+            .ok_or(None)
+            .and_then(|&token| self(token).map(|x| (x, tokens)).ok_or(Some(token)))
     }
 }
 
@@ -48,292 +132,236 @@ pub trait Rule<'a>: Sized {
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>>;
 }
 
-/// `<let-statement> ::= "let" <binding> "=" <expression>`
-#[derive(Debug, Clone, PartialEq)]
-pub struct LetStatement<'a> {
-    pub let_kw: &'a str,
-    pub binding: Binding<'a>,
-    pub assign_kw: &'a str,
-    pub expression: Expression<'a>,
-}
-
-impl<'a> Rule<'a> for LetStatement<'a> {
+impl<'a, T: Rule<'a>> Rule<'a> for Box<T> {
     fn try_pull<'b>(
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (let_kw, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Keyword(Keyword::Let),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("`let` keyword"),
-        )?;
-
-        let (binding, tokens) = Binding::try_pull(source, tokens)?;
-
-        let (assign_kw, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::Assign),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::an("`=` operator"),
-        )?;
-
-        let (expression, tokens) = Expression::try_pull(source, tokens)?;
-
-        Ok((
-            Self {
-                let_kw,
-                binding,
-                assign_kw,
-                expression,
-            },
-            tokens,
-        ))
+        T::try_pull(source, tokens).map(map_pull(Box::new))
     }
 }
 
-/// `<binding> ::= <identifier>`
-// TODO: this can be way cooler
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Binding<'a> {
-    name: &'a str,
-}
-
-impl<'a> Rule<'a> for Binding<'a> {
+impl<'a, T: Rule<'a>> Rule<'a> for Option<T> {
     fn try_pull<'b>(
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (name, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    ty: TokenType::Identifier,
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::an("identifier"),
-        )?;
-
-        Ok((Self { name }, tokens))
+        Ok(T::try_pull(source, tokens)
+            .map(map_pull(Some))
+            .unwrap_or((None, tokens)))
     }
+}
+
+terminal_rule! {
+    /// `"let"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct LetKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Let)) => (Self(src)) as a "`let` keyword";
+}
+terminal_rule! {
+    /// `"="`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct AssignOp<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::Assign)) => (Self(src)) as an "`=` operator";
+}
+terminal_rule! {
+    /// `";"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct SemiColon<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::Semi)) => (Self(src)) as an "`;`";
+}
+
+simple_rule! {
+    /// `<let-statement> ::= "let" <binding> "=" <expression>`
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct LetStatement<'a> {
+        pub let_kw: LetKeyword<'a>,
+        pub binding: Binding<'a>,
+        pub assign_kw: AssignOp<'a>,
+        pub expression: Expression<'a>,
+        pub semi: SemiColon<'a>,
+    }
+}
+
+simple_rule! {
+    /// `<binding> ::= <identifier>`
+    // TODO: this can be way cooler
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct Binding<'a> {
+        name: Ident<'a>,
+    }
+}
+
+fn specify_bracket_err(
+    expect: (Bracket, Range<usize>),
+    ContextError { source, range, err }: ContextError,
+) -> ContextError {
+    ContextError {
+        source,
+        range,
+        err: match err {
+            ErrorType::MissingToken { expect: _ } => ErrorType::MissingCloseBracket { expect },
+
+            ErrorType::UnexpectedToken {
+                expect: _,
+                actual:
+                    Token {
+                        val:
+                            TokenValue::Punctuation(
+                                actual @ (Punctuation::RParen
+                                | Punctuation::RBrack
+                                | Punctuation::RBrace),
+                            ),
+                        ..
+                    },
+            } => ErrorType::IncorrectCloseBracket {
+                expect,
+                actual: match actual {
+                    Punctuation::RParen => Bracket::Paren,
+                    Punctuation::RBrack => Bracket::Brack,
+                    Punctuation::RBrace => Bracket::Brace,
+                    _ => unreachable!("guarded by match arm"),
+                },
+            },
+
+            _ => err,
+        },
+    }
+}
+
+terminal_rule! {
+    /// `"("`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct OpenParen<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::LParen)) => (Self(src)) as an "open parenthesis `(`";
+}
+terminal_rule! {
+    /// `")"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct CloseParen<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::RParen)) => (Self(src)) as a "close parenthesis `)`";
 }
 
 /// `<parenthesized> ::= "(" INNER ")"`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Parenthesized<'a, T> {
-    pub open: &'a str,
+    pub open: OpenParen<'a>,
     pub inner: T,
-    pub close: &'a str,
+    pub close: CloseParen<'a>,
 }
 
+/// Not a simple rule, because brackets have special errors
 impl<'a, T: Rule<'a>> Rule<'a> for Parenthesized<'a, T> {
     fn try_pull<'b>(
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (open, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::LParen),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::an("open parenthesis `(`"),
-        )?;
+        let (open, tokens) = OpenParen::try_pull(source, tokens)?;
 
-        let (inner, tokens) = T::try_pull(source, tokens)?;
+        let (inner, tokens) = Rule::try_pull(source, tokens)?;
 
-        let (close, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::RParen),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("close parenthesis `)`"),
-        )?;
+        let (close, tokens) = Rule::try_pull(source, tokens).map_err(|e| {
+            specify_bracket_err(
+                (
+                    Bracket::Paren,
+                    source
+                        .substr_range(open.0)
+                        .expect("open should be a substr of source"),
+                ),
+                e,
+            )
+        })?;
 
         Ok((Self { open, inner, close }, tokens))
     }
+}
+
+terminal_rule! {
+    /// `"["`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct OpenBrack<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::LBrack)) => (Self(src)) as an "open bracket `[`";
+}
+terminal_rule! {
+    /// `"]"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct CloseBrack<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::RBrack)) => (Self(src)) as a "close bracket `]`";
 }
 
 /// `<bracketed> ::= "[" INNER "]"`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Bracketed<'a, T> {
-    pub open: &'a str,
+    pub open: OpenBrack<'a>,
     pub inner: T,
-    pub close: &'a str,
+    pub close: CloseBrack<'a>,
 }
 
+/// Not a simple rule, because brackets have special errors
 impl<'a, T: Rule<'a>> Rule<'a> for Bracketed<'a, T> {
     fn try_pull<'b>(
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (open, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::LBrack),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::an("open bracket `[`"),
-        )?;
+        let (open, tokens) = OpenBrack::try_pull(source, tokens)?;
 
-        let (inner, tokens) = T::try_pull(source, tokens)?;
+        let expect = (
+            Bracket::Brack,
+            source
+                .substr_range(open.0)
+                .expect("open should be a substr of source"),
+        );
 
-        let (close, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::RBrack),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("close bracket `]`"),
-        )?;
+        let (inner, tokens) = Rule::try_pull(source, tokens)?;
+
+        let (close, tokens) =
+            Rule::try_pull(source, tokens).map_err(|e| specify_bracket_err(expect, e))?;
 
         Ok((Self { open, inner, close }, tokens))
     }
+}
+
+terminal_rule! {
+    /// `"{"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct OpenBrace<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::LBrace)) => (Self(src)) as an "open brace `{`";
+}
+terminal_rule! {
+    /// `"}"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct CloseBrace<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::RBrace)) => (Self(src)) as a "close brace `}`";
 }
 
 /// `<braced> ::= "{" INNER "}"`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Braced<'a, T> {
-    pub open: &'a str,
+    /// `{`
+    pub open: OpenBrace<'a>,
     pub inner: T,
-    pub close: &'a str,
+    /// `}`
+    pub close: CloseBrace<'a>,
 }
 
+/// Not a simple rule, because brackets have special errors
 impl<'a, T: Rule<'a>> Rule<'a> for Braced<'a, T> {
     fn try_pull<'b>(
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (open, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::LBrace),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::an("open brace `{`"),
-        )?;
+        let (open, tokens) = OpenBrace::try_pull(source, tokens)?;
 
-        let (inner, tokens) = T::try_pull(source, tokens)?;
+        let expect = (
+            Bracket::Brace,
+            source
+                .substr_range(open.0)
+                .expect("open should be a substr of source"),
+        );
 
-        let (close, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::RBrace),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("close brace `}`"),
-        )?;
+        let (inner, tokens) = Rule::try_pull(source, tokens)?;
+
+        let (close, tokens) =
+            Rule::try_pull(source, tokens).map_err(|e| specify_bracket_err(expect, e))?;
 
         Ok((Self { open, inner, close }, tokens))
     }
 }
 
-/// `<group> ::= "(" <expression> ")"`
-#[derive(Debug, Clone, PartialEq)]
-pub struct Group<'a> {
-    pub open: &'a str,
-    pub inner: Box<Expression<'a>>,
-    pub close: &'a str,
-}
-
-impl<'a> Rule<'a> for Group<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (open, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::LParen),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::an("open parenthesis `(`"),
-        )?;
-
-        let (inner, tokens) = Expression::try_pull(source, tokens)?;
-
-        let (close, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Punctuation(Punctuation::RParen),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("close parenthesis`)`"),
-        )?;
-
-        Ok((
-            Self {
-                open,
-                inner: Box::new(inner),
-                close,
-            },
-            tokens,
-        ))
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Literal<'a> {
-    pub token: Token<'a>,
+    pub token: (&'a str, TokenValue<'a>),
 }
 
 impl<'a> Rule<'a> for Literal<'a> {
@@ -342,21 +370,12 @@ impl<'a> Rule<'a> for Literal<'a> {
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
         let (token, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    ty:
-                        TokenType::BoolLiteral
-                        | TokenType::NumberLiteral
-                        | TokenType::CharLiteral
-                        | TokenType::StringLiteral,
-                    ..
-                } => Some(token),
-                _ => None,
-            },
-            source,
+            token_pattern!(src, val, ty: TokenType::BoolLiteral | TokenType::NumberLiteral | TokenType::CharLiteral | TokenType::StringLiteral => (src, val)),
             tokens,
-            Expecting::a("literal"),
-        )?;
+        )
+        .map_err(|token| {
+            ContextError::missing_or_unexpected(token, source, Expecting::a("literal"))
+        })?;
 
         Ok((Self { token }, tokens))
     }
@@ -450,10 +469,11 @@ impl<'a> Rule<'a> for BinaryOperation<'a> {
                 } if let Ok(op) = punc.try_into() => Some((src, op)),
                 _ => None,
             },
-            source,
             tokens,
-            Expecting::a("binary operator"),
-        )?;
+        )
+        .map_err(|token| {
+            ContextError::missing_or_unexpected(token, source, Expecting::a("binary operator"))
+        })?;
         let (rhs, tokens) = Expression::try_pull(source, tokens)?;
 
         Ok((
@@ -478,7 +498,7 @@ impl<'a> Rule<'a> for BinaryOperation<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression<'a> {
     Literal(Literal<'a>),
-    Group(Group<'a>),
+    Group(Parenthesized<'a, Box<Self>>),
     BinOp(BinaryOperation<'a>),
 }
 
@@ -487,7 +507,7 @@ impl<'a> Rule<'a> for Expression<'a> {
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        if let Ok((value, tokens)) = Group::try_pull(source, tokens) {
+        if let Ok((value, tokens)) = Parenthesized::try_pull(source, tokens) {
             Ok((Self::Group(value), tokens))
         } else if let Ok((value, tokens)) = Literal::try_pull(source, tokens) {
             Ok((Self::Literal(value), tokens))
@@ -497,12 +517,18 @@ impl<'a> Rule<'a> for Expression<'a> {
         // TODO: are there other expression structures?
         else {
             Err(ContextError::missing_or_unexpected(
-                tokens.first(),
+                tokens.first().copied(),
                 source,
                 Expecting::an("expression"),
             ))
         }
     }
+}
+
+terminal_rule! {
+    /// `"struct"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct StructKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Struct)) => (Self(src)) as a "`struct` keyword";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -513,226 +539,133 @@ impl<'a> Rule<'a> for StructBody {
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        todo!()
+        todo!("struct body")
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct StructDef<'a> {
-    pub struct_kw: &'a str,
-    pub name: &'a str,
-    pub body: Braced<'a, StructBody>,
-}
-
-impl<'a> Rule<'a> for StructDef<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (struct_kw, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Keyword(Keyword::Struct),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("`struct` keyword"),
-        )?;
-
-        let (name, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    ty: TokenType::Identifier,
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::an("identifier"),
-        )?;
-
-        let (body, tokens) = <Braced<StructBody>>::try_pull(source, tokens)?;
-
-        Ok((
-            Self {
-                struct_kw,
-                name,
-                body,
-            },
-            tokens,
-        ))
+simple_rule! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct StructDef<'a> {
+        pub struct_kw: StructKeyword<'a>,
+        pub name: Ident<'a>,
+        pub body: Braced<'a, StructBody>,
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct UnionDef<'a> {
-    pub union_kw: &'a str,
+terminal_rule! {
+    /// `"union"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct UnionKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Union)) => (Self(src)) as a "`union` keyword";
 }
 
-impl<'a> Rule<'a> for UnionDef<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (union_kw, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Keyword(Keyword::Union),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("`union` keyword"),
-        )?;
-
+simple_rule! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct UnionDef<'a> {
+        pub union_kw: UnionKeyword<'a>,
         // TODO
-
-        Ok((Self { union_kw }, tokens))
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct EnumDef<'a> {
-    pub enum_kw: &'a str,
+terminal_rule! {
+    /// `"enum"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct EnumKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Enum)) => (Self(src)) as an "`enum` keyword";
 }
 
-impl<'a> Rule<'a> for EnumDef<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (enum_kw, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Keyword(Keyword::Enum),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::an("`enum` keyword"),
-        )?;
-
+simple_rule! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct EnumDef<'a> {
+        pub enum_kw: EnumKeyword<'a>,
         // TODO
-
-        Ok((Self { enum_kw }, tokens))
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct TypeDef<'a> {
-    pub type_kw: &'a str,
+terminal_rule! {
+    /// `"type"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct TypeKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Type)) => (Self(src)) as a "`type` keyword";
 }
 
-impl<'a> Rule<'a> for TypeDef<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (type_kw, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Keyword(Keyword::Type),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("`type` keyword"),
-        )?;
-
+simple_rule! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct TypeDef<'a> {
+        pub type_kw: TypeKeyword<'a>,
         // TODO
-
-        Ok((Self { type_kw }, tokens))
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct MacroDef<'a> {
-    pub def_kw: &'a str,
+terminal_rule! {
+    /// `"def"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct DefKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Def)) => (Self(src)) as a "`def` keyword";
 }
 
-impl<'a> Rule<'a> for MacroDef<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (def_kw, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Keyword(Keyword::Def),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("`def` keyword"),
-        )?;
-
+simple_rule! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct MacroDef<'a> {
+        pub def_kw: DefKeyword<'a>,
         // TODO
-
-        Ok((Self { def_kw }, tokens))
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct FnDef<'a> {
-    pub fn_kw: &'a str,
+terminal_rule! {
+    /// `","`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct CommaPunc<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::Comma)) => (Self(src)) as a "comma (`,`)";
 }
 
-impl<'a> Rule<'a> for FnDef<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (fn_kw, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    src,
-                    val: TokenValue::Keyword(Keyword::Fn),
-                    ..
-                } => Some(src),
-                _ => None,
-            },
-            source,
-            tokens,
-            Expecting::a("`fn` keyword"),
-        )?;
-
-        // TODO
-
-        Ok((Self { fn_kw }, tokens))
+simple_rule! {
+    /// `<param-list1> ::= "," | "," <param-list>`
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+    pub struct ParamList1<'a> {
+        pub comma: CommaPunc<'a>,
+        pub param: Option<Box<ParamList<'a>>>,
     }
 }
 
-/// ```not_code
-/// <syntax> ::=
-///     <syntax> <syntax>
-///     | <struct-def>
-///     | <union-def>
-///     | <enum-def>
-///     | <type-def>
-///     | <macro-def>
-///     | <fn-def>
-/// ```
+simple_rule! {
+    /// `<param-list> ::= <ident> | <ident> <param-list1>`
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+    pub struct ParamList<'a> {
+        /// ident
+        pub param: Ident<'a>,
+        pub next: Option<ParamList1<'a>>,
+    }
+}
+
+simple_rule! {
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct FnBody<'a> {
+        statement: LetStatement<'a>, // TODO
+    }
+}
+
+terminal_rule! {
+    /// `"fn"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct FnKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Fn)) => (Self(src)) as a "`fn` keyword";
+}
+
+terminal_rule! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct Ident<'a>(pub &'a str) := (val: TokenValue::Direct(src) /* TODO: are there other uses for Direct? */) => (Self(src)) as an "identifier";
+}
+
+simple_rule! {
+    /// `<fn-def> ::= "fn" <ident> "(" <param-list> ")" "{" <fn-body> "}"`
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct FnDef<'a> {
+        /// `fn`
+        pub fn_kw: FnKeyword<'a>,
+        /// ident
+        pub name: Ident<'a>,
+        pub params: Parenthesized<'a, Option<ParamList<'a>>>,
+        pub body: Braced<'a, FnBody<'a>>,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum Syntax<'a> {
-    Pair(Box<(Syntax<'a>, Syntax<'a>)>),
+pub enum Item<'a> {
     StructDef(StructDef<'a>),
     UnionDef(UnionDef<'a>),
     EnumDef(EnumDef<'a>),
@@ -741,12 +674,72 @@ pub enum Syntax<'a> {
     FnDef(FnDef<'a>),
 }
 
+impl<'a> Rule<'a> for Item<'a> {
+    fn try_pull<'b>(
+        source: &'a str,
+        tokens: &'b [Token<'a>],
+    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
+        let unexpected = match tokens.first().copied() {
+            Some(
+                tkn @ Token {
+                    val: TokenValue::Keyword(kw),
+                    ..
+                },
+            ) => match kw {
+                Keyword::Struct => {
+                    return StructDef::try_pull(source, tokens).map(map_pull(Self::StructDef));
+                }
+                Keyword::Union => {
+                    return UnionDef::try_pull(source, tokens).map(map_pull(Self::UnionDef));
+                }
+                Keyword::Enum => {
+                    return EnumDef::try_pull(source, tokens).map(map_pull(Self::EnumDef));
+                }
+                Keyword::Type => {
+                    return TypeDef::try_pull(source, tokens).map(map_pull(Self::TypeDef));
+                }
+                Keyword::Def => {
+                    return MacroDef::try_pull(source, tokens).map(map_pull(Self::MacroDef));
+                }
+                Keyword::Fn => {
+                    return FnDef::try_pull(source, tokens).map(map_pull(Self::FnDef));
+                }
+
+                _ => Some(tkn),
+            },
+
+            _ => None,
+        };
+
+        Err(ContextError::missing_or_unexpected(
+            unexpected,
+            source,
+            Expecting::a("`struct`, `union`, `enum`, `type`, `def`, or `fn` keyword"),
+        ))
+    }
+}
+
+/// ```not_code
+/// <syntax> ::= <item> | <item> <syntax>
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub enum Syntax<'a> {
+    Item(Item<'a>),
+    Pair(Item<'a>, Box<Syntax<'a>>),
+}
+
 impl<'a> Rule<'a> for Syntax<'a> {
     fn try_pull<'b>(
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        todo!()
+        let (item, tokens) = Item::try_pull(source, tokens)?;
+        if tokens.is_empty() {
+            Ok((Self::Item(item), tokens))
+        } else {
+            let (syntax, tokens) = <Box<Syntax>>::try_pull(source, tokens)?;
+            Ok((Self::Pair(item, syntax), tokens))
+        }
     }
 }
 
@@ -755,4 +748,22 @@ pub fn grammarize<'a>(
     tokens: &[Token<'a>],
 ) -> Result<Syntax<'a>, ContextError<'a>> {
     Syntax::try_pull(source, tokens).map(|(syn, _)| syn)
+}
+
+#[test]
+fn test() {
+    const SOURCE: &str = "fn main() { let x = 5; }";
+    let tokens = crate::scanner::tokenize(SOURCE)
+        // TODO: make these optional instead(?)
+        .filter(|res| {
+            !res.as_ref()
+                .is_ok_and(|token| token.val == TokenValue::Ignore)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .expect("lex error(s)");
+
+    match grammarize(SOURCE, &tokens) {
+        Ok(value) => println!("{value:#?}"),
+        Err(e) => panic!("{e}"),
+    }
 }

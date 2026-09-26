@@ -541,19 +541,7 @@ impl<'a> Iterator for Scanner<'a> {
 /// [`Scanner`] will never return another element after outputting [`None`].
 impl std::iter::FusedIterator for Scanner<'_> {}
 
-/// Trait for methods by source code can be tokenized
-pub trait Tokenize {
-    /// The iterator over tokens
-    type Iter<'a>;
-
-    /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
-    fn tokenize(source: &str) -> Self::Iter<'_>;
-}
-
-impl Tokenize for &str {
-    type Iter<'a> = Scanner<'a>;
-
-    fn tokenize(source: &str) -> Self::Iter<'_> {
-        Scanner::new(source)
-    }
+/// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
+pub fn tokenize(source: &str) -> Scanner<'_> {
+    Scanner::new(source)
 }
