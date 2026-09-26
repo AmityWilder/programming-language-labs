@@ -53,13 +53,12 @@ pub struct Expecting {
     ///     - S ("ess")
     ///     - X ("ecks")
     ///
-    /// 3. And to make it even more confusing, sometimes 'u' (a vowel) will make a **consonant** sound
-    ///    when saying its name, something vowels tend to do when followed by a consonant-vowel pair.
+    /// 3. And to make it even more confusing, sometimes vowels will make a **consonant** sound.
     ///
     ///     **Examples:**
     ///     - unit ("you-nit"; 'u' is made to say its name by 'i' on the other side of 'n')
-    ///     - urine ("yer-in"; 'u' is made to say its name by 'i' on the other side of 'r')
     ///     - utility ("you-till-itty"; 'u' is made to say its name by 'i' on the other side of 't')
+    ///     - one ("won"; I don't even know why it's pronounced this way)
     ///
     /// And of course there are limitless exceptions when it comes to English, because while all
     /// languages are formulated by culture rather than committees, English in particular was
