@@ -132,10 +132,13 @@ define_token_eq! {
         Else = "else",
         For = "for",
         While = "while",
-        With = "with",
         Where = "where",
         Loop = "loop",
         In = "in",
+        Break = "break",
+        Skip = "skip",
+        Ret = "ret",
+        Yeild = "yeild",
     }
 }
 
@@ -144,24 +147,13 @@ impl Keyword {
     #[must_use]
     pub const fn kw_type(self) -> KeywordType {
         match self {
-            Self::Struct | Self::Union | Self::Enum | Self::Type => KeywordType::Definition,
-
-            #[allow(
-                clippy::match_same_arms,
-                reason = "gray area - isolated for future decision"
-            )]
-            Self::Def | Self::Fn => KeywordType::Definition,
+            Self::Struct | Self::Union | Self::Enum | Self::Type | Self::Def | Self::Fn => {
+                KeywordType::Definition
+            }
 
             Self::Let | Self::Const | Self::Static => KeywordType::Value,
 
-            Self::If
-            | Self::Else
-            | Self::For
-            | Self::While
-            | Self::With
-            | Self::Where
-            | Self::Loop
-            | Self::In => KeywordType::Control,
+            _ => KeywordType::Control,
         }
     }
 }
@@ -215,7 +207,6 @@ define_token_eq! {
         // 1-char
         Not = "!",
         MacroStringify = "#",
-        Ref = "$",
         Remainder = "%",
         And = "&",
         LParen = "(",
@@ -232,6 +223,7 @@ define_token_eq! {
         Assign = "=",
         Gt = ">",
         QMark = "?",
+        Ref = "@",
         LBrack = "[",
         RBrack = "]",
         Xor = "^",
