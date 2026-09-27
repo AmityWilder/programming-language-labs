@@ -229,7 +229,7 @@ impl<'a: 'b, 'b> Highlighting<'a, 'b> for StrLiteral<'a> {
         SubTokenSyntax::new(
             lex,
             syn,
-            EscapedRanges::new(EscapeRanges::new(Escapes::new(literal.lex))),
+            EscapedRanges::new(EscapeRanges::new(Escapes::new(literal.src))),
         )
     }
 }

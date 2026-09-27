@@ -65,7 +65,7 @@
     }
     ```
 
-    An cat can have any type as its discriminant, as long as each variant has the same type and supports inequality.
+    A categorical type can have any type as its discriminant, as long as each variant has the same type and supports inequality.
 
     ```rs
     cat Foo {
