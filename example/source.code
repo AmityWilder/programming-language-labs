@@ -13,7 +13,7 @@ rec Vector {
 
 of Vector {
     fn to_string(self) -> text {
-        self.x + ", " + self.y
+        give self.x + ", " + self.y;
     }
 }
 
@@ -21,7 +21,7 @@ fn foo(v)
 where
     fn to_string of v: (self) -> text
 {
-    print(v.to_string())
+    print(v.to_string());
 }
 
 fn main() {

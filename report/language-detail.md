@@ -178,7 +178,7 @@
     }
     ```
 
-    When a `where` clause is present, any errors that might have been emitted at the function definition but have been specified in the `where` , will instead be attributed to the caller.
+    When a `where` clause is present, any errors that might have been emitted at the function definition but have been specified in the `where` clause, will instead be attributed to the caller.
 
     ```rs
     fn foo(v) {
@@ -306,6 +306,7 @@
     rep __item.is_some() {
         let /* binding */ = __item;
         // statement
+        __item = __iter.next();
     }
     ```
 
