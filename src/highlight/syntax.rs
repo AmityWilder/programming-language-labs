@@ -21,7 +21,7 @@ pub enum Syntax {
     StringLiteral,
     /// The escape sequence of either a character or string literal
     EscapeSeq,
-    /// A language-defined constant
+    /// A language-defined constant like true/false
     LanguageDefined,
     /// A local variable, field, or function parameter
     Variable,
@@ -31,8 +31,10 @@ pub enum Syntax {
     Callable,
     /// A language keyword that defines items or variables
     Keyword,
-    /// A language keyword that affects runtime state
+    /// A language keyword that resembles assembly labels
     CtrlKeyword,
+    /// A type name
+    Typename,
     /// The name of a macro
     MacroName,
     /// The name of a macro parameter
@@ -60,10 +62,8 @@ pub struct SyntaxStyle<'a, T> {
     pub string_literal: T,
     /// Style for [`Syntax::EscapeSeq`]
     pub escape_seq: T,
-    /// Language-defined constants like `true`/`false`
+    /// Style for [`Syntax::LanguageDefined`]
     pub language_defined: T,
-    /// Style for [`Syntax::InterpExpr`]
-    pub interp_expr: T,
     /// Style for [`Syntax::Variable`]
     pub variable: T,
     /// Style for [`Syntax::Constant`]
@@ -74,9 +74,11 @@ pub struct SyntaxStyle<'a, T> {
     pub keyword: T,
     /// Style for [`Syntax::CtrlKeyword`]
     pub ctrl_keyword: T,
+    /// Style for [`Syntax::Typename`]
+    pub typename: T,
     /// Style for [`Syntax::MacroName`]
     pub macro_name: T,
-    /// Style for [`Syntax::MacroArg`]
+    /// Style for [`Syntax::MacroParam`]
     pub macro_arg: T,
     /// Style for [`Syntax::Bracket`]
     pub bracket: &'a [T],
@@ -101,6 +103,7 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
             Syntax::Callable => &self.callable,
             Syntax::Keyword => &self.keyword,
             Syntax::CtrlKeyword => &self.ctrl_keyword,
+            Syntax::Typename => &self.typename,
             Syntax::MacroName => &self.macro_name,
             Syntax::MacroParam => &self.macro_arg,
             Syntax::Bracket(depth) => self
@@ -137,17 +140,29 @@ where
                 TokenType::BoolLiteral => Syntax::LanguageDefined,
                 TokenType::Identifier => {
                     // constants are all-caps
-                    if token.src.chars().any(char::is_uppercase)
-                        && !token.src.chars().any(char::is_lowercase)
-                    {
-                        Syntax::Constant
+                    if token.src.chars().any(char::is_uppercase) {
+                        if token.src.chars().any(char::is_lowercase) {
+                            Syntax::Typename
+                        } else {
+                            Syntax::Constant
+                        }
                     } else {
                         Syntax::Variable
                     }
                 }
                 TokenType::Callable => Syntax::Callable,
-                TokenType::Keyword => Syntax::Keyword,
-                TokenType::CtrlKeyword => Syntax::CtrlKeyword,
+                TokenType::Keyword => {
+                    let TokenValue::Keyword(kw) = token.val else {
+                        unreachable!()
+                    };
+                    if kw.is_flow() {
+                        Syntax::CtrlKeyword
+                    } else if kw.is_type() {
+                        Syntax::Typename
+                    } else {
+                        Syntax::Keyword
+                    }
+                }
                 TokenType::Macro => Syntax::MacroName,
                 TokenType::MacroParam => Syntax::MacroParam,
 

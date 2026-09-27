@@ -26,12 +26,10 @@ pub enum TokenType {
     Identifier,
     /// Identical to [`Self::Identifier`], but implies a function by context.
     /// i.e. The next token is an open parenthesis (`(`)
+    // TODO: make this the duty of grammar instead
     Callable,
     /// A language keyword
     Keyword,
-    /// Identical to [`Self::Keyword`], but specific to [`KeywordType::Control`]
-    /// (because they have a different highlight color)
-    CtrlKeyword,
     /// An [`Self::Identifier`] preceded by `\`
     Macro,
     /// An [`Self::Identifier`] preceded by `$`
@@ -97,64 +95,99 @@ macro_rules! define_token_eq {
     };
 }
 
-/// The categorization of a [`Keyword`]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum KeywordType {
-    /// Keywords used for defining an item
-    Definition,
-    /// Keywords used for declaring a variable
-    Value,
-    /// Keywords used for flow control
-    Control,
-}
-
 define_token_eq! {
     /// Language-defined reserved words for defining behavior or form
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum Keyword {
-        // Definitions
-        Struct = "struct",
-        Union = "union",
-        Enum = "enum",
-        Type = "type",
+        // Builtin types
+        None = "none",
+        Nevr = "nevr",
+        Bool = "bool",
+        Uint = "uint",
+        Sint = "sint",
+        Frac = "frac",
+        Char = "char",
+        Text = "text",
 
-        // halfway between Definition and Value
+        // Definitions
+        Rec = "rec",
+        Sup = "sup",
+        Cat = "cat",
+        Alt = "alt",
+        Sub = "sub",
         Def = "def",
         Fn = "fn",
+        Of = "of",
 
         // Value
         Let = "let",
-        Const = "const",
-        Static = "static",
+        Uni = "uni",
+        Pvt = "pvt",
 
-        // Flow control
-        If = "if",
-        Else = "else",
-        For = "for",
-        While = "while",
+        // Interface
         Where = "where",
-        Loop = "loop",
+        Has = "has",
+
+        // Flow
+        // ----
+
+        // Conditional
+        If = "if",
+        Or = "or",
+        Match = "match",
+
+        // Loop
+        Rep = "rep",
+        For = "for",
         In = "in",
-        Break = "break",
+        Loop = "loop",
+        Cord = "cord",
+
+        // Loop control
+        Stop = "stop",
         Skip = "skip",
-        Ret = "ret",
-        Yeild = "yeild",
+
+        // Exit
+        Give = "give",
+        Fail = "fail",
+        Emit = "emit",
     }
 }
 
 impl Keyword {
-    /// The type of keyword
-    #[must_use]
-    pub const fn kw_type(self) -> KeywordType {
-        match self {
-            Self::Struct | Self::Union | Self::Enum | Self::Type | Self::Def | Self::Fn => {
-                KeywordType::Definition
-            }
+    /// Test if a keyword is a "flow" keyword
+    pub const fn is_flow(self) -> bool {
+        matches!(
+            self,
+            Self::If
+                | Self::Or
+                | Self::Match
+                | Self::Rep
+                | Self::For
+                | Self::In
+                | Self::Loop
+                | Self::Cord
+                | Self::Stop
+                | Self::Skip
+                | Self::Give
+                | Self::Fail
+                | Self::Emit
+        )
+    }
 
-            Self::Let | Self::Const | Self::Static => KeywordType::Value,
-
-            _ => KeywordType::Control,
-        }
+    /// Test if a keyword is a language defined type
+    pub const fn is_type(self) -> bool {
+        matches!(
+            self,
+            Self::None
+                | Self::Nevr
+                | Self::Bool
+                | Self::Uint
+                | Self::Sint
+                | Self::Frac
+                | Self::Char
+                | Self::Text
+        )
     }
 }
 
@@ -195,6 +228,7 @@ define_token_eq! {
         Arrow = "->",
         DivAssign = "/=",
         PathSep = "::",
+        ColonEq = ":=",
         Le = "<=",
         Shl = "<<",
         Eq = "==",

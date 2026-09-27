@@ -6,6 +6,24 @@ def \foo($fn, $args) { $fn($args, 1) }
 
 [ } ] ] // bracket balance visuals are dependent on matching delimiters
 
+rec Vector {
+    x,
+    y,
+}
+
+of Vector {
+    fn to_string(self) -> text {
+        self.x + ", " + self.y
+    }
+}
+
+fn foo(v)
+where
+    fn to_string of v: (self) -> text
+{
+    print(v.to_string())
+}
+
 fn main() {
     // macro calls use braces for arguments, so that arguments can contain commas
     \foo{my_fn}{9, 3}
@@ -23,7 +41,7 @@ fn main() {
         let multi_esc_ch = '\x1b2';
         let float = 1.6343e24;
         let float1 = 1.6343e-24;
-        const FOO_BAR = 3.1415;
+        pvt FOO_BAR = 3.1415;
         let bad = 35invalid;
         let too_big = 10000000000000000000000000;
         my'text = "this \"text\" is \x1b[91mred\x1b[0m";
@@ -36,4 +54,4 @@ fn main() {
 }
 
 {[(
-    const FOO = "apple \"or\" orange
+    pvt FOO = "apple \"or\" orange

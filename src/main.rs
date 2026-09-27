@@ -76,8 +76,6 @@ const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
 
     language_defined: Style::new().foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
 
-    interp_expr: Style::new().foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
-
     variable: Style::new()
         .underline()
         .foreground(Color::Rgb(0x9c, 0xdc, 0xfe)),
@@ -94,9 +92,11 @@ const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
 
     ctrl_keyword: Style::new().foreground(Color::Rgb(0xc5, 0x86, 0xc0)),
 
+    typename: Style::new().foreground(Color::Rgb(0x4e, 0xc9, 0xb0)),
+
     macro_name: Style::new()
         .underline()
-        .foreground(Color::Rgb(0xc5, 0x86, 0xc0)),
+        .foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
 
     macro_arg: Style::new()
         .underline()

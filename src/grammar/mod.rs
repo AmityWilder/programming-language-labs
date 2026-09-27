@@ -528,13 +528,13 @@ impl<'a> Rule<'a> for Expression<'a> {
 terminal_rule! {
     /// `"struct"`
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct StructKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Struct)) => (Self(src)) as a "`struct` keyword";
+    pub struct RecKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Rec)) => (Self(src)) as a "`rec` keyword";
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct StructBody {}
+pub struct RecBody {}
 
-impl<'a> Rule<'a> for StructBody {
+impl<'a> Rule<'a> for RecBody {
     fn try_pull<'b>(
         source: &'a str,
         tokens: &'b [Token<'a>],
@@ -545,51 +545,65 @@ impl<'a> Rule<'a> for StructBody {
 
 simple_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct StructDef<'a> {
-        pub struct_kw: StructKeyword<'a>,
+    pub struct RecDef<'a> {
+        pub rec_kw: RecKeyword<'a>,
         pub name: Ident<'a>,
-        pub body: Braced<'a, StructBody>,
+        pub body: Braced<'a, RecBody>,
     }
 }
 
 terminal_rule! {
-    /// `"union"`
+    /// `"sup"`
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct UnionKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Union)) => (Self(src)) as a "`union` keyword";
+    pub struct SupKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Sup)) => (Self(src)) as a "`sup` keyword";
 }
 
 simple_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct UnionDef<'a> {
-        pub union_kw: UnionKeyword<'a>,
+    pub struct SupDef<'a> {
+        pub sup_kw: SupKeyword<'a>,
         // TODO
     }
 }
 
 terminal_rule! {
-    /// `"enum"`
+    /// `"sub"`
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct EnumKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Enum)) => (Self(src)) as an "`enum` keyword";
+    pub struct SubKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Sub)) => (Self(src)) as a "`sub` keyword";
 }
 
 simple_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct EnumDef<'a> {
-        pub enum_kw: EnumKeyword<'a>,
+    pub struct SubDef<'a> {
+        pub sup_kw: SubKeyword<'a>,
         // TODO
     }
 }
 
 terminal_rule! {
-    /// `"type"`
+    /// `"cat"`
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct TypeKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Type)) => (Self(src)) as a "`type` keyword";
+    pub struct CatKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Cat)) => (Self(src)) as a "`cat` keyword";
 }
 
 simple_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct TypeDef<'a> {
-        pub type_kw: TypeKeyword<'a>,
+    pub struct CatDef<'a> {
+        pub cat_kw: CatKeyword<'a>,
+        // TODO
+    }
+}
+
+terminal_rule! {
+    /// `"alt"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct AltKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Alt)) => (Self(src)) as an "`alt` keyword";
+}
+
+simple_rule! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct AltDef<'a> {
+        pub alt_kw: AltKeyword<'a>,
         // TODO
     }
 }
@@ -664,14 +678,30 @@ simple_rule! {
     }
 }
 
+terminal_rule! {
+    /// `"of"`
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct OfKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Of)) => (Self(src)) as a "`of` keyword";
+}
+
+simple_rule! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct OfDef<'a> {
+        pub on_kw: OfKeyword<'a>,
+        // TODO
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item<'a> {
-    StructDef(StructDef<'a>),
-    UnionDef(UnionDef<'a>),
-    EnumDef(EnumDef<'a>),
-    TypeDef(TypeDef<'a>),
-    MacroDef(MacroDef<'a>),
-    FnDef(FnDef<'a>),
+    Rec(RecDef<'a>),
+    Sup(SupDef<'a>),
+    Sub(SubDef<'a>),
+    Cat(CatDef<'a>),
+    Alt(AltDef<'a>),
+    Def(MacroDef<'a>),
+    Fn(FnDef<'a>),
+    Of(OfDef<'a>),
 }
 
 impl<'a> Rule<'a> for Item<'a> {
@@ -686,23 +716,29 @@ impl<'a> Rule<'a> for Item<'a> {
                     ..
                 },
             ) => match kw {
-                Keyword::Struct => {
-                    return StructDef::try_pull(source, tokens).map(map_pull(Self::StructDef));
+                Keyword::Rec => {
+                    return Rule::try_pull(source, tokens).map(map_pull(Self::Rec));
                 }
-                Keyword::Union => {
-                    return UnionDef::try_pull(source, tokens).map(map_pull(Self::UnionDef));
+                Keyword::Sup => {
+                    return Rule::try_pull(source, tokens).map(map_pull(Self::Sup));
                 }
-                Keyword::Enum => {
-                    return EnumDef::try_pull(source, tokens).map(map_pull(Self::EnumDef));
+                Keyword::Sub => {
+                    return Rule::try_pull(source, tokens).map(map_pull(Self::Sub));
                 }
-                Keyword::Type => {
-                    return TypeDef::try_pull(source, tokens).map(map_pull(Self::TypeDef));
+                Keyword::Cat => {
+                    return Rule::try_pull(source, tokens).map(map_pull(Self::Cat));
+                }
+                Keyword::Alt => {
+                    return Rule::try_pull(source, tokens).map(map_pull(Self::Alt));
                 }
                 Keyword::Def => {
-                    return MacroDef::try_pull(source, tokens).map(map_pull(Self::MacroDef));
+                    return Rule::try_pull(source, tokens).map(map_pull(Self::Def));
                 }
                 Keyword::Fn => {
-                    return FnDef::try_pull(source, tokens).map(map_pull(Self::FnDef));
+                    return Rule::try_pull(source, tokens).map(map_pull(Self::Fn));
+                }
+                Keyword::Of => {
+                    return Rule::try_pull(source, tokens).map(map_pull(Self::Of));
                 }
 
                 _ => Some(tkn),
@@ -714,7 +750,7 @@ impl<'a> Rule<'a> for Item<'a> {
         Err(ContextError::missing_or_unexpected(
             unexpected,
             source,
-            Expecting::a("`struct`, `union`, `enum`, `type`, `def`, or `fn` keyword"),
+            Expecting::a("`rec`, `sup`, `sub`, `cat`, `alt`, `def`, `fn`, or `on` keyword"),
         ))
     }
 }
