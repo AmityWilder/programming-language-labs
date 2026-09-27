@@ -13,6 +13,19 @@ use std::assert_matches;
 mod scan {
     use super::*;
 
+    #[test]
+    fn test_invalid_token() {
+        const SOURCE: &str = "~";
+        assert_eq!(
+            tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+            &[Err(ContextError {
+                source: SOURCE,
+                range: (0..SOURCE.len()).into(),
+                err: ErrorType::UnknownToken,
+            })]
+        );
+    }
+
     /// [`TokenType::Whitespace`]
     mod whitespace {
         use super::*;
