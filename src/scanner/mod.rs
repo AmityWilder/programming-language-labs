@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use std::range::Range;
-use token::{Keyword, KeywordType, Punctuation, Token, TokenType, TokenValue};
+use token::{Keyword, Punctuation, Token, TokenType, TokenValue};
 
 pub mod symbols;
 pub mod token;
@@ -71,6 +71,9 @@ pub struct Scanner<'a> {
     /// The most recent non-whitespace, non-comment token was either the start of the source code or [`TokenType::Punctuation`]
     /// **and not** `)`, `]`, or `}`.
     can_be_negative: bool,
+
+    /// The most recent non-whitespace, non-comment token was a `fn` keyword
+    is_following_fn: bool,
 }
 
 impl<'a> Scanner<'a> {
@@ -81,6 +84,7 @@ impl<'a> Scanner<'a> {
             source,
             // start off true because we are at the start of the source code
             can_be_negative: true,
+            is_following_fn: false,
         }
     }
 
@@ -303,22 +307,15 @@ impl<'a> Scanner<'a> {
             .split_off(len)
             .expect("find and len should return safe positions to split at");
         let (ty, val) = if let Some(kw) = Keyword::try_from_str(src) {
-            (
-                if matches!(kw.kw_type(), KeywordType::Control) {
-                    TokenType::CtrlKeyword
-                } else {
-                    TokenType::Keyword
-                },
-                TokenValue::Keyword(kw),
-            )
-        }
-        // assumes the token has already been split off
-        else {
+            (TokenType::Keyword, TokenValue::Keyword(kw))
+        } else {
             match src {
                 "true" => (TokenType::BoolLiteral, TokenValue::BoolLiteral(true)),
                 "false" => (TokenType::BoolLiteral, TokenValue::BoolLiteral(false)),
                 _ => (
-                    if self.source.starts_with('(') {
+                    if self.is_following_fn || self.source.starts_with('(')
+                    // assumes the token has already been split off
+                    {
                         TokenType::Callable
                     } else {
                         TokenType::Identifier
@@ -525,6 +522,8 @@ impl<'a> Iterator for Scanner<'a> {
             .inspect(|token| {
                 // non-whitespace, non-comment token
                 if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
+                    self.is_following_fn = matches!(token.val, TokenValue::Keyword(Keyword::Fn));
+
                     // punctuation except for close bracket
                     self.can_be_negative = matches!(token.val, TokenValue::Punctuation(punc) if
                         !matches!(punc, Punctuation::RParen | Punctuation::RBrack | Punctuation::RBrace));
@@ -542,6 +541,6 @@ impl<'a> Iterator for Scanner<'a> {
 impl std::iter::FusedIterator for Scanner<'_> {}
 
 /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
-pub fn tokenize(source: &str) -> Scanner<'_> {
+pub const fn tokenize(source: &str) -> Scanner<'_> {
     Scanner::new(source)
 }

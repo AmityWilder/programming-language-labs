@@ -24,8 +24,10 @@ impl std::fmt::Display for Article {
     }
 }
 
+/// Description of an expectation
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Expecting {
+    /// Description of what type of value is expected
     pub expect: &'static str,
 
     /// Determines "a/an".
@@ -68,6 +70,7 @@ pub struct Expecting {
 }
 
 impl Expecting {
+    /// Expectaion starts with a consonant sound
     pub const fn a(expect: &'static str) -> Self {
         Self {
             expect,
@@ -75,6 +78,7 @@ impl Expecting {
         }
     }
 
+    /// Expectaion starts with a vowel sound
     pub const fn an(expect: &'static str) -> Self {
         Self {
             expect,
@@ -263,6 +267,7 @@ pub struct ContextError<'a> {
 }
 
 impl<'a> ContextError<'a> {
+    /// A token was found but not the right kind
     pub fn unexpected(token: Token<'a>, source: &'a str, expected: Expecting) -> ContextError<'a> {
         ContextError {
             source,
@@ -276,6 +281,7 @@ impl<'a> ContextError<'a> {
         }
     }
 
+    /// No token was found despite expecting one
     pub const fn missing(source: &'a str, expected: Expecting) -> ContextError<'a> {
         ContextError {
             source,
@@ -287,6 +293,7 @@ impl<'a> ContextError<'a> {
         }
     }
 
+    /// A token is expected but wasn't found; determine from its existence if it's unexpected or missing
     pub fn missing_or_unexpected(
         token: Option<Token<'a>>,
         source: &'a str,
