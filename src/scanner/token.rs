@@ -323,14 +323,15 @@ impl Default for StringLiteral<'_> {
 /// No-alloc version of [`StringLiteral`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct StrLiteral<'a> {
+    /// The string literal without delimiters - the value if it has no escapes.
     /// May contain unconverted escape sequences
-    pub lex: &'a str,
+    pub src: &'a str,
 }
 
 impl StrLiteral<'_> {
     /// Identify whether a string literal contains escape sequences.
     pub fn has_escapes(&self) -> bool {
-        self.lex.contains(ESCAPE)
+        self.src.contains(ESCAPE)
     }
 }
 
@@ -339,7 +340,7 @@ impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral<'a> {
 
     fn try_from(value: StrLiteral<'a>) -> Result<Self, Self::Error> {
         if value.has_escapes() {
-            let replacements = Escapes::new(value.lex).collect::<Result<Vec<_>, _>>()?;
+            let replacements = Escapes::new(value.src).collect::<Result<Vec<_>, _>>()?;
             let escapes = replacements.iter().map(|(range, _)| *range).collect();
 
             let byte_diff: usize = replacements
@@ -355,14 +356,14 @@ impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral<'a> {
                 .sum();
             let mut processed = String::with_capacity(
                 value
-                    .lex
+                    .src
                     .len()
                     .checked_sub(byte_diff)
                     .expect("should only be removing bytes, not adding"),
             );
             let mut prev_end = 0;
             for (range, repl) in replacements {
-                processed.push_str(value.lex.get(prev_end..range.start)
+                processed.push_str(value.src.get(prev_end..range.start)
                     .expect("range should never start/end within a UTF-8 character, and prev_end should always be from such a range (or 0)"));
                 processed.push(repl);
                 prev_end = range.end;
@@ -373,7 +374,7 @@ impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral<'a> {
                 escapes,
             })
         } else {
-            Ok(StringLiteral::NoEscapes { text: value.lex })
+            Ok(StringLiteral::NoEscapes { text: value.src })
         }
     }
 }
@@ -499,7 +500,7 @@ impl<'a> TokenValue<'a> {
         {
             Err(e)
         } else {
-            Ok(Self::StringLiteral(StrLiteral { lex: src }))
+            Ok(Self::StringLiteral(StrLiteral { src }))
         }
     }
 }
