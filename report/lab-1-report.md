@@ -80,8 +80,12 @@ To run tests, execute the command `cargo test`.
 
 Assume all of the following are successful (actual output = expected output), as failures would be in [Known limitations/Failures](#known-limitationsfailures).
 
-I'm not sure how you expect me to test *every edge case*. That's quite a lot. But here are the 41 cases I managed to *think of*.
+I'm not sure how you expect me to test *every edge case*. That's quite a lot. But here are the 42 cases I managed to *think of*. All 42 pass.
 
+- `test_invalid_token`
+  - purpose: Confirm that invalid tokens that don't match any pattern are produce an `UnknownToken`
+  - input: `~`
+  - expected: `[Err(UnknownToken)]`
 - `test_scan_whitespace_single`
   - purpose: confirm " " scans as whitespace
   - input: ` `
