@@ -8,6 +8,8 @@ pub enum Syntax {
     /// Any element not described by other syntax categories
     #[default]
     Normal,
+    /// Whitespace
+    Dimmed,
     /// Comments
     Comment,
     /// Any number literal
@@ -51,6 +53,8 @@ pub struct SyntaxStyle<'a, T> {
     pub normal: T,
     /// Style for [`Syntax::Comment`]
     pub comment: T,
+    /// Style for [`Syntax::Dimmed`]
+    pub dimmed: T,
     /// Style for [`Syntax::NumberLiteral`]
     pub number_literal: T,
     /// Style for [`Syntax::CharLiteral`]
@@ -89,6 +93,7 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
     fn index(&self, index: Syntax) -> &Self::Output {
         match index {
             Syntax::Normal => &self.normal,
+            Syntax::Dimmed => &self.dimmed,
             Syntax::Comment => &self.comment,
             Syntax::NumberLiteral => &self.number_literal,
             Syntax::CharLiteral => &self.char_literal,
@@ -128,9 +133,10 @@ where
 {
     match item {
         Ok(token) => (
-            token.src,
+            token.lex,
             match token.val {
                 TokenValue::Comment => Syntax::Comment,
+                TokenValue::Whitespace => Syntax::Dimmed,
                 TokenValue::UIntLiteral(_)
                 | TokenValue::SIntLiteral(_)
                 | TokenValue::FltLiteral(_) => Syntax::NumberLiteral,
@@ -139,8 +145,8 @@ where
                 TokenValue::BoolLiteral(_) => Syntax::LanguageDefined,
                 TokenValue::Identifier => {
                     // constants are all-caps
-                    if token.src.chars().any(char::is_uppercase) {
-                        if token.src.chars().any(char::is_lowercase) {
+                    if token.lex.chars().any(char::is_uppercase) {
+                        if token.lex.chars().any(char::is_lowercase) {
                             Syntax::Typename
                         } else {
                             Syntax::Constant
@@ -162,7 +168,7 @@ where
                 TokenValue::Macro => Syntax::MacroName,
                 TokenValue::MacroParam => Syntax::MacroParam,
 
-                TokenValue::Whitespace | TokenValue::Punctuation(_) => Syntax::Normal,
+                _ => Syntax::Normal,
             },
             &token.val,
         ),

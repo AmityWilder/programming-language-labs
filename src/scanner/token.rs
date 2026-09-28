@@ -69,7 +69,7 @@ macro_rules! define_token_eq {
                     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
                     #[allow(dead_code)]
                     pub struct $rule<'a>(pub &'a str)
-                        := (src, val: TokenValue::$Enum($Enum::$Variant)) => (Self(src))
+                        := (lex, val: TokenValue::$Enum($Enum::$Variant)) => (Self(lex))
                         as $article concat!("`", $value, "` ", $("(", $val_name, ") ",)? stringify!($name));
                 }
             )+
@@ -561,7 +561,7 @@ pub struct Token<'a> {
     /// Because this is a pointer into the original source string, we can use pointer arithmetic to find its location.
     /// If a program has a thousand tokens, why allocate a new string and store two additional integers in case of error
     /// when we can just keep the original string around and calculate those integers *on demand*?
-    pub src: &'a str,
+    pub lex: &'a str,
 
     /// The value of the token
     pub val: TokenValue<'a>,
@@ -569,35 +569,34 @@ pub struct Token<'a> {
 
 impl std::fmt::Debug for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { src, val } = self;
-        let name = match val {
-            TokenValue::Whitespace => "Whitespace",
-            TokenValue::Comment => "Comment",
-            TokenValue::UIntLiteral(_) => "UIntLiteral",
-            TokenValue::SIntLiteral(_) => "SIntLiteral",
-            TokenValue::FltLiteral(_) => "FltLiteral",
-            TokenValue::CharLiteral(_) => "CharLiteral",
-            TokenValue::StringLiteral(_) => "StringLiteral",
-            TokenValue::BoolLiteral(_) => "BoolLiteral",
-            TokenValue::Identifier | TokenValue::Callable => "Identifier",
-            TokenValue::Macro => "Macro",
-            TokenValue::MacroParam => "MacroParam",
-            TokenValue::Keyword(_) => "Keyword",
-            TokenValue::Punctuation(_) => "Punctuation",
+        let Self { lex, val } = self;
+        let (name, val): (_, Option<(_, &dyn std::fmt::Debug, _)>) = match val {
+            TokenValue::Whitespace => ("Whitespace", None),
+            TokenValue::Comment => ("Comment", None),
+            TokenValue::UIntLiteral(x) => ("UIntLiteral", Some((None, x, Some("u")))),
+            TokenValue::SIntLiteral(x) => ("SIntLiteral", Some((None, x, Some("i")))),
+            TokenValue::FltLiteral(x) => ("FltLiteral", Some((None, x, Some("f")))),
+            TokenValue::CharLiteral(x) => ("CharLiteral", Some((None, x, None))),
+            TokenValue::StringLiteral(x) => ("StringLiteral", Some((None, x, None))),
+            TokenValue::BoolLiteral(x) => ("BoolLiteral", Some((None, x, None))),
+            TokenValue::Identifier | TokenValue::Callable => ("Identifier", None),
+            TokenValue::Macro => ("Macro", None),
+            TokenValue::MacroParam => ("MacroParam", None),
+            TokenValue::Keyword(x) => ("Keyword", Some((Some("Keyword::"), x, None))),
+            TokenValue::Punctuation(x) => ("Punctuation", Some((Some("Punctuation::"), x, None))),
         };
-        write!(f, "{name}({src:?})")?;
-        match val {
-            TokenValue::UIntLiteral(x) => write!(f, " {x:?}"),
-            TokenValue::SIntLiteral(x) => write!(f, " {x:?}"),
-            TokenValue::FltLiteral(x) => write!(f, " {x:?}"),
-            TokenValue::CharLiteral(x) => write!(f, " {x:?}"),
-            TokenValue::StringLiteral(x) => write!(f, " {x:?}"),
-            TokenValue::BoolLiteral(x) => write!(f, " {x:?}"),
-            TokenValue::Keyword(x) => write!(f, " {x:?}"),
-            TokenValue::Punctuation(x) => write!(f, " {x:?}"),
-
-            _ => Ok(()),
+        write!(f, "{name}({lex:?})")?;
+        if let Some((pre, val, post)) = val {
+            f.write_str(": ")?;
+            if let Some(pre) = pre {
+                write!(f, "{pre}")?;
+            }
+            write!(f, "{val:?}")?;
+            if let Some(post) = post {
+                write!(f, "{post}")?;
+            }
         }
+        Ok(())
     }
 }
 

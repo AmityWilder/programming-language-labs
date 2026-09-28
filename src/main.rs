@@ -44,6 +44,7 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 #![allow(clippy::wildcard_imports, reason = "don't care")]
 
+use error::ContextError;
 use highlight::{
     highlight,
     style::{Color, Style, StyleWrapper},
@@ -66,6 +67,8 @@ const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
     normal: Style::new(),
 
     comment: Style::new().foreground(Color::Rgb(0x6a, 0x99, 0x55)),
+
+    dimmed: Style::new().foreground(Color::BrightBlack),
 
     number_literal: Style::new().foreground(Color::Rgb(0xb5, 0xce, 0xa8)),
 
@@ -120,9 +123,9 @@ pub fn run_code(source: &str) {
     let tokens: Vec<_> = tokenize(source).collect();
     for item in &tokens {
         let (lex, syn, _) = syntax_of(item);
+        let style = SYNTAX_STYLE_ANSI[syn];
         match item {
             Ok(token) => {
-                let style = SYNTAX_STYLE_ANSI[syn];
                 println!(
                     "{:?}: {}{token:?}{}",
                     source
@@ -132,7 +135,16 @@ pub fn run_code(source: &str) {
                     style.end()
                 );
             }
-            Err(e) => eprintln!("\x1b[91merror: {e:#?}\x1b[0m"),
+            Err(ContextError { source, range, err }) => {
+                eprintln!(
+                    "{range:?}: {}Err({:?}): {err:?}{}",
+                    style.begin(),
+                    source
+                        .get(*range)
+                        .expect("range should be a range in source"),
+                    style.end(),
+                );
+            }
         }
     }
 
