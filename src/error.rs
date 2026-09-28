@@ -123,7 +123,7 @@ impl std::error::Error for NumLitError {
 
 /// The kind of error describing a [`ContextError`]
 #[derive(Debug, Clone, PartialEq)]
-pub enum ErrorType<'a> {
+pub enum ErrorType<'src> {
     // lex
     // ------
     /// Token type could not be identified from the initial character, and so is not a valid token
@@ -143,7 +143,7 @@ pub enum ErrorType<'a> {
     /// A string literal has no `"` to end it, but contains a `\"`
     EscapedStringLiteralEnd,
     /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
-    InvalidEscape(&'a str),
+    InvalidEscape(&'src str),
     /// A number literal could not be evaluated as a number
     InvalidNumLiteral(NumLitError),
 
@@ -176,7 +176,7 @@ pub enum ErrorType<'a> {
         /// The token pattern expected
         expect: Expecting,
         /// The token found
-        actual: Token<'a>,
+        actual: Token<'src>,
     },
 }
 
@@ -260,18 +260,22 @@ impl std::error::Error for ErrorType<'_> {
 
 /// A code error with the range of the error in the source code
 #[derive(Clone, PartialEq)]
-pub struct ContextError<'a> {
+pub struct ContextError<'src> {
     /// A string view of the FULL, ENTIRE source code
-    pub source: &'a str,
+    pub source: &'src str,
     /// The range in [`Self::source`] of precisely where the error occurred
     pub range: Range<usize>,
     /// The exact error that was found
-    pub err: ErrorType<'a>,
+    pub err: ErrorType<'src>,
 }
 
-impl<'a> ContextError<'a> {
+impl<'src> ContextError<'src> {
     /// A token was found but not the right kind
-    pub fn unexpected(token: Token<'a>, source: &'a str, expected: Expecting) -> ContextError<'a> {
+    pub fn unexpected(
+        token: Token<'src>,
+        source: &'src str,
+        expected: Expecting,
+    ) -> ContextError<'src> {
         ContextError {
             source,
             range: source
@@ -285,7 +289,7 @@ impl<'a> ContextError<'a> {
     }
 
     /// No token was found despite expecting one
-    pub const fn missing(source: &'a str, expected: Expecting) -> ContextError<'a> {
+    pub const fn missing(source: &'src str, expected: Expecting) -> ContextError<'src> {
         ContextError {
             source,
             range: Range {
@@ -298,10 +302,10 @@ impl<'a> ContextError<'a> {
 
     /// A token is expected but wasn't found; determine from its existence if it's unexpected or missing
     pub fn missing_or_unexpected(
-        token: Option<Token<'a>>,
-        source: &'a str,
+        token: Option<Token<'src>>,
+        source: &'src str,
         expected: Expecting,
-    ) -> ContextError<'a> {
+    ) -> ContextError<'src> {
         match token {
             Some(token) => Self::unexpected(token, source, expected),
             None => Self::missing(source, expected),
@@ -367,22 +371,22 @@ pub fn line_col_range(s: &str, range: Range<usize>) -> Option<Range<LineCol>> {
         .map(|(a, b)| (a..b).into())
 }
 
-impl<'a> ContextError<'a> {
+impl<'src> ContextError<'src> {
     /// Returns a struct that implements [`std::fmt::Display`] to show detailed line reference information
     #[must_use]
-    pub const fn render(&self) -> RenderedContextError<'_, 'a> {
+    pub const fn render(&self) -> RenderedContextError<'_, 'src> {
         RenderedContextError(self)
     }
 
     /// Returns a struct that implements [`std::fmt::Display`] to show the error code (number)
     #[must_use]
-    pub const fn code(&self) -> ContextErrorCode<'_, 'a> {
+    pub const fn code(&self) -> ContextErrorCode<'_, 'src> {
         ContextErrorCode(self)
     }
 
     /// Returns a struct that implements [`std::fmt::Display`] to show tips for resolving the error
     #[must_use]
-    pub const fn help(&self) -> ContextErrorHelp<'_, 'a> {
+    pub const fn help(&self) -> ContextErrorHelp<'_, 'src> {
         ContextErrorHelp(self)
     }
 }
@@ -403,7 +407,7 @@ impl std::error::Error for ContextError<'_> {
 
 /// [`std::fmt::Display`] the error code (number)
 #[derive(Debug, Clone, PartialEq)]
-pub struct ContextErrorCode<'a, 'b>(&'b ContextError<'a>);
+pub struct ContextErrorCode<'src, 'err>(&'err ContextError<'src>);
 
 impl std::fmt::Display for ContextErrorCode<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -449,7 +453,7 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
 
 /// [`std::fmt::Display`] tips for resolving an error
 #[derive(Debug, Clone)]
-pub struct ContextErrorHelp<'a, 'b>(&'b ContextError<'a>);
+pub struct ContextErrorHelp<'src, 'err>(&'err ContextError<'src>);
 
 impl std::fmt::Display for ContextErrorHelp<'_, '_> {
     #[expect(
@@ -734,7 +738,7 @@ pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
 
 /// [`std::fmt::Display`] advanced error information with line references for a context error
 #[derive(Debug, Clone)]
-pub struct RenderedContextError<'a, 'b>(&'b ContextError<'a>);
+pub struct RenderedContextError<'src, 'err>(&'err ContextError<'src>);
 
 /// Outputs a line reference to `f`.
 ///
@@ -858,4 +862,4 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
 }
 
 /// A [`Token`] and its [`TokenValue`], or a [`ContextError`]
-pub type TokenResult<'a> = Result<Token<'a>, ContextError<'a>>;
+pub type TokenResult<'src> = Result<Token<'src>, ContextError<'src>>;

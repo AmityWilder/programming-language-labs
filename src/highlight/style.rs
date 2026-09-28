@@ -23,12 +23,12 @@ pub trait StyleWrapper {
 
 /// Encloses `T` with the styling of `U`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Styled<'a, T, U>
+pub struct Styled<'style, T, U>
 where
     U: ?Sized + StyleWrapper,
 {
     /// The style to wrap [`Self::inner`] with
-    style: &'a U,
+    style: &'style U,
     /// The content being styled
     inner: T,
 }

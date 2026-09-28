@@ -60,13 +60,13 @@ impl Bracket {
 
 /// An iterator that breaks down text into tokens
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Scanner<'a> {
+pub struct Scanner<'src> {
     /// This one doesn't get ripped apart, it exists for fulfilling context errors
-    original: &'a str,
+    original: &'src str,
 
     /// A reference to the original source code. Since this is only a copy, it will get ripped apart and fed to the tokens.
     /// The next token will always be at the start of this string.
-    source: &'a str,
+    source: &'src str,
 
     /// The most recent non-whitespace, non-comment token was either the start of the source code or [`TokenType::Punctuation`]
     /// **and not** `)`, `]`, or `}`.
@@ -76,9 +76,9 @@ pub struct Scanner<'a> {
     is_following_fn: bool,
 }
 
-impl<'a> Scanner<'a> {
+impl<'src> Scanner<'src> {
     /// Construct a new [`Scanner`] for `source`
-    const fn new(source: &'a str) -> Self {
+    const fn new(source: &'src str) -> Self {
         Self {
             original: source,
             source,
@@ -92,7 +92,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method will panic if `len` splits `self.source` partway through a character or beyond the end of the source string.
-    fn split_off(&mut self, len: usize) -> Option<&'a str> {
+    fn split_off(&mut self, len: usize) -> Option<&'src str> {
         self.source.split_at_checked(len).map(|(front, back)| {
             self.source = back;
             front
@@ -100,7 +100,7 @@ impl<'a> Scanner<'a> {
     }
 
     /// Generate an error on the most recent (complete) token
-    fn error_prev(&mut self, len: usize, err: ErrorType<'a>) -> ContextError<'a> {
+    fn error_prev(&mut self, len: usize, err: ErrorType<'src>) -> ContextError<'src> {
         let end = self
             .original
             .substr_range(self.source)
@@ -121,7 +121,7 @@ impl<'a> Scanner<'a> {
     /// Generate an error starting at the current (incomplete) token
     ///
     /// [Splits off](Self::split_off) the erroneous segment so we can find more errors
-    fn error_here(&mut self, len: usize, err: ErrorType<'a>) -> ContextError<'a> {
+    fn error_here(&mut self, len: usize, err: ErrorType<'src>) -> ContextError<'src> {
         _ = self.split_off(len);
         self.error_prev(len, err)
     }
@@ -135,7 +135,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_whitespace`] would not have returned true
-    fn scan_whitespace(&mut self) -> Token<'a> {
+    fn scan_whitespace(&mut self) -> Token<'src> {
         let len = self
             .source
             .find(|ch: char| !ch.is_whitespace())
@@ -157,7 +157,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_macro(&mut self) -> Token<'a> {
+    fn scan_macro(&mut self) -> Token<'src> {
         let len = self
             .source
             .strip_prefix(MACRO_PREFIX)
@@ -185,7 +185,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_macro_param(&mut self) -> Token<'a> {
+    fn scan_macro_param(&mut self) -> Token<'src> {
         let len = self
             .source
             .strip_prefix(MACRO_PARAM_PREFIX)
@@ -218,7 +218,10 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_strlike_literal(&mut self, open_delim: char) -> Result<Token<'a>, ContextError<'a>> {
+    fn scan_strlike_literal(
+        &mut self,
+        open_delim: char,
+    ) -> Result<Token<'src>, ContextError<'src>> {
         let rest = self.source.strip_prefix(open_delim).expect(
             "should not call `scan_strlike_literal` if `starts_with_strlike_literal` is false",
         );
@@ -286,7 +289,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_ident(&mut self) -> Token<'a> {
+    fn scan_ident(&mut self) -> Token<'src> {
         let len = self
             .source
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
@@ -327,7 +330,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_num_literal(&mut self) -> Result<Token<'a>, ContextError<'a>> {
+    fn scan_num_literal(&mut self) -> Result<Token<'src>, ContextError<'src>> {
         let number_end = {
             let mut is_first_char = true;
             let mut is_first_decimal = true; // at most one decimal
@@ -369,7 +372,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_line_comment(&mut self) -> Token<'a> {
+    fn scan_line_comment(&mut self) -> Token<'src> {
         let len = self
             .source
             .lines()
@@ -393,7 +396,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_block_comment(&mut self) -> Result<Token<'a>, ContextError<'a>> {
+    fn scan_block_comment(&mut self) -> Result<Token<'src>, ContextError<'src>> {
         const BLOCK_COMMENT_CIRCUMFIX_LEN: usize =
             BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len();
         let mut prev_char = None;
@@ -436,7 +439,7 @@ impl<'a> Scanner<'a> {
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_punc(&mut self) -> Result<Token<'a>, ContextError<'a>> {
+    fn scan_punc(&mut self) -> Result<Token<'src>, ContextError<'src>> {
         Punctuation::from_prefix(self.source)
             .map(|punc| {
                 let lex = self
@@ -460,8 +463,8 @@ impl<'a> Scanner<'a> {
     }
 }
 
-impl<'a> Iterator for Scanner<'a> {
-    type Item = Result<Token<'a>, ContextError<'a>>;
+impl<'src> Iterator for Scanner<'src> {
+    type Item = Result<Token<'src>, ContextError<'src>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // if there are no characters remaining, this will return None and stop iterating.

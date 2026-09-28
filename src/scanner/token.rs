@@ -64,7 +64,7 @@ macro_rules! define_token_eq {
                     #[doc = concat!("`\"", $value, "\"`")]
                     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
                     #[allow(dead_code)]
-                    pub struct $rule<'a>(pub &'a str)
+                    pub struct $rule<'src>(pub &'src str)
                         := (lex, val: TokenValue::$Enum($Enum::$Variant)) => (Self(lex))
                         as $article concat!("`", $value, "` ", $("(", $val_name, ") ",)? stringify!($name));
                 }
@@ -780,25 +780,25 @@ pub struct StringLiteral {
 
 /// No-alloc version of [`StringLiteral`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct StrLiteral<'a> {
+pub struct StrLiteral<'src> {
     /// The string literal without delimiters - the value if it has no escapes.
     /// May contain unconverted escape sequences
-    pub src: &'a str,
+    pub content: &'src str,
 }
 
 impl StrLiteral<'_> {
     /// Identify whether a string literal contains escape sequences.
     pub fn has_escapes(&self) -> bool {
-        self.src.contains(ESCAPE)
+        self.content.contains(ESCAPE)
     }
 }
 
-impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral {
-    type Error = ErrorType<'a>;
+impl<'src> TryFrom<StrLiteral<'src>> for StringLiteral {
+    type Error = ErrorType<'src>;
 
-    fn try_from(value: StrLiteral<'a>) -> Result<Self, Self::Error> {
+    fn try_from(value: StrLiteral<'src>) -> Result<Self, Self::Error> {
         if value.has_escapes() {
-            let replacements = Escapes::new(value.src).collect::<Result<Vec<_>, _>>()?;
+            let replacements = Escapes::new(value.content).collect::<Result<Vec<_>, _>>()?;
             let escapes = replacements.iter().map(|(range, _)| *range).collect();
 
             let byte_diff: usize = replacements
@@ -814,14 +814,14 @@ impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral {
                 .sum();
             let mut processed = String::with_capacity(
                 value
-                    .src
+                    .content
                     .len()
                     .checked_sub(byte_diff)
                     .expect("should only be removing bytes, not adding"),
             );
             let mut prev_end = 0;
             for (range, repl) in replacements {
-                processed.push_str(value.src.get(prev_end..range.start)
+                processed.push_str(value.content.get(prev_end..range.start)
                     .expect("range should never start/end within a UTF-8 character, and prev_end should always be from such a range (or 0)"));
                 processed.push(repl);
                 prev_end = range.end;
@@ -833,7 +833,7 @@ impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral {
             })
         } else {
             Ok(StringLiteral {
-                text: value.src.to_string(),
+                text: value.content.to_string(),
                 escapes: Vec::new(),
             })
         }
@@ -842,7 +842,7 @@ impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral {
 
 /// The value represented by a [`Token`]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum TokenValue<'a> {
+pub enum TokenValue<'src> {
     // ignored
     /// An entire chunk of whitespace, not just one character
     #[default]
@@ -862,7 +862,7 @@ pub enum TokenValue<'a> {
     /// Character literal
     CharLiteral(CharLiteral),
     /// String literal
-    StringLiteral(StrLiteral<'a>),
+    StringLiteral(StrLiteral<'src>),
 
     // language builtin
     /// Boolean literal
@@ -885,9 +885,9 @@ pub enum TokenValue<'a> {
     Punctuation(Punctuation),
 }
 
-impl<'a> TokenValue<'a> {
+impl<'src> TokenValue<'src> {
     /// Parses a number literal lexeme into its value
-    pub fn number_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
+    pub fn number_literal(src: &'src str) -> Result<Self, ErrorType<'src>> {
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.
         // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
         if !src.starts_with(HEX_PREFIX) && src.contains(['e', 'E']) || src.contains('.') {
@@ -930,7 +930,7 @@ impl<'a> TokenValue<'a> {
     }
 
     /// Parses a character literal lexeme into its value
-    pub fn char_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
+    pub fn char_literal(src: &'src str) -> Result<Self, ErrorType<'src>> {
         let src = src
             .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
             .expect("character literal tokens should include delimiters (`'`)");
@@ -963,43 +963,43 @@ impl<'a> TokenValue<'a> {
     }
 }
 
-impl<'a> TokenValue<'a> {
+impl<'src> TokenValue<'src> {
     /// Parses a string literal lexeme into its value, without allocating
-    pub fn string_literal(src: &'a str) -> Result<Self, ErrorType<'a>> {
-        let src = src
+    pub fn string_literal(src: &'src str) -> Result<Self, ErrorType<'src>> {
+        let content = src
             .strip_circumfix(STR_DELIM, STR_DELIM)
             .expect("string literal tokens should include delimiters (`\"`)");
         let mut is_esc = false;
-        if src.contains(ESCAPE)
-            && let Some(e) = src
+        if content.contains(ESCAPE)
+            && let Some(e) = content
                 .match_indices(|ch: char| {
                     is_esc = !is_esc && ch == ESCAPE;
                     is_esc
                 })
-                .find_map(|(i, _)| escape_seq(src, i).err())
+                .find_map(|(i, _)| escape_seq(content, i).err())
         {
             Err(e)
         } else {
-            Ok(Self::StringLiteral(StrLiteral { src }))
+            Ok(Self::StringLiteral(StrLiteral { content }))
         }
     }
 }
 
 /// An iterator over unescaped escape characters ([`ESCAPE`]) in a string
 #[derive(Debug, Clone)]
-pub struct Escapes<'a> {
+pub struct Escapes<'src> {
     /// Source code
-    source: &'a str,
+    source: &'src str,
     /// Tracking of offset into [`Self::source`]
     offset: usize,
     /// Whether the upcoming character is escaped
     is_esc: bool,
 }
 
-impl<'a> Escapes<'a> {
+impl<'src> Escapes<'src> {
     /// Construct a new [`Escapes`] iterator from a source string
     #[must_use]
-    pub const fn new(source: &'a str) -> Self {
+    pub const fn new(source: &'src str) -> Self {
         Self {
             source,
             offset: 0,
@@ -1008,8 +1008,8 @@ impl<'a> Escapes<'a> {
     }
 }
 
-impl<'a> Iterator for Escapes<'a> {
-    type Item = Result<(Range<usize>, char), ErrorType<'a>>;
+impl<'src> Iterator for Escapes<'src> {
+    type Item = Result<(Range<usize>, char), ErrorType<'src>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.source
@@ -1033,14 +1033,14 @@ impl<'a> Iterator for Escapes<'a> {
 /// A single token - its lexeme ([`Self::src`]) and type ([`Self::ty`]).
 /// Does not contain the token's value, but can have the value obtained with [`Self::value_noalloc`].
 #[derive(Clone, Copy, PartialEq, Default)]
-pub struct Token<'a> {
+pub struct Token<'src> {
     /// Because this is a pointer into the original source string, we can use pointer arithmetic to find its location.
     /// If a program has a thousand tokens, why allocate a new string and store two additional integers in case of error
     /// when we can just keep the original string around and calculate those integers *on demand*?
-    pub lex: &'a str,
+    pub lex: &'src str,
 
     /// The value of the token
-    pub val: TokenValue<'a>,
+    pub val: TokenValue<'src>,
 }
 
 impl std::fmt::Debug for Token<'_> {
