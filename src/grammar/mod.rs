@@ -1,12 +1,16 @@
 //! Context-free grammar
 
-#![allow(clippy::missing_docs_in_private_items, reason = "under construction")]
+#![allow(
+    clippy::missing_docs_in_private_items,
+    dead_code,
+    reason = "under construction"
+)]
 
 use crate::{
     error::{ContextError, ErrorType, Expecting},
     scanner::{
         Bracket,
-        token::{Keyword, Punctuation, Token, TokenValue, keyword::*, operator::*},
+        token::{CharLiteral, Punctuation, StrLiteral, Token, TokenValue, keyword::*, operator::*},
     },
 };
 use std::range::Range;
@@ -42,12 +46,10 @@ macro_rules! simple_rule {
         ),* $(,)?}
     ) => {
         $(#[$meta])*
-        $vis struct $Struct<$lt> {
-            $(
-                $(#[$fmeta])*
-                $fvis $field: $Type
-            ),*
-        }
+        $vis struct $Struct<$lt> {$(
+            $(#[$fmeta])*
+            $fvis $field: $Type
+        ),*}
 
         impl<'a> Rule<'a> for $Struct<'a> {
             fn try_pull<'b>(
@@ -59,6 +61,40 @@ macro_rules! simple_rule {
             }
         }
     };
+
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $Enum:ident<$lt:lifetime> {
+            $(
+                $(#[$vmeta:meta])*
+                $Variant:ident($Type:ty),
+            )*
+            _ => $x:ident $expecting:literal $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        $vis enum $Enum<$lt> {$(
+            $(#[$vmeta])*
+            $Variant($Type)
+        ),*}
+
+        impl<'a> Rule<'a> for $Enum<'a> {
+            fn try_pull<'b>(
+                source: &'a str,
+                tokens: &'b [Token<'a>],
+            ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
+                $(if let Ok(item) = Rule::try_pull(source, tokens).map(map_pull(Self::$Variant)) {
+                    Ok(item)
+                } else)* {
+                    Err(ContextError::missing_or_unexpected(
+                        tokens.first().copied(),
+                        source,
+                        Expecting::$x($expecting),
+                    ))
+                }
+            }
+        }
+    };
 }
 
 /// A rule that is a single token matching a specific pattern
@@ -66,19 +102,21 @@ macro_rules! simple_rule {
 macro_rules! terminal_rule {
     (
         $(#[$meta:meta])*
-        $vis:vis struct $Struct:ident<$lt:lifetime>($fvis:vis $Type:ty)
-            := ($($field:ident$(: $pattern:pat)?),+ $(,)? $(if $($guard:tt)+)?) => ($result:expr)
+        $vis:vis struct $Struct:ident<$lt:lifetime>($($fvis:vis $Type:ty),* $(,)?)
+            := ($($field:ident$(: $pattern:pat)?),+ $(,)?)
+                $([ if $($guard:tt)+ ])?
+            => ($result:expr)
             as $article:ident $desc:expr;
     ) => {
         $(#[$meta])*
-        $vis struct $Struct<$lt>($fvis $Type);
+        $vis struct $Struct<$lt>($($fvis $Type),*);
 
         impl<'a> $crate::grammar::Rule<'a> for $Struct<'a> {
             fn try_pull<'b>(
                 source: &'a str,
                 tokens: &'b [Token<'a>],
             ) -> Result<(Self, &'b [Token<'a>]), $crate::error::ContextError<'a>> {
-                $crate::grammar::MatchRule::try_pull(
+                $crate::grammar::try_pull_matching(
                     |token| match token {
                         Token { $($field$(: $pattern)?,)+ .. } $(if $($guard)+)? => Some($result),
                         _ => None,
@@ -93,6 +131,43 @@ macro_rules! terminal_rule {
     };
 }
 
+macro_rules! define_enum_subset {
+    (
+        $(#[$enum_meta:meta])*
+        $vis:vis enum $Enum:ident : $Super:ident {$(
+            $(#[$variant_meta:meta])*
+            $Variant:ident
+        ),* $(,)?}
+    ) => {
+        $(#[$enum_meta])*
+        #[doc = concat!("Subset of [`", stringify!($Super), "`]")]
+        $vis enum $Enum {$(
+            $(#[$variant_meta])*
+            #[doc = concat!("[`", stringify!($Super), "::", stringify!($Variant), "`]")]
+            $Variant = $Super::$Variant as isize,
+        )*}
+
+        impl From<$Enum> for $Super {
+            fn from(value: $Enum) -> Self {
+                match value {
+                    $($Enum::$Variant => Self::$Variant,)*
+                }
+            }
+        }
+
+        impl TryFrom<$Super> for $Enum {
+            type Error = ();
+
+            fn try_from(value: $Super) -> Result<Self, Self::Error> {
+                match value {
+                    $($Super::$Variant => Ok(Self::$Variant),)*
+                    _ => Err(())
+                }
+            }
+        }
+    };
+}
+
 fn map_pull<'a, 'b, T, U, F>(f: F) -> impl FnOnce((T, &'b [Token<'a>])) -> (U, &'b [Token<'a>])
 where
     F: FnOnce(T) -> U,
@@ -100,30 +175,17 @@ where
     move |(x, tokens)| (f(x), tokens)
 }
 
-pub trait MatchRule<'a>: Sized {
-    type Output;
-
-    fn try_pull<'b>(
-        self,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self::Output, &'b [Token<'a>]), Option<Token<'a>>>;
-}
-
-impl<'a, U, F> MatchRule<'a> for F
+pub fn try_pull_matching<'a: 'b, 'b, T, F>(
+    f: F,
+    mut tokens: &'b [Token<'a>],
+) -> Result<(T, &'b [Token<'a>]), Option<Token<'a>>>
 where
-    F: FnOnce(Token<'a>) -> Option<U>,
+    F: FnOnce(Token<'a>) -> Option<T>,
 {
-    type Output = U;
-
-    fn try_pull<'b>(
-        self,
-        mut tokens: &'b [Token<'a>],
-    ) -> Result<(Self::Output, &'b [Token<'a>]), Option<Token<'a>>> {
-        tokens
-            .split_off_first()
-            .ok_or(None)
-            .and_then(|&token| self(token).map(|x| (x, tokens)).ok_or(Some(token)))
-    }
+    tokens
+        .split_off_first()
+        .ok_or(None)
+        .and_then(|&token| f(token).map(|x| (x, tokens)).ok_or(Some(token)))
 }
 
 pub trait Rule<'a>: Sized {
@@ -154,7 +216,7 @@ impl<'a, T: Rule<'a>> Rule<'a> for Option<T> {
 }
 
 simple_rule! {
-    /// `<let-statement> ::= "let" <binding> "=" <expression>`
+    /// [`LetStatement`] ::= "let" [`Binding`] "=" [`Expression`] ";"
     #[derive(Debug, Clone, PartialEq)]
     pub struct LetStatement<'a> {
         pub let_kw: LetKeyword<'a>,
@@ -166,11 +228,11 @@ simple_rule! {
 }
 
 simple_rule! {
-    /// `<binding> ::= <identifier>`
+    /// [`Binding`] ::= [`Identifier`]
     // TODO: this can be way cooler
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct Binding<'a> {
-        name: Ident<'a>,
+        name: Identifier<'a>,
     }
 }
 
@@ -211,7 +273,7 @@ fn specify_bracket_err(
     }
 }
 
-/// `<parenthesized> ::= "(" INNER ")"`
+/// [`Parenthesized`] ::= "(" `T` ")"
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Parenthesized<'a, T> {
     pub open: LParenOp<'a>,
@@ -245,7 +307,8 @@ impl<'a, T: Rule<'a>> Rule<'a> for Parenthesized<'a, T> {
     }
 }
 
-/// `<bracketed> ::= "[" INNER "]"`
+#[expect(clippy::doc_link_with_quotes, reason = "not a doc link")]
+/// [`Bracketed`] ::= "[" `T` "]"
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Bracketed<'a, T> {
     pub open: LBrackOp<'a>,
@@ -277,7 +340,7 @@ impl<'a, T: Rule<'a>> Rule<'a> for Bracketed<'a, T> {
     }
 }
 
-/// `<braced> ::= "{" INNER "}"`
+/// [`Braced`] ::= "{" `T` "}"
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Braced<'a, T> {
     /// `{`
@@ -311,78 +374,72 @@ impl<'a, T: Rule<'a>> Rule<'a> for Braced<'a, T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Literal<'a> {
-    pub token: (&'a str, TokenValue<'a>),
+terminal_rule! {
+    /// [`LiteralBool`] ::= "true" | "fals"
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct LiteralBool<'a>(pub &'a str, pub bool) := (lex, val: TokenValue::BoolLiteral(val)) => (Self(lex, val)) as a "boolean literal";
+}
+terminal_rule! {
+    /// [`LiteralUInt`] ::= ; tokenizer-defined
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct LiteralUInt<'a>(pub &'a str, pub usize) := (lex, val: TokenValue::UIntLiteral(val)) => (Self(lex, val)) as a "uint literal";
+}
+terminal_rule! {
+    /// [`LiteralSInt`] ::= ; tokenizer-defined
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct LiteralSInt<'a>(pub &'a str, pub isize) := (lex, val: TokenValue::SIntLiteral(val)) => (Self(lex, val)) as an "sint literal";
+}
+terminal_rule! {
+    /// [`LiteralFrac`] ::= ; tokenizer-defined
+    #[derive(Debug, Clone, Copy, PartialEq, Default)]
+    pub struct LiteralFrac<'a>(pub &'a str, pub f64) := (lex, val: TokenValue::FltLiteral(val)) => (Self(lex, val)) as a "frac literal";
+}
+terminal_rule! {
+    /// [`LiteralChar`] ::= ; tokenizer-defined
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct LiteralChar<'a>(pub &'a str, pub CharLiteral) := (lex, val: TokenValue::CharLiteral(val)) => (Self(lex, val)) as a "char literal";
+}
+terminal_rule! {
+    /// [`LiteralStr`] ::= ; tokenizer-defined
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct LiteralStr<'a>(pub &'a str, pub StrLiteral<'a>) := (lex, val: TokenValue::StringLiteral(val)) => (Self(lex, val)) as a "string literal";
 }
 
-impl<'a> Rule<'a> for Literal<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (token, tokens) = MatchRule::try_pull(
-            token_pattern!(
-                lex,
-                val: val @ (
-                    TokenValue::BoolLiteral(_) |
-                    TokenValue::UIntLiteral(_) |
-                    TokenValue::SIntLiteral(_) |
-                    TokenValue::FltLiteral(_) |
-                    TokenValue::CharLiteral(_) |
-                    TokenValue::StringLiteral(_)
-                ) => (lex, val)
-            ),
-            tokens,
-        )
-        .map_err(|token| {
-            ContextError::missing_or_unexpected(token, source, Expecting::a("literal"))
-        })?;
-
-        Ok((Self { token }, tokens))
+simple_rule! {
+    /// [`IntLiteral`] ::= [`LiteralUInt`] | [`LiteralSInt`]
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum IntLiteral<'a> {
+        UInt(LiteralUInt<'a>),
+        SInt(LiteralSInt<'a>),
+        _ => an "integer literal"
     }
 }
 
-macro_rules! define_enum_subset {
-    (
-        $(#[$enum_meta:meta])*
-        $vis:vis enum $Enum:ident : $Super:ident {$(
-            $(#[$variant_meta:meta])*
-            $Variant:ident
-        ),* $(,)?}
-    ) => {
-        $(#[$enum_meta])*
-        #[doc = concat!("Subset of [`", stringify!($Super), "`]")]
-        $vis enum $Enum {$(
-            $(#[$variant_meta])*
-            #[doc = concat!("[`", stringify!($Super), "::", stringify!($Variant), "`]")]
-            $Variant = $Super::$Variant as isize,
-        )*}
+simple_rule! {
+    /// [`NumLiteral`] ::= [`IntLiteral`] | [`LiteralFrac`]
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum NumLiteral<'a> {
+        Int(IntLiteral<'a>),
+        Flt(LiteralFrac<'a>),
+        _ => a "number literal"
+    }
+}
 
-        impl From<$Enum> for $Super {
-            fn from(value: $Enum) -> Self {
-                match value {
-                    $($Enum::$Variant => Self::$Variant,)*
-                }
-            }
-        }
-
-        impl TryFrom<$Super> for $Enum {
-            type Error = ();
-
-            fn try_from(value: $Super) -> Result<Self, Self::Error> {
-                match value {
-                    $($Super::$Variant => Ok(Self::$Variant),)*
-                    _ => Err(())
-                }
-            }
-        }
-    };
+simple_rule! {
+    /// [`Literal`] ::= [`LiteralBool`] | [`NumLiteral`] | [`LiteralChar`] | [`LiteralStr`]
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum Literal<'a> {
+        Bool(LiteralBool<'a>),
+        Num(NumLiteral<'a>),
+        Char(LiteralChar<'a>),
+        Str(LiteralStr<'a>),
+        _ => a "literal"
+    }
 }
 
 define_enum_subset! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub enum BinaryOp : Punctuation {
+    pub enum BinaryOpPunc : Punctuation {
         Neq,
         Nand,
         Nor,
@@ -406,109 +463,58 @@ define_enum_subset! {
     }
 }
 
-/// ```not_code
-/// <binary-operation> ::= <expression> <binary-operator> <expression>
-/// ```
-#[derive(Debug, Clone, PartialEq)]
-pub struct BinaryOperation<'a> {
-    pub lhs: Box<Expression<'a>>,
-    pub op: (&'a str, BinaryOp),
-    pub rhs: Box<Expression<'a>>,
+terminal_rule! {
+    /// [`BinaryOp`] ::= [`BinaryOpPunc`]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct BinaryOp<'a>(pub &'a str, pub BinaryOpPunc)
+        := (lex, val: TokenValue::Punctuation(val))
+            [ if let Ok(val) = BinaryOpPunc::try_from(val) ]
+        => (Self(lex, val)) as a "binary operator";
 }
 
-impl<'a> Rule<'a> for BinaryOperation<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (lhs, tokens) = Expression::try_pull(source, tokens)?;
-        let (op, tokens) = MatchRule::try_pull(
-            |token| match token {
-                Token {
-                    lex,
-                    val: TokenValue::Punctuation(punc),
-                    ..
-                } if let Ok(op) = punc.try_into() => Some((lex, op)),
-                _ => None,
-            },
-            tokens,
-        )
-        .map_err(|token| {
-            ContextError::missing_or_unexpected(token, source, Expecting::a("binary operator"))
-        })?;
-        let (rhs, tokens) = Expression::try_pull(source, tokens)?;
-
-        Ok((
-            Self {
-                lhs: Box::new(lhs),
-                op,
-                rhs: Box::new(rhs),
-            },
-            tokens,
-        ))
-    }
-}
-
-/// ```not_code
-/// <expression> ::= <literal>
-///     | <group>
-///     | <array>
-///     | <binary-operation>
-///     | <prefix-operator> <expression> ; TODO
-///     | <expression> <postfix-operator> ; TODO
-/// ```
-#[derive(Debug, Clone, PartialEq)]
-pub enum Expression<'a> {
-    Literal(Literal<'a>),
-    Group(Parenthesized<'a, Box<Self>>),
-    BinOp(BinaryOperation<'a>),
-}
-
-impl<'a> Rule<'a> for Expression<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        if let Ok((value, tokens)) = Parenthesized::try_pull(source, tokens) {
-            Ok((Self::Group(value), tokens))
-        } else if let Ok((value, tokens)) = Literal::try_pull(source, tokens) {
-            Ok((Self::Literal(value), tokens))
-        } else if let Ok((value, tokens)) = BinaryOperation::try_pull(source, tokens) {
-            Ok((Self::BinOp(value), tokens))
-        }
-        // TODO: are there other expression structures?
-        else {
-            Err(ContextError::missing_or_unexpected(
-                tokens.first().copied(),
-                source,
-                Expecting::an("expression"),
-            ))
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct RecBody {}
-
-impl<'a> Rule<'a> for RecBody {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        todo!("struct body")
+simple_rule! {
+    /// [`BinaryOperation`] ::= [`Expression`] [`BinaryOp`] [`Expression`]
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct BinaryOperation<'a> {
+        pub lhs: Box<Expression<'a>>,
+        pub op: BinaryOp<'a>,
+        pub rhs: Box<Expression<'a>>,
     }
 }
 
 simple_rule! {
+    /// [`Expression`] ::= [`Literal`] | "(" [`Expression`] ")" | [`BinaryOperation`] | ; TODO
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Expression<'a> {
+        Literal(Literal<'a>),
+        Group(Parenthesized<'a, Box<Self>>),
+        BinOp(BinaryOperation<'a>),
+        // TODO: are there other expression structures?
+        _ => an "expression"
+    }
+}
+
+simple_rule! {
+    /// [`RecBody`] ::= [`Identifier`] ; TODO
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct RecBody<'a> {
+        pub field: Identifier<'a>,
+        // TODO: list
+    }
+}
+
+simple_rule! {
+    /// [`RecDef`] ::= "rec" [`Identifier`] "{" [`RecBody`] "}"
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct RecDef<'a> {
         pub rec_kw: RecKeyword<'a>,
-        pub name: Ident<'a>,
-        pub body: Braced<'a, RecBody>,
+        pub name: Identifier<'a>,
+        pub body: Braced<'a, RecBody<'a>>,
     }
 }
 
 simple_rule! {
+    /// [`SupDef`] ::= "sup" ; TODO
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct SupDef<'a> {
         pub sup_kw: SupKeyword<'a>,
@@ -517,6 +523,7 @@ simple_rule! {
 }
 
 simple_rule! {
+    /// [`SubDef`] ::= "sub" ; TODO
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct SubDef<'a> {
         pub sup_kw: SubKeyword<'a>,
@@ -525,6 +532,7 @@ simple_rule! {
 }
 
 simple_rule! {
+    /// [`CatDef`] ::= "cat" ; TODO
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct CatDef<'a> {
         pub cat_kw: CatKeyword<'a>,
@@ -533,6 +541,7 @@ simple_rule! {
 }
 
 simple_rule! {
+    /// [`AltDef`] ::= "alt" ; TODO
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct AltDef<'a> {
         pub alt_kw: AltKeyword<'a>,
@@ -541,6 +550,7 @@ simple_rule! {
 }
 
 simple_rule! {
+    /// [`MacroDef`] ::= "def" ; TODO
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct MacroDef<'a> {
         pub def_kw: DefKeyword<'a>,
@@ -549,7 +559,7 @@ simple_rule! {
 }
 
 simple_rule! {
-    /// `<param-list1> ::= "," | "," <param-list>`
+    /// [`ParamList1`] ::= "," | "," [`ParamList`]
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
     pub struct ParamList1<'a> {
         pub comma: CommaOp<'a>,
@@ -558,120 +568,75 @@ simple_rule! {
 }
 
 simple_rule! {
-    /// `<param-list> ::= <ident> | <ident> <param-list1>`
+    /// [`ParamList`] ::= [`Identifier`] | [`Identifier`] [`ParamList1`]
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
     pub struct ParamList<'a> {
         /// ident
-        pub param: Ident<'a>,
+        pub param: Identifier<'a>,
         pub next: Option<ParamList1<'a>>,
     }
 }
 
 simple_rule! {
+    /// [`FnBody`] ::= [`LetStatement`] ; TODO
     #[derive(Debug, Clone, PartialEq)]
     pub struct FnBody<'a> {
-        statement: LetStatement<'a>, // TODO
+        statement: LetStatement<'a>,
+        // TODO
     }
 }
 
 terminal_rule! {
+    /// [`Identifier`] ::= ; tokenizer-defined
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct Ident<'a>(pub &'a str) := (lex, val: TokenValue::Identifier | TokenValue::Callable) => (Self(lex)) as an "identifier";
+    pub struct Identifier<'a>(pub &'a str) := (lex, val: TokenValue::Identifier | TokenValue::Callable) => (Self(lex)) as an "identifier";
 }
 
 simple_rule! {
-    /// `<fn-def> ::= "fn" <ident> "(" <param-list> ")" "{" <fn-body> "}"`
+    /// [`FnDef`] ::= "fn" [`Identifier`] "(" [`ParamList`] ")" "{" [`FnBody`] "}"
     #[derive(Debug, Clone, PartialEq)]
     pub struct FnDef<'a> {
-        /// `fn`
         pub fn_kw: FnKeyword<'a>,
-        /// ident
-        pub name: Ident<'a>,
+        pub name: Identifier<'a>,
         pub params: Parenthesized<'a, Option<ParamList<'a>>>,
         pub body: Braced<'a, FnBody<'a>>,
     }
 }
 
 simple_rule! {
+    /// [`MemDef`] ::= "mem" ; TODO
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct OfDef<'a> {
-        pub on_kw: MemKeyword<'a>,
+    pub struct MemDef<'a> {
+        pub mem_kw: MemKeyword<'a>,
         // TODO
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Item<'a> {
-    Rec(RecDef<'a>),
-    Sup(SupDef<'a>),
-    Sub(SubDef<'a>),
-    Cat(CatDef<'a>),
-    Alt(AltDef<'a>),
-    Def(MacroDef<'a>),
-    Fn(FnDef<'a>),
-    Of(OfDef<'a>),
-}
-
-impl<'a> Rule<'a> for Item<'a> {
-    fn try_pull<'b>(
-        source: &'a str,
-        tokens: &'b [Token<'a>],
-    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let unexpected = match tokens.first().copied() {
-            Some(
-                tkn @ Token {
-                    val: TokenValue::Keyword(kw),
-                    ..
-                },
-            ) => match kw {
-                Keyword::Rec => {
-                    return Rule::try_pull(source, tokens).map(map_pull(Self::Rec));
-                }
-                Keyword::Sup => {
-                    return Rule::try_pull(source, tokens).map(map_pull(Self::Sup));
-                }
-                Keyword::Sub => {
-                    return Rule::try_pull(source, tokens).map(map_pull(Self::Sub));
-                }
-                Keyword::Cat => {
-                    return Rule::try_pull(source, tokens).map(map_pull(Self::Cat));
-                }
-                Keyword::Alt => {
-                    return Rule::try_pull(source, tokens).map(map_pull(Self::Alt));
-                }
-                Keyword::Def => {
-                    return Rule::try_pull(source, tokens).map(map_pull(Self::Def));
-                }
-                Keyword::Fn => {
-                    return Rule::try_pull(source, tokens).map(map_pull(Self::Fn));
-                }
-                Keyword::Mem => {
-                    return Rule::try_pull(source, tokens).map(map_pull(Self::Of));
-                }
-
-                _ => Some(tkn),
-            },
-
-            _ => None,
-        };
-
-        Err(ContextError::missing_or_unexpected(
-            unexpected,
-            source,
-            Expecting::a("`rec`, `sup`, `sub`, `cat`, `alt`, `def`, `fn`, or `on` keyword"),
-        ))
+simple_rule! {
+    /// [`Item`] ::= [`RecDef`] | [`SupDef`] | [`SubDef`] | [`CatDef`] | [`AltDef`] | [`MacroDef`] | [`FnDef`] | [`MemDef`]
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Item<'a> {
+        Rec(RecDef<'a>),
+        Sup(SupDef<'a>),
+        Sub(SubDef<'a>),
+        Cat(CatDef<'a>),
+        Alt(AltDef<'a>),
+        Def(MacroDef<'a>),
+        Fn(FnDef<'a>),
+        Mem(MemDef<'a>),
+        _ => a "`rec`, `sup`, `sub`, `cat`, `alt`, `def`, `fn`, or `mem` keyword"
     }
 }
 
-/// ```not_code
-/// <syntax> ::= <item> | <item> <syntax>
-/// ```
+/// [`Syntax`] ::= [`Item`] | [`Item`] [`Syntax`]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Syntax<'a> {
     Item(Item<'a>),
     Pair(Item<'a>, Box<Syntax<'a>>),
 }
 
+/// There is a distinction between "optional rest" vs "there should be nothing else".
+/// Here we want there to be nothing remaining after.
 impl<'a> Rule<'a> for Syntax<'a> {
     fn try_pull<'b>(
         source: &'a str,
