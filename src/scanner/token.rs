@@ -4,7 +4,7 @@ use crate::{
     error::{ErrorType, NumLitError},
     scanner::symbols::{BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM},
 };
-use std::range::Range;
+use std::{range::Range, sync::LazyLock};
 
 /// Helper macro for preventing issues with missed variants when adding new ones
 ///
@@ -26,20 +26,16 @@ macro_rules! define_token_eq {
 
         #[allow(dead_code, reason = "not always used in all expressions of this macro")]
         impl $Enum {
-            /// Descending length, so bigger tokens aren't broken apart by subset tokens
-            pub const OPTIONS: [(&str, Self); [$(Self::$Variant),+].len()] = [
-                $(($value, Self::$Variant),)+
-            ];
-
-            /// Matches the prefix of `s` to a [`Self`]. Tries to find the longest one possible.
+            /// Matches the prefix of `s` to a variant of [`Self`], finding the longest match possible.
             pub fn from_prefix(s: &str) -> Option<Self> {
-                Self::OPTIONS
+                $name::OPTIONS
                     .into_iter()
-                    .find(|(pat, _)| s.starts_with(pat))
+                    .filter(|(pat, _)| s.starts_with(pat))
+                    .max_by_key(|(pat, _)| pat.len()) // maximal munch
                     .map(|(_, punc)| punc)
             }
 
-            /// Like [`Self::from_prefix`] but matches the full string
+            /// Like [`Self::from_prefix`], but matches the full string
             pub fn try_from_str(s: &str) -> Option<Self> {
                 match s {
                     $($value => Some(Self::$Variant),)+
@@ -73,6 +69,25 @@ macro_rules! define_token_eq {
                         as $article concat!("`", $value, "` ", $("(", $val_name, ") ",)? stringify!($name));
                 }
             )+
+
+            pub static OPTIONS: LazyLock<[(&str, $Enum); [$($Enum::$Variant),+].len()]> = LazyLock::new(||{
+                let mut list: [(&'static str, $Enum); _] = [
+                    $(($value, $Enum::$Variant),)+
+                ];
+                list.sort_by_key(|(name, _)| *name);
+                list
+            });
+
+            #[cfg(test)]
+            #[expect(non_snake_case)]
+            mod tests {
+                use super::*;
+
+                $(#[test]
+                fn $Variant() {
+                    assert_eq!($Enum::from_prefix($value), Some($Enum::$Variant));
+                })+
+            }
         }
     };
 }
@@ -644,6 +659,8 @@ define_token_eq! {
         SubAssign = a "-=" ("subtract assign") as SubAssignOp,
         /// Arrow - Separate a function's parameter list from its return type
         Arrow = an "->" ("arrow") as ArrowOp,
+        /// Dot dot - Range
+        DotDot = a ".." ("dot dot") as DotDotOp,
         /// Divide assign - Equivalent to `lhs = lhs / rhs`
         DivAssign = a "/=" ("divide assign") as DivAssignOp,
         /// Path separator - Separate namespace path items
