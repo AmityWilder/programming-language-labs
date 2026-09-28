@@ -1,9 +1,6 @@
 //! Syntax used for highlighting
 
-use crate::{
-    error::TokenResult,
-    scanner::token::{TokenType, TokenValue},
-};
+use crate::{error::TokenResult, scanner::token::TokenValue};
 
 /// Syntactic element category for highlighting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -132,13 +129,15 @@ where
     match item {
         Ok(token) => (
             token.src,
-            match token.ty {
-                TokenType::Comment => Syntax::Comment,
-                TokenType::NumberLiteral => Syntax::NumberLiteral,
-                TokenType::CharLiteral => Syntax::CharLiteral,
-                TokenType::StringLiteral => Syntax::StringLiteral,
-                TokenType::BoolLiteral => Syntax::LanguageDefined,
-                TokenType::Identifier => {
+            match token.val {
+                TokenValue::Comment => Syntax::Comment,
+                TokenValue::UIntLiteral(_)
+                | TokenValue::SIntLiteral(_)
+                | TokenValue::FltLiteral(_) => Syntax::NumberLiteral,
+                TokenValue::CharLiteral(_) => Syntax::CharLiteral,
+                TokenValue::StringLiteral(_) => Syntax::StringLiteral,
+                TokenValue::BoolLiteral(_) => Syntax::LanguageDefined,
+                TokenValue::Identifier => {
                     // constants are all-caps
                     if token.src.chars().any(char::is_uppercase) {
                         if token.src.chars().any(char::is_lowercase) {
@@ -150,11 +149,8 @@ where
                         Syntax::Variable
                     }
                 }
-                TokenType::Callable => Syntax::Callable,
-                TokenType::Keyword => {
-                    let TokenValue::Keyword(kw) = token.val else {
-                        unreachable!()
-                    };
+                TokenValue::Callable => Syntax::Callable,
+                TokenValue::Keyword(kw) => {
                     if kw.is_flow() {
                         Syntax::CtrlKeyword
                     } else if kw.is_type() {
@@ -163,10 +159,10 @@ where
                         Syntax::Keyword
                     }
                 }
-                TokenType::Macro => Syntax::MacroName,
-                TokenType::MacroParam => Syntax::MacroParam,
+                TokenValue::Macro => Syntax::MacroName,
+                TokenValue::MacroParam => Syntax::MacroParam,
 
-                TokenType::Whitespace | TokenType::Punctuation => Syntax::Normal,
+                TokenValue::Whitespace | TokenValue::Punctuation(_) => Syntax::Normal,
             },
             &token.val,
         ),
@@ -175,7 +171,7 @@ where
                 .get(e.range)
                 .expect("range should be a range of source"),
             Syntax::Invalid,
-            &TokenValue::Ignore,
+            &TokenValue::Comment,
         ),
     }
 }
