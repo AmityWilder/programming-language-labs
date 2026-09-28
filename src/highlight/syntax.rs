@@ -48,7 +48,7 @@ pub enum Syntax {
 /// A style table for [`Syntax`] elements.
 /// `T`: The type used for styling
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct SyntaxStyle<'a, T> {
+pub struct SyntaxStyle<'style, T> {
     /// Style for [`Syntax::Normal`]
     pub normal: T,
     /// Style for [`Syntax::Comment`]
@@ -82,7 +82,7 @@ pub struct SyntaxStyle<'a, T> {
     /// Style for [`Syntax::MacroParam`]
     pub macro_arg: T,
     /// Style for [`Syntax::Bracket`]
-    pub bracket: &'a [T],
+    pub bracket: &'style [T],
     /// Style for [`Syntax::Invalid`]
     pub invalid: T,
 }
@@ -127,9 +127,11 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
 ///
 /// # Panics
 /// This method may panic if `item` is an error with a malformed [`range`](crate::error::ContextError::range).
-pub fn syntax_of<'a, 'b>(item: &'b TokenResult<'a>) -> (&'a str, Syntax, &'b TokenValue<'a>)
+pub fn syntax_of<'src, 'res>(
+    item: &'res TokenResult<'src>,
+) -> (&'src str, Syntax, &'res TokenValue<'src>)
 where
-    'a: 'b,
+    'src: 'res,
 {
     match item {
         Ok(token) => (

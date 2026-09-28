@@ -53,9 +53,9 @@ fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, S
 
 /// An iterator over sub-tokens (like escape sequences in char/string literals)
 #[derive(Debug, Clone)]
-pub struct SubTokenSyntax<'a, I: Iterator<Item = (Range<usize>, Syntax)>> {
+pub struct SubTokenSyntax<'src, I: Iterator<Item = (Range<usize>, Syntax)>> {
     /// Full lexeme
-    lex: &'a str,
+    lex: &'src str,
 
     /// Outer syntax
     syn: Syntax,
@@ -67,9 +67,9 @@ pub struct SubTokenSyntax<'a, I: Iterator<Item = (Range<usize>, Syntax)>> {
     prev_end: usize,
 }
 
-impl<'a, I: Iterator<Item = (Range<usize>, Syntax)>> SubTokenSyntax<'a, I> {
+impl<'src, I: Iterator<Item = (Range<usize>, Syntax)>> SubTokenSyntax<'src, I> {
     /// Constructs a new [`SubTokenSyntax`]
-    fn new(lex: &'a str, syn: Syntax, iter: I) -> Self {
+    fn new(lex: &'src str, syn: Syntax, iter: I) -> Self {
         Self {
             lex,
             syn,
@@ -79,11 +79,11 @@ impl<'a, I: Iterator<Item = (Range<usize>, Syntax)>> SubTokenSyntax<'a, I> {
     }
 }
 
-impl<'a, I> Iterator for SubTokenSyntax<'a, I>
+impl<'src, I> Iterator for SubTokenSyntax<'src, I>
 where
     I: Iterator<Item = (Range<usize>, Syntax)>,
 {
-    type Item = (&'a str, Syntax);
+    type Item = (&'src str, Syntax);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter
@@ -172,19 +172,21 @@ where
 }
 
 /// An extension to [`StrLiteral`] defining helpers for syntax highlighting
-pub trait Highlighting<'a: 'b, 'b>: 'b {
+pub trait Highlighting<'src: 'arr, 'arr>: 'arr {
     /// The type returned by [`Self::escaped_str_literal`]
-    type Escaped: 'b + Iterator<Item = (&'a str, Syntax)>;
+    type Escaped: 'arr + Iterator<Item = (&'src str, Syntax)>;
 
     /// Returns a syntax iterator over subtokens of a char/string literal
-    fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped;
+    fn escaped_str_literal(lex: &'src str, syn: Syntax, literal: &'arr Self) -> Self::Escaped;
 }
 
-impl<'a: 'b, 'b> Highlighting<'a, 'b> for StringLiteral {
-    type Escaped =
-        SubTokenSyntax<'a, EscapedRanges<std::iter::Copied<std::slice::Iter<'b, Range<usize>>>>>;
+impl<'src: 'arr, 'arr> Highlighting<'src, 'arr> for StringLiteral {
+    type Escaped = SubTokenSyntax<
+        'src,
+        EscapedRanges<std::iter::Copied<std::slice::Iter<'arr, Range<usize>>>>,
+    >;
 
-    fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped {
+    fn escaped_str_literal(lex: &'src str, syn: Syntax, literal: &'arr Self) -> Self::Escaped {
         SubTokenSyntax::new(
             lex,
             syn,
@@ -195,14 +197,14 @@ impl<'a: 'b, 'b> Highlighting<'a, 'b> for StringLiteral {
 
 /// Not related to [`EscapedRanges`], actually. Just adapts an [`Escapes`] iterator into its non-error ranges.
 #[derive(Debug, Clone)]
-pub struct EscapeRanges<'a> {
+pub struct EscapeRanges<'src> {
     /// Iterator being adapted
-    iter: Escapes<'a>,
+    iter: Escapes<'src>,
 }
 
-impl<'a> EscapeRanges<'a> {
+impl<'src> EscapeRanges<'src> {
     /// Creates a new iterator over [`EscapeRanges`]
-    const fn new(iter: Escapes<'a>) -> Self {
+    const fn new(iter: Escapes<'src>) -> Self {
         Self { iter }
     }
 }
@@ -215,31 +217,31 @@ impl Iterator for EscapeRanges<'_> {
     }
 }
 
-impl<'a: 'b, 'b> Highlighting<'a, 'b> for StrLiteral<'a> {
-    type Escaped = SubTokenSyntax<'a, EscapedRanges<EscapeRanges<'b>>>;
+impl<'src: 'arr, 'arr> Highlighting<'src, 'arr> for StrLiteral<'src> {
+    type Escaped = SubTokenSyntax<'src, EscapedRanges<EscapeRanges<'arr>>>;
 
-    fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped {
+    fn escaped_str_literal(lex: &'src str, syn: Syntax, literal: &'arr Self) -> Self::Escaped {
         SubTokenSyntax::new(
             lex,
             syn,
-            EscapedRanges::new(EscapeRanges::new(Escapes::new(literal.src))),
+            EscapedRanges::new(EscapeRanges::new(Escapes::new(literal.content))),
         )
     }
 }
 
 /// An iterator over the subtokens of any valid token, since each has its own method of iterating
 #[derive(Debug, Clone)]
-pub enum HighlightToken<'a: 'b, 'b, H: Highlighting<'a, 'b>> {
+pub enum HighlightToken<'src: 'arr, 'arr, H: Highlighting<'src, 'arr>> {
     /// Character literal containing escapes - the open delimiter, the escape sequence, then the close delimiter
-    CharLiteral(std::array::IntoIter<(&'a str, Syntax), 3>),
+    CharLiteral(std::array::IntoIter<(&'src str, Syntax), 3>),
     /// String literal containing escapes - interleaves the escape sequences between un-escaped chunks
     StrLiteral(H::Escaped),
     /// Any token that doesn't have subtokens
-    Simple(std::iter::Once<(&'a str, Syntax)>),
+    Simple(std::iter::Once<(&'src str, Syntax)>),
 }
 
-impl<'a: 'b, 'b, H: Highlighting<'a, 'b>> Iterator for HighlightToken<'a, 'b, H> {
-    type Item = (&'a str, Syntax);
+impl<'src: 'arr, 'arr, H: Highlighting<'src, 'arr>> Iterator for HighlightToken<'src, 'arr, H> {
+    type Item = (&'src str, Syntax);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -280,8 +282,8 @@ impl<I> HighlightIter<I> {
     }
 }
 
-impl<'a: 'b, 'b, I: Iterator<Item = &'b TokenResult<'a>>> Iterator for HighlightIter<I> {
-    type Item = HighlightToken<'a, 'b, StrLiteral<'a>>;
+impl<'src: 'arr, 'arr, I: Iterator<Item = &'arr TokenResult<'src>>> Iterator for HighlightIter<I> {
+    type Item = HighlightToken<'src, 'arr, StrLiteral<'src>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|res| {
@@ -305,9 +307,9 @@ impl<'a: 'b, 'b, I: Iterator<Item = &'b TokenResult<'a>>> Iterator for Highlight
 }
 
 /// An iterator over each lexeme and [`Syntax`] in the [`TokenResult`] list
-pub fn highlight<'a: 'b, 'b, I>(tokens: I) -> std::iter::Flatten<HighlightIter<I::IntoIter>>
+pub fn highlight<'src: 'arr, 'arr, I>(tokens: I) -> std::iter::Flatten<HighlightIter<I::IntoIter>>
 where
-    I: IntoIterator<Item = &'b TokenResult<'a>>,
+    I: IntoIterator<Item = &'arr TokenResult<'src>>,
 {
     HighlightIter::new(tokens.into_iter()).flatten()
 }

@@ -540,7 +540,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::StringLiteral(StrLiteral { src: "a" }),
+                    val: TokenValue::StringLiteral(StrLiteral { content: "a" }),
                 },)]
             );
         }
@@ -552,7 +552,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::StringLiteral(StrLiteral { src: "aa" }),
+                    val: TokenValue::StringLiteral(StrLiteral { content: "aa" }),
                 })]
             );
         }
@@ -564,7 +564,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::StringLiteral(StrLiteral { src: "" }),
+                    val: TokenValue::StringLiteral(StrLiteral { content: "" }),
                 })]
             );
         }
@@ -592,7 +592,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::StringLiteral(StrLiteral { src: "\\0" })
+                        val: TokenValue::StringLiteral(StrLiteral { content: "\\0" })
                     },)]
                 );
             }
@@ -604,7 +604,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::StringLiteral(StrLiteral { src: "\\x1b" })
+                        val: TokenValue::StringLiteral(StrLiteral { content: "\\x1b" })
                     },)]
                 );
             }
@@ -616,7 +616,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::StringLiteral(StrLiteral { src: "\\1b" })
+                        val: TokenValue::StringLiteral(StrLiteral { content: "\\1b" })
                     },)]
                 );
             }
