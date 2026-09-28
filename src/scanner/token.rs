@@ -6,39 +6,6 @@ use crate::{
 };
 use std::range::Range;
 
-/// The classification of a [`Token`]
-#[deprecated(note = "`TokenValue` implies type")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum TokenType {
-    /// An entire chunk of whitespace, not just one character
-    #[default]
-    Whitespace,
-    /// A comment (either block or line)
-    Comment,
-    /// A number literal (int or float)
-    NumberLiteral,
-    /// A character literal
-    CharLiteral,
-    /// A string literal
-    StringLiteral,
-    /// A boolean literal
-    BoolLiteral,
-    /// The name of an item in code
-    Identifier,
-    /// Identical to [`Self::Identifier`], but implies a function by context.
-    /// i.e. The next token is an open parenthesis (`(`)
-    // TODO: make this the duty of grammar instead
-    Callable,
-    /// A language keyword
-    Keyword,
-    /// An [`Self::Identifier`] preceded by `\`
-    Macro,
-    /// An [`Self::Identifier`] preceded by `$`
-    MacroParam,
-    /// Operators and other non-alphanumeric tokens
-    Punctuation,
-}
-
 /// Helper macro for preventing issues with missed variants when adding new ones
 ///
 /// Variants should be in the order they should be tested
@@ -114,6 +81,9 @@ define_token_eq! {
     /// Language-defined reserved words for defining behavior or form
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum Keyword = keyword {
+        // Builtin values
+        SelfKw = a "self" as SelfKeyword,
+
         // Builtin types
         None = a "none" as NoneKeyword,
         Nevr = a "nevr" as NevrKeyword,
@@ -397,26 +367,45 @@ impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral<'a> {
 /// The value represented by a [`Token`]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TokenValue<'a> {
-    /// Whitespace/comments
+    // ignored
+    /// An entire chunk of whitespace, not just one character
     #[default]
-    Ignore,
+    Whitespace,
+    /// A comment (either block or line)
+    Comment,
+
+    // number literal
     /// Unsigned integer literal
     UIntLiteral(usize),
     /// Signed integer literal
     SIntLiteral(isize),
     /// Floating point literal
     FltLiteral(f64),
+
+    // strlike literal
     /// Character literal
     CharLiteral(CharLiteral),
     /// String literal
     StringLiteral(StrLiteral<'a>),
+
+    // language builtin
     /// Boolean literal
     BoolLiteral(bool),
-    /// Value is the token source itself (in-code name)
-    Direct(&'a str),
+
+    // identifiers
+    /// An identifier - its value is the lexeme itself
+    Identifier,
+    /// An identifier followed by `(` or following a `fn` keyword
+    #[deprecated(note = "will be determined by parser in future versions")]
+    Callable,
+    /// An identifier prefixed with `\`
+    Macro,
+    /// An identifier prefixed with `$`
+    MacroParam,
+
     /// A language keyword
     Keyword(Keyword),
-    /// Punctuation
+    /// Operators and other non-alphanumeric tokens
     Punctuation(Punctuation),
 }
 
@@ -574,17 +563,41 @@ pub struct Token<'a> {
     /// when we can just keep the original string around and calculate those integers *on demand*?
     pub src: &'a str,
 
-    /// Couldn't be named `type` because that's a keyword in Rust
-    pub ty: TokenType,
-
     /// The value of the token
     pub val: TokenValue<'a>,
 }
 
 impl std::fmt::Debug for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { src, ty, val } = self;
-        write!(f, "{ty:?}({src:?}): {val:?}")
+        let Self { src, val } = self;
+        let name = match val {
+            TokenValue::Whitespace => "Whitespace",
+            TokenValue::Comment => "Comment",
+            TokenValue::UIntLiteral(_) => "UIntLiteral",
+            TokenValue::SIntLiteral(_) => "SIntLiteral",
+            TokenValue::FltLiteral(_) => "FltLiteral",
+            TokenValue::CharLiteral(_) => "CharLiteral",
+            TokenValue::StringLiteral(_) => "StringLiteral",
+            TokenValue::BoolLiteral(_) => "BoolLiteral",
+            TokenValue::Identifier | TokenValue::Callable => "Identifier",
+            TokenValue::Macro => "Macro",
+            TokenValue::MacroParam => "MacroParam",
+            TokenValue::Keyword(_) => "Keyword",
+            TokenValue::Punctuation(_) => "Punctuation",
+        };
+        write!(f, "{name}({src:?})")?;
+        match val {
+            TokenValue::UIntLiteral(x) => write!(f, " {x:?}"),
+            TokenValue::SIntLiteral(x) => write!(f, " {x:?}"),
+            TokenValue::FltLiteral(x) => write!(f, " {x:?}"),
+            TokenValue::CharLiteral(x) => write!(f, " {x:?}"),
+            TokenValue::StringLiteral(x) => write!(f, " {x:?}"),
+            TokenValue::BoolLiteral(x) => write!(f, " {x:?}"),
+            TokenValue::Keyword(x) => write!(f, " {x:?}"),
+            TokenValue::Punctuation(x) => write!(f, " {x:?}"),
+
+            _ => Ok(()),
+        }
     }
 }
 

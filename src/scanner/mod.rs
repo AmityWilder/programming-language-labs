@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use std::range::Range;
-use token::{Keyword, Punctuation, Token, TokenType, TokenValue};
+use token::{Keyword, Punctuation, Token, TokenValue};
 
 pub mod symbols;
 pub mod token;
@@ -144,8 +144,7 @@ impl<'a> Scanner<'a> {
             src: self
                 .split_off(len)
                 .expect("find and len should return safe positions within source"),
-            ty: TokenType::Whitespace,
-            val: TokenValue::Ignore,
+            val: TokenValue::Whitespace,
         }
     }
 
@@ -173,8 +172,7 @@ impl<'a> Scanner<'a> {
             .expect("find and len should return safe positions to split at");
         Token {
             src,
-            ty: TokenType::Macro,
-            val: TokenValue::Direct(src),
+            val: TokenValue::Macro,
         }
     }
 
@@ -202,8 +200,7 @@ impl<'a> Scanner<'a> {
             .expect("find and len should return safe positions to split at");
         Token {
             src,
-            ty: TokenType::MacroParam,
-            val: TokenValue::Direct(src),
+            val: TokenValue::MacroParam,
         }
     }
 
@@ -270,17 +267,8 @@ impl<'a> Scanner<'a> {
                     .split_off(len)
                     .expect("find and len should return safe positions to split at");
                 match open_delim {
-                    STR_DELIM => TokenValue::string_literal(src).map(|val| Token {
-                        src,
-                        ty: TokenType::StringLiteral,
-                        val,
-                    }),
-
-                    CHAR_DELIM => TokenValue::char_literal(src).map(|val| Token {
-                        src,
-                        ty: TokenType::CharLiteral,
-                        val,
-                    }),
+                    STR_DELIM => TokenValue::string_literal(src).map(|val| Token { src, val }),
+                    CHAR_DELIM => TokenValue::char_literal(src).map(|val| Token { src, val }),
 
                     _ => unreachable!("should be guarded by if condition"),
                 }
@@ -306,25 +294,24 @@ impl<'a> Scanner<'a> {
         let src = self
             .split_off(len)
             .expect("find and len should return safe positions to split at");
-        let (ty, val) = if let Some(kw) = Keyword::try_from_str(src) {
-            (TokenType::Keyword, TokenValue::Keyword(kw))
+        let val = if let Some(kw) = Keyword::try_from_str(src) {
+            TokenValue::Keyword(kw)
         } else {
             match src {
-                "true" => (TokenType::BoolLiteral, TokenValue::BoolLiteral(true)),
-                "false" => (TokenType::BoolLiteral, TokenValue::BoolLiteral(false)),
-                _ => (
+                "true" => TokenValue::BoolLiteral(true),
+                "false" => TokenValue::BoolLiteral(false),
+                _ => {
                     if self.is_following_fn || self.source.starts_with('(')
                     // assumes the token has already been split off
                     {
-                        TokenType::Callable
+                        TokenValue::Callable
                     } else {
-                        TokenType::Identifier
-                    },
-                    TokenValue::Direct(src),
-                ),
+                        TokenValue::Identifier
+                    }
+                }
             }
         };
-        Token { src, ty, val }
+        Token { src, val }
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -369,11 +356,7 @@ impl<'a> Scanner<'a> {
             .split_off(len)
             .expect("should be a safe position to split at");
         TokenValue::number_literal(src)
-            .map(|val| Token {
-                src,
-                ty: TokenType::NumberLiteral,
-                val,
-            })
+            .map(|val| Token { src, val })
             .map_err(|err| self.error_prev(len, err))
     }
 
@@ -397,8 +380,7 @@ impl<'a> Scanner<'a> {
             src: self
                 .split_off(len)
                 .expect("should be a safe position to split at"),
-            ty: TokenType::Comment,
-            val: TokenValue::Ignore,
+            val: TokenValue::Comment,
         }
     }
 
@@ -439,8 +421,7 @@ impl<'a> Scanner<'a> {
             src: self
                 .split_off(len)
                 .expect("should be a safe position to split at"),
-            ty: TokenType::Comment,
-            val: TokenValue::Ignore,
+            val: TokenValue::Comment,
         })
         .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
     }
@@ -463,7 +444,6 @@ impl<'a> Scanner<'a> {
                     .expect("should be a safe position to split at");
                 Token {
                     src,
-                    ty: TokenType::Punctuation,
                     val: TokenValue::Punctuation(punc),
                 }
             })
@@ -521,7 +501,7 @@ impl<'a> Iterator for Scanner<'a> {
             }
             .inspect(|token| {
                 // non-whitespace, non-comment token
-                if !matches!(token.ty, TokenType::Whitespace | TokenType::Comment) {
+                if !matches!(token.val, TokenValue::Whitespace | TokenValue::Comment) {
                     self.is_following_fn = matches!(token.val, TokenValue::Keyword(Keyword::Fn));
 
                     // punctuation except for close bracket

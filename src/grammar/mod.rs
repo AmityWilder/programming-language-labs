@@ -6,7 +6,7 @@ use crate::{
     error::{ContextError, ErrorType, Expecting},
     scanner::{
         Bracket,
-        token::{Keyword, Punctuation, Token, TokenType, TokenValue, keyword::*, operator::*},
+        token::{Keyword, Punctuation, Token, TokenValue, keyword::*, operator::*},
     },
 };
 use std::range::Range;
@@ -322,7 +322,17 @@ impl<'a> Rule<'a> for Literal<'a> {
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
         let (token, tokens) = MatchRule::try_pull(
-            token_pattern!(src, val, ty: TokenType::BoolLiteral | TokenType::NumberLiteral | TokenType::CharLiteral | TokenType::StringLiteral => (src, val)),
+            token_pattern!(
+                src,
+                val: val @ (
+                    TokenValue::BoolLiteral(_) |
+                    TokenValue::UIntLiteral(_) |
+                    TokenValue::SIntLiteral(_) |
+                    TokenValue::FltLiteral(_) |
+                    TokenValue::CharLiteral(_) |
+                    TokenValue::StringLiteral(_)
+                ) => (src, val)
+            ),
             tokens,
         )
         .map_err(|token| {
@@ -566,7 +576,7 @@ simple_rule! {
 
 terminal_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct Ident<'a>(pub &'a str) := (val: TokenValue::Direct(src) /* TODO: are there other uses for Direct? */) => (Self(src)) as an "identifier";
+    pub struct Ident<'a>(pub &'a str) := (src, val: TokenValue::Identifier | TokenValue::Callable) => (Self(src)) as an "identifier";
 }
 
 simple_rule! {
@@ -690,8 +700,9 @@ fn test() {
     let tokens = crate::scanner::tokenize(SOURCE)
         // TODO: make these optional instead(?)
         .filter(|res| {
-            !res.as_ref()
-                .is_ok_and(|token| token.val == TokenValue::Ignore)
+            !res.as_ref().is_ok_and(|token| {
+                matches!(token.val, TokenValue::Comment | TokenValue::Whitespace)
+            })
         })
         .collect::<Result<Vec<_>, _>>()
         .expect("lex error(s)");
