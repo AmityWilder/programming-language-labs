@@ -38,6 +38,7 @@ macro_rules! token_pattern {
 
 /// A rule that is just a sequence of one rule after another
 macro_rules! simple_rule {
+    // sequence of rules
     (
         $(#[$meta:meta])*
         $vis:vis struct $Struct:ident<$lt:lifetime> {$(
@@ -62,6 +63,7 @@ macro_rules! simple_rule {
         }
     };
 
+    // switch case of rules
     (
         $(#[$meta:meta])*
         $vis:vis enum $Enum:ident<$lt:lifetime> {
@@ -214,6 +216,43 @@ impl<'a, T: Rule<'a>> Rule<'a> for Option<T> {
             .unwrap_or((None, tokens)))
     }
 }
+
+impl<'a, T: Rule<'a>> Rule<'a> for Vec<T> {
+    fn try_pull<'b>(
+        source: &'a str,
+        mut tokens: &'b [Token<'a>],
+    ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
+        Ok((
+            std::iter::from_fn(|| T::try_pull(source, tokens).ok())
+                .map(|(item, tkns)| {
+                    tokens = tkns;
+                    item
+                })
+                .collect(),
+            tokens,
+        ))
+    }
+}
+
+macro_rules! tuple_rule {
+    ($($T:ident),+ $(,)?) => {
+        impl<'a, $($T: Rule<'a>),+> Rule<'a> for ($($T),+) {
+            fn try_pull<'b>(
+                source: &'a str,
+                tokens: &'b [Token<'a>],
+            ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
+                $(#[expect(non_snake_case)] let ($T, tokens) = Rule::try_pull(source, tokens)?;)+
+                Ok((($($T),+), tokens))
+            }
+        }
+    };
+}
+
+tuple_rule!(T1, T2);
+tuple_rule!(T1, T2, T3);
+tuple_rule!(T1, T2, T3, T4);
+tuple_rule!(T1, T2, T3, T4, T5);
+tuple_rule!(T1, T2, T3, T4, T5, T6);
 
 simple_rule! {
     /// [`LetStatement`] ::= "let" [`Binding`] "=" [`Expression`] ";"
@@ -437,19 +476,77 @@ simple_rule! {
     }
 }
 
+simple_rule! {
+    /// [`Primary`] ::= [`Literal`] | "(" [`Expression`] ")"
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Primary<'a> {
+        Literal(Literal<'a>),
+        Expr(Parenthesized<'a, Expression<'a>>),
+        _ => a "literal or parenthesized expression"
+    }
+}
+
 define_enum_subset! {
+    /// [`UnaryOpPunc`] ::= "!" | "#" | "@"
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum UnaryOpPunc : Punctuation {
+        Not,
+        MacroStringify,
+        Ref,
+    }
+}
+
+terminal_rule! {
+    /// [`UnaryOp`] ::= [`UnaryOpPunc`]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct UnaryOp<'a>(pub &'a str, pub UnaryOpPunc)
+        := (lex, val: TokenValue::Punctuation(val))
+            [ if let Ok(val) = UnaryOpPunc::try_from(val) ]
+        => (Self(lex, val)) as a "unary operator";
+}
+
+simple_rule! {
+    /// [`Unary`] ::= [`UnaryOp`] [`Unary`] | [`Primary`]
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Unary<'a> {
+        Unary(Box<(UnaryOp<'a>, Unary<'a>)>),
+        Primary(Primary<'a>),
+        _ => a "unary or primary"
+    }
+}
+
+define_enum_subset! {
+    /// [`FactorPunc`] ::= "*" | "/"
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum FactorPunc : Punctuation {
+        Mul,
+        Div,
+    }
+}
+
+terminal_rule! {
+    /// [`FactorOp`] ::= [`FactorPunc`]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct FactorOp<'a>(pub &'a str, pub FactorPunc)
+        := (lex, val: TokenValue::Punctuation(val))
+            [ if let Ok(val) = FactorPunc::try_from(val) ]
+        => (Self(lex, val)) as a "`*` or `/` operator";
+}
+
+simple_rule! {
+    /// [`Factor`] ::= [`Factor`] [`FactorOp`] [`Unary`] | [`Unary`]
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Factor<'a> {
+        Factor(Box<(Factor<'a>, FactorOp<'a>)>),
+        Unary(Unary<'a>),
+        _ => a "`*` or `/` operator or unary expression"
+    }
+}
+
+define_enum_subset! {
+    /// [`BinaryOpPunc`] ::= "%" | "&" | "*" | "+" | "/" | "<" | ">" | "^" | "|" | "!=" | "!&" | "!|" | "!^" |"**" | "<=" | "<<" | "==" | ">=" | ">>"
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum BinaryOpPunc : Punctuation {
-        Neq,
-        Nand,
-        Nor,
-        Xnor,
-        Exponent,
-        Le,
-        Shl,
-        Eq,
-        Ge,
-        Shr,
         Remainder,
         And,
         Mul,
@@ -460,6 +557,17 @@ define_enum_subset! {
         Gt,
         Xor,
         Or,
+
+        Neq,
+        Nand,
+        Nor,
+        Xnor,
+        Exponent,
+        Le,
+        Shl,
+        Eq,
+        Ge,
+        Shr,
     }
 }
 
