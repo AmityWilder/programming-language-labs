@@ -7,6 +7,7 @@ use crate::{
 use std::range::Range;
 
 /// The classification of a [`Token`]
+#[deprecated(note = "`TokenValue` implies type")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TokenType {
     /// An entire chunk of whitespace, not just one character
@@ -44,9 +45,9 @@ pub enum TokenType {
 macro_rules! define_token_eq {
     (
         $(#[$em:meta])*
-        $vis:vis enum $Enum:ident {$(
+        $vis:vis enum $Enum:ident = $name:ident {$(
             $(#[$vm:meta])*
-            $Variant:ident = $value:literal
+            $Variant:ident = $article:ident $value:literal $(($val_name:literal))? as $rule:ident
         ),+ $(,)?}
     ) => {
         $(#[$em])*
@@ -92,65 +93,79 @@ macro_rules! define_token_eq {
                 f.write_str(self.as_str())
             }
         }
+
+        pub mod $name {
+            use super::*;
+            $(
+                $crate::terminal_rule!{
+                    #[doc = concat!("`\"", $value, "\"`")]
+                    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+                    #[allow(dead_code)]
+                    pub struct $rule<'a>(pub &'a str)
+                        := (src, val: TokenValue::$Enum($Enum::$Variant)) => (Self(src))
+                        as $article concat!("`", $value, "` ", $("(", $val_name, ") ",)? stringify!($name));
+                }
+            )+
+        }
     };
 }
 
 define_token_eq! {
     /// Language-defined reserved words for defining behavior or form
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub enum Keyword {
+    pub enum Keyword = keyword {
         // Builtin types
-        None = "none",
-        Nevr = "nevr",
-        Bool = "bool",
-        Uint = "uint",
-        Sint = "sint",
-        Frac = "frac",
-        Char = "char",
-        Text = "text",
+        None = a "none" as NoneKeyword,
+        Nevr = a "nevr" as NevrKeyword,
+        Bool = a "bool" as BoolKeyword,
+        Uint = a "uint" as UintKeyword,
+        Sint = a "sint" as SintKeyword,
+        Frac = a "frac" as FracKeyword,
+        Char = a "char" as CharKeyword,
+        Text = a "text" as TextKeyword,
 
         // Definitions
-        Rec = "rec",
-        Sup = "sup",
-        Cat = "cat",
-        Alt = "alt",
-        Sub = "sub",
-        Def = "def",
-        Fn = "fn",
-        Of = "of",
+        Rec = a "rec" as RecKeyword,
+        Sup = a "sup" as SupKeyword,
+        Cat = a "cat" as CatKeyword,
+        Alt = a "alt" as AltKeyword,
+        Sub = a "sub" as SubKeyword,
+        Def = a "def" as DefKeyword,
+        Fn = a "fn" as FnKeyword,
+        Of = an "of" as OfKeyword,
 
         // Value
-        Let = "let",
-        Uni = "uni",
-        Pvt = "pvt",
+        Let = a "let" as LetKeyword,
+        Uni = a "uni" as UniKeyword,
+        Pvt = a "pvt" as PvtKeyword,
 
         // Interface
-        Where = "where",
-        Has = "has",
+        Where = a "where" as WhereKeyword,
+        Has = a "has" as HasKeyword,
 
         // Flow
         // ----
 
         // Conditional
-        If = "if",
-        Or = "or",
-        Match = "match",
+        If = an "if" as IfKeyword,
+        Or = an "or" as OrKeyword,
+        Match = a "match" as MatchKeyword,
 
         // Loop
-        Rep = "rep",
-        For = "for",
-        In = "in",
-        Loop = "loop",
-        Cord = "cord",
+        Rep = a "rep" as RepKeyword,
+        For = a "for" as ForKeyword,
+        In = an "in" as InKeyword,
+        Loop = a "loop" as LoopKeyword,
+        Cord = a "cord" as CordKeyword,
 
         // Loop control
-        Stop = "stop",
-        Skip = "skip",
+        Stop = a "stop" as StopKeyword,
+        Skip = a "skip" as SkipKeyword,
 
         // Exit
-        Give = "give",
-        Fail = "fail",
-        Emit = "emit",
+        Give = a "give" as GiveKeyword,
+        Fail = a "fail" as FailKeyword,
+        Emit = an "emit" as EmitKeyword,
     }
 }
 
@@ -204,66 +219,66 @@ define_token_eq! {
     /// - Comparisons
     /// - "Bitwise" operations on booleans
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub enum Punctuation {
+    pub enum Punctuation = operator {
         // 3-char
-        ExponentAssign = "**=",
-        ShlAssign = "<<=",
-        ShrAssign = ">>=",
-        NandAssign = "!&=",
-        NorAssign = "!|=",
-        XnorAssign = "!^=",
+        ExponentAssign = an "**=" ("exponent assign") as ExponentAssignOp,
+        ShlAssign = a "<<=" ("left bitshift assign") as ShlAssignOp,
+        ShrAssign = a ">>=" ("right bitshift assign") as ShrAssignOp,
+        NandAssign = a "!&=" ("nand assign") as NandAssignOp,
+        NorAssign = a "!|=" ("nor assign") as NorAssignOp,
+        XnorAssign = a "!^=" ("xnor assign") as XnorAssignOp,
 
         // 2-char
-        Neq = "!=",
-        Nand = "!&",
-        Nor = "!|",
-        Xnor = "!^",
-        MacroConcatenate = "##",
-        RemAssign = "%=",
-        AndAssign = "&=",
-        MulAssign = "*=",
-        Exponent = "**",
-        AddAssign = "+=",
-        SubAssign = "-=",
-        Arrow = "->",
-        DivAssign = "/=",
-        PathSep = "::",
-        ColonEq = ":=",
-        Le = "<=",
-        Shl = "<<",
-        Eq = "==",
-        FatArrow = "=>",
-        Ge = ">=",
-        Shr = ">>",
-        XorAssign = "^=",
-        OrAssign = "|=",
+        Neq = a "!=" ("not equal") as NeqOp,
+        Nand = a "!&" ("nand") as NandOp,
+        Nor = a "!|" ("nor") as NorOp,
+        Xnor = an "!^" ("xnor") as XnorOp,
+        MacroConcatenate = a "##" ("concatenate") as MacroConcatenateOp,
+        RemAssign = a "%=" ("remainder assign") as RemAssignOp,
+        AndAssign = an "&=" ("and assign") as AndAssignOp,
+        MulAssign = a "*=" ("multiply assign") as MulAssignOp,
+        Exponent = an "**" ("exponent") as ExponentOp,
+        AddAssign = an "+=" ("add assign") as AddAssignOp,
+        SubAssign = a "-=" ("subtract assign") as SubAssignOp,
+        Arrow = an "->" ("arrow") as ArrowOp,
+        DivAssign = a "/=" ("divide assign") as DivAssignOp,
+        PathSep = a "::" ("path separator") as PathSepOp,
+        ColonEq = a ":=" ("colon assign") as ColonEqOp,
+        Le = a "<=" ("less or equal") as LeOp,
+        Shl = a "<<" ("left bitshift") as ShlOp,
+        Eq = an "==" ("equal") as EqOp,
+        FatArrow = a "=>" ("fat arrow") as FatArrowOp,
+        Ge = a ">=" ("greater or equal") as GeOp,
+        Shr = a ">>" ("right bitshift") as ShrOp,
+        XorAssign = an "^=" ("xor assign") as XorAssignOp,
+        OrAssign = an "|=" ("or assign") as OrAssignOp,
 
         // 1-char
-        Not = "!",
-        MacroStringify = "#",
-        Remainder = "%",
-        And = "&",
-        LParen = "(",
-        RParen = ")",
-        Mul = "*",
-        Add = "+",
-        Comma = ",",
-        Sub = "-",
-        Dot = ".",
-        Div = "/",
-        Colon = ":",
-        Semi = ";",
-        Lt = "<",
-        Assign = "=",
-        Gt = ">",
-        QMark = "?",
-        Ref = "@",
-        LBrack = "[",
-        RBrack = "]",
-        Xor = "^",
-        LBrace = "{",
-        Or = "|",
-        RBrace = "}",
+        Not = a "!" ("not") as NotOp,
+        MacroStringify = a "#" ("stringify") as MacroStringifyOp,
+        Remainder = a "%" ("remainder") as RemainderOp,
+        And = an "&" ("and") as AndOp,
+        LParen = a "(" ("left parenthesis") as LParenOp,
+        RParen = a ")" ("right parenthesis") as RParenOp,
+        Mul = a "*" ("multiply") as MulOp,
+        Add = an "+" ("add") as AddOp,
+        Comma = a "," ("comma") as CommaOp,
+        Sub = a "-" ("subtract") as SubOp,
+        Dot = a "." ("dot") as DotOp,
+        Div = a "/" ("divide") as DivOp,
+        Colon = a ":" ("colon") as ColonOp,
+        Semi = a ";" ("semicolon") as SemiOp,
+        Lt = a "<" ("less than") as LtOp,
+        Assign = an "=" ("assignment") as AssignOp,
+        Gt = a ">" ("greater than") as GtOp,
+        QMark = a "?" ("question mark") as QMarkOp,
+        Ref = a "@" ("reference") as RefOp,
+        LBrack = a "[" ("left bracket") as LBrackOp,
+        RBrack = a "]" ("right bracket") as RBrackOp,
+        Xor = an "^" ("xor") as XorOp,
+        LBrace = a "{" ("left brace") as LBraceOp,
+        Or = an "|" ("or") as OrOp,
+        RBrace = a "}" ("right brace") as RBraceOp,
     }
 }
 

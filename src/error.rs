@@ -9,9 +9,12 @@ use crate::scanner::{
 };
 use std::range::Range;
 
+/// Either "a" or "an"
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Article {
+    /// Article used before consonant sounds
     A,
+    /// Article used before vowel sounds
     An,
 }
 

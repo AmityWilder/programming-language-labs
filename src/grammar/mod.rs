@@ -6,7 +6,7 @@ use crate::{
     error::{ContextError, ErrorType, Expecting},
     scanner::{
         Bracket,
-        token::{Keyword, Punctuation, Token, TokenType, TokenValue},
+        token::{Keyword, Punctuation, Token, TokenType, TokenValue, keyword::*, operator::*},
     },
 };
 use std::range::Range;
@@ -62,22 +62,23 @@ macro_rules! simple_rule {
 }
 
 /// A rule that is a single token matching a specific pattern
+#[macro_export]
 macro_rules! terminal_rule {
     (
         $(#[$meta:meta])*
         $vis:vis struct $Struct:ident<$lt:lifetime>($fvis:vis $Type:ty)
             := ($($field:ident$(: $pattern:pat)?),+ $(,)? $(if $($guard:tt)+)?) => ($result:expr)
-            as $article:ident $desc:literal;
+            as $article:ident $desc:expr;
     ) => {
         $(#[$meta])*
         $vis struct $Struct<$lt>($fvis $Type);
 
-        impl<'a> Rule<'a> for $Struct<'a> {
+        impl<'a> $crate::grammar::Rule<'a> for $Struct<'a> {
             fn try_pull<'b>(
                 source: &'a str,
                 tokens: &'b [Token<'a>],
-            ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-                MatchRule::try_pull(
+            ) -> Result<(Self, &'b [Token<'a>]), $crate::error::ContextError<'a>> {
+                $crate::grammar::MatchRule::try_pull(
                     |token| match token {
                         Token { $($field$(: $pattern)?,)+ .. } $(if $($guard)+)? => Some($result),
                         _ => None,
@@ -85,7 +86,7 @@ macro_rules! terminal_rule {
                     tokens,
                 )
                 .map_err(|token| {
-                    ContextError::missing_or_unexpected(token, source, Expecting::$article($desc))
+                    $crate::error::ContextError::missing_or_unexpected(token, source, $crate::error::Expecting::$article($desc))
                 })
             }
         }
@@ -152,22 +153,6 @@ impl<'a, T: Rule<'a>> Rule<'a> for Option<T> {
     }
 }
 
-terminal_rule! {
-    /// `"let"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct LetKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Let)) => (Self(src)) as a "`let` keyword";
-}
-terminal_rule! {
-    /// `"="`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct AssignOp<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::Assign)) => (Self(src)) as an "`=` operator";
-}
-terminal_rule! {
-    /// `";"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct SemiColon<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::Semi)) => (Self(src)) as an "`;`";
-}
-
 simple_rule! {
     /// `<let-statement> ::= "let" <binding> "=" <expression>`
     #[derive(Debug, Clone, PartialEq)]
@@ -176,7 +161,7 @@ simple_rule! {
         pub binding: Binding<'a>,
         pub assign_kw: AssignOp<'a>,
         pub expression: Expression<'a>,
-        pub semi: SemiColon<'a>,
+        pub semi: SemiOp<'a>,
     }
 }
 
@@ -226,23 +211,12 @@ fn specify_bracket_err(
     }
 }
 
-terminal_rule! {
-    /// `"("`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct OpenParen<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::LParen)) => (Self(src)) as an "open parenthesis `(`";
-}
-terminal_rule! {
-    /// `")"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct CloseParen<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::RParen)) => (Self(src)) as a "close parenthesis `)`";
-}
-
 /// `<parenthesized> ::= "(" INNER ")"`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Parenthesized<'a, T> {
-    pub open: OpenParen<'a>,
+    pub open: LParenOp<'a>,
     pub inner: T,
-    pub close: CloseParen<'a>,
+    pub close: RParenOp<'a>,
 }
 
 /// Not a simple rule, because brackets have special errors
@@ -251,7 +225,7 @@ impl<'a, T: Rule<'a>> Rule<'a> for Parenthesized<'a, T> {
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (open, tokens) = OpenParen::try_pull(source, tokens)?;
+        let (open, tokens) = LParenOp::try_pull(source, tokens)?;
 
         let (inner, tokens) = Rule::try_pull(source, tokens)?;
 
@@ -271,23 +245,12 @@ impl<'a, T: Rule<'a>> Rule<'a> for Parenthesized<'a, T> {
     }
 }
 
-terminal_rule! {
-    /// `"["`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct OpenBrack<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::LBrack)) => (Self(src)) as an "open bracket `[`";
-}
-terminal_rule! {
-    /// `"]"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct CloseBrack<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::RBrack)) => (Self(src)) as a "close bracket `]`";
-}
-
 /// `<bracketed> ::= "[" INNER "]"`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Bracketed<'a, T> {
-    pub open: OpenBrack<'a>,
+    pub open: LBrackOp<'a>,
     pub inner: T,
-    pub close: CloseBrack<'a>,
+    pub close: RBrackOp<'a>,
 }
 
 /// Not a simple rule, because brackets have special errors
@@ -296,7 +259,7 @@ impl<'a, T: Rule<'a>> Rule<'a> for Bracketed<'a, T> {
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (open, tokens) = OpenBrack::try_pull(source, tokens)?;
+        let (open, tokens) = LBrackOp::try_pull(source, tokens)?;
 
         let expect = (
             Bracket::Brack,
@@ -314,25 +277,14 @@ impl<'a, T: Rule<'a>> Rule<'a> for Bracketed<'a, T> {
     }
 }
 
-terminal_rule! {
-    /// `"{"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct OpenBrace<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::LBrace)) => (Self(src)) as an "open brace `{`";
-}
-terminal_rule! {
-    /// `"}"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct CloseBrace<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::RBrace)) => (Self(src)) as a "close brace `}`";
-}
-
 /// `<braced> ::= "{" INNER "}"`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Braced<'a, T> {
     /// `{`
-    pub open: OpenBrace<'a>,
+    pub open: LBraceOp<'a>,
     pub inner: T,
     /// `}`
-    pub close: CloseBrace<'a>,
+    pub close: RBraceOp<'a>,
 }
 
 /// Not a simple rule, because brackets have special errors
@@ -341,7 +293,7 @@ impl<'a, T: Rule<'a>> Rule<'a> for Braced<'a, T> {
         source: &'a str,
         tokens: &'b [Token<'a>],
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
-        let (open, tokens) = OpenBrace::try_pull(source, tokens)?;
+        let (open, tokens) = LBraceOp::try_pull(source, tokens)?;
 
         let expect = (
             Bracket::Brace,
@@ -525,12 +477,6 @@ impl<'a> Rule<'a> for Expression<'a> {
     }
 }
 
-terminal_rule! {
-    /// `"struct"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct RecKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Rec)) => (Self(src)) as a "`rec` keyword";
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct RecBody {}
 
@@ -552,24 +498,12 @@ simple_rule! {
     }
 }
 
-terminal_rule! {
-    /// `"sup"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct SupKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Sup)) => (Self(src)) as a "`sup` keyword";
-}
-
 simple_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct SupDef<'a> {
         pub sup_kw: SupKeyword<'a>,
         // TODO
     }
-}
-
-terminal_rule! {
-    /// `"sub"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct SubKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Sub)) => (Self(src)) as a "`sub` keyword";
 }
 
 simple_rule! {
@@ -580,24 +514,12 @@ simple_rule! {
     }
 }
 
-terminal_rule! {
-    /// `"cat"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct CatKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Cat)) => (Self(src)) as a "`cat` keyword";
-}
-
 simple_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct CatDef<'a> {
         pub cat_kw: CatKeyword<'a>,
         // TODO
     }
-}
-
-terminal_rule! {
-    /// `"alt"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct AltKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Alt)) => (Self(src)) as an "`alt` keyword";
 }
 
 simple_rule! {
@@ -608,12 +530,6 @@ simple_rule! {
     }
 }
 
-terminal_rule! {
-    /// `"def"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct DefKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Def)) => (Self(src)) as a "`def` keyword";
-}
-
 simple_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct MacroDef<'a> {
@@ -622,17 +538,11 @@ simple_rule! {
     }
 }
 
-terminal_rule! {
-    /// `","`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct CommaPunc<'a>(pub &'a str) := (src, val: TokenValue::Punctuation(Punctuation::Comma)) => (Self(src)) as a "comma (`,`)";
-}
-
 simple_rule! {
     /// `<param-list1> ::= "," | "," <param-list>`
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
     pub struct ParamList1<'a> {
-        pub comma: CommaPunc<'a>,
+        pub comma: CommaOp<'a>,
         pub param: Option<Box<ParamList<'a>>>,
     }
 }
@@ -655,12 +565,6 @@ simple_rule! {
 }
 
 terminal_rule! {
-    /// `"fn"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct FnKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Fn)) => (Self(src)) as a "`fn` keyword";
-}
-
-terminal_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct Ident<'a>(pub &'a str) := (val: TokenValue::Direct(src) /* TODO: are there other uses for Direct? */) => (Self(src)) as an "identifier";
 }
@@ -676,12 +580,6 @@ simple_rule! {
         pub params: Parenthesized<'a, Option<ParamList<'a>>>,
         pub body: Braced<'a, FnBody<'a>>,
     }
-}
-
-terminal_rule! {
-    /// `"of"`
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct OfKeyword<'a>(pub &'a str) := (src, val: TokenValue::Keyword(Keyword::Of)) => (Self(src)) as a "`of` keyword";
 }
 
 simple_rule! {
