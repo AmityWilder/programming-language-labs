@@ -128,10 +128,10 @@
     }
     ```
 
-- `of` - Define member items of a `rec`/`union`/`cat`.
+- `mem` - Define member items of a `rec`/`union`/`cat`.
 
     ```rs
-    of /* rec/union/cat */ {
+    mem /* rec/union/cat */ {
         // types
         // constants
         // methods

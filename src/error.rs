@@ -361,7 +361,7 @@ pub fn line_col(s: &str, position: usize) -> Option<LineCol> {
 }
 
 /// The lines and columns of `start` and `end` within `s`
-fn line_col_range(s: &str, range: Range<usize>) -> Option<Range<LineCol>> {
+pub fn line_col_range(s: &str, range: Range<usize>) -> Option<Range<LineCol>> {
     line_col(s, range.start)
         .zip(line_col(s, range.end))
         .map(|(a, b)| (a..b).into())
