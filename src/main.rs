@@ -44,7 +44,7 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 #![allow(clippy::wildcard_imports, reason = "don't care")]
 
-use error::ContextError;
+use error::{ContextError, LineCol, line_col_range};
 use highlight::{
     highlight,
     style::{Color, Style, StyleWrapper},
@@ -121,28 +121,30 @@ pub fn run_code(source: &str) {
     // token debug
     println!("source code:\n```\n{source}\n```");
     let tokens: Vec<_> = tokenize(source).collect();
+    let max_cols = source.lines().map(str::len).max().unwrap_or(0);
+    let max_range_digits = max_cols.to_string().len().strict_mul(2);
     for item in &tokens {
         let (lex, syn, _) = syntax_of(item);
         let style = SYNTAX_STYLE_ANSI[syn];
+        let range = match item {
+            Ok(_) => source
+                .substr_range(lex)
+                .expect("every lexeme should be a substr of source"),
+            Err(e) => e.range,
+        };
+        print!("\x1b[90m{range:>max_range_digits$?}:\x1b[0m ");
         match item {
             Ok(token) => {
-                println!(
-                    "{:?}: {}{token:?}{}",
-                    source
-                        .substr_range(lex)
-                        .expect("every lexeme should be a substr of source"),
-                    style.begin(),
-                    style.end()
-                );
+                println!("{}{token:?}{}", style.begin(), style.end());
             }
             Err(ContextError { source, range, err }) => {
-                eprintln!(
-                    "{range:?}: {}Err({:?}): {err:?}{}",
+                let src = source
+                    .get(*range)
+                    .expect("range should be a range in source");
+                println!(
+                    "{}ContextError({src:?}): {err:?}{}",
                     style.begin(),
-                    source
-                        .get(*range)
-                        .expect("range should be a range in source"),
-                    style.end(),
+                    style.end()
                 );
             }
         }

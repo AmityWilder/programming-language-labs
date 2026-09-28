@@ -299,7 +299,7 @@ impl<'a> Scanner<'a> {
         } else {
             match lex {
                 "true" => TokenValue::BoolLiteral(true),
-                "false" => TokenValue::BoolLiteral(false),
+                "fals" => TokenValue::BoolLiteral(false),
                 _ => {
                     if self.is_following_fn || self.source.starts_with('(')
                     // assumes the token has already been split off

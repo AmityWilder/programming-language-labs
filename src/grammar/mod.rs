@@ -595,7 +595,7 @@ simple_rule! {
 simple_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
     pub struct OfDef<'a> {
-        pub on_kw: OfKeyword<'a>,
+        pub on_kw: MemKeyword<'a>,
         // TODO
     }
 }
@@ -645,7 +645,7 @@ impl<'a> Rule<'a> for Item<'a> {
                 Keyword::Fn => {
                     return Rule::try_pull(source, tokens).map(map_pull(Self::Fn));
                 }
-                Keyword::Of => {
+                Keyword::Mem => {
                     return Rule::try_pull(source, tokens).map(map_pull(Self::Of));
                 }
 
