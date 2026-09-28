@@ -180,7 +180,7 @@ pub trait Highlighting<'a: 'b, 'b>: 'b {
     fn escaped_str_literal(lex: &'a str, syn: Syntax, literal: &'b Self) -> Self::Escaped;
 }
 
-impl<'a: 'b, 'b> Highlighting<'a, 'b> for StringLiteral<'a> {
+impl<'a: 'b, 'b> Highlighting<'a, 'b> for StringLiteral {
     type Escaped =
         SubTokenSyntax<'a, EscapedRanges<std::iter::Copied<std::slice::Iter<'b, Range<usize>>>>>;
 
@@ -188,14 +188,7 @@ impl<'a: 'b, 'b> Highlighting<'a, 'b> for StringLiteral<'a> {
         SubTokenSyntax::new(
             lex,
             syn,
-            EscapedRanges::new(
-                match literal {
-                    Self::HasEscaped { escapes, .. } => escapes.as_slice(),
-                    Self::NoEscapes { .. } => [].as_slice(),
-                }
-                .iter()
-                .copied(),
-            ),
+            EscapedRanges::new(literal.escapes.iter().copied()),
         )
     }
 }

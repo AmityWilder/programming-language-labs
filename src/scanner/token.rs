@@ -769,29 +769,13 @@ pub struct CharLiteral {
 /// Information about a string literal
 ///
 /// Allocating version of [`StrLiteral`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum StringLiteral<'a> {
-    /// The string literal doesn't have any escape sequences
-    NoEscapes {
-        /// No escape sequences are present
-        text: &'a str,
-    },
-    /// The string literal has at least one escape sequence
-    HasEscaped {
-        /// The text content of the string literal; escape sequences converted and delimiters excluded.
-        text: String,
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct StringLiteral {
+    /// The text content of the string literal; escape sequences converted and delimiters excluded.
+    pub text: String,
 
-        /// Ranges of the original lexeme (quote delimiters excluded) that refer to escape sequences
-        escapes: Vec<Range<usize>>,
-    },
-}
-
-impl Default for StringLiteral<'_> {
-    fn default() -> Self {
-        Self::NoEscapes {
-            text: Default::default(),
-        }
-    }
+    /// Ranges of the original lexeme (quote delimiters excluded) that refer to escape sequences
+    pub escapes: Vec<Range<usize>>,
 }
 
 /// No-alloc version of [`StringLiteral`]
@@ -809,7 +793,7 @@ impl StrLiteral<'_> {
     }
 }
 
-impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral<'a> {
+impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral {
     type Error = ErrorType<'a>;
 
     fn try_from(value: StrLiteral<'a>) -> Result<Self, Self::Error> {
@@ -843,12 +827,15 @@ impl<'a> TryFrom<StrLiteral<'a>> for StringLiteral<'a> {
                 prev_end = range.end;
             }
 
-            Ok(StringLiteral::HasEscaped {
+            Ok(StringLiteral {
                 text: processed,
                 escapes,
             })
         } else {
-            Ok(StringLiteral::NoEscapes { text: value.src })
+            Ok(StringLiteral {
+                text: value.src.to_string(),
+                escapes: Vec::new(),
+            })
         }
     }
 }
