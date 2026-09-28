@@ -19,7 +19,7 @@ of Vector {
 
 fn foo(v)
 where
-    fn to_string of v: (self) -> text
+    v has fn to_string: (self) -> text,
 {
     print(v.to_string());
 }

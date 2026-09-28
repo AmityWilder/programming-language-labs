@@ -210,6 +210,18 @@
     }
     ```
 
+    Type restraints can be added to the member by following it with a colon
+
+    ```rs
+    fn foo(v)
+    where
+        v has x: uint, // `v.x` is defined as a uint
+        v has fn f: (self) -> frac, // `v.y` is defined as a frac-returning method
+    {
+        // ...
+    }
+    ```
+
 ### Flow Control
 
 #### Conditional
