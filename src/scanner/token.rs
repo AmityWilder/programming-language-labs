@@ -615,21 +615,59 @@ define_token_eq! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum Punctuation = operator {
         // ----------------------------
-        // 3-char
+        // 1-char
         // ----------------------------
 
-        /// Exponent assign - Equivalent to `lhs = lhs ** rhs`
-        ExponentAssign = an "**=" ("exponent assign") as ExponentAssignOp,
-        /// Bitshift left assign - Equivalent to `lhs = lhs << rhs`
-        ShlAssign = a "<<=" ("left bitshift assign") as ShlAssignOp,
-        /// Bitshift right assign - Equivalent to `lhs = lhs >> rhs`
-        ShrAssign = a ">>=" ("right bitshift assign") as ShrAssignOp,
-        /// Nand assign - Equivalent to `lhs = lhs !& rhs`
-        NandAssign = a "!&=" ("nand assign") as NandAssignOp,
-        /// Nor assign - Equivalent to `lhs = lhs !| rhs`
-        NorAssign = a "!|=" ("nor assign") as NorAssignOp,
-        /// Xnor assign - Equivalent to `lhs = lhs !^ rhs`
-        XnorAssign = a "!^=" ("xnor assign") as XnorAssignOp,
+        /// Not - Logical negation (booleans) or bitflip (integers)
+        Not = a "!" ("not") as NotOp,
+        /// Stringify - Replace tokens with their lexemes in a macro
+        MacroStringify = a "#" ("stringify") as MacroStringifyOp,
+        /// Remainder - Find the remainder of `lhs / rhs`
+        Remainder = a "%" ("remainder") as RemainderOp,
+        /// And - Logical AND (booleans) or bitwise AND (integers)
+        And = an "&" ("and") as AndOp,
+        /// Left parenthesis
+        LParen = a "(" ("left parenthesis") as LParenOp,
+        /// Right parenthesis
+        RParen = a ")" ("right parenthesis") as RParenOp,
+        /// Multiply - Find the product of `lhs` and `rhs`
+        Mul = a "*" ("multiply") as MulOp,
+        /// Add - Find the sum of `lhs` and `rhs`
+        Add = an "+" ("add") as AddOp,
+        /// Comma - Separate items in a list
+        Comma = a "," ("comma") as CommaOp,
+        /// Subtract - Find the difference of `lhs - rhs`
+        Sub = a "-" ("subtract") as SubOp,
+        /// Dot - Access a rec member
+        Dot = a "." ("dot") as DotOp,
+        /// Divide - Find the quotient of `lhs / rhs`
+        Div = a "/" ("divide") as DivOp,
+        /// Colon - Separate a variable/field/parameter from its type or requirements
+        Colon = a ":" ("colon") as ColonOp,
+        /// Semicolon - Conclude a statement
+        Semi = a ";" ("semicolon") as SemiOp,
+        /// Less than - Test if `lhs` is strictly lower value compared to `rhs`
+        Lt = a "<" ("less than") as LtOp,
+        /// Assign - Assign `rhs` to `lhs`
+        Assign = an "=" ("assignment") as AssignOp,
+        /// Greater than - Test if `lhs` is strictly higher value compared to `rhs`
+        Gt = a ">" ("greater than") as GtOp,
+        /// Question mark - TBD
+        QMark = a "?" ("question mark") as QMarkOp,
+        /// Reference - Create a pointer/reference to a value (like to `&` in other languages)
+        Ref = a "@" ("reference") as RefOp,
+        /// Left bracket
+        LBrack = a "[" ("left bracket") as LBrackOp,
+        /// Right bracket
+        RBrack = a "]" ("right bracket") as RBrackOp,
+        /// Xor - Logical XOR (booleans) or bitwise XOR (integers)
+        Xor = an "^" ("xor") as XorOp,
+        /// Left brace
+        LBrace = a "{" ("left brace") as LBraceOp,
+        /// Or - Logical OR (booleans) or bitwise OR (integers)
+        Or = an "|" ("or") as OrOp,
+        /// Right brace
+        RBrace = a "}" ("right brace") as RBraceOp,
 
         // ----------------------------
         // 2-char
@@ -685,59 +723,21 @@ define_token_eq! {
         OrAssign = an "|=" ("or assign") as OrAssignOp,
 
         // ----------------------------
-        // 1-char
+        // 3-char
         // ----------------------------
 
-        /// Not - Logical negation (booleans) or bitflip (integers)
-        Not = a "!" ("not") as NotOp,
-        /// Stringify - Replace tokens with their lexemes in a macro
-        MacroStringify = a "#" ("stringify") as MacroStringifyOp,
-        /// Remainder - Find the remainder of `lhs / rhs`
-        Remainder = a "%" ("remainder") as RemainderOp,
-        /// And - Logical AND (booleans) or bitwise AND (integers)
-        And = an "&" ("and") as AndOp,
-        /// Left parenthesis
-        LParen = a "(" ("left parenthesis") as LParenOp,
-        /// Right parenthesis
-        RParen = a ")" ("right parenthesis") as RParenOp,
-        /// Multiply - Find the product of `lhs` and `rhs`
-        Mul = a "*" ("multiply") as MulOp,
-        /// Add - Find the sum of `lhs` and `rhs`
-        Add = an "+" ("add") as AddOp,
-        /// Comma - Separate items in a list
-        Comma = a "," ("comma") as CommaOp,
-        /// Subtract - Find the difference of `lhs - rhs`
-        Sub = a "-" ("subtract") as SubOp,
-        /// Dot - Access a rec member
-        Dot = a "." ("dot") as DotOp,
-        /// Divide - Find the quotient of `lhs / rhs`
-        Div = a "/" ("divide") as DivOp,
-        /// Colon - Separate a variable/field/parameter from its type or requirements
-        Colon = a ":" ("colon") as ColonOp,
-        /// Semicolon - Conclude a statement
-        Semi = a ";" ("semicolon") as SemiOp,
-        /// Less than - Test if `lhs` is strictly lower value compared to `rhs`
-        Lt = a "<" ("less than") as LtOp,
-        /// Assign - Assign `rhs` to `lhs`
-        Assign = an "=" ("assignment") as AssignOp,
-        /// Greater than - Test if `lhs` is strictly higher value compared to `rhs`
-        Gt = a ">" ("greater than") as GtOp,
-        /// Question mark - TBD
-        QMark = a "?" ("question mark") as QMarkOp,
-        /// Reference - Create a pointer/reference to a value (like to `&` in other languages)
-        Ref = a "@" ("reference") as RefOp,
-        /// Left bracket
-        LBrack = a "[" ("left bracket") as LBrackOp,
-        /// Right bracket
-        RBrack = a "]" ("right bracket") as RBrackOp,
-        /// Xor - Logical XOR (booleans) or bitwise XOR (integers)
-        Xor = an "^" ("xor") as XorOp,
-        /// Left brace
-        LBrace = a "{" ("left brace") as LBraceOp,
-        /// Or - Logical OR (booleans) or bitwise OR (integers)
-        Or = an "|" ("or") as OrOp,
-        /// Right brace
-        RBrace = a "}" ("right brace") as RBraceOp,
+        /// Exponent assign - Equivalent to `lhs = lhs ** rhs`
+        ExponentAssign = an "**=" ("exponent assign") as ExponentAssignOp,
+        /// Bitshift left assign - Equivalent to `lhs = lhs << rhs`
+        ShlAssign = a "<<=" ("left bitshift assign") as ShlAssignOp,
+        /// Bitshift right assign - Equivalent to `lhs = lhs >> rhs`
+        ShrAssign = a ">>=" ("right bitshift assign") as ShrAssignOp,
+        /// Nand assign - Equivalent to `lhs = lhs !& rhs`
+        NandAssign = a "!&=" ("nand assign") as NandAssignOp,
+        /// Nor assign - Equivalent to `lhs = lhs !| rhs`
+        NorAssign = a "!|=" ("nor assign") as NorAssignOp,
+        /// Xnor assign - Equivalent to `lhs = lhs !^ rhs`
+        XnorAssign = a "!^=" ("xnor assign") as XnorAssignOp,
     }
 }
 
