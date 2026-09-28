@@ -323,7 +323,7 @@ impl<'a> Rule<'a> for Literal<'a> {
     ) -> Result<(Self, &'b [Token<'a>]), ContextError<'a>> {
         let (token, tokens) = MatchRule::try_pull(
             token_pattern!(
-                src,
+                lex,
                 val: val @ (
                     TokenValue::BoolLiteral(_) |
                     TokenValue::UIntLiteral(_) |
@@ -331,7 +331,7 @@ impl<'a> Rule<'a> for Literal<'a> {
                     TokenValue::FltLiteral(_) |
                     TokenValue::CharLiteral(_) |
                     TokenValue::StringLiteral(_)
-                ) => (src, val)
+                ) => (lex, val)
             ),
             tokens,
         )
@@ -425,10 +425,10 @@ impl<'a> Rule<'a> for BinaryOperation<'a> {
         let (op, tokens) = MatchRule::try_pull(
             |token| match token {
                 Token {
-                    src,
+                    lex,
                     val: TokenValue::Punctuation(punc),
                     ..
-                } if let Ok(op) = punc.try_into() => Some((src, op)),
+                } if let Ok(op) = punc.try_into() => Some((lex, op)),
                 _ => None,
             },
             tokens,
@@ -576,7 +576,7 @@ simple_rule! {
 
 terminal_rule! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-    pub struct Ident<'a>(pub &'a str) := (src, val: TokenValue::Identifier | TokenValue::Callable) => (Self(src)) as an "identifier";
+    pub struct Ident<'a>(pub &'a str) := (lex, val: TokenValue::Identifier | TokenValue::Callable) => (Self(lex)) as an "identifier";
 }
 
 simple_rule! {

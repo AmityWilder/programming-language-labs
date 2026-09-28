@@ -141,7 +141,7 @@ impl<'a> Scanner<'a> {
             .find(|ch: char| !ch.is_whitespace())
             .unwrap_or(self.source.len());
         Token {
-            src: self
+            lex: self
                 .split_off(len)
                 .expect("find and len should return safe positions within source"),
             val: TokenValue::Whitespace,
@@ -167,11 +167,11 @@ impl<'a> Scanner<'a> {
                 n.checked_add(MACRO_PREFIX.len_utf8())
                     .expect("n is the length of the string after this character")
             });
-        let src = self
+        let lex = self
             .split_off(len)
             .expect("find and len should return safe positions to split at");
         Token {
-            src,
+            lex,
             val: TokenValue::Macro,
         }
     }
@@ -195,11 +195,11 @@ impl<'a> Scanner<'a> {
                 n.checked_add(MACRO_PARAM_PREFIX.len_utf8())
                     .expect("n is the length of the string after this character")
             });
-        let src = self
+        let lex = self
             .split_off(len)
             .expect("find and len should return safe positions to split at");
         Token {
-            src,
+            lex,
             val: TokenValue::MacroParam,
         }
     }
@@ -263,12 +263,12 @@ impl<'a> Scanner<'a> {
                 )
             })
             .and_then(|len| {
-                let src = self
+                let lex = self
                     .split_off(len)
                     .expect("find and len should return safe positions to split at");
                 match open_delim {
-                    STR_DELIM => TokenValue::string_literal(src).map(|val| Token { src, val }),
-                    CHAR_DELIM => TokenValue::char_literal(src).map(|val| Token { src, val }),
+                    STR_DELIM => TokenValue::string_literal(lex).map(|val| Token { lex, val }),
+                    CHAR_DELIM => TokenValue::char_literal(lex).map(|val| Token { lex, val }),
 
                     _ => unreachable!("should be guarded by if condition"),
                 }
@@ -291,13 +291,13 @@ impl<'a> Scanner<'a> {
             .source
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
             .unwrap_or(self.source.len());
-        let src = self
+        let lex = self
             .split_off(len)
             .expect("find and len should return safe positions to split at");
-        let val = if let Some(kw) = Keyword::try_from_str(src) {
+        let val = if let Some(kw) = Keyword::try_from_str(lex) {
             TokenValue::Keyword(kw)
         } else {
-            match src {
+            match lex {
                 "true" => TokenValue::BoolLiteral(true),
                 "false" => TokenValue::BoolLiteral(false),
                 _ => {
@@ -311,7 +311,7 @@ impl<'a> Scanner<'a> {
                 }
             }
         };
-        Token { src, val }
+        Token { lex, val }
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -352,11 +352,11 @@ impl<'a> Scanner<'a> {
         // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
         // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
         let len = number.trim_end_matches(['.', '-']).len();
-        let src = self
+        let lex = self
             .split_off(len)
             .expect("should be a safe position to split at");
-        TokenValue::number_literal(src)
-            .map(|val| Token { src, val })
+        TokenValue::number_literal(lex)
+            .map(|val| Token { lex, val })
             .map_err(|err| self.error_prev(len, err))
     }
 
@@ -377,7 +377,7 @@ impl<'a> Scanner<'a> {
             .expect("the existence of characters should imply the existence of a line")
             .len();
         Token {
-            src: self
+            lex: self
                 .split_off(len)
                 .expect("should be a safe position to split at"),
             val: TokenValue::Comment,
@@ -418,7 +418,7 @@ impl<'a> Scanner<'a> {
             .map(|n| n.checked_add(BLOCK_COMMENT_CIRCUMFIX_LEN)
                 .expect("n should describe the non-block-comment-circumfix subset of a string in memory"));
         len.map(|len| Token {
-            src: self
+            lex: self
                 .split_off(len)
                 .expect("should be a safe position to split at"),
             val: TokenValue::Comment,
@@ -439,11 +439,11 @@ impl<'a> Scanner<'a> {
     fn scan_punc(&mut self) -> Result<Token<'a>, ContextError<'a>> {
         Punctuation::from_prefix(self.source)
             .map(|punc| {
-                let src = self
+                let lex = self
                     .split_off(punc.as_str().len())
                     .expect("should be a safe position to split at");
                 Token {
-                    src,
+                    lex,
                     val: TokenValue::Punctuation(punc),
                 }
             })

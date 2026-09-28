@@ -241,7 +241,7 @@ impl std::fmt::Display for ErrorType<'_> {
 
             Self::UnexpectedToken {
                 expect: Expecting { expect, article },
-                actual: Token { src: found, .. },
+                actual: Token { lex: found, .. },
             } => {
                 write!(f, "expected {article} {expect}, found `{found}`")
             }
@@ -275,7 +275,7 @@ impl<'a> ContextError<'a> {
         ContextError {
             source,
             range: source
-                .substr_range(token.src)
+                .substr_range(token.lex)
                 .expect("token src should be a substring of the source code"),
             err: ErrorType::UnexpectedToken {
                 expect: expected,
@@ -699,7 +699,7 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
 
             ErrorType::UnexpectedToken {
                 expect: Expecting { expect, article },
-                actual: Token { src: found, .. },
+                actual: Token { lex: found, .. },
             } => {
                 write!(
                     f,
