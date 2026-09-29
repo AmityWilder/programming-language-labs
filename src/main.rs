@@ -44,7 +44,7 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 #![allow(clippy::wildcard_imports, reason = "don't care")]
 
-use error::{ContextError, LineCol, line_col_range};
+use error::ContextError;
 use highlight::{
     highlight,
     style::{Color, Style, StyleWrapper},

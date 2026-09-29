@@ -16,17 +16,17 @@ use crate::{
 use std::range::Range;
 
 macro_rules! match_token {
-    ($pattern:pat) => {
-        |token| matches!(token.val, $pattern)
+    ($($variant:ident$(($pattern:pat))?)|+) => {
+        |token| matches!(token.val, $(TokenValue::$variant$(($pattern))?)|+)
     };
 }
 
 macro_rules! binary_op_seq {
-    ($($outer:ident -> $lhs:ident ( ($($op:ident)|+) $rhs:ident )* ;)+) => {$(
+    ($( $outer:ident -> $lhs:ident ( ( $($op:ident)|+ ) $rhs:ident )* ; )+) => {$(
         fn $outer(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
             let mut expr = self.$lhs()?;
 
-            while let Some(op) = self.tokens.next_if(match_token!(TokenValue::Punctuation($(Punctuation::$op)|+))) {
+            while let Some(op) = self.tokens.next_if(match_token!(Punctuation($(Punctuation::$op)|+))) {
                 let rhs = self.$rhs()?;
                 expr = Expr::binary(expr, op, rhs);
             }
@@ -94,15 +94,12 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         comparison -> term ( (Gt | Ge | Lt | Le) term )* ;
         term       -> factor ( (Add | Sub) factor )* ;
         factor     -> exponent ( (Mul | Div) exponent )* ;
-        exponent   -> unary ( (Exponent) unary )* ;
+        exponent   -> unary ( (Exp) unary )* ;
     }
 
     fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         use Punctuation::*;
-        if let Some(op) = self
-            .tokens
-            .next_if(match_token!(TokenValue::Punctuation(Not | Sub)))
-        {
+        if let Some(op) = self.tokens.next_if(match_token!(Punctuation(Not | Sub))) {
             Ok(Expr::unary(op, self.unary()?))
         } else {
             self.primary()
@@ -111,23 +108,23 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         if let Some(token) = self.tokens.next_if(match_token!(
-            TokenValue::BoolLiteral(_)
-                | TokenValue::Keyword(Keyword::None)
-                | TokenValue::UIntLiteral(_)
-                | TokenValue::SIntLiteral(_)
-                | TokenValue::FltLiteral(_)
-                | TokenValue::CharLiteral(_)
-                | TokenValue::StringLiteral(_)
+            BoolLiteral(_)
+                | Keyword(Keyword::None)
+                | UIntLiteral(_)
+                | SIntLiteral(_)
+                | FltLiteral(_)
+                | CharLiteral(_)
+                | StringLiteral(_)
         )) {
             Ok(Expr::literal(token))
         } else if let Some(lparen) = self
             .tokens
-            .next_if(match_token!(TokenValue::Punctuation(Punctuation::LParen)))
+            .next_if(match_token!(Punctuation(Punctuation::LParen)))
         {
             let expr = self.expression()?;
             if let Some(_rparen) = self
                 .tokens
-                .next_if(match_token!(TokenValue::Punctuation(Punctuation::RParen)))
+                .next_if(match_token!(Punctuation(Punctuation::RParen)))
             {
                 Ok(Expr::grouping(expr))
             } else {
