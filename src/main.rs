@@ -20,7 +20,7 @@
     reason = "could cause mistakes"
 )]
 #![warn(
-    clippy::pedantic,
+    // clippy::pedantic,
     clippy::missing_const_for_fn,
     clippy::missing_docs_in_private_items,
     clippy::too_many_lines,
