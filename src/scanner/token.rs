@@ -59,16 +59,6 @@ macro_rules! define_token_eq {
 
         pub mod $name {
             use super::*;
-            $(
-                $crate::terminal_rule!{
-                    #[doc = concat!("`\"", $value, "\"`")]
-                    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-                    #[allow(dead_code)]
-                    pub struct $rule<'src>(pub &'src str)
-                        := (lex, val: TokenValue::$Enum($Enum::$Variant)) => (Self(lex))
-                        as $article concat!("`", $value, "` ", $("(", $val_name, ") ",)? stringify!($name));
-                }
-            )+
 
             pub static OPTIONS: LazyLock<[(&str, $Enum); [$($Enum::$Variant),+].len()]> = LazyLock::new(||{
                 let mut list: [(&'static str, $Enum); _] = [
