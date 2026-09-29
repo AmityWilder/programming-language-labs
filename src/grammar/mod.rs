@@ -71,20 +71,31 @@ pub struct Parser<'src, I: Iterator<Item = Token<'src>>> {
 fn parse<'src, A>(
     source: &'src str,
     tokens: A,
-) -> Parser<'src, std::iter::Filter<A::IntoIter, impl FnMut(&Token<'src>) -> bool>>
+) -> impl Iterator<Item = Result<Expr<'src>, ContextError<'src>>>
 where
-    A: IntoIterator<Item = Token<'src>>,
+    A: IntoIterator<IntoIter: 'src, Item = Token<'src>>,
 {
-    Parser {
+    let mut parser = Parser {
         source,
         tokens: tokens
             .into_iter()
             .filter(|token| !matches!(token.val, Value::Whitespace | Value::Comment))
             .peekable(),
-    }
+    };
+    std::iter::from_fn(move || {
+        parser
+            .tokens
+            .peek()
+            .is_some()
+            .then(|| parser.expression().inspect_err(|_| parser.synchronize()))
+    })
 }
 
 impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
+    fn parse(&mut self) -> Option<Expr<'src>> {
+        self.expression().ok()
+    }
+
     fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.equality()
     }
@@ -162,7 +173,50 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 })
             }
         } else {
-            todo!()
+            Err(ContextError::missing_or_unexpected(
+                self.tokens.peek().copied(),
+                self.source,
+                Expecting::an("expression"),
+            ))
+        }
+    }
+
+    fn synchronize(&mut self) {
+        while let Some(token) = self.tokens.next() {
+            if matches!(token.val, Value::Punctuation(Punctuation::Semi))
+                || self.tokens.peek().is_some_and(|token| {
+                    matches!(
+                        token.val,
+                        Value::Keyword(
+                            Keyword::Rec
+                                | Keyword::Sup
+                                | Keyword::Cat
+                                | Keyword::Alt
+                                | Keyword::Sub
+                                | Keyword::Def
+                                | Keyword::Fn
+                                | Keyword::Mem
+                                | Keyword::Let
+                                | Keyword::Uni
+                                | Keyword::Pvt
+                                | Keyword::If
+                                | Keyword::Or
+                                | Keyword::Match
+                                | Keyword::Rep
+                                | Keyword::For
+                                | Keyword::Loop
+                                | Keyword::Cord
+                                | Keyword::Halt
+                                | Keyword::Skip
+                                | Keyword::Give
+                                | Keyword::Fail
+                                | Keyword::Emit
+                        )
+                    )
+                })
+            {
+                return;
+            }
         }
     }
 }
@@ -178,11 +232,12 @@ mod tests {
         let tokens = tokenize(SOURCE)
             .collect::<Result<Vec<_>, _>>()
             .expect("should not have a token error");
-        let mut parser = parse(SOURCE, tokens);
-        let expr = parser.expression().expect("should be a valid expression");
+        let expr = parse(SOURCE, tokens)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("should be a valid expression");
         assert_eq!(
-            expr,
-            Expr::Binary(Box::new((
+            expr.as_slice(),
+            &[Expr::Binary(Box::new((
                 Expr::Literal(Token {
                     lex: "5",
                     val: Value::UIntLiteral(5)
@@ -221,7 +276,7 @@ mod tests {
                         val: Value::UIntLiteral(3)
                     })
                 )))
-            )))
+            )))]
         );
     }
 }
