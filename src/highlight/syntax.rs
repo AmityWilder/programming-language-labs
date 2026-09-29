@@ -1,6 +1,9 @@
 //! Syntax used for highlighting
 
-use crate::{error::TokenResult, scanner::token::value::Value};
+use crate::{
+    error::ContextError,
+    scanner::token::{Token, value::Value},
+};
 
 /// Syntactic element category for highlighting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -122,13 +125,13 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
     }
 }
 
-/// Identifies the [`Syntax`] of a [`TokenResult`].
+/// Identifies the [`Syntax`] of a token.
 /// All [`Err`]s are [`Syntax::Invalid`].
 ///
 /// # Panics
 /// This method may panic if `item` is an error with a malformed [`range`](crate::error::ContextError::range).
 pub fn syntax_of<'src, 'res>(
-    item: &'res TokenResult<'src>,
+    item: &'res Result<Token<'src>, ContextError<'src>>,
 ) -> (&'src str, Syntax, &'res Value<'src>)
 where
     'src: 'res,

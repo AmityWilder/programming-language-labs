@@ -14,7 +14,7 @@ macro_rules! define_token_eq {
         $(#[$em:meta])*
         $vis:vis enum $Enum:ident = $name:ident {$(
             $(#[$vm:meta])*
-            $Variant:ident = $article:ident $value:literal $(($val_name:literal))? as $rule:ident
+            $Variant:ident = $value:literal
         ),+ $(,)?}
     ) => {
         $(#[$em])*

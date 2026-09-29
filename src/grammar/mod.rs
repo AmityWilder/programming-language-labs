@@ -13,7 +13,6 @@ use crate::{
         token::{Token, keyword::Keyword, punc::Punctuation, value::Value},
     },
 };
-use std::range::Range;
 
 macro_rules! match_token {
     ($($variant:ident$(($pattern:pat))?)|+) => {
@@ -23,12 +22,13 @@ macro_rules! match_token {
 
 macro_rules! binary_op_seq {
     ($( $outer:ident -> $lhs:ident ( ( $($op:ident)|+ ) $rhs:ident )* ; )+) => {$(
+        #[doc = concat!("`", stringify!($outer -> $lhs ( ( $($op)|+ ) $rhs )* ;), "`")]
         fn $outer(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
             let mut expr = self.$lhs()?;
 
             while let Some(op) = self.tokens.next_if(match_token!(Punctuation($(Punctuation::$op)|+))) {
                 let rhs = self.$rhs()?;
-                expr = Expr::binary(expr, op, rhs);
+                expr = Expr::binary(Binary { lhs: expr, op, rhs });
             }
 
             Ok(expr)
@@ -37,20 +37,33 @@ macro_rules! binary_op_seq {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Binary<'src> {
+    pub lhs: Expr<'src>,
+    pub op: Token<'src>,
+    pub rhs: Expr<'src>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Unary<'src> {
+    pub op: Token<'src>,
+    pub rhs: Expr<'src>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'src> {
-    Binary(Box<(Self, Token<'src>, Self)>),
-    Unary(Box<(Token<'src>, Self)>),
+    Binary(Box<Binary<'src>>),
+    Unary(Box<Unary<'src>>),
     Literal(Token<'src>),
     Grouping(Box<Self>),
 }
 
 impl<'src> Expr<'src> {
-    pub fn binary(lhs: Self, op: Token<'src>, rhs: Self) -> Self {
-        Self::Binary(Box::new((lhs, op, rhs)))
+    pub fn binary(inner: Binary<'src>) -> Self {
+        Self::Binary(Box::new(inner))
     }
 
-    pub fn unary(op: Token<'src>, rhs: Self) -> Self {
-        Self::Unary(Box::new((op, rhs)))
+    pub fn unary(inner: Unary<'src>) -> Self {
+        Self::Unary(Box::new(inner))
     }
 
     pub const fn literal(literal: Token<'src>) -> Self {
@@ -68,32 +81,68 @@ pub struct Parser<'src, I: Iterator<Item = Token<'src>>> {
     tokens: std::iter::Peekable<I>,
 }
 
-fn parse<'src, A>(
+impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
+    fn new(source: &'src str, tokens: I) -> Self {
+        Self {
+            source,
+            tokens: tokens.peekable(),
+        }
+    }
+}
+
+impl<'src, I> Iterator for Parser<'src, I>
+where
+    I: Iterator<Item = Token<'src>>,
+{
+    type Item = Result<Expr<'src>, ContextError<'src>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.tokens
+            .peek()
+            .is_some()
+            .then(|| self.statement().inspect_err(|_| self.synchronize()))
+    }
+}
+
+pub fn parse<'src, A>(
     source: &'src str,
     tokens: A,
-) -> impl Iterator<Item = Result<Expr<'src>, ContextError<'src>>>
+) -> Parser<'src, std::iter::Filter<<A as IntoIterator>::IntoIter, impl FnMut(&Token<'src>) -> bool>>
 where
     A: IntoIterator<IntoIter: 'src, Item = Token<'src>>,
 {
-    let mut parser = Parser {
+    Parser::new(
         source,
-        tokens: tokens
+        tokens
             .into_iter()
-            .filter(|token| !matches!(token.val, Value::Whitespace | Value::Comment))
-            .peekable(),
-    };
-    std::iter::from_fn(move || {
-        parser
-            .tokens
-            .peek()
-            .is_some()
-            .then(|| parser.expression().inspect_err(|_| parser.synchronize()))
-    })
+            .filter(|token| !matches!(token.val, Value::Whitespace | Value::Comment)),
+    )
 }
 
 impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
-    fn parse(&mut self) -> Option<Expr<'src>> {
-        self.expression().ok()
+    fn pull_if<P>(&mut self, p: P) -> Option<Token<'src>>
+    where
+        P: FnOnce(&Token<'src>) -> bool,
+    {
+        self.tokens.next_if(p)
+    }
+
+    fn try_pull<P>(&mut self, p: P, expected: Expecting) -> Result<Token<'src>, ContextError<'src>>
+    where
+        P: FnOnce(&Token<'src>) -> bool,
+    {
+        self.pull_if(p).ok_or_else(|| {
+            ContextError::missing_or_unexpected(self.tokens.peek().copied(), self.source, expected)
+        })
+    }
+
+    fn statement(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let expr = self.expression()?;
+        self.try_pull(
+            match_token!(Punctuation(Punctuation::Semi)),
+            Expecting::a("`;`"),
+        )?;
+        Ok(expr)
     }
 
     fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
@@ -110,112 +159,127 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         use Punctuation::*;
+
         if let Some(op) = self.tokens.next_if(match_token!(Punctuation(Not | Sub))) {
-            Ok(Expr::unary(op, self.unary()?))
+            Ok(Expr::unary(Unary {
+                op,
+                rhs: self.unary()?,
+            }))
         } else {
             self.primary()
         }
     }
 
-    fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        if let Some(token) = self.tokens.next_if(match_token!(
-            BoolLiteral(_)
-                | Keyword(Keyword::None)
-                | UIntLiteral(_)
-                | SIntLiteral(_)
-                | FltLiteral(_)
-                | CharLiteral(_)
-                | StringLiteral(_)
-        )) {
-            Ok(Expr::literal(token))
-        } else if let Some(lparen) = self
-            .tokens
-            .next_if(match_token!(Punctuation(Punctuation::LParen)))
-        {
-            let expr = self.expression()?;
-            if self
-                .tokens
-                .next_if(match_token!(Punctuation(Punctuation::RParen)))
-                .is_some()
-            {
-                Ok(Expr::grouping(expr))
-            } else {
-                let peeked = self.tokens.peek();
-                Err(ContextError {
-                    source: self.source,
-                    range: peeked
-                        .map_or(Range::from(self.source.len()..self.source.len()), |token| {
-                            token.lex_range(self.source)
-                        }),
-                    err: match peeked {
-                        Some(Token {
-                            val:
-                                Value::Punctuation(punc @ (Punctuation::RBrace | Punctuation::RBrack)),
-                            ..
-                        }) => ErrorType::IncorrectCloseBracket {
-                            expect: (Bracket::Paren, lparen.lex_range(self.source)),
-                            actual: match punc {
-                                Punctuation::RBrace => Bracket::Brace,
-                                Punctuation::RBrack => Bracket::Brack,
-                                _ => unreachable!("guarded by outer match arm"),
+    fn literal(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        self.try_pull(
+            match_token!(
+                BoolLiteral(_)
+                    | Keyword(Keyword::None)
+                    | UIntLiteral(_)
+                    | SIntLiteral(_)
+                    | FltLiteral(_)
+                    | CharLiteral(_)
+                    | StringLiteral(_)
+            ),
+            Expecting::a("literal"),
+        )
+        .map(Expr::literal)
+    }
+
+    fn group(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let lparen = self.try_pull(
+            match_token!(Punctuation(Punctuation::LParen)),
+            Expecting::an("parenthesized expression"),
+        )?;
+        let expr = self.expression()?;
+        self.try_pull(
+                match_token!(Punctuation(Punctuation::RParen)),
+                Expecting::a("`)`"),
+            )
+            .map(move |_| Expr::grouping(expr))
+            .map_err(|e| ContextError {
+                source: e.source,
+                range: e.range,
+                err: match e.err {
+                    ErrorType::MissingToken { .. } => ErrorType::MissingCloseBracket {
+                        expect: (Bracket::Paren, lparen.lex_range(self.source)),
+                    },
+
+                    ErrorType::UnexpectedToken {
+                        actual:
+                            Token {
+                                val:
+                                    Value::Punctuation(
+                                        punc @ (Punctuation::RBrace | Punctuation::RBrack),
+                                    ),
+                                ..
                             },
-                        },
-
-                        Some(token) => ErrorType::UnexpectedToken {
-                            expect: Expecting::a("')'"),
-                            actual: *token,
-                        },
-
-                        None => ErrorType::MissingCloseBracket {
-                            expect: (Bracket::Paren, lparen.lex_range(self.source)),
+                        ..
+                    } => ErrorType::IncorrectCloseBracket {
+                        expect: (Bracket::Paren, lparen.lex_range(self.source)),
+                        actual: match punc {
+                            Punctuation::RBrace => Bracket::Brace,
+                            Punctuation::RBrack => Bracket::Brack,
+                            _ => unreachable!("guarded by outer match arm"),
                         },
                     },
-                })
+
+                    _ => e.err,
+                },
+            })
+    }
+
+    fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        self.literal().or_else(|_| self.group()).map_err(|mut e| {
+            if let ErrorType::MissingToken { expect } | ErrorType::UnexpectedToken { expect, .. } =
+                &mut e.err
+                && expect.expect == "parenthesized expression"
+            {
+                *expect = Expecting::an("expression");
             }
-        } else {
-            Err(ContextError::missing_or_unexpected(
-                self.tokens.peek().copied(),
-                self.source,
-                Expecting::an("expression"),
-            ))
-        }
+            e
+        })
     }
 
     fn synchronize(&mut self) {
         while let Some(token) = self.tokens.next() {
-            if matches!(token.val, Value::Punctuation(Punctuation::Semi))
-                || self.tokens.peek().is_some_and(|token| {
-                    matches!(
-                        token.val,
-                        Value::Keyword(
-                            Keyword::Rec
-                                | Keyword::Sup
-                                | Keyword::Cat
-                                | Keyword::Alt
-                                | Keyword::Sub
-                                | Keyword::Def
-                                | Keyword::Fn
-                                | Keyword::Mem
-                                | Keyword::Let
-                                | Keyword::Uni
-                                | Keyword::Pvt
-                                | Keyword::If
-                                | Keyword::Or
-                                | Keyword::Match
-                                | Keyword::Rep
-                                | Keyword::For
-                                | Keyword::Loop
-                                | Keyword::Cord
-                                | Keyword::Halt
-                                | Keyword::Skip
-                                | Keyword::Give
-                                | Keyword::Fail
-                                | Keyword::Emit
-                        )
+            // end of current statement
+            if matches!(token.val, Value::Punctuation(Punctuation::Semi)) {
+                break;
+            }
+
+            // start of new statement/definition
+            if self.tokens.peek().is_some_and(|token| {
+                matches!(
+                    token.val,
+                    Value::Keyword(
+                        Keyword::Rec
+                            | Keyword::Sup
+                            | Keyword::Cat
+                            | Keyword::Alt
+                            | Keyword::Sub
+                            | Keyword::Def
+                            | Keyword::Fn
+                            | Keyword::Mem
+                            | Keyword::Let
+                            | Keyword::Uni
+                            | Keyword::Pvt
+                            | Keyword::If
+                            | Keyword::Or
+                            | Keyword::Match
+                            | Keyword::Rep
+                            | Keyword::For
+                            | Keyword::Loop
+                            | Keyword::Cord
+                            | Keyword::Halt
+                            | Keyword::Skip
+                            | Keyword::Give
+                            | Keyword::Fail
+                            | Keyword::Emit
                     )
-                })
-            {
-                return;
+                )
+            }) {
+                break;
             }
         }
     }
@@ -237,46 +301,46 @@ mod tests {
             .expect("should be a valid expression");
         assert_eq!(
             expr.as_slice(),
-            &[Expr::Binary(Box::new((
-                Expr::Literal(Token {
+            &[Expr::binary(Binary {
+                lhs: Expr::literal(Token {
                     lex: "5",
                     val: Value::UIntLiteral(5)
                 }),
-                Token {
+                op: Token {
                     lex: "+",
                     val: Value::Punctuation(Punctuation::Add)
                 },
-                Expr::Binary(Box::new((
-                    Expr::Unary(Box::new((
-                        Token {
+                rhs: Expr::binary(Binary {
+                    lhs: Expr::unary(Unary {
+                        op: Token {
                             lex: "-",
                             val: Value::Punctuation(Punctuation::Sub)
                         },
-                        Expr::Grouping(Box::new(Expr::Binary(Box::new((
-                            Expr::Literal(Token {
+                        rhs: Expr::grouping(Expr::binary(Binary {
+                            lhs: Expr::literal(Token {
                                 lex: "7",
                                 val: Value::UIntLiteral(7)
                             }),
-                            Token {
+                            op: Token {
                                 lex: "/",
                                 val: Value::Punctuation(Punctuation::Div)
                             },
-                            Expr::Literal(Token {
+                            rhs: Expr::literal(Token {
                                 lex: "8",
                                 val: Value::UIntLiteral(8)
                             })
-                        )))))
-                    ))),
-                    Token {
+                        }))
+                    }),
+                    op: Token {
                         lex: "*",
                         val: Value::Punctuation(Punctuation::Mul)
                     },
-                    Expr::Literal(Token {
+                    rhs: Expr::Literal(Token {
                         lex: "3",
                         val: Value::UIntLiteral(3)
                     })
-                )))
-            )))]
+                })
+            })]
         );
     }
 }

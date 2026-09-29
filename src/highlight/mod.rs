@@ -1,11 +1,14 @@
 //! Syntax (not semantic, yet) highlighting
 
 use crate::{
-    error::TokenResult,
+    error::ContextError,
     highlight::syntax::{Syntax, syntax_of},
     scanner::{
         symbols::{CHAR_DELIM, STR_DELIM},
-        token::value::{CharLiteral, Escapes, StrLiteral, StringLiteral, Value},
+        token::{
+            Token,
+            value::{CharLiteral, Escapes, StrLiteral, StringLiteral, Value},
+        },
     },
 };
 use std::range::Range;
@@ -282,7 +285,9 @@ impl<I> HighlightIter<I> {
     }
 }
 
-impl<'src: 'arr, 'arr, I: Iterator<Item = &'arr TokenResult<'src>>> Iterator for HighlightIter<I> {
+impl<'src: 'arr, 'arr, I: Iterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>> Iterator
+    for HighlightIter<I>
+{
     type Item = HighlightToken<'src, 'arr, StrLiteral<'src>>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -306,10 +311,10 @@ impl<'src: 'arr, 'arr, I: Iterator<Item = &'arr TokenResult<'src>>> Iterator for
     }
 }
 
-/// An iterator over each lexeme and [`Syntax`] in the [`TokenResult`] list
+/// An iterator over each lexeme and [`Syntax`] in the list
 pub fn highlight<'src: 'arr, 'arr, I>(tokens: I) -> std::iter::Flatten<HighlightIter<I::IntoIter>>
 where
-    I: IntoIterator<Item = &'arr TokenResult<'src>>,
+    I: IntoIterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
 {
     HighlightIter::new(tokens.into_iter()).flatten()
 }

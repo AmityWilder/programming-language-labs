@@ -7,7 +7,7 @@ define_token_eq! {
         // ----------------------------
 
         /// The value a method is being called on
-        SelfKw = a "self" as SelfKeyword,
+        SelfKw = "self",
 
         // ----------------------------
         // Builtin types
@@ -17,24 +17,24 @@ define_token_eq! {
         /// Absence of value
         /// ## As a type
         /// Absence of a result (return type of an empty-bodied function)
-        None = a "none" as NoneKeyword,
+        None = "none",
         /// ## As a value
         /// Unreachable (crash if accessed)
         /// ## As a type
         /// Unreachable (return type of `stop`less `loop {}`)
-        Nevr = a "nevr" as NevrKeyword,
+        Nevr = "nevr",
         /// Boolean type
-        Bool = a "bool" as BoolKeyword,
+        Bool = "bool",
         /// Unsigned integer type (represented as `usize` (`size_t`))
-        Uint = a "uint" as UintKeyword,
+        Uint = "uint",
         /// Signed integer type (represented as `isize` (`isize_t`))
-        Sint = a "sint" as SintKeyword,
+        Sint = "sint",
         /// Floating point type (represented as `f64`)
-        Frac = a "frac" as FracKeyword,
+        Frac = "frac",
         /// Character type
-        Char = a "char" as CharKeyword,
+        Char = "char",
         /// String type
-        Text = a "text" as TextKeyword,
+        Text = "text",
 
         // ----------------------------
         // Definitions
@@ -47,7 +47,7 @@ define_token_eq! {
         ///     // fields
         /// }
         /// ```
-        Rec = a "rec" as RecKeyword,
+        Rec = "rec",
         /// Define a superset type. A superset type can be any one of the types it is defined with.
         /// ### Syntax
         /// ```rs
@@ -57,7 +57,7 @@ define_token_eq! {
         /// ```rs
         /// sup MaybeNumber = uint | none;
         /// ```
-        Sup = a "sup" as SupKeyword,
+        Sup = "sup",
         /// Define a categorical type. Categorical types are related, disjoint constants that can
         /// be used as literal-subset type with named variants.
         /// ### Syntax
@@ -86,14 +86,14 @@ define_token_eq! {
         ///     Mango = "gold",
         /// }
         /// ```
-        Cat = a "cat" as CatKeyword,
+        Cat = "cat",
         /// Define a type alternative (alias). A type alias is identical to the existing type,
         /// but with a new name.
         /// ### Syntax
         /// ```rs
         /// alt /* alias */ = /* type */;
         /// ```
-        Alt = a "alt" as AltKeyword,
+        Alt = "alt",
         /// Define a subset type. A subset type can fit into any slot where its original type fits,
         /// but its original type cannot fit into a subset type slot without proving the value fits.
         /// Use `only` to give a whitelist, `xcpt` to give a blacklist, or `where` to provide a
@@ -124,7 +124,7 @@ define_token_eq! {
         ///     Mango,
         /// }
         /// ```
-        Sub = a "sub" as SubKeyword,
+        Sub = "sub",
         /// Define a macro.
         /// ### Syntax
         /// ```rs
@@ -132,7 +132,7 @@ define_token_eq! {
         ///     // definition
         /// }
         /// ```
-        Def = a "def" as DefKeyword,
+        Def = "def",
         /// Define a function.
         /// ### Syntax
         /// ```rs
@@ -140,7 +140,7 @@ define_token_eq! {
         ///     // definition
         /// }
         /// ```
-        Fn = a "fn" as FnKeyword,
+        Fn = "fn",
         /// Define member items of a `rec`/`union`/`cat`.
         /// ### Syntax
         /// ```rs
@@ -150,7 +150,7 @@ define_token_eq! {
         ///     // methods
         /// }
         /// ```
-        Mem = an "mem" as MemKeyword,
+        Mem = "mem",
 
         // ----------------------------
         // Value
@@ -163,7 +163,7 @@ define_token_eq! {
         /// // or
         /// let /* name */ = /* initial value */;
         /// ```
-        Let = a "let" as LetKeyword,
+        Let = "let",
         /// Create a universal variable.
         /// ### Syntax
         /// ```rs
@@ -171,13 +171,13 @@ define_token_eq! {
         /// // or
         /// uni /* name */ = /* initial value */;
         /// ```
-        Uni = a "uni" as UniKeyword,
+        Uni = "uni",
         /// Create a pivot (constant) value.
         /// ### Syntax
         /// ```rs
         /// pvt /* name */ = /* constant value */;
         /// ```
-        Pvt = a "pvt" as PvtKeyword,
+        Pvt = "pvt",
 
         // ----------------------------
         // Interface
@@ -236,7 +236,7 @@ define_token_eq! {
         ///     // statement
         /// }
         /// ```
-        Where = a "where" as WhereKeyword,
+        Where = "where",
         /// Used in a `where` clause to specify that a parameter must possess some field/method,
         /// without specifying its format.
         /// ### Syntax
@@ -260,7 +260,7 @@ define_token_eq! {
         ///     // ...
         /// }
         /// ```
-        Has = a "has" as HasKeyword,
+        Has = "has",
 
         // ----------------------------
         // Flow
@@ -280,7 +280,7 @@ define_token_eq! {
         ///     # statement
         /// after:
         /// ```
-        If = an "if" as IfKeyword,
+        If = "if",
         /// When following an `if` statement, only performs the statement if the condition does not hold.
         /// ### Syntax
         /// ```rs
@@ -307,7 +307,7 @@ define_token_eq! {
         ///     // statement
         /// }
         /// ```
-        Or = an "or" as OrKeyword,
+        Or = "or",
         /// Choose a branch based on pattern.
         /// ### Syntax
         /// ```rs
@@ -316,7 +316,7 @@ define_token_eq! {
         ///     // ...
         /// }
         /// ```
-        Match = a "match" as MatchKeyword,
+        Match = "match",
 
         // ----------------------------
         // Loop
@@ -337,7 +337,7 @@ define_token_eq! {
         ///     j loop
         /// after:
         /// ```
-        Rep = a "rep" as RepKeyword,
+        Rep = "rep",
         /// Repeat for each item in an iterator.
         /// ### Syntax
         /// ```rs
@@ -355,7 +355,7 @@ define_token_eq! {
         ///     __item = __iter.next();
         /// }
         /// ```
-        For = a "for" as ForKeyword,
+        For = "for",
         /// Separates the binding from the iterator in a for loop.
         /// ### Syntax
         /// ```rs
@@ -363,7 +363,7 @@ define_token_eq! {
         ///     // ...
         /// }
         /// ```
-        In = an "in" as InKeyword,
+        In = "in",
         /// Repeat forever (or until a `stop`/`give`/`fail`).
         /// ### Syntax
         /// ```rs
@@ -383,7 +383,7 @@ define_token_eq! {
         ///     # statement
         ///     j loop
         /// ```
-        Loop = a "loop" as LoopKeyword,
+        Loop = "loop",
 
         /// A conditionless, single-iteration loop that can be "early-returned" from (using `stop`)
         /// without exiting the function. Saves from having to make a new function that would only
@@ -415,7 +415,7 @@ define_token_eq! {
         ///     # statement
         /// after:
         /// ```
-        Cord = a "cord" as CordKeyword,
+        Cord = "cord",
 
         // Loop control
         /// Quit the loop.
@@ -425,7 +425,7 @@ define_token_eq! {
         ///     if /* condition */ { halt; }
         /// }
         /// ```
-        Halt = a "halt" as HaltKeyword,
+        Halt = "halt",
         /// Stop the current loop and skip to the next iteration.
         /// ### Syntax
         /// ```rs
@@ -433,7 +433,7 @@ define_token_eq! {
         ///     if /* condition */ { skip; }
         /// }
         /// ```
-        Skip = a "skip" as SkipKeyword,
+        Skip = "skip",
 
         // ----------------------------
         // Exit
@@ -444,7 +444,7 @@ define_token_eq! {
         /// ```rs
         /// give /* value */;
         /// ```
-        Give = a "give" as GiveKeyword,
+        Give = "give",
         /// ## As a type
         /// Builtin error type produced by `fail`
         /// ## As a keyword
@@ -454,7 +454,7 @@ define_token_eq! {
         /// ```rs
         /// fail /* error */;
         /// ```
-        Fail = a "fail" as FailKeyword,
+        Fail = "fail",
         /// Return the value within a loop without ending the function, to allow for iterable functions.
         /// Turns the function into a mutable closure.
         /// ### Syntax
@@ -465,7 +465,7 @@ define_token_eq! {
         /// ```rs
         /// emit fail /* error */;
         /// ```
-        Emit = an "emit" as EmitKeyword,
+        Emit = "emit",
     }
 }
 
