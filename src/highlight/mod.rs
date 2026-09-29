@@ -5,7 +5,7 @@ use crate::{
     highlight::syntax::{Syntax, syntax_of},
     scanner::{
         symbols::{CHAR_DELIM, STR_DELIM},
-        token::{CharLiteral, Escapes, StrLiteral, StringLiteral, TokenValue},
+        token::value::{CharLiteral, Escapes, StrLiteral, StringLiteral, Value},
     },
 };
 use std::range::Range;
@@ -290,12 +290,12 @@ impl<'src: 'arr, 'arr, I: Iterator<Item = &'arr TokenResult<'src>>> Iterator for
             let (lex, syn, val) = syntax_of(res);
             match val {
                 // char literal with escape - an iterator
-                TokenValue::CharLiteral(CharLiteral {
+                Value::CharLiteral(CharLiteral {
                     is_escaped: true, ..
                 }) => HighlightToken::CharLiteral(escaped_char_literal(lex, syn)),
 
                 // string literal with escapes or interpolated string with escapes and no expressions - an iterator
-                TokenValue::StringLiteral(literal) if literal.has_escapes() => {
+                Value::StringLiteral(literal) if literal.has_escapes() => {
                     HighlightToken::StrLiteral(StrLiteral::escaped_str_literal(lex, syn, literal))
                 }
 

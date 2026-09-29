@@ -10,14 +10,14 @@ use crate::{
     error::{ContextError, ErrorType, Expecting},
     scanner::{
         Bracket,
-        token::{Keyword, Punctuation, Token, TokenValue},
+        token::{Token, keyword::Keyword, punc::Punctuation, value::Value},
     },
 };
 use std::range::Range;
 
 macro_rules! match_token {
     ($($variant:ident$(($pattern:pat))?)|+) => {
-        |token| matches!(token.val, $(TokenValue::$variant$(($pattern))?)|+)
+        |token| matches!(token.val, $($crate::scanner::token::value::Value::$variant$(($pattern))?)|+)
     };
 }
 
@@ -79,7 +79,7 @@ where
         source,
         tokens: tokens
             .into_iter()
-            .filter(|token| !matches!(token.val, TokenValue::Whitespace | TokenValue::Comment))
+            .filter(|token| !matches!(token.val, Value::Whitespace | Value::Comment))
             .peekable(),
     }
 }
@@ -122,37 +122,27 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .next_if(match_token!(Punctuation(Punctuation::LParen)))
         {
             let expr = self.expression()?;
-            if let Some(_rparen) = self
+            if self
                 .tokens
                 .next_if(match_token!(Punctuation(Punctuation::RParen)))
+                .is_some()
             {
                 Ok(Expr::grouping(expr))
             } else {
                 let peeked = self.tokens.peek();
                 Err(ContextError {
                     source: self.source,
-                    range: peeked.map_or(
-                        Range::from(self.source.len()..self.source.len()),
-                        |token| {
-                            self.source
-                                .substr_range(token.lex)
-                                .expect("lexeme should be a substr of source code")
-                        },
-                    ),
+                    range: peeked
+                        .map_or(Range::from(self.source.len()..self.source.len()), |token| {
+                            token.lex_range(self.source)
+                        }),
                     err: match peeked {
                         Some(Token {
                             val:
-                                TokenValue::Punctuation(
-                                    punc @ (Punctuation::RBrace | Punctuation::RBrack),
-                                ),
+                                Value::Punctuation(punc @ (Punctuation::RBrace | Punctuation::RBrack)),
                             ..
                         }) => ErrorType::IncorrectCloseBracket {
-                            expect: (
-                                Bracket::Paren,
-                                self.source
-                                    .substr_range(lparen.lex)
-                                    .expect("lexeme should be a substr of source code"),
-                            ),
+                            expect: (Bracket::Paren, lparen.lex_range(self.source)),
                             actual: match punc {
                                 Punctuation::RBrace => Bracket::Brace,
                                 Punctuation::RBrack => Bracket::Brack,
@@ -166,12 +156,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                         },
 
                         None => ErrorType::MissingCloseBracket {
-                            expect: (
-                                Bracket::Paren,
-                                self.source
-                                    .substr_range(lparen.lex)
-                                    .expect("lexeme should be a substr of source code"),
-                            ),
+                            expect: (Bracket::Paren, lparen.lex_range(self.source)),
                         },
                     },
                 })
@@ -200,40 +185,40 @@ mod tests {
             Expr::Binary(Box::new((
                 Expr::Literal(Token {
                     lex: "5",
-                    val: TokenValue::UIntLiteral(5)
+                    val: Value::UIntLiteral(5)
                 }),
                 Token {
                     lex: "+",
-                    val: TokenValue::Punctuation(Punctuation::Add)
+                    val: Value::Punctuation(Punctuation::Add)
                 },
                 Expr::Binary(Box::new((
                     Expr::Unary(Box::new((
                         Token {
                             lex: "-",
-                            val: TokenValue::Punctuation(Punctuation::Sub)
+                            val: Value::Punctuation(Punctuation::Sub)
                         },
                         Expr::Grouping(Box::new(Expr::Binary(Box::new((
                             Expr::Literal(Token {
                                 lex: "7",
-                                val: TokenValue::UIntLiteral(7)
+                                val: Value::UIntLiteral(7)
                             }),
                             Token {
                                 lex: "/",
-                                val: TokenValue::Punctuation(Punctuation::Div)
+                                val: Value::Punctuation(Punctuation::Div)
                             },
                             Expr::Literal(Token {
                                 lex: "8",
-                                val: TokenValue::UIntLiteral(8)
+                                val: Value::UIntLiteral(8)
                             })
                         )))))
                     ))),
                     Token {
                         lex: "*",
-                        val: TokenValue::Punctuation(Punctuation::Mul)
+                        val: Value::Punctuation(Punctuation::Mul)
                     },
                     Expr::Literal(Token {
                         lex: "3",
-                        val: TokenValue::UIntLiteral(3)
+                        val: Value::UIntLiteral(3)
                     })
                 )))
             )))

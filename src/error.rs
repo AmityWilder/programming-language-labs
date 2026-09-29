@@ -278,9 +278,7 @@ impl<'src> ContextError<'src> {
     ) -> ContextError<'src> {
         ContextError {
             source,
-            range: source
-                .substr_range(token.lex)
-                .expect("token src should be a substring of the source code"),
+            range: token.lex_range(source),
             err: ErrorType::UnexpectedToken {
                 expect: expected,
                 actual: token,
