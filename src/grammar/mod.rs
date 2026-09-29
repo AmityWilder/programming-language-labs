@@ -24,7 +24,11 @@ macro_rules! match_token {
 macro_rules! binary_op_seq {
     ($outer:ident, $inner:ident, $pattern:pat) => {
         fn $outer(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-            self.binary_op(Self::$inner, match_token!($pattern))
+            use Punctuation::*;
+            self.binary_op(
+                Self::$inner,
+                match_token!(TokenValue::Punctuation($pattern)),
+            )
         }
     };
 }
@@ -97,22 +101,18 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    binary_op_seq! { equality, comparison, TokenValue::Punctuation(Punctuation::Neq | Punctuation::Eq) }
-
-    binary_op_seq! { comparison, term, TokenValue::Punctuation(
-        Punctuation::Gt | Punctuation::Ge | Punctuation::Lt | Punctuation::Le
-    ) }
-
-    binary_op_seq! { term, factor, TokenValue::Punctuation(Punctuation::Add | Punctuation::Sub) }
-
-    binary_op_seq! { factor, exponent, TokenValue::Punctuation(Punctuation::Mul | Punctuation::Div) }
-
-    binary_op_seq! { exponent, unary, TokenValue::Punctuation(Punctuation::Exponent) }
+    binary_op_seq! { equality, comparison, Neq | Eq }
+    binary_op_seq! { comparison, term, Gt | Ge | Lt | Le }
+    binary_op_seq! { term, factor, Add | Sub }
+    binary_op_seq! { factor, exponent, Mul | Div }
+    binary_op_seq! { exponent, unary, Exponent }
 
     fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        if let Some(op) = self.tokens.next_if(match_token!(TokenValue::Punctuation(
-            Punctuation::Not | Punctuation::Sub
-        ))) {
+        use Punctuation::*;
+        if let Some(op) = self
+            .tokens
+            .next_if(match_token!(TokenValue::Punctuation(Not | Sub)))
+        {
             Ok(Expr::unary(op, self.unary()?))
         } else {
             self.primary()
