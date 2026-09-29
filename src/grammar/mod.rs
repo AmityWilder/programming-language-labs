@@ -22,12 +22,13 @@ macro_rules! match_token {
 }
 
 macro_rules! binary_op_seq {
-    ($outer:ident, $inner:ident, $pattern:pat) => {
+    ($outer:ident ::= $lhs:ident ($op:pat) $rhs:ident) => {
         fn $outer(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
             use Punctuation::*;
             self.binary_op(
-                Self::$inner,
-                match_token!(TokenValue::Punctuation($pattern)),
+                match_token!(TokenValue::Punctuation($op)),
+                Self::$lhs,
+                Self::$rhs,
             )
         }
     };
@@ -88,24 +89,25 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     fn binary_op(
         &mut self,
-        items: fn(&mut Self) -> Result<Expr<'src>, ContextError<'src>>,
         sep: fn(&Token<'src>) -> bool,
+        lhs: fn(&mut Self) -> Result<Expr<'src>, ContextError<'src>>,
+        rhs: fn(&mut Self) -> Result<Expr<'src>, ContextError<'src>>,
     ) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = items(self)?;
+        let mut expr = lhs(self)?;
 
         while let Some(op) = self.tokens.next_if(sep) {
-            let rhs = items(self)?;
+            let rhs = rhs(self)?;
             expr = Expr::binary(expr, op, rhs);
         }
 
         Ok(expr)
     }
 
-    binary_op_seq! { equality, comparison, Neq | Eq }
-    binary_op_seq! { comparison, term, Gt | Ge | Lt | Le }
-    binary_op_seq! { term, factor, Add | Sub }
-    binary_op_seq! { factor, exponent, Mul | Div }
-    binary_op_seq! { exponent, unary, Exponent }
+    binary_op_seq! { equality ::= comparison (Neq | Eq) comparison }
+    binary_op_seq! { comparison ::= term (Gt | Ge | Lt | Le) term }
+    binary_op_seq! { term ::= factor (Add | Sub) factor }
+    binary_op_seq! { factor ::= exponent (Mul | Div) exponent }
+    binary_op_seq! { exponent ::= unary (Exponent) unary }
 
     fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         use Punctuation::*;
