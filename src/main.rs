@@ -46,7 +46,7 @@
 
 use error::ContextError;
 use eval::evaluate;
-use grammar::{Binary, Expr, Unary, parse};
+use grammar::{Binary, Expr, Grouping, Unary, parse};
 use highlight::{
     highlight,
     style::{Color, Style, StyleWrapper},
@@ -140,8 +140,12 @@ pub fn print_ast(depth: usize, node: &Expr<'_>) {
             println!("Literal: {token:?}");
         }
         Expr::Grouping(inner) => {
-            print!("Grouping:");
-            print_ast(depth.strict_add(2), inner);
+            let Grouping { open, expr, close } = &**inner;
+            println!("Grouping:");
+            println!("{:>depth$} open: {open:?}", "");
+            print!("{:>depth$} expr: ", "");
+            print_ast(depth.strict_add(2), expr);
+            println!("{:>depth$} close: {close:?}", "");
         }
     }
 }

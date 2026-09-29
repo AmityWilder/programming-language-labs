@@ -188,7 +188,10 @@ pub enum ErrorType<'src> {
     // eval
     // ----------------------------
     /// Attempted to find the quotient or remainder with a denominator of 0
-    DivByZero,
+    DivByZero {
+        /// The range of the expression evaluating to zero
+        zero: Range<usize>,
+    },
     /// The operands in a binary operation are of incompatible type
     Incompatible {
         op: Punctuation,
@@ -271,7 +274,7 @@ impl std::fmt::Display for ErrorType<'_> {
                 write!(f, "expected {article} {expect}, found `{found}`")
             }
 
-            Self::DivByZero => write!(f, "divide by zero"),
+            Self::DivByZero { .. } => write!(f, "divide by zero"),
             Self::Incompatible { op, lhs, rhs } => {
                 write!(f, "{lhs} is not compatible with {rhs} for `{op}`")
             }
@@ -461,7 +464,7 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             | ErrorType::MissingToken { .. }
             | ErrorType::UnexpectedToken { .. } => "GRA",
 
-            ErrorType::DivByZero
+            ErrorType::DivByZero { .. }
             | ErrorType::Incompatible { .. }
             | ErrorType::Unsupported { .. }
             | ErrorType::UnsignedNeg
@@ -486,7 +489,7 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             ErrorType::MissingToken { .. } => 14,
             ErrorType::UnexpectedToken { .. } => 15,
 
-            ErrorType::DivByZero => 20,
+            ErrorType::DivByZero { .. } => 20,
             ErrorType::Incompatible { .. } => 21,
             ErrorType::Unsupported { .. } => 22,
             ErrorType::UnsignedNeg => 23,
@@ -792,7 +795,7 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 )
             }
 
-            ErrorType::DivByZero => write!(f, "ensure the right side cannot be 0"),
+            ErrorType::DivByZero { .. } => write!(f, "ensure the right side cannot be 0"),
             ErrorType::Incompatible { .. } => {
                 write!(f, "try a different operator or convert the types")
             }
@@ -933,7 +936,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
                     }
                     ErrorType::MissingToken { .. } => Box::new(|f| f.write_str("missing token")),
                     ErrorType::UnexpectedToken { .. } => Box::new(|f| f.write_str("wrong token")),
-                    ErrorType::DivByZero => Box::new(|f| f.write_str("dividing by 0")),
+                    ErrorType::DivByZero { .. } => Box::new(|f| f.write_str("dividing by 0")),
                     ErrorType::Incompatible { op, .. } => {
                         Box::new(move |f| write!(f, "operands do not support {op}"))
                     }
@@ -961,6 +964,13 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
 
             ErrorType::MissingCloseBracket { expect: (_, range) } => {
                 vec![(range, Box::new(|f| f.write_str("missing a partner")))]
+            }
+
+            ErrorType::DivByZero { zero } => {
+                vec![(
+                    zero,
+                    Box::new(|f| f.write_str("this expression evaluates to 0")),
+                )]
             }
 
             _ => Vec::new(),
