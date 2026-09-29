@@ -17,124 +17,124 @@ define_token_eq! {
         // ----------------------------
 
         /// Not - Logical negation (booleans) or bitflip (integers)
-        Not = a "!" ("not") as NotOp,
+        Not = "!",
         /// Stringify - Replace tokens with their lexemes in a macro
-        MacroStringify = a "#" ("stringify") as MacroStringifyOp,
+        MacroStringify = "#",
         /// Remainder - Find the remainder of `lhs / rhs`
-        Remainder = a "%" ("remainder") as RemainderOp,
+        Rem = "%",
         /// And - Logical AND (booleans) or bitwise AND (integers)
-        And = an "&" ("and") as AndOp,
+        And = "&",
         /// Left parenthesis
-        LParen = a "(" ("left parenthesis") as LParenOp,
+        LParen = "(",
         /// Right parenthesis
-        RParen = a ")" ("right parenthesis") as RParenOp,
+        RParen = ")",
         /// Multiply - Find the product of `lhs` and `rhs`
-        Mul = a "*" ("multiply") as MulOp,
+        Mul = "*",
         /// Add - Find the sum of `lhs` and `rhs`
-        Add = an "+" ("add") as AddOp,
+        Add = "+",
         /// Comma - Separate items in a list
-        Comma = a "," ("comma") as CommaOp,
+        Comma = ",",
         /// Subtract - Find the difference of `lhs - rhs`
-        Sub = a "-" ("subtract") as SubOp,
+        Sub = "-",
         /// Dot - Access a rec member
-        Dot = a "." ("dot") as DotOp,
+        Dot = ".",
         /// Divide - Find the quotient of `lhs / rhs`
-        Div = a "/" ("divide") as DivOp,
+        Div = "/",
         /// Colon - Separate a variable/field/parameter from its type or requirements
-        Colon = a ":" ("colon") as ColonOp,
+        Colon = ":",
         /// Semicolon - Conclude a statement
-        Semi = a ";" ("semicolon") as SemiOp,
+        Semi = ";",
         /// Less than - Test if `lhs` is strictly lower value compared to `rhs`
-        Lt = a "<" ("less than") as LtOp,
+        Lt = "<",
         /// Assign - Assign `rhs` to `lhs`
-        Assign = an "=" ("assignment") as AssignOp,
+        Assign = "=",
         /// Greater than - Test if `lhs` is strictly higher value compared to `rhs`
-        Gt = a ">" ("greater than") as GtOp,
+        Gt = ">",
         /// Question mark - TBD
-        QMark = a "?" ("question mark") as QMarkOp,
+        QMark = "?",
         /// Reference - Create a pointer/reference to a value (like to `&` in other languages)
-        Ref = a "@" ("reference") as RefOp,
+        Ref = "@",
         /// Left bracket
-        LBrack = a "[" ("left bracket") as LBrackOp,
+        LBrack = "[",
         /// Right bracket
-        RBrack = a "]" ("right bracket") as RBrackOp,
+        RBrack = "]",
         /// Xor - Logical XOR (booleans) or bitwise XOR (integers)
-        Xor = an "^" ("xor") as XorOp,
+        Xor = "^",
         /// Left brace
-        LBrace = a "{" ("left brace") as LBraceOp,
+        LBrace = "{",
         /// Or - Logical OR (booleans) or bitwise OR (integers)
-        Or = an "|" ("or") as OrOp,
+        Or = "|",
         /// Right brace
-        RBrace = a "}" ("right brace") as RBraceOp,
+        RBrace = "}",
 
         // ----------------------------
         // 2-char
         // ----------------------------
 
         /// Not equal - Equivalent to `!(lhs == rhs)`
-        Neq = a "!=" ("not equal") as NeqOp,
+        Neq = "!=",
         /// Nand - Equivalent to `!(lhs & rhs)`
-        Nand = a "!&" ("nand") as NandOp,
+        Nand = "!&",
         /// Nor - Equivalent to `!(lhs | rhs)`
-        Nor = a "!|" ("nor") as NorOp,
+        Nor = "!|",
         /// Xnor - Equivalent to `!(lhs ^ rhs)`
-        Xnor = an "!^" ("xnor") as XnorOp,
+        Xnor = "!^",
         /// Concatenate - Combine macro arguments without whitespace (possibly forming new tokens)
-        MacroConcatenate = a "##" ("concatenate") as MacroConcatenateOp,
+        MacroConcatenate = "##",
         /// Remainder assign - Equivalent to `lhs = lhs % rhs`
-        RemAssign = a "%=" ("remainder assign") as RemAssignOp,
+        RemAssign = "%=",
         /// And assign - Equivalent to `lhs = lhs & rhs`
-        AndAssign = an "&=" ("and assign") as AndAssignOp,
+        AndAssign = "&=",
         /// Multiply assign - Equivalent to `lhs = lhs * rhs`
-        MulAssign = a "*=" ("multiply assign") as MulAssignOp,
+        MulAssign = "*=",
         /// Exponent - Put `lhs` to the power of `rhs`
-        Exp = an "**" ("exponent") as ExponentOp,
+        Exp = "**",
         /// Add assign - Equivalent to `lhs = lhs + rhs`
-        AddAssign = an "+=" ("add assign") as AddAssignOp,
+        AddAssign = "+=",
         /// Sub assign - Equivalent to `lhs = lhs - rhs`
-        SubAssign = a "-=" ("subtract assign") as SubAssignOp,
+        SubAssign = "-=",
         /// Arrow - Separate a function's parameter list from its return type
-        Arrow = an "->" ("arrow") as ArrowOp,
+        Arrow = "->",
         /// Dot dot - Range
-        DotDot = a ".." ("dot dot") as DotDotOp,
+        DotDot = "..",
         /// Divide assign - Equivalent to `lhs = lhs / rhs`
-        DivAssign = a "/=" ("divide assign") as DivAssignOp,
+        DivAssign = "/=",
         /// Path separator - Separate namespace path items
-        PathSep = a "::" ("path separator") as PathSepOp,
+        PathSep = "::",
         /// Colon assign - Assign definition
-        ColonEq = a ":=" ("colon assign") as ColonEqOp,
+        ColonEq = ":=",
         /// Less or equal - Equivalent to `lhs < rhs | lhs == rhs`
-        Le = a "<=" ("less or equal") as LeOp,
+        Le = "<=",
         /// Bitshift left - Shift the bits in `lhs` to the left (away from 0) by `rhs` bits
-        Shl = a "<<" ("left bitshift") as ShlOp,
+        Shl = "<<",
         /// Equal - Test equality between `lhs` and `rhs`
-        Eq = an "==" ("equal") as EqOp,
+        Eq = "==",
         /// Fat arrow - Separates `match` arm conditions from statements
-        FatArrow = a "=>" ("fat arrow") as FatArrowOp,
+        FatArrow = "=>",
         /// Greater or equal - Equivalent to `lhs < rhs | lhs == rhs`
-        Ge = a ">=" ("greater or equal") as GeOp,
+        Ge = ">=",
         /// Shr - Shift the bits in `lhs` to the right (towards 0) by `rhs` bits
-        Shr = a ">>" ("right bitshift") as ShrOp,
+        Shr = ">>",
         /// Xor assign - Equivalent to `lhs = lhs ^ rhs`
-        XorAssign = an "^=" ("xor assign") as XorAssignOp,
+        XorAssign = "^=",
         /// Or assign - Equivalent to `lhs = lhs | rhs`
-        OrAssign = an "|=" ("or assign") as OrAssignOp,
+        OrAssign = "|=",
 
         // ----------------------------
         // 3-char
         // ----------------------------
 
         /// Exponent assign - Equivalent to `lhs = lhs ** rhs`
-        ExpAssign = an "**=" ("exponent assign") as ExpAssignOp,
+        ExpAssign = "**=",
         /// Bitshift left assign - Equivalent to `lhs = lhs << rhs`
-        ShlAssign = a "<<=" ("left bitshift assign") as ShlAssignOp,
+        ShlAssign = "<<=",
         /// Bitshift right assign - Equivalent to `lhs = lhs >> rhs`
-        ShrAssign = a ">>=" ("right bitshift assign") as ShrAssignOp,
+        ShrAssign = ">>=",
         /// Nand assign - Equivalent to `lhs = lhs !& rhs`
-        NandAssign = a "!&=" ("nand assign") as NandAssignOp,
+        NandAssign = "!&=",
         /// Nor assign - Equivalent to `lhs = lhs !| rhs`
-        NorAssign = a "!|=" ("nor assign") as NorAssignOp,
+        NorAssign = "!|=",
         /// Xnor assign - Equivalent to `lhs = lhs !^ rhs`
-        XnorAssign = a "!^=" ("xnor assign") as XnorAssignOp,
+        XnorAssign = "!^=",
     }
 }

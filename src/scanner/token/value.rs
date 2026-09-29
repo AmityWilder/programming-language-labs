@@ -39,10 +39,15 @@ pub struct StrLiteral<'src> {
     pub content: &'src str,
 }
 
-impl StrLiteral<'_> {
+impl<'src> StrLiteral<'src> {
     /// Identify whether a string literal contains escape sequences.
     pub fn has_escapes(&self) -> bool {
         self.content.contains(ESCAPE)
+    }
+
+    /// Process the [`StrLiteral`] into a [`StringLiteral`]
+    pub fn process(&self) -> Result<StringLiteral, ErrorType<'src>> {
+        StringLiteral::try_from(*self)
     }
 }
 

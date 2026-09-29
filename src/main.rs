@@ -45,17 +45,20 @@
 #![allow(clippy::wildcard_imports, reason = "don't care")]
 
 use error::ContextError;
+use grammar::{Binary, Expr, Unary, parse};
 use highlight::{
     highlight,
     style::{Color, Style, StyleWrapper},
-    syntax::{SyntaxStyle, syntax_of},
+    syntax::{Syntax, SyntaxStyle, syntax_of},
 };
+use interp::evaluate;
 use scanner::tokenize;
 use std::{fmt::Write, range::Range};
 
 mod error;
 mod grammar;
 mod highlight;
+mod interp;
 mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
@@ -115,11 +118,73 @@ const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
     invalid: Style::new().foreground(Color::Rgb(0xcc, 0x0e, 0x0e)),
 };
 
+pub fn print_ast(depth: usize, node: &Expr<'_>) {
+    match node {
+        Expr::Binary(inner) => {
+            let Binary { lhs, op, rhs } = &**inner;
+            println!("Binary:");
+            print!("{:>depth$} lhs: ", "");
+            print_ast(depth.strict_add(1), lhs);
+            println!("{:>depth$} op: {op:?}", "");
+            print!("{:>depth$} rhs: ", "");
+            print_ast(depth.strict_add(1), rhs);
+        }
+        Expr::Unary(inner) => {
+            let Unary { op, rhs } = &**inner;
+            println!("Unary:");
+            println!("{:>depth$} op: {op:?}", "");
+            print!("{:>depth$} rhs: ", "");
+            print_ast(depth.strict_add(1), rhs);
+        }
+        Expr::Literal(token) => {
+            println!("Literal: {token:?}");
+        }
+        Expr::Grouping(inner) => {
+            println!("Grouping:");
+            print_ast(depth.strict_add(1), inner);
+        }
+    }
+}
+
+/// Print a list of all errors with clean formatting
+fn list_errors<'src, 'err, I>(errs: I)
+where
+    'src: 'err,
+    I: IntoIterator<IntoIter: 'err, Item = &'err ContextError<'src>>,
+{
+    println!("errors:");
+    let mut any_errors = false;
+    for e in errs {
+        const INDENT: &str = "          ";
+        eprint!(
+            "  \x1b[91m{}:\x1b[0m {}\n{}    \x1b[92mhelp:\x1b[0m ",
+            e.code(),
+            e.err,
+            e.render(),
+        );
+        let mut has_prev = false;
+        for line in e.help().to_string().lines() {
+            if has_prev {
+                eprint!("{INDENT}");
+            }
+            eprintln!("{line}");
+            has_prev = true;
+        }
+        eprintln!();
+        any_errors = true;
+    }
+    if !any_errors {
+        println!("  \x1b[92mnone\x1b[0m");
+    }
+}
+
 /// # Panics
 /// This method can panic if [`scanner::Scanner`] isn't written correctly
 pub fn run_code(source: &str) {
     // token debug
     println!("source code:\n```\n{source}\n```");
+
+    println!("tokens:");
     let tokens: Vec<_> = tokenize(source).collect();
     let max_cols = source.lines().map(str::len).max().unwrap_or(0);
     let max_range_digits = max_cols.to_string().len().strict_mul(2);
@@ -185,30 +250,50 @@ pub fn run_code(source: &str) {
     }
     println!("```");
 
-    // error list
-    println!("errors:");
-    let mut any_errors = false;
-    for e in tokens.iter().filter_map(|item| item.as_ref().err()) {
-        const INDENT: &str = "          ";
-        eprint!(
-            "  \x1b[91m{}:\x1b[0m {}\n{}    \x1b[92mhelp:\x1b[0m ",
-            e.code(),
-            e.err,
-            e.render(),
-        );
-        let mut has_prev = false;
-        for line in e.help().to_string().lines() {
-            if has_prev {
-                eprint!("{INDENT}");
+    // lex errors
+    println!();
+    list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err));
+
+    // parse debug
+    println!("ast:");
+    let ast: Vec<_> = parse(source, tokens.into_iter().filter_map(Result::ok)).collect();
+    for res in &ast {
+        match res {
+            Ok(node) => {
+                print_ast(0, node);
             }
-            eprintln!("{line}");
-            has_prev = true;
+            Err(ContextError { source, range, err }) => {
+                let style = SYNTAX_STYLE_ANSI[Syntax::Invalid];
+                let src = source
+                    .get(*range)
+                    .expect("range should be a range in source");
+                println!(
+                    "{}ContextError({src:?}): {err:?}{}",
+                    style.begin(),
+                    style.end()
+                );
+            }
         }
-        eprintln!();
-        any_errors = true;
     }
-    if !any_errors {
-        println!("  \x1b[92mnone\x1b[0m");
+
+    // parse errors
+    println!();
+    list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err));
+
+    // eval
+    println!();
+    for expr in ast.iter().flatten() {
+        match evaluate(expr) {
+            Ok(x) => match x {
+                interp::Value::Bool(x) => println!("{x:?}"),
+                interp::Value::UInt(x) => println!("{x:?}"),
+                interp::Value::SInt(x) => println!("{x:?}"),
+                interp::Value::Flt(x) => println!("{x:?}"),
+                interp::Value::Char(x) => println!("{x:?}"),
+                interp::Value::Str(x) => println!("{x:?}"),
+            },
+            Err(e) => println!("{e}"),
+        }
     }
 }
 
@@ -226,6 +311,12 @@ fn main() {
                 std::io::stdin()
                     .read_line(&mut input)
                     .expect("failed to obtain input");
+                if input.ends_with('\n') {
+                    input.pop();
+                    if input.ends_with('\r') {
+                        input.pop();
+                    }
+                }
                 if matches!(input.trim(), "exit" | "quit") {
                     break; // finish
                 }
@@ -237,7 +328,13 @@ fn main() {
         Some(source_path) => match std::fs::read_to_string(std::path::Path::new(&source_path)) {
             Err(e) => eprintln!("failed to read source code file: {e}"),
 
-            Ok(source) => {
+            Ok(mut source) => {
+                if source.ends_with('\n') {
+                    source.pop();
+                    if source.ends_with('\r') {
+                        source.pop();
+                    }
+                }
                 if args.next().is_some() {
                     eprintln!("usage: {} [script]", prgm.display());
                 } else {

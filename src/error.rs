@@ -858,6 +858,3 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
         Ok(())
     }
 }
-
-/// A [`Token`] and its [`TokenValue`], or a [`ContextError`]
-pub type TokenResult<'src> = Result<Token<'src>, ContextError<'src>>;
