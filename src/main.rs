@@ -118,34 +118,65 @@ const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
     invalid: Style::new().foreground(Color::Rgb(0xcc, 0x0e, 0x0e)),
 };
 
-pub fn print_ast(depth: usize, node: &Expr<'_>) {
+pub fn print_ast(node: &Expr<'_>, depth: usize, bracket_depth: usize) {
     match node {
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
-            println!("Binary:");
-            print!("{:>depth$} lhs: ", "");
-            print_ast(depth.strict_add(2), lhs);
-            println!("{:>depth$} op: {op:?}", "");
-            print!("{:>depth$} rhs: ", "");
-            print_ast(depth.strict_add(2), rhs);
+            println!("\x1b[94mBinary:\x1b[0m");
+            print!("{:>depth$} \x1b[90mlhs:\x1b[0m ", "");
+            print_ast(lhs, depth.strict_add(2), bracket_depth);
+            let (_, syn, _) = syntax_of(&Ok(*op));
+            let style = SYNTAX_STYLE_ANSI[syn];
+            println!(
+                "{:>depth$} \x1b[90mop:\x1b[0m {}{op:?}{}",
+                "",
+                style.begin(),
+                style.end()
+            );
+            print!("{:>depth$} \x1b[90mrhs:\x1b[0m ", "");
+            print_ast(rhs, depth.strict_add(2), bracket_depth);
         }
         Expr::Unary(inner) => {
             let Unary { op, rhs } = &**inner;
-            println!("Unary:");
-            println!("{:>depth$} op: {op:?}", "");
-            print!("{:>depth$} rhs: ", "");
-            print_ast(depth.strict_add(2), rhs);
+            println!("\x1b[94mUnary:\x1b[0m");
+            let (_, syn, _) = syntax_of(&Ok(*op));
+            let style = SYNTAX_STYLE_ANSI[syn];
+            println!(
+                "{:>depth$} \x1b[90mop:\x1b[0m {}{op:?}{}",
+                "",
+                style.begin(),
+                style.end()
+            );
+            print!("{:>depth$} \x1b[90mrhs:\x1b[0m ", "");
+            print_ast(rhs, depth.strict_add(2), bracket_depth);
         }
         Expr::Literal(token) => {
-            println!("Literal: {token:?}");
+            let (_, syn, _) = syntax_of(&Ok(*token));
+            let style = SYNTAX_STYLE_ANSI[syn];
+            println!(
+                "\x1b[94mLiteral:\x1b[0m {}{token:?}{}",
+                style.begin(),
+                style.end()
+            );
         }
         Expr::Grouping(inner) => {
             let Grouping { open, expr, close } = &**inner;
-            println!("Grouping:");
-            println!("{:>depth$} open: {open:?}", "");
-            print!("{:>depth$} expr: ", "");
-            print_ast(depth.strict_add(2), expr);
-            println!("{:>depth$} close: {close:?}", "");
+            let style = SYNTAX_STYLE_ANSI[Syntax::Bracket(bracket_depth)];
+            println!("\x1b[94mGrouping:\x1b[0m");
+            println!(
+                "{:>depth$} \x1b[90mopen:\x1b[0m {}{open:?}{}",
+                "",
+                style.begin(),
+                style.end()
+            );
+            print!("{:>depth$} \x1b[90mexpr:\x1b[0m ", "");
+            print_ast(expr, depth.strict_add(2), bracket_depth.strict_add(1));
+            println!(
+                "{:>depth$} \x1b[90mclose:\x1b[0m {}{close:?}{}",
+                "",
+                style.begin(),
+                style.end()
+            );
         }
     }
 }
@@ -266,7 +297,7 @@ pub fn run_code(source: &str) {
     for res in &ast {
         match res {
             Ok(node) => {
-                print_ast(0, node);
+                print_ast(node, 0, 0);
             }
             Err(ContextError { source, range, err }) => {
                 let style = SYNTAX_STYLE_ANSI[Syntax::Invalid];
