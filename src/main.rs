@@ -45,20 +45,20 @@
 #![allow(clippy::wildcard_imports, reason = "don't care")]
 
 use error::ContextError;
+use eval::evaluate;
 use grammar::{Binary, Expr, Unary, parse};
 use highlight::{
     highlight,
     style::{Color, Style, StyleWrapper},
     syntax::{Syntax, SyntaxStyle, syntax_of},
 };
-use interp::evaluate;
 use scanner::tokenize;
 use std::{fmt::Write, range::Range};
 
 mod error;
+mod eval;
 mod grammar;
 mod highlight;
-mod interp;
 mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
@@ -285,12 +285,12 @@ pub fn run_code(source: &str) {
     for expr in ast.iter().flatten() {
         match evaluate(expr) {
             Ok(x) => match x {
-                interp::Value::Bool(x) => println!("{x:?}"),
-                interp::Value::UInt(x) => println!("{x:?}"),
-                interp::Value::SInt(x) => println!("{x:?}"),
-                interp::Value::Flt(x) => println!("{x:?}"),
-                interp::Value::Char(x) => println!("{x:?}"),
-                interp::Value::Str(x) => println!("{x:?}"),
+                eval::Value::Bool(x) => println!("{x:?}"),
+                eval::Value::UInt(x) => println!("{x:?}"),
+                eval::Value::SInt(x) => println!("{x:?}"),
+                eval::Value::Flt(x) => println!("{x:?}"),
+                eval::Value::Char(x) => println!("{x:?}"),
+                eval::Value::Str(x) => println!("{x:?}"),
             },
             Err(e) => println!("{e}"),
         }
