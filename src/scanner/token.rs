@@ -680,7 +680,7 @@ define_token_eq! {
         /// Multiply assign - Equivalent to `lhs = lhs * rhs`
         MulAssign = a "*=" ("multiply assign") as MulAssignOp,
         /// Exponent - Put `lhs` to the power of `rhs`
-        Exponent = an "**" ("exponent") as ExponentOp,
+        Exp = an "**" ("exponent") as ExponentOp,
         /// Add assign - Equivalent to `lhs = lhs + rhs`
         AddAssign = an "+=" ("add assign") as AddAssignOp,
         /// Sub assign - Equivalent to `lhs = lhs - rhs`
@@ -717,7 +717,7 @@ define_token_eq! {
         // ----------------------------
 
         /// Exponent assign - Equivalent to `lhs = lhs ** rhs`
-        ExponentAssign = an "**=" ("exponent assign") as ExponentAssignOp,
+        ExpAssign = an "**=" ("exponent assign") as ExpAssignOp,
         /// Bitshift left assign - Equivalent to `lhs = lhs << rhs`
         ShlAssign = a "<<=" ("left bitshift assign") as ShlAssignOp,
         /// Bitshift right assign - Equivalent to `lhs = lhs >> rhs`
