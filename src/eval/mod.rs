@@ -7,7 +7,7 @@
 )]
 
 use crate::{
-    error::ContextError,
+    error::{ContextError, ErrorType},
     grammar::{Binary, Expr, Unary},
     scanner::token::{
         punc::Punctuation,
@@ -15,267 +15,358 @@ use crate::{
     },
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ValueType {
+    Bool,
+    UInt,
+    SInt,
+    Frac,
+    Char,
+    Str,
+}
+
+impl std::fmt::Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Bool => "bool",
+            Self::UInt => "uint",
+            Self::SInt => "sint",
+            Self::Frac => "frac",
+            Self::Char => "char",
+            Self::Str => "str",
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Bool(bool),
     UInt(usize),
     SInt(isize),
-    Flt(f64),
+    Frac(f64),
     Char(char),
     Str(String),
 }
 
+impl Value {
+    pub fn as_type(&self) -> ValueType {
+        match self {
+            Self::Bool(_) => ValueType::Bool,
+            Self::UInt(_) => ValueType::UInt,
+            Self::SInt(_) => ValueType::SInt,
+            Self::Frac(_) => ValueType::Frac,
+            Self::Char(_) => ValueType::Char,
+            Self::Str(_) => ValueType::Str,
+        }
+    }
+}
+
 // TODO: unsigned should be allowed to convert to signed, but signed is not allowed to convert to unsigned
 impl<'src> Value {
-    fn eval_rem(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_rem(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
-            (Self::UInt(l), Self::UInt(r)) => l
-                .checked_rem(r)
-                .map(Self::UInt)
-                .ok_or_else(|| todo!("div by zero")),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_rem(r).map(Self::UInt).ok_or(ErrorType::DivByZero)
+            }
 
-            (Self::SInt(l), Self::SInt(r)) => l
-                .checked_rem(r)
-                .map(Self::SInt)
-                .ok_or_else(|| todo!("div by zero")),
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_rem(r).map(Self::SInt).ok_or(ErrorType::DivByZero)
+            }
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Rem,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_and(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_and(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l & r)),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l & r)),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l & r)),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::And,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_mul(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_mul(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
-            (Self::UInt(l), Self::UInt(r)) => l
-                .checked_mul(r)
-                .map(Self::UInt)
-                .ok_or_else(|| todo!("overflow")),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_mul(r).map(Self::UInt).ok_or(ErrorType::Overflow)
+            }
 
-            (Self::SInt(l), Self::SInt(r)) => l
-                .checked_mul(r)
-                .map(Self::SInt)
-                .ok_or_else(|| todo!("overflow")),
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_mul(r).map(Self::SInt).ok_or(ErrorType::Overflow)
+            }
 
-            (Self::Flt(l), Self::Flt(r)) => Ok(Self::Flt(l * r)),
+            (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l * r)),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Mul,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_add(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_add(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
-            (Self::UInt(l), Self::UInt(r)) => l
-                .checked_add(r)
-                .map(Self::UInt)
-                .ok_or_else(|| todo!("overflow")),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_add(r).map(Self::UInt).ok_or(ErrorType::Overflow)
+            }
 
-            (Self::SInt(l), Self::SInt(r)) => l
-                .checked_add(r)
-                .map(Self::SInt)
-                .ok_or_else(|| todo!("overflow")),
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_add(r).map(Self::SInt).ok_or(ErrorType::Overflow)
+            }
 
-            (Self::Flt(l), Self::Flt(r)) => Ok(Self::Flt(l + r)),
+            (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l + r)),
 
             (Self::Str(l), Self::Char(r)) => Ok(Self::Str(format!("{l}{r}"))),
             (Self::Str(l), Self::Bool(r)) => Ok(Self::Str(format!("{l}{r}"))),
             (Self::Str(l), Self::UInt(r)) => Ok(Self::Str(format!("{l}{r}"))),
             (Self::Str(l), Self::SInt(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::Str(l), Self::Flt(r)) => Ok(Self::Str(format!("{l}{r}"))),
+            (Self::Str(l), Self::Frac(r)) => Ok(Self::Str(format!("{l}{r}"))),
 
             (Self::Char(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
             (Self::Bool(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
             (Self::UInt(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
             (Self::SInt(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::Flt(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
+            (Self::Frac(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
 
             (Self::Str(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Add,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_sub(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_sub(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
-            (Self::UInt(l), Self::UInt(r)) => l
-                .checked_sub(r)
-                .map(Self::UInt)
-                .ok_or_else(|| todo!("overflow")),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_sub(r).map(Self::UInt).ok_or(ErrorType::Overflow)
+            }
 
-            (Self::SInt(l), Self::SInt(r)) => l
-                .checked_sub(r)
-                .map(Self::SInt)
-                .ok_or_else(|| todo!("overflow")),
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_sub(r).map(Self::SInt).ok_or(ErrorType::Overflow)
+            }
 
-            (Self::Flt(l), Self::Flt(r)) => Ok(Self::Flt(l - r)),
+            (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l - r)),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Sub,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_div(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_div(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
-            (Self::UInt(l), Self::UInt(r)) => l
-                .checked_div(r)
-                .map(Self::UInt)
-                .ok_or_else(|| todo!("div by zero")),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_div(r).map(Self::UInt).ok_or(ErrorType::DivByZero)
+            }
 
-            (Self::SInt(l), Self::SInt(r)) => l
-                .checked_div(r)
-                .map(Self::SInt)
-                .ok_or_else(|| todo!("div by zero")),
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_div(r).map(Self::SInt).ok_or(ErrorType::DivByZero)
+            }
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Div,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_cmp(self, rhs: Self) -> Result<std::cmp::Ordering, ContextError<'src>> {
+    fn eval_cmp(self, rhs: Self, op: Punctuation) -> Result<std::cmp::Ordering, ErrorType<'src>> {
         // TODO: more things should support cmp
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => Ok(l.cmp(&r)),
 
             (Self::SInt(l), Self::SInt(r)) => Ok(l.cmp(&r)),
 
-            (Self::Flt(l), Self::Flt(r)) => Ok(l.total_cmp(&r)),
+            (Self::Frac(l), Self::Frac(r)) => Ok(l.total_cmp(&r)),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_xor(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_xor(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l ^ r)),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l ^ r)),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l ^ r)),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Xor,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_or(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_or(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l | r)),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l | r)),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l | r)),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Or,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_nand(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_nand(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(!(l & r))),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l & r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l & r))),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Nand,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_nor(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_nor(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(!(l | r))),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l | r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l | r))),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Nor,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_xnor(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_xnor(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(!(l ^ r))),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l ^ r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l ^ r))),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Xnor,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_exp(self, rhs: Self) -> Result<Self, ContextError<'src>> {
-        match (self, rhs) {
-            (Self::UInt(l), Self::UInt(r)) => {
-                Ok(Self::UInt(l.pow(r.try_into().map_err(|e| todo!("{e}"))?)))
-            }
-            (Self::SInt(l), Self::SInt(r)) => {
-                Ok(Self::SInt(l.pow(r.try_into().map_err(|e| todo!("{e}"))?)))
-            }
-            (Self::Flt(l), Self::UInt(r)) => {
-                Ok(Self::Flt(l.powi(r.try_into().map_err(|e| todo!("{e}"))?)))
-            }
-            (Self::Flt(l), Self::SInt(r)) => {
-                Ok(Self::Flt(l.powi(r.try_into().map_err(|e| todo!("{e}"))?)))
-            }
-            (Self::Flt(l), Self::Flt(r)) => Ok(Self::Flt(l.powf(r))),
-
-            _ => todo!("incompatible"),
-        }
-    }
-
-    fn eval_shl(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_exp(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(
-                l.unbounded_shl(r.try_into().map_err(|e| todo!("{e}"))?),
+                l.pow(r.try_into().map_err(ErrorType::FailedConvert)?),
             )),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(
-                l.unbounded_shl(r.try_into().map_err(|e| todo!("{e}"))?),
+                l.pow(r.try_into().map_err(ErrorType::FailedConvert)?),
             )),
+            (Self::Frac(l), Self::UInt(r)) => Ok(Self::Frac(
+                l.powi(r.try_into().map_err(ErrorType::FailedConvert)?),
+            )),
+            (Self::Frac(l), Self::SInt(r)) => Ok(Self::Frac(
+                l.powi(r.try_into().map_err(ErrorType::FailedConvert)?),
+            )),
+            (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l.powf(r))),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Exp,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_shr(self, rhs: Self) -> Result<Self, ContextError<'src>> {
+    fn eval_shl(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(
-                l.unbounded_shr(r.try_into().map_err(|e| todo!("{e}"))?),
+                l.unbounded_shl(r.try_into().map_err(ErrorType::FailedConvert)?),
             )),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(
-                l.unbounded_shr(r.try_into().map_err(|e| todo!("{e}"))?),
+                l.unbounded_shl(r.try_into().map_err(ErrorType::FailedConvert)?),
             )),
 
-            _ => todo!("incompatible"),
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Shl,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_not(self) -> Result<Self, ContextError<'src>> {
+    fn eval_shr(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+        match (self, rhs) {
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(
+                l.unbounded_shr(r.try_into().map_err(ErrorType::FailedConvert)?),
+            )),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(
+                l.unbounded_shr(r.try_into().map_err(ErrorType::FailedConvert)?),
+            )),
+
+            (l, r) => Err(ErrorType::Incompatible {
+                op: Punctuation::Shr,
+                lhs: l.as_type(),
+                rhs: r.as_type(),
+            }),
+        }
+    }
+
+    fn eval_not(self) -> Result<Self, ErrorType<'src>> {
         match self {
             Self::Bool(x) => Ok(Self::Bool(!x)),
             Self::UInt(x) => Ok(Self::UInt(!x)),
             Self::SInt(x) => Ok(Self::SInt(!x)),
 
-            _ => todo!("unsupported"),
+            r => Err(ErrorType::Unsupported {
+                op: Punctuation::Not,
+                rhs: r.as_type(),
+            }),
         }
     }
 
-    fn eval_neg(self) -> Result<Self, ContextError<'src>> {
+    fn eval_neg(self) -> Result<Self, ErrorType<'src>> {
         match self {
-            Self::UInt(x) => Err(todo!("unsigned cannot be negated")),
-            Self::SInt(x) => x
-                .checked_neg()
-                .map(Self::SInt)
-                .ok_or_else(|| todo!("overflow")),
-            Self::Flt(x) => Ok(Self::Flt(-x)),
+            Self::UInt(_) => Err(ErrorType::UnsignedNeg),
 
-            _ => todo!("unsupported"),
+            Self::SInt(x) => x.checked_neg().map(Self::SInt).ok_or(ErrorType::Overflow),
+
+            Self::Frac(x) => Ok(Self::Frac(-x)),
+
+            r => Err(ErrorType::Unsupported {
+                op: Punctuation::Sub,
+                rhs: r.as_type(),
+            }),
         }
     }
 }
 
-pub fn evaluate<'src>(ast: &Expr<'src>) -> Result<Value, ContextError<'src>> {
+pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, ContextError<'src>> {
     match ast {
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
-            let lhs = evaluate(lhs)?;
-            let rhs = evaluate(rhs)?;
+            let lhs = evaluate(source, lhs)?;
+            let rhs = evaluate(source, rhs)?;
             match op.val {
                 TokenValue::Punctuation(punc) => match punc {
                     Punctuation::Rem => lhs.eval_rem(rhs),
@@ -284,52 +375,62 @@ pub fn evaluate<'src>(ast: &Expr<'src>) -> Result<Value, ContextError<'src>> {
                     Punctuation::Add => lhs.eval_add(rhs),
                     Punctuation::Sub => lhs.eval_sub(rhs),
                     Punctuation::Div => lhs.eval_div(rhs),
-                    Punctuation::Lt => lhs.eval_cmp(rhs).map(|ord| Value::Bool(ord.is_lt())),
-                    Punctuation::Gt => lhs.eval_cmp(rhs).map(|ord| Value::Bool(ord.is_gt())),
+                    Punctuation::Lt => lhs.eval_cmp(rhs, punc).map(|ord| Value::Bool(ord.is_lt())),
+                    Punctuation::Gt => lhs.eval_cmp(rhs, punc).map(|ord| Value::Bool(ord.is_gt())),
                     Punctuation::Xor => lhs.eval_xor(rhs),
                     Punctuation::Or => lhs.eval_or(rhs),
-                    Punctuation::Neq => lhs.eval_cmp(rhs).map(|ord| Value::Bool(ord.is_ne())),
+                    Punctuation::Neq => lhs.eval_cmp(rhs, punc).map(|ord| Value::Bool(ord.is_ne())),
                     Punctuation::Nand => lhs.eval_nand(rhs),
                     Punctuation::Nor => lhs.eval_nor(rhs),
                     Punctuation::Xnor => lhs.eval_xnor(rhs),
                     Punctuation::Exp => lhs.eval_exp(rhs),
-                    Punctuation::Le => lhs.eval_cmp(rhs).map(|ord| Value::Bool(ord.is_le())),
+                    Punctuation::Le => lhs.eval_cmp(rhs, punc).map(|ord| Value::Bool(ord.is_le())),
                     Punctuation::Shl => lhs.eval_shl(rhs),
-                    Punctuation::Eq => lhs.eval_cmp(rhs).map(|ord| Value::Bool(ord.is_eq())),
-                    Punctuation::Ge => lhs.eval_cmp(rhs).map(|ord| Value::Bool(ord.is_ge())),
+                    Punctuation::Eq => lhs.eval_cmp(rhs, punc).map(|ord| Value::Bool(ord.is_eq())),
+                    Punctuation::Ge => lhs.eval_cmp(rhs, punc).map(|ord| Value::Bool(ord.is_ge())),
                     Punctuation::Shr => lhs.eval_shr(rhs),
+
                     _ => unimplemented!(),
                 },
                 _ => unimplemented!(),
             }
+            .map_err(|e| (op, e))
         }
 
         Expr::Unary(inner) => {
             let Unary { op, rhs } = &**inner;
-            let rhs = evaluate(rhs)?;
+            let rhs = evaluate(source, rhs)?;
             match op.val {
                 TokenValue::Punctuation(punc) => match punc {
                     Punctuation::Not => rhs.eval_not(),
                     Punctuation::Sub => rhs.eval_neg(),
+
                     _ => unimplemented!(),
                 },
                 _ => unimplemented!(),
             }
+            .map_err(|e| (op, e))
         }
 
         Expr::Literal(token) => match token.val {
             TokenValue::BoolLiteral(b) => Ok(Value::Bool(b)),
             TokenValue::UIntLiteral(n) => Ok(Value::UInt(n)),
             TokenValue::SIntLiteral(n) => Ok(Value::SInt(n)),
-            TokenValue::FltLiteral(x) => Ok(Value::Flt(x)),
+            TokenValue::FltLiteral(x) => Ok(Value::Frac(x)),
             TokenValue::CharLiteral(CharLiteral { ch, .. }) => Ok(Value::Char(ch)),
             TokenValue::StringLiteral(s) => s
                 .process()
-                .map(|StringLiteral { text, .. }| Value::Str(text))
-                .map_err(|e| todo!("{e}")),
-            _ => unimplemented!("not a literal"),
-        },
+                .map(|StringLiteral { text, .. }| Value::Str(text)),
 
-        Expr::Grouping(inner) => evaluate(inner),
+            _ => unimplemented!(),
+        }
+        .map_err(|e| (token, e)),
+
+        Expr::Grouping(inner) => Ok(evaluate(source, inner)?),
     }
+    .map_err(|(token, err)| ContextError {
+        source,
+        range: token.lex_range(source),
+        err,
+    })
 }

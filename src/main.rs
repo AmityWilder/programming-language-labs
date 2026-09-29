@@ -124,24 +124,24 @@ pub fn print_ast(depth: usize, node: &Expr<'_>) {
             let Binary { lhs, op, rhs } = &**inner;
             println!("Binary:");
             print!("{:>depth$} lhs: ", "");
-            print_ast(depth.strict_add(1), lhs);
+            print_ast(depth.strict_add(2), lhs);
             println!("{:>depth$} op: {op:?}", "");
             print!("{:>depth$} rhs: ", "");
-            print_ast(depth.strict_add(1), rhs);
+            print_ast(depth.strict_add(2), rhs);
         }
         Expr::Unary(inner) => {
             let Unary { op, rhs } = &**inner;
             println!("Unary:");
             println!("{:>depth$} op: {op:?}", "");
             print!("{:>depth$} rhs: ", "");
-            print_ast(depth.strict_add(1), rhs);
+            print_ast(depth.strict_add(2), rhs);
         }
         Expr::Literal(token) => {
             println!("Literal: {token:?}");
         }
         Expr::Grouping(inner) => {
-            println!("Grouping:");
-            print_ast(depth.strict_add(1), inner);
+            print!("Grouping:");
+            print_ast(depth.strict_add(2), inner);
         }
     }
 }
@@ -184,6 +184,7 @@ pub fn run_code(source: &str) {
     // token debug
     println!("source code:\n```\n{source}\n```");
 
+    println!();
     println!("tokens:");
     let tokens: Vec<_> = tokenize(source).collect();
     let max_cols = source.lines().map(str::len).max().unwrap_or(0);
@@ -255,6 +256,7 @@ pub fn run_code(source: &str) {
     list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err));
 
     // parse debug
+    println!();
     println!("ast:");
     let ast: Vec<_> = parse(source, tokens.into_iter().filter_map(Result::ok)).collect();
     for res in &ast {
@@ -282,19 +284,30 @@ pub fn run_code(source: &str) {
 
     // eval
     println!();
-    for expr in ast.iter().flatten() {
-        match evaluate(expr) {
-            Ok(x) => match x {
-                eval::Value::Bool(x) => println!("{x:?}"),
-                eval::Value::UInt(x) => println!("{x:?}"),
-                eval::Value::SInt(x) => println!("{x:?}"),
-                eval::Value::Flt(x) => println!("{x:?}"),
-                eval::Value::Char(x) => println!("{x:?}"),
-                eval::Value::Str(x) => println!("{x:?}"),
-            },
-            Err(e) => println!("{e}"),
-        }
-    }
+    println!("evaluation:");
+    let errors: Vec<_> = ast
+        .iter()
+        .flatten()
+        .map(|expr| {
+            evaluate(source, expr)
+                .map(|x| {
+                    print!("\x1b[90m{expr}:\x1b[0m ");
+                    match x {
+                        eval::Value::Bool(x) => println!("{x}"),
+                        eval::Value::UInt(x) => println!("{x}"),
+                        eval::Value::SInt(x) => println!("{x}"),
+                        eval::Value::Frac(x) => println!("{x}"),
+                        eval::Value::Char(x) => println!("{x:?}"),
+                        eval::Value::Str(x) => println!("{x:?}"),
+                    }
+                })
+                .inspect_err(|e| println!("error: {e:?}"))
+        })
+        .filter_map(Result::err)
+        .collect();
+
+    println!();
+    list_errors(errors.iter());
 }
 
 fn main() {

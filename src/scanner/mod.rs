@@ -350,8 +350,13 @@ impl<'src> Scanner<'src> {
         };
         let number = self
             .source
-            .split_once(number_end)
-            .map_or(self.source, |(pre, _)| pre);
+            .find(number_end)
+            .map(|pos| {
+                self.source
+                    .get(..pos)
+                    .expect("find should not be within a UTF-8 character")
+            })
+            .unwrap_or(self.source);
         // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
         // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
         let len = number.trim_end_matches(['.', '-']).len();
