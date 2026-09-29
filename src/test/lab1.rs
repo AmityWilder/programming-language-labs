@@ -4,7 +4,7 @@
 use crate::{
     error::{ContextError, ErrorType},
     scanner::{
-        token::{Punctuation, Token, TokenValue},
+        token::{Token, punc::Punctuation, value::Value},
         tokenize,
     },
 };
@@ -37,7 +37,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::Whitespace,
+                    val: Value::Whitespace,
                 },)]
             );
         }
@@ -49,7 +49,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::Whitespace,
+                    val: Value::Whitespace,
                 },)]
             );
         }
@@ -70,7 +70,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::Comment
+                        val: Value::Comment
                     },)]
                 );
             }
@@ -83,11 +83,11 @@ mod scan {
                     &[
                         Ok(Token {
                             lex: "// apple",
-                            val: TokenValue::Comment
+                            val: Value::Comment
                         },),
                         Ok(Token {
                             lex: "\n",
-                            val: TokenValue::Whitespace
+                            val: Value::Whitespace
                         },)
                     ]
                 );
@@ -109,7 +109,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::Identifier
+                    val: Value::Identifier
                 },)]
             );
         }
@@ -121,7 +121,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::Identifier
+                    val: Value::Identifier
                 },)]
             );
         }
@@ -133,7 +133,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::Identifier
+                    val: Value::Identifier
                 },)]
             );
         }
@@ -154,7 +154,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::UIntLiteral(5)
+                        val: Value::UIntLiteral(5)
                     },)]
                 );
             }
@@ -166,7 +166,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::UIntLiteral(35)
+                        val: Value::UIntLiteral(35)
                     },)]
                 );
             }
@@ -178,7 +178,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::SIntLiteral(-5)
+                        val: Value::SIntLiteral(-5)
                     },)]
                 );
             }
@@ -190,7 +190,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::FltLiteral(2.5)
+                        val: Value::FltLiteral(2.5)
                     },)]
                 );
             }
@@ -202,7 +202,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::FltLiteral(25.25)
+                        val: Value::FltLiteral(25.25)
                     },)]
                 );
             }
@@ -214,7 +214,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::FltLiteral(-25.25)
+                        val: Value::FltLiteral(-25.25)
                     },)]
                 );
             }
@@ -231,7 +231,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::FltLiteral(5e0)
+                        val: Value::FltLiteral(5e0)
                     },)]
                 );
             }
@@ -243,7 +243,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::FltLiteral(5e-5)
+                        val: Value::FltLiteral(5e-5)
                     },)]
                 );
             }
@@ -255,7 +255,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::FltLiteral(5e-50)
+                        val: Value::FltLiteral(5e-50)
                     },)]
                 );
             }
@@ -267,7 +267,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::FltLiteral(-5e-50)
+                        val: Value::FltLiteral(-5e-50)
                     },)]
                 );
             }
@@ -280,15 +280,15 @@ mod scan {
                     &[
                         Ok(Token {
                             lex: "-5e-5",
-                            val: TokenValue::FltLiteral(-5e-5)
+                            val: Value::FltLiteral(-5e-5)
                         }),
                         Ok(Token {
                             lex: "-",
-                            val: TokenValue::Punctuation(Punctuation::Sub)
+                            val: Value::Punctuation(Punctuation::Sub)
                         }),
                         Ok(Token {
                             lex: "3",
-                            val: TokenValue::UIntLiteral(3)
+                            val: Value::UIntLiteral(3)
                         })
                     ]
                 );
@@ -308,11 +308,11 @@ mod scan {
                         // but "e" isn't a valid number literal suffix
                         Ok(Token {
                             lex: "-",
-                            val: TokenValue::Punctuation(Punctuation::Sub)
+                            val: Value::Punctuation(Punctuation::Sub)
                         }),
                         Ok(Token {
                             lex: "-5",
-                            val: TokenValue::SIntLiteral(-5)
+                            val: Value::SIntLiteral(-5)
                         })
                     ]
                 );
@@ -330,7 +330,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::UIntLiteral(0x9F)
+                        val: Value::UIntLiteral(0x9F)
                     },)]
                 );
             }
@@ -360,7 +360,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::UIntLiteral(0o253)
+                        val: Value::UIntLiteral(0o253)
                     },)]
                 );
             }
@@ -390,7 +390,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::UIntLiteral(0b1101_1011)
+                        val: Value::UIntLiteral(0b1101_1011)
                     },)]
                 );
             }
@@ -412,7 +412,7 @@ mod scan {
 
     mod char {
         use super::*;
-        use crate::scanner::token::CharLiteral;
+        use crate::scanner::token::value::CharLiteral;
 
         #[test]
         fn test_scan_char_simple() {
@@ -421,7 +421,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::CharLiteral(CharLiteral {
+                    val: Value::CharLiteral(CharLiteral {
                         ch: 'a',
                         is_escaped: false
                     }),
@@ -478,7 +478,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::CharLiteral(CharLiteral {
+                        val: Value::CharLiteral(CharLiteral {
                             ch: '\0',
                             is_escaped: true
                         })
@@ -493,7 +493,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::CharLiteral(CharLiteral {
+                        val: Value::CharLiteral(CharLiteral {
                             ch: '\x1b',
                             is_escaped: true
                         })
@@ -531,7 +531,7 @@ mod scan {
 
     mod str {
         use super::*;
-        use crate::scanner::token::StrLiteral;
+        use crate::scanner::token::value::StrLiteral;
 
         #[test]
         fn test_scan_str_simple() {
@@ -540,7 +540,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::StringLiteral(StrLiteral { content: "a" }),
+                    val: Value::StringLiteral(StrLiteral { content: "a" }),
                 },)]
             );
         }
@@ -552,7 +552,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::StringLiteral(StrLiteral { content: "aa" }),
+                    val: Value::StringLiteral(StrLiteral { content: "aa" }),
                 })]
             );
         }
@@ -564,7 +564,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: TokenValue::StringLiteral(StrLiteral { content: "" }),
+                    val: Value::StringLiteral(StrLiteral { content: "" }),
                 })]
             );
         }
@@ -592,7 +592,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::StringLiteral(StrLiteral { content: "\\0" })
+                        val: Value::StringLiteral(StrLiteral { content: "\\0" })
                     },)]
                 );
             }
@@ -604,7 +604,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::StringLiteral(StrLiteral { content: "\\x1b" })
+                        val: Value::StringLiteral(StrLiteral { content: "\\x1b" })
                     },)]
                 );
             }
@@ -616,7 +616,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: TokenValue::StringLiteral(StrLiteral { content: "\\1b" })
+                        val: Value::StringLiteral(StrLiteral { content: "\\1b" })
                     },)]
                 );
             }

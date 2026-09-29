@@ -1,6 +1,6 @@
 //! Syntax used for highlighting
 
-use crate::{error::TokenResult, scanner::token::TokenValue};
+use crate::{error::TokenResult, scanner::token::value::Value};
 
 /// Syntactic element category for highlighting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -129,7 +129,7 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
 /// This method may panic if `item` is an error with a malformed [`range`](crate::error::ContextError::range).
 pub fn syntax_of<'src, 'res>(
     item: &'res TokenResult<'src>,
-) -> (&'src str, Syntax, &'res TokenValue<'src>)
+) -> (&'src str, Syntax, &'res Value<'src>)
 where
     'src: 'res,
 {
@@ -137,15 +137,15 @@ where
         Ok(token) => (
             token.lex,
             match token.val {
-                TokenValue::Comment => Syntax::Comment,
-                TokenValue::Whitespace => Syntax::Dimmed,
-                TokenValue::UIntLiteral(_)
-                | TokenValue::SIntLiteral(_)
-                | TokenValue::FltLiteral(_) => Syntax::NumberLiteral,
-                TokenValue::CharLiteral(_) => Syntax::CharLiteral,
-                TokenValue::StringLiteral(_) => Syntax::StringLiteral,
-                TokenValue::BoolLiteral(_) => Syntax::LanguageDefined,
-                TokenValue::Identifier => {
+                Value::Comment => Syntax::Comment,
+                Value::Whitespace => Syntax::Dimmed,
+                Value::UIntLiteral(_) | Value::SIntLiteral(_) | Value::FltLiteral(_) => {
+                    Syntax::NumberLiteral
+                }
+                Value::CharLiteral(_) => Syntax::CharLiteral,
+                Value::StringLiteral(_) => Syntax::StringLiteral,
+                Value::BoolLiteral(_) => Syntax::LanguageDefined,
+                Value::Identifier => {
                     // constants are all-caps
                     if token.lex.chars().any(char::is_uppercase) {
                         if token.lex.chars().any(char::is_lowercase) {
@@ -157,8 +157,8 @@ where
                         Syntax::Variable
                     }
                 }
-                TokenValue::Callable => Syntax::Callable,
-                TokenValue::Keyword(kw) => {
+                Value::Callable => Syntax::Callable,
+                Value::Keyword(kw) => {
                     if kw.is_flow() {
                         Syntax::CtrlKeyword
                     } else if kw.is_type() {
@@ -167,8 +167,8 @@ where
                         Syntax::Keyword
                     }
                 }
-                TokenValue::Macro => Syntax::MacroName,
-                TokenValue::MacroParam => Syntax::MacroParam,
+                Value::Macro => Syntax::MacroName,
+                Value::MacroParam => Syntax::MacroParam,
 
                 _ => Syntax::Normal,
             },
@@ -179,7 +179,7 @@ where
                 .get(e.range)
                 .expect("range should be a range of source"),
             Syntax::Invalid,
-            &TokenValue::Comment,
+            &Value::Comment,
         ),
     }
 }
