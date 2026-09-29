@@ -6,6 +6,8 @@
     reason = "under construction"
 )]
 
+use std::range::Range;
+
 use crate::{
     error::{ContextError, ErrorType, Expecting},
     scanner::{
@@ -43,6 +45,15 @@ pub struct Binary<'src> {
     pub rhs: Expr<'src>,
 }
 
+impl<'src> Binary<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        Range {
+            start: self.lhs.range(source).start,
+            end: self.rhs.range(source).end,
+        }
+    }
+}
+
 impl std::fmt::Display for Binary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self {
@@ -60,6 +71,15 @@ pub struct Unary<'src> {
     pub rhs: Expr<'src>,
 }
 
+impl<'src> Unary<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        Range {
+            start: self.op.lex_range(source).start,
+            end: self.rhs.range(source).end,
+        }
+    }
+}
+
 impl std::fmt::Display for Unary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self {
@@ -71,11 +91,38 @@ impl std::fmt::Display for Unary<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Grouping<'src> {
+    pub open: Token<'src>,
+    pub expr: Expr<'src>,
+    pub close: Token<'src>,
+}
+
+impl<'src> Grouping<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        Range {
+            start: self.open.lex_range(source).start,
+            end: self.close.lex_range(source).end,
+        }
+    }
+}
+
+impl std::fmt::Display for Grouping<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            open: Token { lex: open, .. },
+            expr,
+            close: Token { lex: close, .. },
+        } = self;
+        write!(f, "{open}{expr}{close}")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'src> {
     Binary(Box<Binary<'src>>),
     Unary(Box<Unary<'src>>),
     Literal(Token<'src>),
-    Grouping(Box<Self>),
+    Grouping(Box<Grouping<'src>>),
 }
 
 impl std::fmt::Display for Expr<'_> {
@@ -84,12 +131,21 @@ impl std::fmt::Display for Expr<'_> {
             Self::Binary(inner) => inner.fmt(f),
             Self::Unary(inner) => inner.fmt(f),
             Self::Literal(Token { lex, .. }) => lex.fmt(f),
-            Self::Grouping(inner) => write!(f, "({inner})"),
+            Self::Grouping(inner) => inner.fmt(f),
         }
     }
 }
 
 impl<'src> Expr<'src> {
+    pub fn range(&self, source: &'src str) -> Range<usize> {
+        match self {
+            Self::Binary(binary) => binary.range(source),
+            Self::Unary(unary) => unary.range(source),
+            Self::Literal(token) => token.lex_range(source),
+            Self::Grouping(group) => group.range(source),
+        }
+    }
+
     pub fn binary(inner: Binary<'src>) -> Self {
         Self::Binary(Box::new(inner))
     }
@@ -102,7 +158,7 @@ impl<'src> Expr<'src> {
         Self::Literal(literal)
     }
 
-    pub fn grouping(inner: Self) -> Self {
+    pub fn grouping(inner: Grouping<'src>) -> Self {
         Self::Grouping(Box::new(inner))
     }
 }
@@ -219,7 +275,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     }
 
     fn group(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let lparen = self.try_pull(
+        let open = self.try_pull(
             match_token!(Punctuation(Punctuation::LParen)),
             Expecting::an("parenthesized expression"),
         )?;
@@ -228,13 +284,13 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 match_token!(Punctuation(Punctuation::RParen)),
                 Expecting::an("expression or `)`"),
             )
-            .map(move |_| Expr::grouping(expr))
+            .map(move |close| Expr::grouping(Grouping { open, expr, close }))
             .map_err(|e| ContextError {
                 source: e.source,
                 range: e.range,
                 err: match e.err {
                     ErrorType::MissingToken { .. } => ErrorType::MissingCloseBracket {
-                        expect: (Bracket::Paren, lparen.lex_range(self.source)),
+                        expect: (Bracket::Paren, open.lex_range(self.source)),
                     },
 
                     ErrorType::UnexpectedToken {
@@ -248,7 +304,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                             },
                         ..
                     } => ErrorType::IncorrectCloseBracket {
-                        expect: (Bracket::Paren, lparen.lex_range(self.source)),
+                        expect: (Bracket::Paren, open.lex_range(self.source)),
                         actual: match punc {
                             Punctuation::RBrace => Bracket::Brace,
                             Punctuation::RBrack => Bracket::Brack,
@@ -348,20 +404,30 @@ mod tests {
                             lex: "-",
                             val: Value::Punctuation(Punctuation::Sub)
                         },
-                        rhs: Expr::grouping(Expr::binary(Binary {
-                            lhs: Expr::literal(Token {
-                                lex: "7",
-                                val: Value::UIntLiteral(7)
-                            }),
-                            op: Token {
-                                lex: "/",
-                                val: Value::Punctuation(Punctuation::Div)
+                        rhs: Expr::grouping(Grouping {
+                            open: Token {
+                                lex: "(",
+                                val: Value::Punctuation(Punctuation::LParen)
                             },
-                            rhs: Expr::literal(Token {
-                                lex: "8",
-                                val: Value::UIntLiteral(8)
-                            })
-                        }))
+                            expr: Expr::binary(Binary {
+                                lhs: Expr::literal(Token {
+                                    lex: "7",
+                                    val: Value::UIntLiteral(7)
+                                }),
+                                op: Token {
+                                    lex: "/",
+                                    val: Value::Punctuation(Punctuation::Div)
+                                },
+                                rhs: Expr::literal(Token {
+                                    lex: "8",
+                                    val: Value::UIntLiteral(8)
+                                })
+                            }),
+                            close: Token {
+                                lex: ")",
+                                val: Value::Punctuation(Punctuation::RParen)
+                            }
+                        })
                     }),
                     op: Token {
                         lex: "*",
