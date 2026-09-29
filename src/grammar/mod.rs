@@ -43,10 +43,31 @@ pub struct Binary<'src> {
     pub rhs: Expr<'src>,
 }
 
+impl std::fmt::Display for Binary<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            lhs,
+            op: Token { lex: op, .. },
+            rhs,
+        } = self;
+        write!(f, "{lhs}{op}{rhs}")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unary<'src> {
     pub op: Token<'src>,
     pub rhs: Expr<'src>,
+}
+
+impl std::fmt::Display for Unary<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            op: Token { lex: op, .. },
+            rhs,
+        } = self;
+        write!(f, "{op}{rhs}")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +76,17 @@ pub enum Expr<'src> {
     Unary(Box<Unary<'src>>),
     Literal(Token<'src>),
     Grouping(Box<Self>),
+}
+
+impl std::fmt::Display for Expr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Binary(inner) => inner.fmt(f),
+            Self::Unary(inner) => inner.fmt(f),
+            Self::Literal(Token { lex, .. }) => lex.fmt(f),
+            Self::Grouping(inner) => write!(f, "({inner})"),
+        }
+    }
 }
 
 impl<'src> Expr<'src> {
@@ -100,7 +132,7 @@ where
         self.tokens
             .peek()
             .is_some()
-            .then(|| self.statement().inspect_err(|_| self.synchronize()))
+            .then(|| self.expression().inspect_err(|_| self.synchronize()))
     }
 }
 
@@ -194,7 +226,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         let expr = self.expression()?;
         self.try_pull(
                 match_token!(Punctuation(Punctuation::RParen)),
-                Expecting::a("`)`"),
+                Expecting::an("expression or `)`"),
             )
             .map(move |_| Expr::grouping(expr))
             .map_err(|e| ContextError {

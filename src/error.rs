@@ -1,11 +1,14 @@
 //! Errors regarding code validity
 
-use crate::scanner::{
-    Bracket,
-    symbols::{
-        BIN_PREFIX, BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM,
+use crate::{
+    eval::ValueType,
+    scanner::{
+        Bracket,
+        symbols::{
+            BIN_PREFIX, BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM,
+        },
+        token::{Token, escape_char, punc::Punctuation},
     },
-    token::{Token, escape_char},
 };
 use std::range::Range;
 
@@ -124,8 +127,9 @@ impl std::error::Error for NumLitError {
 /// The kind of error describing a [`ContextError`]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ErrorType<'src> {
+    // ----------------------------
     // lex
-    // ------
+    // ----------------------------
     /// Token type could not be identified from the initial character, and so is not a valid token
     UnknownToken,
     /// A block comment has no `*/` to end it
@@ -147,8 +151,9 @@ pub enum ErrorType<'src> {
     /// A number literal could not be evaluated as a number
     InvalidNumLiteral(NumLitError),
 
+    // ----------------------------
     // parse
-    // ------
+    // ----------------------------
     /// A closing bracket is of the wrong type for the open bracket at its depth
     IncorrectCloseBracket {
         /// The bracket type being expected based on the opening side
@@ -178,6 +183,26 @@ pub enum ErrorType<'src> {
         /// The token found
         actual: Token<'src>,
     },
+
+    // ----------------------------
+    // eval
+    // ----------------------------
+    /// Attempted to find the quotient or remainder with a denominator of 0
+    DivByZero,
+    /// The operands in a binary operation are of incompatible type
+    Incompatible {
+        op: Punctuation,
+        lhs: ValueType,
+        rhs: ValueType,
+    },
+    /// The operand in a unary operation is of an unsupported type
+    Unsupported { op: Punctuation, rhs: ValueType },
+    /// Unsigned cannot be negated
+    UnsignedNeg,
+    /// An operation resulted in overflow/underflow
+    Overflow,
+    /// Failed to convert between integer types
+    FailedConvert(std::num::TryFromIntError),
 }
 
 impl std::fmt::Display for ErrorType<'_> {
@@ -245,6 +270,15 @@ impl std::fmt::Display for ErrorType<'_> {
             } => {
                 write!(f, "expected {article} {expect}, found `{found}`")
             }
+
+            Self::DivByZero => write!(f, "divide by zero"),
+            Self::Incompatible { op, lhs, rhs } => {
+                write!(f, "{lhs} is not compatible with {rhs} for `{op}`")
+            }
+            Self::Unsupported { op, rhs } => write!(f, "`{op}` is not supported for {rhs}"),
+            Self::UnsignedNeg => write!(f, "unsigned integer cannot be negated"),
+            Self::Overflow => write!(f, "arithmetic overflow"),
+            Self::FailedConvert(e) => write!(f, "failed conversion: {e}"),
         }
     }
 }
@@ -426,6 +460,13 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             | ErrorType::MissingCloseBracket { .. }
             | ErrorType::MissingToken { .. }
             | ErrorType::UnexpectedToken { .. } => "GRA",
+
+            ErrorType::DivByZero
+            | ErrorType::Incompatible { .. }
+            | ErrorType::Unsupported { .. }
+            | ErrorType::UnsignedNeg
+            | ErrorType::Overflow
+            | ErrorType::FailedConvert(_) => "RUN",
         };
         let code = match self.0.err {
             ErrorType::UnknownToken => 0,
@@ -439,11 +480,18 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             ErrorType::InvalidEscape(_) => 8,
             ErrorType::InvalidNumLiteral(_) => 9,
 
-            ErrorType::IncorrectCloseBracket { .. } => 10,
-            ErrorType::ExcessCloseBracket { .. } => 11,
-            ErrorType::MissingCloseBracket { .. } => 12,
-            ErrorType::MissingToken { .. } => 21,
-            ErrorType::UnexpectedToken { .. } => 22,
+            ErrorType::IncorrectCloseBracket { .. } => 11,
+            ErrorType::ExcessCloseBracket { .. } => 12,
+            ErrorType::MissingCloseBracket { .. } => 13,
+            ErrorType::MissingToken { .. } => 14,
+            ErrorType::UnexpectedToken { .. } => 15,
+
+            ErrorType::DivByZero => 20,
+            ErrorType::Incompatible { .. } => 21,
+            ErrorType::Unsupported { .. } => 22,
+            ErrorType::UnsignedNeg => 23,
+            ErrorType::Overflow => 24,
+            ErrorType::FailedConvert(_) => 25,
         };
         write!(f, "err[{area}{code:>03}]")
     }
@@ -459,7 +507,7 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
         reason = "it would be even more complicated to make a separate function for each of these"
     )]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let src = self
+        let src: &str = self
             .0
             .source
             .get(self.0.range)
@@ -586,24 +634,44 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                         ),
 
                         IntErrorKind::InvalidDigit => {
+                            // TODO: dry this up
                             let (suffix, base_name) =
                                 if let Some(digits) = src.strip_prefix(HEX_PREFIX) {
-                                    digits
-                                        .split_once(|ch: char| !ch.is_ascii_hexdigit())
-                                        .map(|(_, suffix)| (suffix, "hexadecimal"))
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_ascii_hexdigit())
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "hexadecimal")
                                 } else if let Some(digits) = src.strip_prefix(OCT_PREFIX) {
                                     digits
-                                        .split_once(|ch: char| !ch.is_digit(8))
-                                        .map(|(_, suffix)| (suffix, "octal"))
+                                        .find(|ch: char| !ch.is_digit(8))
+                                        .expect("should contain an invalid digit");
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_digit(8))
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "octal")
                                 } else if let Some(digits) = src.strip_prefix(BIN_PREFIX) {
-                                    digits
-                                        .split_once(|ch: char| !ch.is_digit(2))
-                                        .map(|(_, suffix)| (suffix, "binary"))
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_digit(2))
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "binary")
                                 } else {
-                                    src.split_once(|ch: char| !ch.is_ascii_digit())
-                                        .map(|(_, suffix)| (suffix, "decimal"))
-                                }
-                                .expect("digits are unexpectedly valid");
+                                    let pos = src
+                                        .find(|ch: char| !ch.is_ascii_digit())
+                                        .expect("should contain an invalid digit");
+                                    let suffix = src
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "decimal")
+                                };
                             write!(
                                 f,
                                 "the suffix `{suffix}` is not valid for {base_name} integer literals",
@@ -628,23 +696,38 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                             let digits = src.strip_prefix('-').unwrap_or(src);
                             let (suffix, base_name) =
                                 if let Some(digits) = digits.strip_prefix(HEX_PREFIX) {
-                                    digits
-                                        .split_once(|ch: char| !ch.is_ascii_hexdigit())
-                                        .map(|(_, suffix)| (suffix, "hexadecimal"))
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_ascii_hexdigit())
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "hexadecimal")
                                 } else if let Some(digits) = digits.strip_prefix(OCT_PREFIX) {
-                                    digits
-                                        .split_once(|ch: char| !ch.is_digit(8))
-                                        .map(|(_, suffix)| (suffix, "octal"))
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_digit(8))
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "octal")
                                 } else if let Some(digits) = digits.strip_prefix(BIN_PREFIX) {
-                                    digits
-                                        .split_once(|ch: char| !ch.is_digit(2))
-                                        .map(|(_, suffix)| (suffix, "binary"))
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_digit(2))
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "binary")
                                 } else {
-                                    digits
-                                        .split_once(|ch: char| !ch.is_ascii_digit())
-                                        .map(|(_, suffix)| (suffix, "decimal"))
-                                }
-                                .expect("digits are unexpectedly valid");
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_ascii_digit())
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "decimal")
+                                };
                             write!(
                                 f,
                                 "the suffix `{suffix}` is not valid for {base_name} integer literals",
@@ -672,7 +755,7 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
 
             ErrorType::IncorrectCloseBracket { expect, actual } => write!(
                 f,
-                "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or `{}`",
+                "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or the `{}`",
                 expect.0.close(),
                 actual.close(),
                 actual.open(),
@@ -705,8 +788,21 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
             } => {
                 write!(
                     f,
-                    "try inserting {article} {expect} before `{found}` or remove `{found}`"
+                    "try inserting {article} {expect} before the `{found}` or remove the `{found}`"
                 )
+            }
+
+            ErrorType::DivByZero => write!(f, "ensure the right side cannot be 0"),
+            ErrorType::Incompatible { .. } => {
+                write!(f, "try a different operator or convert the types")
+            }
+            ErrorType::Unsupported { .. } => {
+                write!(f, "try a different operator or convert the type")
+            }
+            ErrorType::UnsignedNeg => write!(f, "remove the `-` or convert the integer to signed"),
+            ErrorType::Overflow => write!(f, "ensure the result will fit in an integer"),
+            ErrorType::FailedConvert(_) => {
+                write!(f, "ensure the conversion will not result in overflow")
             }
         }
     }
@@ -715,28 +811,24 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
 /// Returns [`None`] if `range` is out of bounds for `src`
 #[must_use]
 pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
-    let line_start = src
-        .get(..range.start)?
-        .rfind(['\n', '\r'])
-        .map_or(range.start, |n| {
-            // SAFETY: `n` is the position of the start of a 1-byte ASCII char, therefore we can
-            // add the length of that char (1 byte) to get the end, which is at most src.len().
-            unsafe { n.unchecked_add(1) }
-        });
-    let line_end = src
-        .get(range.end..)?
-        .find(['\n', '\r'])
-        .map_or(src.len(), |n| {
-            // SAFETY: `n` is a position in `source[range.end..]`, therefore `range.end + n`
-            // is a position in `source[..]`, which must be in memory whose len therefore fits in usize.
-            unsafe { n.unchecked_add(range.end) }
-        });
+    let line_start = src.get(..range.start)?.rfind('\n').map_or(0, |pos| {
+        // SAFETY: `pos` is the position of the start of a 1-byte ASCII char ('\n'), therefore we can
+        // add the length of that char (1 byte) to get the end, which is at most src.len().
+        unsafe { pos.unchecked_add('\n'.len_utf8()) }
+    });
+    let line_end = src.get(range.end..)?.find('\n').map_or(src.len(), |n| {
+        // SAFETY: `n` is a position in `source[range.end..]`, therefore `range.end + n`
+        // is a position in `source[..]`, which must be in memory whose len therefore fits in usize.
+        unsafe { n.unchecked_add(range.end) }
+    });
     Some((line_start..line_end).into())
 }
 
 /// [`std::fmt::Display`] advanced error information with line references for a context error
 #[derive(Debug, Clone)]
 pub struct RenderedContextError<'src, 'err>(&'err ContextError<'src>);
+
+type DynDisplay = Box<dyn FnOnce(&mut std::fmt::Formatter<'_>) -> std::fmt::Result>;
 
 /// Outputs a line reference to `f`.
 ///
@@ -752,7 +844,7 @@ fn line_ref(
     range: Range<usize>,
     underline_style: &str,
     underline_char: char,
-    msg: &str,
+    msg: DynDisplay,
 ) -> std::fmt::Result {
     const PRE_NUM: &str = "   \x1b[94m";
     const POST_NUM: &str = " |\x1b[0m  ";
@@ -793,11 +885,10 @@ fn line_ref(
         for _ in start_col..end_col {
             write!(f, "{underline_char}")?;
         }
-        if idx == num_lines {
-            write!(f, " {msg}")?;
-        }
-        writeln!(f, "\x1b[0m")?;
     }
+    f.write_str(" ")?;
+    msg(f)?;
+    writeln!(f, "\x1b[0m")?;
     Ok(())
 }
 
@@ -814,40 +905,67 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
                 "\x1b[91m",
                 '^',
                 match self.0.err {
-                    ErrorType::UnknownToken => "what is this?",
+                    ErrorType::UnknownToken => Box::new(|f| f.write_str("what is this?")),
                     ErrorType::EndlessBlockComment
                     | ErrorType::EndlessCharLiteral
-                    | ErrorType::EndlessStringLiteral => "never ends",
-                    ErrorType::EmptyCharLiteral => "empty",
-                    ErrorType::MultiCharLiteral => "a char should be 1 char",
-                    ErrorType::EscapedCharLiteralEnd | ErrorType::EscapedStringLiteralEnd => {
-                        "never ends, unless you remove the `\\`"
+                    | ErrorType::EndlessStringLiteral => Box::new(|f| f.write_str("never ends")),
+                    ErrorType::EmptyCharLiteral => Box::new(|f| f.write_str("empty")),
+                    ErrorType::MultiCharLiteral => {
+                        Box::new(|f| f.write_str("a char should be 1 char"))
                     }
-                    ErrorType::InvalidEscape(_) => "has an invalid escape sequence",
-                    ErrorType::InvalidNumLiteral(_) => "not a valid number",
-                    ErrorType::IncorrectCloseBracket { .. } => "incorrect partner",
-                    ErrorType::ExcessCloseBracket { .. } => "missing a partner",
-                    ErrorType::MissingCloseBracket { .. } => "missing close bracket",
-                    ErrorType::MissingToken { .. } => "missing token",
-                    ErrorType::UnexpectedToken { .. } => "wrong token",
+                    ErrorType::EscapedCharLiteralEnd | ErrorType::EscapedStringLiteralEnd => {
+                        Box::new(|f| f.write_str("never ends, unless you remove the `\\`"))
+                    }
+                    ErrorType::InvalidEscape(_) => {
+                        Box::new(|f| f.write_str("has an invalid escape sequence"))
+                    }
+                    ErrorType::InvalidNumLiteral(_) => {
+                        Box::new(|f| f.write_str("not a valid number"))
+                    }
+                    ErrorType::IncorrectCloseBracket { .. } => {
+                        Box::new(|f| f.write_str("incorrect partner"))
+                    }
+                    ErrorType::ExcessCloseBracket { .. } => {
+                        Box::new(|f| f.write_str("missing a partner"))
+                    }
+                    ErrorType::MissingCloseBracket { .. } => {
+                        Box::new(|f| f.write_str("missing close bracket"))
+                    }
+                    ErrorType::MissingToken { .. } => Box::new(|f| f.write_str("missing token")),
+                    ErrorType::UnexpectedToken { .. } => Box::new(|f| f.write_str("wrong token")),
+                    ErrorType::DivByZero => Box::new(|f| f.write_str("dividing by 0")),
+                    ErrorType::Incompatible { op, .. } => {
+                        Box::new(move |f| write!(f, "operands do not support {op}"))
+                    }
+                    ErrorType::Unsupported { op, .. } => {
+                        Box::new(move |f| write!(f, "operand does not support {op}"))
+                    }
+                    ErrorType::UnsignedNeg => Box::new(|f| f.write_str("uint can't be negated")),
+                    ErrorType::Overflow => Box::new(|f| f.write_str("unhandled integer overflow")),
+                    ErrorType::FailedConvert(_) => {
+                        Box::new(|f| f.write_str("integer conversion failed"))
+                    }
                 },
             )?;
             has_prev = true;
         }
 
         // info
-        let items = match self.0.err {
+        let items: Vec<(Range<usize>, DynDisplay)> = match self.0.err {
             ErrorType::IncorrectCloseBracket {
                 expect: (_, range), ..
-            } => &[(range, "bracket type introduced here")],
+            } => vec![(
+                range,
+                Box::new(|f| f.write_str("bracket type introduced here")),
+            )],
 
             ErrorType::MissingCloseBracket { expect: (_, range) } => {
-                &[(range, "missing a partner")]
+                vec![(range, Box::new(|f| f.write_str("missing a partner")))]
             }
 
-            _ => [].as_slice(),
+            _ => Vec::new(),
         };
-        for &(range, explanation) in items {
+        for (range, explanation) in items {
             if has_prev {
                 writeln!(f)?;
             }
