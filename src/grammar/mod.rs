@@ -15,6 +15,46 @@ use crate::{
 };
 use std::range::Range;
 
+macro_rules! match_token {
+    ($pattern:pat) => {
+        |token| matches!(token.val, $pattern)
+    };
+}
+
+macro_rules! binary_op_seq {
+    ($outer:ident, $inner:ident, $pattern:pat) => {
+        fn $outer(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+            self.binary_op(Self::$inner, match_token!($pattern))
+        }
+    };
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expr<'src> {
+    Binary(Box<(Self, Token<'src>, Self)>),
+    Unary(Box<(Token<'src>, Self)>),
+    Literal(Token<'src>),
+    Grouping(Box<Self>),
+}
+
+impl<'src> Expr<'src> {
+    pub fn binary(lhs: Self, op: Token<'src>, rhs: Self) -> Self {
+        Self::Binary(Box::new((lhs, op, rhs)))
+    }
+
+    pub fn unary(op: Token<'src>, rhs: Self) -> Self {
+        Self::Unary(Box::new((op, rhs)))
+    }
+
+    pub const fn literal(literal: Token<'src>) -> Self {
+        Self::Literal(literal)
+    }
+
+    pub fn grouping(inner: Self) -> Self {
+        Self::Grouping(Box::new(inner))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Parser<'src, I: Iterator<Item = Token<'src>>> {
     source: &'src str,
@@ -42,124 +82,64 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.equality()
     }
 
-    fn equality(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.comparison()?;
+    fn binary_op(
+        &mut self,
+        items: fn(&mut Self) -> Result<Expr<'src>, ContextError<'src>>,
+        sep: fn(&Token<'src>) -> bool,
+    ) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = items(self)?;
 
-        while let Some(op) = self.tokens.next_if(|token| {
-            matches!(
-                token.val,
-                TokenValue::Punctuation(Punctuation::Neq | Punctuation::Eq)
-            )
-        }) {
-            let rhs = self.comparison()?;
-            expr = Expr::Binary(Box::new((expr, op, rhs)));
+        while let Some(op) = self.tokens.next_if(sep) {
+            let rhs = items(self)?;
+            expr = Expr::binary(expr, op, rhs);
         }
 
         Ok(expr)
     }
 
-    fn comparison(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.term()?;
+    binary_op_seq! { equality, comparison, TokenValue::Punctuation(Punctuation::Neq | Punctuation::Eq) }
 
-        while let Some(op) = self.tokens.next_if(|token| {
-            matches!(
-                token.val,
-                TokenValue::Punctuation(
-                    Punctuation::Gt | Punctuation::Ge | Punctuation::Lt | Punctuation::Le
-                )
-            )
-        }) {
-            let rhs = self.term()?;
-            expr = Expr::Binary(Box::new((expr, op, rhs)));
-        }
+    binary_op_seq! { comparison, term, TokenValue::Punctuation(
+        Punctuation::Gt | Punctuation::Ge | Punctuation::Lt | Punctuation::Le
+    ) }
 
-        Ok(expr)
-    }
+    binary_op_seq! { term, factor, TokenValue::Punctuation(Punctuation::Add | Punctuation::Sub) }
 
-    fn term(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.factor()?;
+    binary_op_seq! { factor, exponent, TokenValue::Punctuation(Punctuation::Mul | Punctuation::Div) }
 
-        while let Some(op) = self.tokens.next_if(|token| {
-            matches!(
-                token.val,
-                TokenValue::Punctuation(Punctuation::Add | Punctuation::Sub)
-            )
-        }) {
-            let rhs = self.factor()?;
-            expr = Expr::Binary(Box::new((expr, op, rhs)));
-        }
-
-        Ok(expr)
-    }
-
-    fn factor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.exponent()?;
-
-        while let Some(op) = self.tokens.next_if(|token| {
-            matches!(
-                token.val,
-                TokenValue::Punctuation(Punctuation::Mul | Punctuation::Div)
-            )
-        }) {
-            let rhs = self.exponent()?;
-            expr = Expr::Binary(Box::new((expr, op, rhs)));
-        }
-
-        Ok(expr)
-    }
-
-    fn exponent(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.unary()?;
-
-        while let Some(op) = self
-            .tokens
-            .next_if(|token| matches!(token.val, TokenValue::Punctuation(Punctuation::Exponent)))
-        {
-            let rhs = self.unary()?;
-            expr = Expr::Binary(Box::new((expr, op, rhs)));
-        }
-
-        Ok(expr)
-    }
+    binary_op_seq! { exponent, unary, TokenValue::Punctuation(Punctuation::Exponent) }
 
     fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        if let Some(op) = self.tokens.next_if(|token| {
-            matches!(
-                token.val,
-                TokenValue::Punctuation(Punctuation::Not | Punctuation::Sub)
-            )
-        }) {
-            let rhs = self.unary()?;
-            Ok(Expr::Unary(Box::new((op, rhs))))
+        if let Some(op) = self.tokens.next_if(match_token!(TokenValue::Punctuation(
+            Punctuation::Not | Punctuation::Sub
+        ))) {
+            Ok(Expr::unary(op, self.unary()?))
         } else {
             self.primary()
         }
     }
 
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        if let Some(token) = self.tokens.next_if(|token| {
-            matches!(
-                token.val,
-                TokenValue::BoolLiteral(_)
-                    | TokenValue::Keyword(Keyword::None)
-                    | TokenValue::UIntLiteral(_)
-                    | TokenValue::SIntLiteral(_)
-                    | TokenValue::FltLiteral(_)
-                    | TokenValue::CharLiteral(_)
-                    | TokenValue::StringLiteral(_)
-            )
-        }) {
-            Ok(Expr::Literal(token))
+        if let Some(token) = self.tokens.next_if(match_token!(
+            TokenValue::BoolLiteral(_)
+                | TokenValue::Keyword(Keyword::None)
+                | TokenValue::UIntLiteral(_)
+                | TokenValue::SIntLiteral(_)
+                | TokenValue::FltLiteral(_)
+                | TokenValue::CharLiteral(_)
+                | TokenValue::StringLiteral(_)
+        )) {
+            Ok(Expr::literal(token))
         } else if let Some(lparen) = self
             .tokens
-            .next_if(|token| matches!(token.val, TokenValue::Punctuation(Punctuation::LParen)))
+            .next_if(match_token!(TokenValue::Punctuation(Punctuation::LParen)))
         {
             let expr = self.expression()?;
             if let Some(_rparen) = self
                 .tokens
-                .next_if(|token| matches!(token.val, TokenValue::Punctuation(Punctuation::RParen)))
+                .next_if(match_token!(TokenValue::Punctuation(Punctuation::RParen)))
             {
-                Ok(Expr::Grouping(Box::new(expr)))
+                Ok(Expr::grouping(expr))
             } else {
                 let peeked = self.tokens.peek();
                 Err(ContextError {
@@ -213,14 +193,6 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             todo!()
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Expr<'src> {
-    Binary(Box<(Self, Token<'src>, Self)>),
-    Unary(Box<(Token<'src>, Self)>),
-    Literal(Token<'src>),
-    Grouping(Box<Self>),
 }
 
 #[cfg(test)]
