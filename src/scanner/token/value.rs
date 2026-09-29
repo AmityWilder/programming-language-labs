@@ -1,4 +1,4 @@
-use std::range::Range;
+use std::{range::Range, sync::LazyLock};
 
 use crate::{
     error::{ErrorType, NumLitError},
@@ -8,20 +8,18 @@ use crate::{
     },
 };
 
-/// Produces a `IntErrorKind::NegOverflow`, since those are private :/
-fn number_underflow() -> std::num::TryFromIntError {
-    {
-        #[allow(clippy::as_conversions, reason = "into is not const")]
-        #[expect(clippy::invalid_upcast_comparisons, reason = "further proves my point")]
-        const {
-            assert!(i16::MIN < i8::MIN as i16, "proof. i16::MIN < i8::MIN");
-        }
-        // SAFETY: `i16::MIN < i8::MIN`. Because it is `<` and not `<=`, and both are integers,
-        // there must be a difference of at least 1.
-        i8::try_from(unsafe { i16::from(i8::MIN).unchecked_sub(1) })
-            .expect_err("should result in negative overflow")
+/// A `IntErrorKind::NegOverflow`, since those are private :/
+static NEG_UNDERFLOW: LazyLock<std::num::TryFromIntError> = LazyLock::new(|| {
+    #[allow(clippy::as_conversions, reason = "into is not const")]
+    #[expect(clippy::invalid_upcast_comparisons, reason = "further proves my point")]
+    const {
+        assert!(i16::MIN < i8::MIN as i16, "proof. i16::MIN < i8::MIN");
     }
-}
+    // SAFETY: `i16::MIN < i8::MIN`. Because it is `<` and not `<=`, and both are integers,
+    // there must be a difference of at least 1.
+    i8::try_from(unsafe { i16::from(i8::MIN).unchecked_sub(1) })
+        .expect_err("should result in negative overflow")
+});
 
 /// Information about a character literal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -183,9 +181,7 @@ impl<'src> Value<'src> {
                             .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::SInt(e)))
                             .and_then(|x| {
                                 x.checked_neg().ok_or_else(|| {
-                                    ErrorType::InvalidNumLiteral(NumLitError::SInt(
-                                        number_underflow(),
-                                    ))
+                                    ErrorType::InvalidNumLiteral(NumLitError::SInt(*NEG_UNDERFLOW))
                                 })
                             }))
                         .map(Self::SIntLiteral)
