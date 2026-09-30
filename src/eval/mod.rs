@@ -66,8 +66,9 @@ impl<'src> Value {
     fn eval_rem(
         self,
         rhs: Self,
-        rhs_expr: &Expr<'src>,
         source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
     ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => {
@@ -88,13 +89,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Rem,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_and(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_and(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l & r)),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l & r)),
@@ -102,13 +109,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::And,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_mul(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_mul(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => {
                 l.checked_mul(r).map(Self::UInt).ok_or(ErrorType::Overflow)
@@ -122,13 +135,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Mul,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_add(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_add(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => {
                 l.checked_add(r).map(Self::UInt).ok_or(ErrorType::Overflow)
@@ -156,13 +175,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Add,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_sub(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_sub(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => {
                 l.checked_sub(r).map(Self::UInt).ok_or(ErrorType::Overflow)
@@ -176,8 +201,8 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Sub,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
@@ -185,8 +210,9 @@ impl<'src> Value {
     fn eval_div(
         self,
         rhs: Self,
-        rhs_expr: &Expr<'src>,
         source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
     ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => {
@@ -207,13 +233,20 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Div,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_cmp(self, rhs: Self, op: Punctuation) -> Result<std::cmp::Ordering, ErrorType<'src>> {
+    fn eval_cmp(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+        op: Punctuation,
+    ) -> Result<std::cmp::Ordering, ErrorType<'src>> {
         // TODO: more things should support cmp
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => Ok(l.cmp(&r)),
@@ -224,13 +257,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_xor(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_xor(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l ^ r)),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l ^ r)),
@@ -238,13 +277,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Xor,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_or(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_or(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l | r)),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l | r)),
@@ -252,13 +297,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Or,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_nand(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_nand(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(!(l & r))),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l & r))),
@@ -266,13 +317,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Nand,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_nor(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_nor(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(!(l | r))),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l | r))),
@@ -280,13 +337,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Nor,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_xnor(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_xnor(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(!(l ^ r))),
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l ^ r))),
@@ -294,13 +357,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Xnor,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_exp(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_exp(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(
                 l.pow(r.try_into().map_err(ErrorType::FailedConvert)?),
@@ -318,13 +387,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Exp,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_shl(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_shl(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(
                 l.unbounded_shl(r.try_into().map_err(ErrorType::FailedConvert)?),
@@ -335,13 +410,19 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Shl,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_shr(self, rhs: Self) -> Result<Self, ErrorType<'src>> {
+    fn eval_shr(
+        self,
+        rhs: Self,
+        source: &'src str,
+        lhs_expr: &Expr<'src>,
+        rhs_expr: &Expr<'src>,
+    ) -> Result<Self, ErrorType<'src>> {
         match (self, rhs) {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(
                 l.unbounded_shr(r.try_into().map_err(ErrorType::FailedConvert)?),
@@ -352,13 +433,13 @@ impl<'src> Value {
 
             (l, r) => Err(ErrorType::Incompatible {
                 op: Punctuation::Shr,
-                lhs: l.as_type(),
-                rhs: r.as_type(),
+                lhs: (l.as_type(), lhs_expr.range(source)),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_not(self) -> Result<Self, ErrorType<'src>> {
+    fn eval_not(self, source: &'src str, rhs_expr: &Expr<'src>) -> Result<Self, ErrorType<'src>> {
         match self {
             Self::Bool(x) => Ok(Self::Bool(!x)),
             Self::UInt(x) => Ok(Self::UInt(!x)),
@@ -366,12 +447,12 @@ impl<'src> Value {
 
             r => Err(ErrorType::Unsupported {
                 op: Punctuation::Not,
-                rhs: r.as_type(),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
 
-    fn eval_neg(self) -> Result<Self, ErrorType<'src>> {
+    fn eval_neg(self, source: &'src str, rhs_expr: &Expr<'src>) -> Result<Self, ErrorType<'src>> {
         match self {
             Self::UInt(_) => Err(ErrorType::UnsignedNeg),
 
@@ -381,7 +462,7 @@ impl<'src> Value {
 
             r => Err(ErrorType::Unsupported {
                 op: Punctuation::Sub,
-                rhs: r.as_type(),
+                rhs: (r.as_type(), rhs_expr.range(source)),
             }),
         }
     }
@@ -391,30 +472,68 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, Cont
     match ast {
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
-            let l = evaluate(source, lhs)?;
-            let r = evaluate(source, rhs)?;
             match op.val {
                 TokenValue::Punctuation(punc) => match punc {
-                    Punctuation::Rem => l.eval_rem(r, rhs, source),
-                    Punctuation::And => l.eval_and(r),
-                    Punctuation::Mul => l.eval_mul(r),
-                    Punctuation::Add => l.eval_add(r),
-                    Punctuation::Sub => l.eval_sub(r),
-                    Punctuation::Div => l.eval_div(r, rhs, source),
-                    Punctuation::Lt => l.eval_cmp(r, punc).map(|ord| Value::Bool(ord.is_lt())),
-                    Punctuation::Gt => l.eval_cmp(r, punc).map(|ord| Value::Bool(ord.is_gt())),
-                    Punctuation::Xor => l.eval_xor(r),
-                    Punctuation::Or => l.eval_or(r),
-                    Punctuation::Neq => l.eval_cmp(r, punc).map(|ord| Value::Bool(ord.is_ne())),
-                    Punctuation::Nand => l.eval_nand(r),
-                    Punctuation::Nor => l.eval_nor(r),
-                    Punctuation::Xnor => l.eval_xnor(r),
-                    Punctuation::Exp => l.eval_exp(r),
-                    Punctuation::Le => l.eval_cmp(r, punc).map(|ord| Value::Bool(ord.is_le())),
-                    Punctuation::Shl => l.eval_shl(r),
-                    Punctuation::Eq => l.eval_cmp(r, punc).map(|ord| Value::Bool(ord.is_eq())),
-                    Punctuation::Ge => l.eval_cmp(r, punc).map(|ord| Value::Bool(ord.is_ge())),
-                    Punctuation::Shr => l.eval_shr(r),
+                    Punctuation::Rem => {
+                        evaluate(source, lhs)?.eval_rem(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::And => {
+                        evaluate(source, lhs)?.eval_and(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Mul => {
+                        evaluate(source, lhs)?.eval_mul(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Add => {
+                        evaluate(source, lhs)?.eval_add(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Sub => {
+                        evaluate(source, lhs)?.eval_sub(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Div => {
+                        evaluate(source, lhs)?.eval_div(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Lt => evaluate(source, lhs)?
+                        .eval_cmp(evaluate(source, rhs)?, source, lhs, rhs, punc)
+                        .map(|ord| Value::Bool(ord.is_lt())),
+                    Punctuation::Gt => evaluate(source, lhs)?
+                        .eval_cmp(evaluate(source, rhs)?, source, lhs, rhs, punc)
+                        .map(|ord| Value::Bool(ord.is_gt())),
+                    Punctuation::Xor => {
+                        evaluate(source, lhs)?.eval_xor(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Or => {
+                        evaluate(source, lhs)?.eval_or(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Neq => evaluate(source, lhs)?
+                        .eval_cmp(evaluate(source, rhs)?, source, lhs, rhs, punc)
+                        .map(|ord| Value::Bool(ord.is_ne())),
+                    Punctuation::Nand => {
+                        evaluate(source, lhs)?.eval_nand(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Nor => {
+                        evaluate(source, lhs)?.eval_nor(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Xnor => {
+                        evaluate(source, lhs)?.eval_xnor(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Exp => {
+                        evaluate(source, lhs)?.eval_exp(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Le => evaluate(source, lhs)?
+                        .eval_cmp(evaluate(source, rhs)?, source, lhs, rhs, punc)
+                        .map(|ord| Value::Bool(ord.is_le())),
+                    Punctuation::Shl => {
+                        evaluate(source, lhs)?.eval_shl(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
+                    Punctuation::Eq => evaluate(source, lhs)?
+                        .eval_cmp(evaluate(source, rhs)?, source, lhs, rhs, punc)
+                        .map(|ord| Value::Bool(ord.is_eq())),
+                    Punctuation::Ge => evaluate(source, lhs)?
+                        .eval_cmp(evaluate(source, rhs)?, source, lhs, rhs, punc)
+                        .map(|ord| Value::Bool(ord.is_ge())),
+                    Punctuation::Shr => {
+                        evaluate(source, lhs)?.eval_shr(evaluate(source, rhs)?, source, lhs, rhs)
+                    }
 
                     _ => unimplemented!(),
                 },
@@ -427,8 +546,8 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, Cont
             let Unary { op, rhs } = &**inner;
             match op.val {
                 TokenValue::Punctuation(punc) => match punc {
-                    Punctuation::Not => evaluate(source, rhs)?.eval_not(),
-                    Punctuation::Sub => evaluate(source, rhs)?.eval_neg(),
+                    Punctuation::Not => evaluate(source, rhs)?.eval_not(source, rhs),
+                    Punctuation::Sub => evaluate(source, rhs)?.eval_neg(source, rhs),
                     Punctuation::MacroStringify => Ok(Value::Str(rhs.to_string())),
 
                     _ => unimplemented!(),

@@ -139,16 +139,16 @@ pub enum ErrorType<'src> {
         /// The binary operator
         op: Punctuation,
         /// The type of the value on the left side of the operator
-        lhs: ValueType,
+        lhs: (ValueType, Range<usize>),
         /// The type of the value on the right side of the operator
-        rhs: ValueType,
+        rhs: (ValueType, Range<usize>),
     },
     /// The operand in a unary operation is of an unsupported type
     Unsupported {
         /// The unary operator
         op: Punctuation,
         /// The type of the value on the right side of the operator
-        rhs: ValueType,
+        rhs: (ValueType, Range<usize>),
     },
     /// Unsigned cannot be negated
     UnsignedNeg,
@@ -222,10 +222,16 @@ impl std::fmt::Display for ErrorType<'_> {
             }
 
             Self::DivByZero { .. } => write!(f, "divide by zero"),
-            Self::Incompatible { op, lhs, rhs } => {
+            Self::Incompatible {
+                op,
+                lhs: (lhs, _),
+                rhs: (rhs, _),
+            } => {
                 write!(f, "{lhs} is not compatible with {rhs} for `{op}`")
             }
-            Self::Unsupported { op, rhs } => write!(f, "`{op}` is not supported for {rhs}"),
+            Self::Unsupported { op, rhs: (rhs, _) } => {
+                write!(f, "`{op}` is not supported for {rhs}")
+            }
             Self::UnsignedNeg => write!(f, "unsigned integer cannot be negated"),
             Self::Overflow => write!(f, "arithmetic overflow"),
             Self::FailedConvert(e) => write!(f, "failed conversion: {e}"),
@@ -826,10 +832,6 @@ pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
 #[derive(Debug, Clone)]
 pub struct RenderedContextError<'src, 'err>(&'err ContextError<'src>);
 
-/// Dynamic write function
-// TODO: surely this can be done more cheaply?
-type DynDisplay = Box<dyn FnOnce(&mut std::fmt::Formatter<'_>) -> std::fmt::Result>;
-
 /// Outputs a line reference to `f`.
 ///
 /// Example:
@@ -844,7 +846,7 @@ fn line_ref(
     range: Range<usize>,
     underline_style: &str,
     underline_char: char,
-    msg: DynDisplay,
+    msg: &dyn std::fmt::Display,
 ) -> std::fmt::Result {
     const PRE_NUM: &str = "   \x1b[94m";
     const POST_NUM: &str = " |\x1b[0m  ";
@@ -887,9 +889,98 @@ fn line_ref(
         }
     }
     f.write_str(" ")?;
-    msg(f)?;
-    writeln!(f, "\x1b[0m")?;
+    writeln!(f, " {msg}\x1b[0m")?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct UnsupportedOpMsg {
+    op: Punctuation,
+    is_binary: bool,
+}
+
+impl std::fmt::Display for UnsupportedOpMsg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (s, by, these) = if self.is_binary {
+            ("s", "between", "these")
+        } else {
+            ("", "by", "this")
+        };
+        let op = match self.op {
+            Punctuation::Not => "logical or bitwise 'not'",
+            Punctuation::MacroStringify => "token stringification",
+            Punctuation::Rem => "remainder",
+            Punctuation::And => "logical or bitwise 'and'",
+            Punctuation::Mul => "multiplication",
+            Punctuation::Add => "addition",
+            Punctuation::Sub if self.is_binary => "subtraction",
+            Punctuation::Sub => "arithmetic negation",
+            Punctuation::Div => "division",
+            Punctuation::Ref => "referencing",
+            Punctuation::Xor => "logical or bitwise 'xor'",
+            Punctuation::Or => "logical or bitwise 'or'",
+            Punctuation::Nand => "logical or bitwise 'nand'",
+            Punctuation::Nor => "logical or bitwise 'nor'",
+            Punctuation::Xnor => "logical or bitwise 'xnor'",
+            Punctuation::MacroConcatenate => "token concatenation",
+            Punctuation::Exp => "exponentiation",
+            Punctuation::Shl => "left bitshift",
+            Punctuation::Shr => "right bitshift",
+
+            Punctuation::Lt
+            | Punctuation::Gt
+            | Punctuation::Neq
+            | Punctuation::Le
+            | Punctuation::Eq
+            | Punctuation::Ge => "comparison",
+
+            Punctuation::LParen
+            | Punctuation::RParen
+            | Punctuation::Comma
+            | Punctuation::Dot
+            | Punctuation::Colon
+            | Punctuation::Semi
+            | Punctuation::Assign
+            | Punctuation::QMark // TODO: will this be an operation?
+            | Punctuation::LBrack
+            | Punctuation::RBrack
+            | Punctuation::LBrace
+            | Punctuation::RBrace
+            | Punctuation::RemAssign
+            | Punctuation::AndAssign
+            | Punctuation::MulAssign
+            | Punctuation::AddAssign
+            | Punctuation::SubAssign
+            | Punctuation::Arrow
+            | Punctuation::DotDot // TODO: will this be an operation?
+            | Punctuation::DivAssign
+            | Punctuation::PathSep
+            | Punctuation::ColonEq
+            | Punctuation::FatArrow
+            | Punctuation::XorAssign
+            | Punctuation::OrAssign
+            | Punctuation::ExpAssign
+            | Punctuation::ShlAssign
+            | Punctuation::ShrAssign
+            | Punctuation::NandAssign
+            | Punctuation::NorAssign
+            | Punctuation::XnorAssign => {
+                unimplemented!("not an operator")
+            }
+        };
+        write!(f, "{op} not supported {by} operand{s} of {these} type{s}")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct TypeResolutionMsg {
+    ty: ValueType,
+}
+
+impl std::fmt::Display for TypeResolutionMsg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "type resolves to {}", self.ty)
+    }
 }
 
 impl std::fmt::Display for RenderedContextError<'_, '_> {
@@ -907,7 +998,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
                 macro_range,
                 "\x1b[96m",
                 '-',
-                Box::new(|f| f.write_str("within this macro expansion")),
+                &"within this macro expansion",
             )?;
             has_prev = true;
         }
@@ -917,6 +1008,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
             if has_prev {
                 writeln!(f)?;
             }
+            let unsupported_op_buf: UnsupportedOpMsg;
             line_ref(
                 f,
                 self.0.source,
@@ -924,70 +1016,70 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
                 "\x1b[91m",
                 '^',
                 match self.0.err {
-                    ErrorType::UnknownToken => Box::new(|f| f.write_str("what is this?")),
+                    ErrorType::UnknownToken => &"what is this?",
                     ErrorType::EndlessBlockComment
                     | ErrorType::EndlessCharLiteral
-                    | ErrorType::EndlessStringLiteral => Box::new(|f| f.write_str("never ends")),
-                    ErrorType::EmptyCharLiteral => Box::new(|f| f.write_str("empty")),
-                    ErrorType::MultiCharLiteral => {
-                        Box::new(|f| f.write_str("a char should be 1 char"))
-                    }
+                    | ErrorType::EndlessStringLiteral => &"never ends",
+                    ErrorType::EmptyCharLiteral => &"empty",
+                    ErrorType::MultiCharLiteral => &"a char should be 1 char",
                     ErrorType::EscapedCharLiteralEnd | ErrorType::EscapedStringLiteralEnd => {
-                        Box::new(|f| f.write_str("never ends, unless you remove the `\\`"))
+                        &"never ends, unless you remove the `\\`"
                     }
-                    ErrorType::InvalidEscape(_) => {
-                        Box::new(|f| f.write_str("has an invalid escape sequence"))
-                    }
-                    ErrorType::InvalidNumLiteral(_) => {
-                        Box::new(|f| f.write_str("not a valid number"))
-                    }
-                    ErrorType::MacroUndefined => Box::new(|f| f.write_str("not defined")),
-                    ErrorType::IncorrectCloseBracket { .. } => {
-                        Box::new(|f| f.write_str("incorrect partner"))
-                    }
-                    ErrorType::ExcessCloseBracket { .. } => {
-                        Box::new(|f| f.write_str("missing a partner"))
-                    }
-                    ErrorType::MissingCloseBracket { .. } => {
-                        Box::new(|f| f.write_str("missing close bracket"))
-                    }
-                    ErrorType::MissingToken { .. } => Box::new(|f| f.write_str("missing token")),
-                    ErrorType::UnexpectedToken { .. } => Box::new(|f| f.write_str("wrong token")),
-                    ErrorType::DivByZero { .. } => Box::new(|f| f.write_str("dividing by 0")),
+                    ErrorType::InvalidEscape(_) => &"has an invalid escape sequence",
+                    ErrorType::InvalidNumLiteral(_) => &"not a valid number",
+                    ErrorType::MacroUndefined => &"not defined",
+                    ErrorType::IncorrectCloseBracket { .. } => &"incorrect partner",
+                    ErrorType::ExcessCloseBracket { .. } => &"missing a partner",
+                    ErrorType::MissingCloseBracket { .. } => &"missing close bracket",
+                    ErrorType::MissingToken { .. } => &"missing token",
+                    ErrorType::UnexpectedToken { .. } => &"wrong token",
+                    ErrorType::DivByZero { .. } => &"dividing by 0",
                     ErrorType::Incompatible { op, .. } => {
-                        Box::new(move |f| write!(f, "operands do not support {op}"))
+                        unsupported_op_buf = UnsupportedOpMsg {
+                            op,
+                            is_binary: true,
+                        };
+                        &unsupported_op_buf
                     }
                     ErrorType::Unsupported { op, .. } => {
-                        Box::new(move |f| write!(f, "operand does not support {op}"))
+                        unsupported_op_buf = UnsupportedOpMsg {
+                            op,
+                            is_binary: false,
+                        };
+                        &unsupported_op_buf
                     }
-                    ErrorType::UnsignedNeg => Box::new(|f| f.write_str("uint can't be negated")),
-                    ErrorType::Overflow => Box::new(|f| f.write_str("unhandled integer overflow")),
-                    ErrorType::FailedConvert(_) => {
-                        Box::new(|f| f.write_str("integer conversion failed"))
-                    }
+                    ErrorType::UnsignedNeg => &"uint can't be negated",
+                    ErrorType::Overflow => &"unhandled integer overflow",
+                    ErrorType::FailedConvert(_) => &"integer conversion failed",
                 },
             )?;
             has_prev = true;
         }
 
         // info
-        let items: Vec<(Range<usize>, DynDisplay)> = match self.0.err {
+        let lhs_ty_buf: TypeResolutionMsg;
+        let rhs_ty_buf: TypeResolutionMsg;
+        let items: Vec<(Range<usize>, &dyn std::fmt::Display)> = match self.0.err {
             ErrorType::IncorrectCloseBracket {
                 expect: (_, range), ..
-            } => vec![(
-                range,
-                Box::new(|f| f.write_str("bracket type introduced here")),
-            )],
+            } => vec![(range, &"bracket type introduced here")],
 
             ErrorType::MissingCloseBracket { expect: (_, range) } => {
-                vec![(range, Box::new(|f| f.write_str("missing a partner")))]
+                vec![(range, &"missing a partner")]
             }
 
             ErrorType::DivByZero { zero } => {
-                vec![(
-                    zero,
-                    Box::new(|f| f.write_str("this expression evaluates to 0")),
-                )]
+                vec![(zero, &"this expression evaluates to 0")]
+            }
+
+            ErrorType::Incompatible { lhs, rhs, .. } => {
+                lhs_ty_buf = TypeResolutionMsg { ty: lhs.0 };
+                rhs_ty_buf = TypeResolutionMsg { ty: rhs.0 };
+                vec![(lhs.1, &lhs_ty_buf), (rhs.1, &rhs_ty_buf)]
+            }
+            ErrorType::Unsupported { rhs, .. } => {
+                rhs_ty_buf = TypeResolutionMsg { ty: rhs.0 };
+                vec![(rhs.1, &rhs_ty_buf)]
             }
 
             _ => Vec::new(),
