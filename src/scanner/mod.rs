@@ -114,6 +114,7 @@ impl<'src> Scanner<'src> {
                 ),
                 end,
             },
+            macro_range: None,
             err,
         }
     }
@@ -145,6 +146,7 @@ impl<'src> Scanner<'src> {
                 .split_off(len)
                 .expect("find and len should return safe positions within source"),
             val: Value::Whitespace,
+            mac: None,
         }
     }
 
@@ -173,6 +175,7 @@ impl<'src> Scanner<'src> {
         Token {
             lex,
             val: Value::Macro,
+            mac: None,
         }
     }
 
@@ -201,6 +204,7 @@ impl<'src> Scanner<'src> {
         Token {
             lex,
             val: Value::MacroParam,
+            mac: None,
         }
     }
 
@@ -270,8 +274,16 @@ impl<'src> Scanner<'src> {
                     .split_off(len)
                     .expect("find and len should return safe positions to split at");
                 match open_delim {
-                    STR_DELIM => Value::string_literal(lex).map(|val| Token { lex, val }),
-                    CHAR_DELIM => Value::char_literal(lex).map(|val| Token { lex, val }),
+                    STR_DELIM => Value::string_literal(lex).map(|val| Token {
+                        lex,
+                        val,
+                        mac: None,
+                    }),
+                    CHAR_DELIM => Value::char_literal(lex).map(|val| Token {
+                        lex,
+                        val,
+                        mac: None,
+                    }),
 
                     _ => unreachable!("should be guarded by if condition"),
                 }
@@ -314,7 +326,11 @@ impl<'src> Scanner<'src> {
                 }
             }
         };
-        Token { lex, val }
+        Token {
+            lex,
+            val,
+            mac: None,
+        }
     }
 
     /// The source code starts with [`TokenType::Macro`]
@@ -364,7 +380,11 @@ impl<'src> Scanner<'src> {
             .split_off(len)
             .expect("should be a safe position to split at");
         Value::number_literal(lex)
-            .map(|val| Token { lex, val })
+            .map(|val| Token {
+                lex,
+                val,
+                mac: None,
+            })
             .map_err(|err| self.error_prev(len, err))
     }
 
@@ -389,6 +409,7 @@ impl<'src> Scanner<'src> {
                 .split_off(len)
                 .expect("should be a safe position to split at"),
             val: Value::Comment,
+            mac: None,
         }
     }
 
@@ -430,6 +451,7 @@ impl<'src> Scanner<'src> {
                 .split_off(len)
                 .expect("should be a safe position to split at"),
             val: Value::Comment,
+            mac: None,
         })
         .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
     }
@@ -453,6 +475,7 @@ impl<'src> Scanner<'src> {
                 Token {
                     lex,
                     val: Value::Punctuation(punc),
+                    mac: None,
                 }
             })
             .ok_or_else(|| {

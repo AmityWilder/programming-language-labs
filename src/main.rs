@@ -235,15 +235,9 @@ where
             Ok(token) => {
                 println!("{}{token:?}{}", style.begin(), style.end());
             }
-            Err(ContextError { source, range, err }) => {
-                let src = source
-                    .get(*range)
-                    .expect("range should be a range in source");
-                println!(
-                    "{}ContextError({src:?}): {err:?}{}",
-                    style.begin(),
-                    style.end()
-                );
+            Err(e) => {
+                let style = &SYNTAX_STYLE_ANSI.invalid;
+                println!("{}{e:?}{}", style.begin(), style.end())
             }
         }
     }
@@ -316,16 +310,9 @@ pub fn run_code(source: &str) {
             Ok(node) => {
                 print_ast(node, 0, 0);
             }
-            Err(ContextError { source, range, err }) => {
-                let style = SYNTAX_STYLE_ANSI[Syntax::Invalid];
-                let src = source
-                    .get(*range)
-                    .expect("range should be a range in source");
-                println!(
-                    "{}ContextError({src:?}): {err:?}{}",
-                    style.begin(),
-                    style.end()
-                );
+            Err(e) => {
+                let style = &SYNTAX_STYLE_ANSI.invalid;
+                println!("{}{e:?}{}", style.begin(), style.end())
             }
         }
     }

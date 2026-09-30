@@ -8,7 +8,10 @@ use crate::{
         token::{Token, keyword::Keyword, punc::Punctuation, value::Value},
     },
 };
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    range::Range,
+};
 
 #[derive(Debug, Clone)]
 struct MacroSub<'src, I> {
@@ -67,10 +70,14 @@ impl<'src> MacroDef<'src> {
     }
 }
 
+/// Consumes macros and converts them into token sequences
 #[derive(Debug, Clone)]
 pub struct Preprocessor<'src> {
+    /// The source code
     source: &'src str,
+    /// The token stream (actively modified)
     tokens: VecDeque<Result<Token<'src>, ContextError<'src>>>,
+    /// Macro definitions (actively modified)
     macros: HashMap<&'src str, MacroDef<'src>>,
 }
 
@@ -88,6 +95,8 @@ impl<'src> Preprocessor<'src> {
 }
 
 impl<'src> Preprocessor<'src> {
+    /// Expect a token matching `p` and return an error if it is not found.
+    /// Ignores whitespace and comments.
     fn require<P>(&mut self, p: P, expecting: Expecting) -> Result<Token<'src>, ContextError<'src>>
     where
         P: FnOnce(Token<'src>) -> bool,
@@ -106,15 +115,21 @@ impl<'src> Preprocessor<'src> {
         match self.tokens.pop_front() {
             Some(Ok(token)) if p(token) => Ok(token),
 
-            item => Err(ContextError::missing_or_unexpected(
-                item.transpose()?,
-                self.source,
-                expecting,
-            )),
+            item => {
+                // put it back
+                if let Some(item) = item.clone() {
+                    self.tokens.push_front(item);
+                }
+                Err(ContextError::missing_or_unexpected(
+                    item.transpose()?,
+                    self.source,
+                    expecting,
+                ))
+            }
         }
     }
 
-    /// Just found a `def` keyword
+    /// Consume a macro definition (expects `def` keyword to have already been consumed)
     fn macro_define(&mut self) -> Result<(), ContextError<'src>> {
         let macro_name = self.require(match_token!(Macro), Expecting::a("macro identifier"))?;
 
@@ -160,12 +175,15 @@ impl<'src> Preprocessor<'src> {
         let mut def = Vec::new();
         let mut depth: usize = 0;
         loop {
-            let token = self.tokens.pop_front().ok_or_else(|| ContextError {
-                source: self.source,
-                range: (self.source.len()..self.source.len()).into(),
-                err: ErrorType::MissingCloseBracket {
-                    expect: (Bracket::Brace, open_brace.lex_range(self.source)),
-                },
+            let token = self.tokens.pop_front().ok_or_else(|| {
+                ContextError::error(
+                    self.source,
+                    None,
+                    None,
+                    ErrorType::MissingCloseBracket {
+                        expect: (Bracket::Brace, open_brace.lex_range(self.source)),
+                    },
+                )
             })??;
             match token.val {
                 Value::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
@@ -192,14 +210,17 @@ impl<'src> Preprocessor<'src> {
         Ok(())
     }
 
+    /// Expand a macro call into its substituted definition
     fn macro_expand(&mut self, macro_name: Token<'src>) -> Result<(), ContextError<'src>> {
-        // TODO: how to handle recursive expansion?
+        let mut macro_range = macro_name.lex_range(self.source);
+
         let param_count = self
             .macros
             .get(&macro_name.lex)
             .ok_or_else(|| ContextError {
                 source: self.source,
                 range: macro_name.lex_range(self.source),
+                macro_range: Some(macro_range),
                 err: ErrorType::MacroUndefined,
             })?
             .params
@@ -214,12 +235,15 @@ impl<'src> Preprocessor<'src> {
             let mut arg = Vec::new();
             let mut depth: usize = 0;
             loop {
-                let token = self.tokens.pop_front().ok_or_else(|| ContextError {
-                    source: self.source,
-                    range: (self.source.len()..self.source.len()).into(),
-                    err: ErrorType::MissingCloseBracket {
-                        expect: (Bracket::Brace, open_brace.lex_range(self.source)),
-                    },
+                let token = self.tokens.pop_front().ok_or_else(|| {
+                    ContextError::error(
+                        self.source,
+                        None,
+                        Some(macro_range),
+                        ErrorType::MissingCloseBracket {
+                            expect: (Bracket::Brace, open_brace.lex_range(self.source)),
+                        },
+                    )
                 })??;
                 match token.val {
                     Value::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
@@ -227,6 +251,7 @@ impl<'src> Preprocessor<'src> {
                         if let Some(n) = depth.checked_sub(1) {
                             depth = n;
                         } else {
+                            macro_range.end = token.lex_range(self.source).end;
                             break;
                         }
                     }
@@ -242,8 +267,15 @@ impl<'src> Preprocessor<'src> {
             .get(&macro_name.lex)
             .expect("should have returned an error at the start of the fn");
 
-        self.tokens
-            .prepend(def.substitute(args).map(Ok).collect::<Vec<_>>().drain(..));
+        self.tokens.prepend(
+            def.substitute(args)
+                .map(|mut token| {
+                    token.mac = Some(macro_range);
+                    Ok(token)
+                })
+                .collect::<Vec<_>>()
+                .drain(..),
+        );
 
         Ok(())
     }
