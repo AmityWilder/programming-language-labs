@@ -1,3 +1,5 @@
+//! Punctuation tokens
+
 define_token_eq! {
     /// Operators and other punctuation (but not brackets)
     ///

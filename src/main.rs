@@ -217,6 +217,7 @@ where
     }
 }
 
+/// Display the debug of tokens in a stream
 fn print_tokens<'src: 'arr, 'arr, I>(source: &str, tokens: I)
 where
     I: IntoIterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,

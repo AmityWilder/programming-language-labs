@@ -9,7 +9,7 @@
 use std::range::Range;
 
 use crate::{
-    error::{ContextError, ErrorType, Expecting},
+    error::{ContextError, ErrorType},
     scanner::{
         Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::Value},
@@ -216,7 +216,11 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.tokens.next_if(p)
     }
 
-    fn try_pull<P>(&mut self, p: P, expected: Expecting) -> Result<Token<'src>, ContextError<'src>>
+    fn try_pull<P>(
+        &mut self,
+        p: P,
+        expected: &'static str,
+    ) -> Result<Token<'src>, ContextError<'src>>
     where
         P: FnOnce(&Token<'src>) -> bool,
     {
@@ -227,10 +231,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     fn statement(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let expr = self.expression()?;
-        self.try_pull(
-            match_token!(Punctuation(Punctuation::Semi)),
-            Expecting::a("`;`"),
-        )?;
+        self.try_pull(match_token!(Punctuation(Punctuation::Semi)), "a `;`")?;
         Ok(expr)
     }
 
@@ -273,7 +274,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                     | CharLiteral(_)
                     | StringLiteral(_)
             ),
-            Expecting::a("literal"),
+            "a literal",
         )
         .map(Expr::literal)
     }
@@ -281,12 +282,12 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn group(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let open = self.try_pull(
             match_token!(Punctuation(Punctuation::LParen)),
-            Expecting::an("parenthesized expression"),
+            "a parenthesized expression",
         )?;
         let expr = self.expression()?;
         self.try_pull(
             match_token!(Punctuation(Punctuation::RParen)),
-            Expecting::an("expression or `)`"),
+            "an expression or `)`",
         )
         .map(move |close| Expr::grouping(Grouping { open, expr, close }))
         .map_err(|e| {
@@ -315,9 +316,9 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.literal().or_else(|_| self.group()).map_err(|mut e| {
             if let ErrorType::MissingToken { expect } | ErrorType::UnexpectedToken { expect, .. } =
                 &mut e.err
-                && expect.expect == "parenthesized expression"
+                && *expect == "parenthesized expression"
             {
-                *expect = Expecting::an("expression");
+                *expect = "an expression";
             }
             e
         })

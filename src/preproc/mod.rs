@@ -1,22 +1,23 @@
 //! Preprocessing (macros)
 
 use crate::{
-    error::{ContextError, ErrorType, Expecting},
+    error::{ContextError, ErrorType},
     grammar::match_token,
     scanner::{
         Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::Value},
     },
 };
-use std::{
-    collections::{HashMap, VecDeque},
-    range::Range,
-};
+use std::collections::{HashMap, VecDeque};
 
+/// Macro substitution
 #[derive(Debug, Clone)]
 struct MacroSub<'src, I> {
+    /// Mapping of the parameter names to the related argument tokens
     arg_map: HashMap<&'src str, Vec<Token<'src>>>,
+    /// The tokens of the macro definition
     tokens: I,
+    /// For flattening - the tokens of the argument currently being substituted
     curr: std::vec::IntoIter<Token<'src>>,
 }
 
@@ -44,13 +45,17 @@ where
     }
 }
 
+/// A macro definition
 #[derive(Debug, Clone, PartialEq)]
 struct MacroDef<'src> {
+    /// The macro parameter names
     pub params: Vec<&'src str>,
+    /// The tokens of the definition (may contain macro parameters)
     pub tokens: Vec<Token<'src>>,
 }
 
 impl<'src> MacroDef<'src> {
+    /// Substitute the arguments in place of the parameters in the definition
     fn substitute<'def, I>(
         &'def self,
         args: I,
@@ -82,6 +87,7 @@ pub struct Preprocessor<'src> {
 }
 
 impl<'src> Preprocessor<'src> {
+    /// Construct a new preprocessor over `tokens`
     fn new<I>(source: &'src str, tokens: I) -> Self
     where
         I: IntoIterator<Item = Result<Token<'src>, ContextError<'src>>>,
@@ -97,7 +103,11 @@ impl<'src> Preprocessor<'src> {
 impl<'src> Preprocessor<'src> {
     /// Expect a token matching `p` and return an error if it is not found.
     /// Ignores whitespace and comments.
-    fn require<P>(&mut self, p: P, expecting: Expecting) -> Result<Token<'src>, ContextError<'src>>
+    fn require<P>(
+        &mut self,
+        p: P,
+        expecting: &'static str,
+    ) -> Result<Token<'src>, ContextError<'src>>
     where
         P: FnOnce(Token<'src>) -> bool,
     {
@@ -131,12 +141,9 @@ impl<'src> Preprocessor<'src> {
 
     /// Consume a macro definition (expects `def` keyword to have already been consumed)
     fn macro_define(&mut self) -> Result<(), ContextError<'src>> {
-        let macro_name = self.require(match_token!(Macro), Expecting::a("macro identifier"))?;
+        let macro_name = self.require(match_token!(Macro), "a macro identifier")?;
 
-        _ = self.require(
-            match_token!(Punctuation(Punctuation::LParen)),
-            Expecting::a("`(`"),
-        )?;
+        _ = self.require(match_token!(Punctuation(Punctuation::LParen)), "a `(`")?;
 
         let mut params = Vec::new();
         loop {
@@ -144,7 +151,7 @@ impl<'src> Preprocessor<'src> {
                 match self
                     .require(
                         match_token!(Punctuation(Punctuation::Comma | Punctuation::RParen)),
-                        Expecting::a("`,` or `)`"),
+                        "a `,` or `)`",
                     )?
                     .val
                 {
@@ -157,7 +164,7 @@ impl<'src> Preprocessor<'src> {
 
             let token = self.require(
                 match_token!(MacroParam | Punctuation(Punctuation::RParen)),
-                Expecting::a("macro parameter or `)`"),
+                "a macro parameter or `)`",
             )?;
             match token.val {
                 Value::MacroParam => params.push(token.lex),
@@ -169,7 +176,7 @@ impl<'src> Preprocessor<'src> {
 
         let open_brace = self.require(
             match_token!(Punctuation(Punctuation::LBrace)),
-            Expecting::a("`{` for macro definition"),
+            "a `{` for macro definition",
         )?;
 
         let mut def = Vec::new();
@@ -230,7 +237,7 @@ impl<'src> Preprocessor<'src> {
         for _ in 0..param_count {
             let open_brace = self.require(
                 match_token!(Punctuation(Punctuation::LBrace)),
-                Expecting::a("`{` for macro argument"),
+                "a `{` for macro argument",
             )?;
             let mut arg = Vec::new();
             let mut depth: usize = 0;
@@ -314,6 +321,7 @@ impl<'src> Iterator for Preprocessor<'src> {
     }
 }
 
+/// Preprocess a token stream to evaluate macros
 pub fn preprocess<'src, A>(source: &'src str, stream: A) -> Preprocessor<'src>
 where
     A: IntoIterator<IntoIter: 'src, Item = Result<Token<'src>, ContextError<'src>>>,
