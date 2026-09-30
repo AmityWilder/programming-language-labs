@@ -8,7 +8,7 @@ use crate::{
         token::{Token, keyword::Keyword, punc::Punctuation, value::Value},
     },
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone)]
 struct MacroSub<'src, I> {
@@ -70,22 +70,18 @@ impl<'src> MacroDef<'src> {
 #[derive(Debug, Clone)]
 pub struct Preprocessor<'src> {
     source: &'src str,
-    /// Reverse order
-    tokens: Vec<Result<Token<'src>, ContextError<'src>>>,
+    tokens: VecDeque<Result<Token<'src>, ContextError<'src>>>,
     macros: HashMap<&'src str, MacroDef<'src>>,
 }
 
 impl<'src> Preprocessor<'src> {
     fn new<I>(source: &'src str, tokens: I) -> Self
     where
-        I: IntoIterator<
-                IntoIter: DoubleEndedIterator,
-                Item = Result<Token<'src>, ContextError<'src>>,
-            >,
+        I: IntoIterator<Item = Result<Token<'src>, ContextError<'src>>>,
     {
         Self {
             source,
-            tokens: Vec::from_iter(tokens.into_iter().rev()),
+            tokens: VecDeque::from_iter(tokens),
             macros: HashMap::new(),
         }
     }
@@ -96,16 +92,21 @@ impl<'src> Preprocessor<'src> {
     where
         P: FnOnce(Token<'src>) -> bool,
     {
-        self.tokens.pop_if(|res| {
-            res.as_ref()
-                .is_ok_and(|token| matches!(token.val, Value::Whitespace | Value::Comment))
-        });
-        let item = self.tokens.pop();
+        // clear out the ignored tokens
+        while self
+            .tokens
+            .pop_front_if(|res| {
+                res.as_ref()
+                    .is_ok_and(|token| matches!(token.val, Value::Whitespace | Value::Comment))
+            })
+            .is_some()
+        {}
 
-        match item {
+        // next item that isn't whitespace or a comment
+        match self.tokens.pop_front() {
             Some(Ok(token)) if p(token) => Ok(token),
 
-            _ => Err(ContextError::missing_or_unexpected(
+            item => Err(ContextError::missing_or_unexpected(
                 item.transpose()?,
                 self.source,
                 expecting,
@@ -153,13 +154,13 @@ impl<'src> Preprocessor<'src> {
 
         let open_brace = self.require(
             match_token!(Punctuation(Punctuation::LBrace)),
-            Expecting::a("`{`"),
+            Expecting::a("`{` for macro definition"),
         )?;
 
-        // TODO: balanced braces
         let mut def = Vec::new();
+        let mut depth: usize = 0;
         loop {
-            let token = self.tokens.pop().ok_or_else(|| ContextError {
+            let token = self.tokens.pop_front().ok_or_else(|| ContextError {
                 source: self.source,
                 range: (self.source.len()..self.source.len()).into(),
                 err: ErrorType::MissingCloseBracket {
@@ -167,7 +168,14 @@ impl<'src> Preprocessor<'src> {
                 },
             })??;
             match token.val {
-                Value::Punctuation(Punctuation::RBrace) => break,
+                Value::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
+                Value::Punctuation(Punctuation::RBrace) => {
+                    if let Some(n) = depth.checked_sub(1) {
+                        depth = n;
+                    } else {
+                        break;
+                    }
+                }
                 _ => def.push(token),
             }
         }
@@ -183,8 +191,8 @@ impl<'src> Preprocessor<'src> {
         Ok(())
     }
 
-    // how will we iterate over the new tokens?
     fn macro_expand(&mut self, macro_name: Token<'src>) -> Result<(), ContextError<'src>> {
+        // TODO: how to handle recursive expansion?
         let param_count = self
             .macros
             .get(&macro_name.lex)
@@ -200,11 +208,12 @@ impl<'src> Preprocessor<'src> {
         for _ in 0..param_count {
             let open_brace = self.require(
                 match_token!(Punctuation(Punctuation::LBrace)),
-                Expecting::a("`{`"),
+                Expecting::a("`{` for macro argument"),
             )?;
             let mut arg = Vec::new();
+            let mut depth: usize = 0;
             loop {
-                let token = self.tokens.pop().ok_or_else(|| ContextError {
+                let token = self.tokens.pop_front().ok_or_else(|| ContextError {
                     source: self.source,
                     range: (self.source.len()..self.source.len()).into(),
                     err: ErrorType::MissingCloseBracket {
@@ -212,7 +221,14 @@ impl<'src> Preprocessor<'src> {
                     },
                 })??;
                 match token.val {
-                    Value::Punctuation(Punctuation::RBrace) => break,
+                    Value::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
+                    Value::Punctuation(Punctuation::RBrace) => {
+                        if let Some(n) = depth.checked_sub(1) {
+                            depth = n;
+                        } else {
+                            break;
+                        }
+                    }
                     _ => arg.push(token),
                 }
             }
@@ -224,7 +240,8 @@ impl<'src> Preprocessor<'src> {
             .get(&macro_name.lex)
             .expect("should have returned an error at the start of the fn");
 
-        self.tokens.extend(def.substitute(args).map(Ok));
+        self.tokens
+            .prepend(def.substitute(args).map(Ok).collect::<Vec<_>>().drain(..));
 
         Ok(())
     }
@@ -235,7 +252,7 @@ impl<'src> Iterator for Preprocessor<'src> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.tokens.pop() {
+            match self.tokens.pop_front() {
                 // define macro
                 Some(Ok(Token {
                     val: Value::Keyword(Keyword::Def),
@@ -265,10 +282,7 @@ impl<'src> Iterator for Preprocessor<'src> {
 
 pub fn preprocess<'src, A>(source: &'src str, stream: A) -> Preprocessor<'src>
 where
-    A: IntoIterator<
-            IntoIter: 'src + DoubleEndedIterator,
-            Item = Result<Token<'src>, ContextError<'src>>,
-        >,
+    A: IntoIterator<IntoIter: 'src, Item = Result<Token<'src>, ContextError<'src>>>,
 {
     Preprocessor::new(source, stream)
 }
