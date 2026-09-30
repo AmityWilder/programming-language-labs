@@ -58,184 +58,539 @@ fn trim_article(s: &str) -> &str {
     s
 }
 
-/// The kind of error describing a [`ContextError`]
-#[derive(Debug, Clone, PartialEq)]
-pub enum ErrorType<'src> {
-    // ----------------------------
-    // lex
-    // ----------------------------
-    /// Token type could not be identified from the initial character, and so is not a valid token
-    UnknownToken,
-    /// A block comment has no `*/` to end it
-    EndlessBlockComment,
-    /// A character literal that is just `''`
-    EmptyCharLiteral,
-    /// A character literal with multiple codepoints
-    MultiCharLiteral,
-    /// A character literal has no `'` to end it
-    EndlessCharLiteral,
-    /// A character literal has no `'` to end it, but contains a `\'`
-    EscapedCharLiteralEnd,
-    /// A string literal has no `"` to end it
-    EndlessStringLiteral,
-    /// A string literal has no `"` to end it, but contains a `\"`
-    EscapedStringLiteralEnd,
-    /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
-    InvalidEscape(&'src str),
-    /// A number literal could not be evaluated as a number
-    InvalidNumLiteral(NumLitError),
+macro_rules! define_error_type {
+    (
+        formatter: $f:ident
+        source: $src:ident
 
-    // ----------------------------
-    // preprocessor
-    // ----------------------------
-    /// A macro was encountered that has not been defined
-    MacroUndefined,
+        $(#[$emeta:meta])*
+        $vis:vis enum $Enum:ident<$lt:lifetime> {$(
+            $(#[$vmeta:meta])*
+            $Variant:ident$({$(
+                $(#[$sfmeta:meta])*
+                $sfield:ident: $SType:ty
+            ),* $(,)?})?$(($(
+                $TType:ty
+            ),* $(,)?))?
+            $kind:ident $code:literal {
+                err$({$(..)? $( $err_s_ident:ident$(: $err_s_pat:pat)? ),* $(, ..)?})?$(($( $err_t_pat:pat ),*))? => $display:expr,
+                inlay$({$(..)? $( $inlay_s_ident:ident$(: $inlay_s_pat:pat)? ),* $(, ..)?})?$(($( $inlay_t_pat:pat ),*))? => $inlay:expr,
+                help$({$(..)? $( $help_s_ident:ident$(: $help_s_pat:pat)? ),* $(, ..)?})?$(($( $help_t_pat:pat ),*))? => $help:expr$(,
+                info$({$(..)? $( $info_s_ident:ident$(: $info_s_pat:pat)? ),* $(, ..)?})?$(($( $info_t_pat:pat ),*))? => [$($info:expr),+$(,)?])?$(,)?
+            }
+        ),* $(,)?}
+    ) => {
+        $(#[$emeta])*
+        $vis enum $Enum<$lt> {$(
+            $(#[$vmeta])*
+            $Variant$({$(
+                $(#[$sfmeta])*
+                $sfield: $SType
+            ),*})?$(($(
+                $TType
+            ),*))?
+        ),*}
 
-    // ----------------------------
-    // parse
-    // ----------------------------
-    /// A closing bracket is of the wrong type for the open bracket at its depth
-    IncorrectCloseBracket {
-        /// The bracket type being expected based on the opening side
-        expect: (Bracket, Range<usize>),
-        /// The bracket type that was found
-        actual: Bracket,
-    },
-    /// A closing bracket was found with no open bracket
-    ExcessCloseBracket {
-        /// The bracket type that was found
-        actual: Bracket,
-    },
-    /// An open bracket was found with no close bracket
-    MissingCloseBracket {
-        /// The bracket type being expected based on the opening side
-        expect: (Bracket, Range<usize>),
-    },
-    /// A token was expected, but instead found EOF
-    MissingToken {
-        /// The token pattern expected - should start with the proper article
-        /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
-        expect: &'static str,
-    },
-    /// A token was expected, but instead found `actual`
-    UnexpectedToken {
-        /// The token pattern expected - should start with the proper article
-        /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
-        expect: &'static str,
-        /// The token found
-        actual: &'src str,
-    },
+        impl ContextError<'_> {
+            fn info_line(&self, $f: &mut std::fmt::Formatter<'_>, has_prev: &mut bool) -> std::fmt::Result {
+                match &self.err {
+                    $($($Enum::$Variant$({$( $info_s_ident$(: $info_s_pat)?, )* ..})?$(($( $info_t_pat ),*))? => {
+                        $({
+                            if *has_prev {
+                                writeln!($f)?;
+                            }
+                            let (range, msg) = $info;
+                            line_ref($f, self.source, *range, "\x1b[94m", '-', &msg)?;
+                            *has_prev = true;
+                        })*
+                    },)?)*
+                    _ => ()
+                }
+                Ok(())
+            }
+        }
 
-    // ----------------------------
-    // eval
-    // ----------------------------
-    /// Attempted to find the quotient or remainder with a denominator of 0
-    DivByZero {
-        /// The range of the expression evaluating to zero
-        zero: Range<usize>,
-    },
-    /// The operands in a binary operation are of incompatible type
-    Incompatible {
-        /// The binary operator
-        op: Punctuation,
-        /// The type of the value on the left side of the operator
-        lhs: (ValueType, Range<usize>),
-        /// The type of the value on the right side of the operator
-        rhs: (ValueType, Range<usize>),
-    },
-    /// The operand in a unary operation is of an unsupported type
-    Unsupported {
-        /// The unary operator
-        op: Punctuation,
-        /// The type of the value on the right side of the operator
-        rhs: (ValueType, Range<usize>),
-    },
-    /// Unsigned cannot be negated
-    UnsignedNeg,
-    /// An operation resulted in overflow/underflow
-    Overflow,
-    /// Failed to convert between integer types
-    FailedConvert(std::num::TryFromIntError),
+        impl std::fmt::Display for $Enum<'_> {
+            fn fmt(&self, $f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {$(
+                    $Enum::$Variant$({$( $err_s_ident$(: $err_s_pat)?, )* .. })?$(($( $err_t_pat ),*))? => $display
+                ),*}
+            }
+        }
+
+        impl std::fmt::Display for InlineErrMsg<'_, '_> {
+            fn fmt(&self, $f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match &self.0 {$(
+                    $Enum::$Variant$({$( $inlay_s_ident$(: $inlay_s_pat)?, )* ..})?$(($( $inlay_t_pat ),*))? => $inlay
+                ),*}
+            }
+        }
+
+        impl std::fmt::Display for ContextErrorHelp<'_, '_> {
+            // #[expect(
+            //     clippy::too_many_lines,
+            //     reason = "it would be even more complicated to make a separate function for each of these"
+            // )]
+            fn fmt(&self, $f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let $src: &str = self
+                    .0
+                    .source
+                    .get(self.0.range)
+                    .expect("range should be a range in source");
+                match &self.0.err {$(
+                    $Enum::$Variant$({$( $help_s_ident$(: $help_s_pat)?, )* ..})?$(($( $help_t_pat ),*))? => $help
+                ),*}
+            }
+        }
+
+        impl std::fmt::Display for ContextErrorCode<'_, '_> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let area = match &self.0.err {$(
+                    $Enum::$Variant{..} => stringify!($kind)
+                ),*};
+                let code = match &self.0.err {$(
+                    $Enum::$Variant{..} => $code
+                ),*};
+                write!(f, "err[{area}.{code:>03}]")
+            }
+        }
+    };
 }
 
-impl std::fmt::Display for ErrorType<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownToken => write!(f, "unknown token"),
+define_error_type! {
+    formatter: f
+    source: src
 
-            Self::EndlessBlockComment => {
+    /// The kind of error describing a [`ContextError`]
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum ErrorType<'src> {
+        // ----------------------------
+        // lex
+        // ----------------------------
+        /// Token type could not be identified from the initial character, and so is not a valid token
+        UnknownToken LEX 1 {
+            err => write!(f, "unknown token"),
+            inlay => write!(f, "what is this?"),
+            help => write!(f, "try removing the character"),
+        },
+        /// A block comment has no `*/` to end it
+        EndlessBlockComment LEX 2 {
+            err => write!(f, "block comment opens (`/*`) but never closes (missing `*/`)"),
+            inlay => write!(f, "never ends"),
+            help => write!(f, "try adding `{BLOCK_COMMENT_CLOSE}`"),
+        },
+        /// A character literal that is just `''`
+        EmptyCharLiteral LEX 3 {
+            err => write!(f, "empty character literal"),
+            inlay => write!(f, "empty"),
+            help => write!(f, "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` with `{STR_DELIM}{STR_DELIM}` or insert a character"),
+        },
+        /// A character literal with multiple codepoints
+        MultiCharLiteral LEX 4 {
+            err => write!(f, "character literal may only contain one codepoint"),
+            inlay => write!(f, "a char should be 1 char"),
+            help => {
+                let inner = src
+                    .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
+                    .expect("char literals should include delimiters");
+                let (first, rest) = inner.split_at(match escape_char(inner) {
+                    Some((len, _)) => len,
+                    // normal character
+                    None => inner.chars()
+                        .next()
+                        .expect("should have at least one character if MultiCharLiteral instead of EmptyCharLiteral")
+                        .len_utf8(),
+                });
                 write!(
                     f,
-                    "block comment opens (`/*`) but never closes (missing `*/`)"
+                    "try removing the character(s) after `{first}` (remove trailing `{rest}`) \
+                     or change this to a string ({STR_DELIM}{inner}{STR_DELIM})"
                 )
-            }
-
-            Self::EmptyCharLiteral => write!(f, "empty character literal"),
-
-            Self::MultiCharLiteral => {
-                write!(f, "character literal may only contain one codepoint")
-            }
-
-            Self::EndlessCharLiteral | Self::EscapedCharLiteralEnd => {
+            },
+        },
+        /// A character literal has no `'` to end it
+        EndlessCharLiteral LEX 5 {
+            err => write!(f, "char literal opens (`'`) but never closes (missing unescaped `'`)"),
+            inlay => write!(f, "never ends"),
+            help => {
+                write!(f, "try adding a `{CHAR_DELIM}` to the end of the char")
+            },
+        },
+        /// A character literal has no `'` to end it, but contains a `\'`
+        EscapedCharLiteralEnd LEX 6 {
+            err => write!(f, "char literal opens (`'`) but never closes (missing unescaped `'`)"),
+            inlay => write!(f, "never ends, unless you remove the `\\`"),
+            help => {
+                let substr = src.strip_prefix(CHAR_DELIM)
+                    .expect("string literal should include at least the open delimiter, in EscapedCharLiteralEnd")
+                    .split_once("\\'")
+                    .expect("should be EscapedCharLiteralEnd if this is not present")
+                    .0;
                 write!(
                     f,
-                    "char literal opens (`'`) but never closes (missing unescaped `'`)"
+                    "there is a closing single-quote candidate, but it is escaped (`{ESCAPE}{CHAR_DELIM}`). \n\
+                     char literals cannot end with an unescaped backslash (`{ESCAPE}`), \
+                     it is indistinguishable from an escaped single-quote (`{ESCAPE}{CHAR_DELIM}`). \n\
+                     try adding a `{CHAR_DELIM}` to the end of the char or remove the `{ESCAPE}` from `{ESCAPE}{CHAR_DELIM}` \
+                     to make the char `{CHAR_DELIM}{substr}{CHAR_DELIM}`"
                 )
-            }
-
-            Self::EndlessStringLiteral | Self::EscapedStringLiteralEnd => {
+            },
+        },
+        /// A string literal has no `"` to end it
+        EndlessStringLiteral LEX 7 {
+            err => write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"),
+            inlay => write!(f, "never ends"),
+            help => {
+                write!(f, "try adding a `{STR_DELIM}` to the end of the string")
+            },
+        },
+        /// A string literal has no `"` to end it, but contains a `\"`
+        EscapedStringLiteralEnd LEX 8 {
+            err => write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"),
+            inlay => write!(f, "never ends, unless you remove the `\\`"),
+            help => {
+                let substr = src
+                    .strip_prefix(STR_DELIM)
+                    .expect("string literal should include delimiter")
+                    .split_once("\\\"")
+                    .expect("should be EndlessStringLiteral if this is not present")
+                    .0;
                 write!(
                     f,
-                    "string literal opens (`\"`) but never closes (missing unescaped `\"`)"
+                    "there is a closing double-quote candidate, but it is escaped (`{ESCAPE}{STR_DELIM}`).\n\
+                     string literals cannot end with an unescaped backslash (`{ESCAPE}`), \
+                     it is indistinguishable from an escaped double-quote (`{ESCAPE}{STR_DELIM}`).\n\
+                     try adding a `{STR_DELIM}` to the end of the string or remove the `{ESCAPE}` from `{ESCAPE}{STR_DELIM}` \
+                     to make the string `{STR_DELIM}{substr}{STR_DELIM}`"
                 )
+            },
+        },
+        /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
+        InvalidEscape(&'src str) LEX 9 {
+            err(esc) => write!(f, "unknown character escape: {esc:?}"),
+            inlay(_) => write!(f, "has an invalid escape sequence"),
+            help(esc) => {
+                let mut iter = esc.chars();
+                iter.next()
+                    .filter(|ch| *ch == ESCAPE)
+                    .expect("InvalidEscape should include `\\`");
+                let ch = iter.next().expect(
+                    "should have at least 2 characters or else be an EscapedStringLiteralEnd",
+                );
+
+                if ch == 'x' {
+                    let n = iter.take(2).filter(char::is_ascii_hexdigit).count();
+                    assert!(n < 2, "why is this an error?");
+                    write!(
+                        f,
+                        "`\\x` should be followed by 2 hexadecimal digits ([0-9a-fA-F]), this escape sequence has {n}"
+                    )
+                } else if ch == 'o' {
+                    let n = iter.take(3).filter(|ch| ch.is_digit(8)).count();
+                    assert!(n < 3, "why is this an error?");
+                    write!(
+                        f,
+                        "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}"
+                    )
+                } else if ch.is_alphabetic() {
+                    write!(
+                        f,
+                        "`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
+                                ASCII letters that can be escape sequences"
+                    )
+                } else if ch.is_numeric() {
+                    write!(
+                        f,
+                        "only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "supported escape sequences: `\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, `\\0`-`\\9`,\n\\
+                        `\\x##` (where # is a hexadecimal digit), `\\o###` (where # is an octal digit)"
+                    )
+                }
             }
+        },
+        /// A number literal could not be evaluated as a number
+        InvalidNumLiteral(NumLitError) LEX 10 {
+            err(e) => write!(f, "invalid number literal: {e}"),
+            inlay(_) => write!(f, "not a valid number"),
+            help(e) => {
+                use std::num::IntErrorKind;
+                match e {
+                    NumLitError::UInt(e) => match e.kind() {
+                        IntErrorKind::Empty => unreachable!(
+                            "tokenizer should not emit number tokens that have no number"
+                        ),
 
-            Self::InvalidEscape(s) => write!(f, "unknown character escape: {s:?}"),
+                        IntErrorKind::InvalidDigit => {
+                            // TODO: dry this up
+                            let (suffix, base_name) =
+                                if let Some(digits) = src.strip_prefix(HEX_PREFIX) {
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_ascii_hexdigit())
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "hexadecimal")
+                                } else if let Some(digits) = src.strip_prefix(OCT_PREFIX) {
+                                    digits
+                                        .find(|ch: char| !ch.is_digit(8))
+                                        .expect("should contain an invalid digit");
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_digit(8))
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "octal")
+                                } else if let Some(digits) = src.strip_prefix(BIN_PREFIX) {
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_digit(2))
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "binary")
+                                } else {
+                                    let pos = src
+                                        .find(|ch: char| !ch.is_ascii_digit())
+                                        .expect("should contain an invalid digit");
+                                    let suffix = src
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "decimal")
+                                };
+                            write!(
+                                f,
+                                "the suffix `{suffix}` is not valid for {base_name} integer literals",
+                            )
+                        }
 
-            Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
+                        IntErrorKind::PosOverflow => write!(
+                            f,
+                            "the largest supported unsigned integer value is {}",
+                            usize::MAX
+                        ),
 
-            Self::MacroUndefined => write!(f, "macro has not been defined at this point"),
+                        _ => unimplemented!(),
+                    },
 
-            Self::IncorrectCloseBracket { expect, actual } => write!(
+                    NumLitError::SInt(e) => match e.kind() {
+                        IntErrorKind::Empty => unreachable!(
+                            "tokenizer should not emit number tokens that have no number"
+                        ),
+
+                        IntErrorKind::InvalidDigit => {
+                            let digits = src.strip_prefix('-').unwrap_or(src);
+                            let (suffix, base_name) =
+                                if let Some(digits) = digits.strip_prefix(HEX_PREFIX) {
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_ascii_hexdigit())
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "hexadecimal")
+                                } else if let Some(digits) = digits.strip_prefix(OCT_PREFIX) {
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_digit(8))
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "octal")
+                                } else if let Some(digits) = digits.strip_prefix(BIN_PREFIX) {
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_digit(2))
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "binary")
+                                } else {
+                                    let pos = digits
+                                        .find(|ch: char| !ch.is_ascii_digit())
+                                        .expect("should contain an invalid digit");
+                                    let suffix = digits
+                                        .get(pos..)
+                                        .expect("find should not be within a UTF-8 character");
+                                    (suffix, "decimal")
+                                };
+                            write!(
+                                f,
+                                "the suffix `{suffix}` is not valid for {base_name} integer literals",
+                            )
+                        }
+
+                        IntErrorKind::PosOverflow => write!(
+                            f,
+                            "the largest supported signed integer value is {}",
+                            isize::MAX
+                        ),
+
+                        IntErrorKind::NegOverflow => write!(
+                            f,
+                            "the smallest supported signed integer value is {}",
+                            isize::MIN
+                        ),
+
+                        _ => unimplemented!(),
+                    },
+
+                    NumLitError::Flt(_) => write!(f, "I'm not sure how to help with this yet"),
+                }
+            }
+        },
+
+        // ----------------------------
+        // preprocessor
+        // ----------------------------
+        /// A macro was encountered that has not been defined
+        MacroUndefined PRE 21 {
+            err => write!(f, "macro has not been defined at this point"),
+            inlay => write!(f, "not defined"),
+            help => write!(f, "try moving the definition ahead of this usage"),
+        },
+
+        // ----------------------------
+        // parse
+        // ----------------------------
+        /// A closing bracket is of the wrong type for the open bracket at its depth
+        IncorrectCloseBracket {
+            /// The bracket type being expected based on the opening side
+            expect: (Bracket, Range<usize>),
+            /// The bracket type that was found
+            actual: Bracket,
+        } GRA 31 {
+            err { expect: (expect, _), actual } => write!(f, "incorrect close bracket: expected `{}`, found `{}`", expect.close(), actual.close()),
+            inlay { .. } => write!(f, "incorrect partner"),
+            help { expect, actual } => write!(
                 f,
-                "incorrect close bracket: expected `{}`, found `{}`",
+                "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or the `{}`",
                 expect.0.close(),
-                actual.close()
+                actual.close(),
+                actual.open(),
+                expect.0.open(),
+                expect.0.open(),
+                actual.close(),
             ),
-
-            Self::ExcessCloseBracket { actual } => write!(
+            info { expect: (_, range) } => [(range, "bracket type introduced here")],
+        },
+        /// A closing bracket was found with no open bracket
+        ExcessCloseBracket {
+            /// The bracket type that was found
+            actual: Bracket,
+        } GRA 32 {
+            err { actual } => write!(f, "too many close brackets: expected none, found `{}`", actual.close() ),
+            inlay { .. } => write!(f, "missing a partner"),
+            help { actual } => write!(
                 f,
-                "too many close brackets: expected none, found `{}`",
-                actual.close()
+                "try removing the `{}` or add a `{}` before it",
+                actual.close(),
+                actual.open(),
             ),
-
-            Self::MissingCloseBracket { expect } => write!(
+        },
+        /// An open bracket was found with no close bracket
+        MissingCloseBracket {
+            /// The bracket type being expected based on the opening side
+            expect: (Bracket, Range<usize>),
+        } GRA 33 {
+            err { expect: (expect, _) } => write!(f, "missing close bracket: expected `{}`, found none", expect.close() ),
+            inlay { .. } => write!(f, "missing close bracket"),
+            help { expect } => write!(
                 f,
-                "missing close bracket: expected `{}`, found none",
-                expect.0.close()
+                "try inserting a `{}` or remove the `{}`",
+                expect.0.close(),
+                expect.0.open(),
             ),
+            info { expect: (_, range) } => [(range, "missing a partner")],
+        },
+        /// A token was expected, but instead found EOF
+        MissingToken {
+            /// The token pattern expected - should start with the proper article
+            /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
+            expect: &'static str,
+        } GRA 34 {
+            err { expect } => write!(f, "missing {expect}"),
+            inlay { .. } => write!(f, "missing token"),
+            help { expect } => write!(f, "try inserting {expect}"),
+        },
+        /// A token was expected, but instead found `actual`
+        UnexpectedToken {
+            /// The token pattern expected - should start with the proper article
+            /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
+            expect: &'static str,
+            /// The token found
+            actual: &'src str,
+        } GRA 35 {
+            err { expect, actual } => write!(f, "expected {expect}, found `{actual}`"),
+            inlay { .. } => write!(f, "wrong token"),
+            help { expect, actual } => write!(f, "try inserting {expect} before the `{actual}` or remove the `{actual}`"),
+        },
 
-            Self::MissingToken { expect } => write!(f, "missing {expect}"),
-
-            Self::UnexpectedToken { expect, actual } => {
-                write!(f, "expected {expect}, found `{actual}`")
-            }
-
-            Self::DivByZero { .. } => write!(f, "divide by zero"),
-            Self::Incompatible {
-                op,
-                lhs: (lhs, _),
-                rhs: (rhs, _),
-            } => {
-                write!(f, "{lhs} is not compatible with {rhs} for `{op}`")
-            }
-            Self::Unsupported { op, rhs: (rhs, _) } => {
-                write!(f, "`{op}` is not supported for {rhs}")
-            }
-            Self::UnsignedNeg => write!(f, "unsigned integer cannot be negated"),
-            Self::Overflow => write!(f, "arithmetic overflow"),
-            Self::FailedConvert(e) => write!(f, "failed conversion: {e}"),
-        }
+        // ----------------------------
+        // eval
+        // ----------------------------
+        /// Attempted to find the quotient or remainder with a denominator of 0
+        DivByZero {
+            /// The range of the expression evaluating to zero
+            zero: Range<usize>,
+        } RUN 41 {
+            err { .. } => write!(f, "divide by zero"),
+            inlay { .. } => write!(f, "dividing by 0"),
+            help { .. } => write!(f, "ensure the right side cannot be 0"),
+            info { zero } => [(zero, "this expression evaluates to 0")],
+        },
+        /// The operands in a binary operation are of incompatible type
+        Incompatible {
+            /// The binary operator
+            op: Punctuation,
+            /// The type of the value on the left side of the operator
+            lhs: (ValueType, Range<usize>),
+            /// The type of the value on the right side of the operator
+            rhs: (ValueType, Range<usize>),
+        } RUN 42 {
+            err { op, lhs: (l_ty, _), rhs: (r_ty, _) } => write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"),
+            inlay { op, .. } => write!(f, "{} is not supported for operands of these types", op_desc(*op, true)),
+            help { .. } => write!(f, "try a different operator or convert the types"),
+            info { lhs: (l_ty, l_range), rhs: (r_ty, r_range), .. } => [
+                (l_range, TypeResolutionMsg { ty: *l_ty }),
+                (r_range, TypeResolutionMsg { ty: *r_ty }),
+            ],
+        },
+        /// The operand in a unary operation is of an unsupported type
+        Unsupported {
+            /// The unary operator
+            op: Punctuation,
+            /// The type of the value on the right side of the operator
+            rhs: (ValueType, Range<usize>),
+        } RUN 43 {
+            err { op, rhs: (r_ty, _) } => write!(f, "`{op}` is not supported for {r_ty}"),
+            inlay { op, .. } => write!(f, "{} is not supported for operands of this type", op_desc(*op, false)),
+            help { .. } => write!(f, "try a different operator or convert the type"),
+            info { rhs: (r_ty, r_range), .. } => [(r_range, TypeResolutionMsg { ty: *r_ty })],
+        },
+        /// Unsigned cannot be negated
+        UnsignedNeg RUN 44 {
+            err => write!(f, "unsigned integer cannot be negated"),
+            inlay => write!(f, "uint can't be negated"),
+            help => write!(f, "remove the `-` or convert the integer to signed"),
+        },
+        /// An operation resulted in overflow/underflow
+        Overflow RUN 45 {
+            err => write!(f, "arithmetic overflow"),
+            inlay => write!(f, "unhandled integer overflow"),
+            help => write!(f, "ensure the result will fit in an integer"),
+        },
+        /// Failed to convert between integer types
+        FailedConvert(std::num::TryFromIntError) RUN 46 {
+            err(e) => write!(f, "failed conversion: {e}"),
+            inlay(_) => write!(f, "integer conversion failed"),
+            help(_) => write!(f, "ensure the conversion will not result in overflow"),
+        },
     }
 }
 
@@ -444,373 +799,9 @@ impl std::error::Error for ContextError<'_> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ContextErrorCode<'src, 'err>(&'err ContextError<'src>);
 
-impl std::fmt::Display for ContextErrorCode<'_, '_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let area = match self.0.err {
-            ErrorType::UnknownToken
-            | ErrorType::EndlessBlockComment
-            | ErrorType::EmptyCharLiteral
-            | ErrorType::MultiCharLiteral
-            | ErrorType::EndlessCharLiteral
-            | ErrorType::EscapedCharLiteralEnd
-            | ErrorType::EndlessStringLiteral
-            | ErrorType::EscapedStringLiteralEnd
-            | ErrorType::InvalidEscape(_)
-            | ErrorType::InvalidNumLiteral(_) => "LEX",
-
-            ErrorType::MacroUndefined => "PRE",
-
-            ErrorType::IncorrectCloseBracket { .. }
-            | ErrorType::ExcessCloseBracket { .. }
-            | ErrorType::MissingCloseBracket { .. }
-            | ErrorType::MissingToken { .. }
-            | ErrorType::UnexpectedToken { .. } => "GRA",
-
-            ErrorType::DivByZero { .. }
-            | ErrorType::Incompatible { .. }
-            | ErrorType::Unsupported { .. }
-            | ErrorType::UnsignedNeg
-            | ErrorType::Overflow
-            | ErrorType::FailedConvert(_) => "RUN",
-        };
-        let code = match self.0.err {
-            ErrorType::UnknownToken => 0,
-            ErrorType::EndlessBlockComment => 1,
-            ErrorType::EmptyCharLiteral => 2,
-            ErrorType::MultiCharLiteral => 3,
-            ErrorType::EndlessCharLiteral => 4,
-            ErrorType::EscapedCharLiteralEnd => 5,
-            ErrorType::EndlessStringLiteral => 6,
-            ErrorType::EscapedStringLiteralEnd => 7,
-            ErrorType::InvalidEscape(_) => 8,
-            ErrorType::InvalidNumLiteral(_) => 9,
-
-            ErrorType::MacroUndefined => 11,
-
-            ErrorType::IncorrectCloseBracket { .. } => 21,
-            ErrorType::ExcessCloseBracket { .. } => 22,
-            ErrorType::MissingCloseBracket { .. } => 23,
-            ErrorType::MissingToken { .. } => 24,
-            ErrorType::UnexpectedToken { .. } => 25,
-
-            ErrorType::DivByZero { .. } => 31,
-            ErrorType::Incompatible { .. } => 32,
-            ErrorType::Unsupported { .. } => 33,
-            ErrorType::UnsignedNeg => 34,
-            ErrorType::Overflow => 35,
-            ErrorType::FailedConvert(_) => 36,
-        };
-        write!(f, "err[{area}{code:>03}]")
-    }
-}
-
 /// [`std::fmt::Display`] tips for resolving an error
 #[derive(Debug, Clone)]
 pub struct ContextErrorHelp<'src, 'err>(&'err ContextError<'src>);
-
-impl std::fmt::Display for ContextErrorHelp<'_, '_> {
-    #[expect(
-        clippy::too_many_lines,
-        reason = "it would be even more complicated to make a separate function for each of these"
-    )]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let src: &str = self
-            .0
-            .source
-            .get(self.0.range)
-            .expect("range should be a range in source");
-        match &self.0.err {
-            ErrorType::UnknownToken => write!(f, "try removing the character"),
-
-            ErrorType::EndlessBlockComment => write!(f, "try adding `{BLOCK_COMMENT_CLOSE}`"),
-
-            ErrorType::EmptyCharLiteral => write!(
-                f,
-                "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` with `{STR_DELIM}{STR_DELIM}` or insert a character",
-            ),
-
-            ErrorType::MultiCharLiteral => {
-                let inner = src
-                    .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
-                    .expect("char literals should include delimiters");
-                let (first, rest) = inner.split_at(match escape_char(inner) {
-                    Some((len, _)) => len,
-                    // normal character
-                    None => inner.chars()
-                        .next()
-                        .expect("should have at least one character if MultiCharLiteral instead of EmptyCharLiteral")
-                        .len_utf8(),
-                });
-                write!(
-                    f,
-                    "try removing the character(s) after `{first}` (remove trailing `{rest}`) \
-                     or change this to a string ({STR_DELIM}{inner}{STR_DELIM})"
-                )
-            }
-
-            ErrorType::EndlessCharLiteral => {
-                write!(f, "try adding a `{CHAR_DELIM}` to the end of the char")
-            }
-
-            ErrorType::EscapedCharLiteralEnd => {
-                let substr = src.strip_prefix(CHAR_DELIM)
-                    .expect("string literal should include at least the open delimiter, in EscapedCharLiteralEnd")
-                    .split_once("\\'")
-                    .expect("should be EscapedCharLiteralEnd if this is not present")
-                    .0;
-                write!(
-                    f,
-                    "there is a closing single-quote candidate, but it is escaped (`{ESCAPE}{CHAR_DELIM}`). \n\
-                     char literals cannot end with an unescaped backslash (`{ESCAPE}`), \
-                     it is indistinguishable from an escaped single-quote (`{ESCAPE}{CHAR_DELIM}`). \n\
-                     try adding a `{CHAR_DELIM}` to the end of the char or remove the `{ESCAPE}` from `{ESCAPE}{CHAR_DELIM}` \
-                     to make the char `{CHAR_DELIM}{substr}{CHAR_DELIM}`"
-                )
-            }
-
-            ErrorType::EndlessStringLiteral => {
-                write!(f, "try adding a `{STR_DELIM}` to the end of the string")
-            }
-
-            ErrorType::EscapedStringLiteralEnd => {
-                let substr = src
-                    .strip_prefix(STR_DELIM)
-                    .expect("string literal should include delimiter")
-                    .split_once("\\\"")
-                    .expect("should be EndlessStringLiteral if this is not present")
-                    .0;
-                write!(
-                    f,
-                    "there is a closing double-quote candidate, but it is escaped (`{ESCAPE}{STR_DELIM}`).\n\
-                     string literals cannot end with an unescaped backslash (`{ESCAPE}`), \
-                     it is indistinguishable from an escaped double-quote (`{ESCAPE}{STR_DELIM}`).\n\
-                     try adding a `{STR_DELIM}` to the end of the string or remove the `{ESCAPE}` from `{ESCAPE}{STR_DELIM}` \
-                     to make the string `{STR_DELIM}{substr}{STR_DELIM}`"
-                )
-            }
-
-            ErrorType::InvalidEscape(esc) => {
-                let mut iter = esc.chars();
-                iter.next()
-                    .filter(|ch| *ch == ESCAPE)
-                    .expect("InvalidEscape should include `\\`");
-                let ch = iter.next().expect(
-                    "should have at least 2 characters or else be an EscapedStringLiteralEnd",
-                );
-
-                if ch == 'x' {
-                    let n = iter.take(2).filter(char::is_ascii_hexdigit).count();
-                    assert!(n < 2, "why is this an error?");
-                    write!(
-                        f,
-                        "`\\x` should be followed by 2 hexadecimal digits ([0-9a-fA-F]), this escape sequence has {n}"
-                    )
-                } else if ch == 'o' {
-                    let n = iter.take(3).filter(|ch| ch.is_digit(8)).count();
-                    assert!(n < 3, "why is this an error?");
-                    write!(
-                        f,
-                        "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}"
-                    )
-                } else if ch.is_alphabetic() {
-                    write!(
-                        f,
-                        "`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
-                                ASCII letters that can be escape sequences"
-                    )
-                } else if ch.is_numeric() {
-                    write!(
-                        f,
-                        "only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences"
-                    )
-                } else {
-                    write!(
-                        f,
-                        "supported escape sequences: `\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, `\\0`-`\\9`,\n\\
-                        `\\x##` (where # is a hexadecimal digit), `\\o###` (where # is an octal digit)"
-                    )
-                }
-            }
-
-            ErrorType::InvalidNumLiteral(e) => {
-                use std::num::IntErrorKind;
-                match e {
-                    NumLitError::UInt(e) => match e.kind() {
-                        IntErrorKind::Empty => unreachable!(
-                            "tokenizer should not emit number tokens that have no number"
-                        ),
-
-                        IntErrorKind::InvalidDigit => {
-                            // TODO: dry this up
-                            let (suffix, base_name) =
-                                if let Some(digits) = src.strip_prefix(HEX_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_ascii_hexdigit())
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "hexadecimal")
-                                } else if let Some(digits) = src.strip_prefix(OCT_PREFIX) {
-                                    digits
-                                        .find(|ch: char| !ch.is_digit(8))
-                                        .expect("should contain an invalid digit");
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_digit(8))
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "octal")
-                                } else if let Some(digits) = src.strip_prefix(BIN_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_digit(2))
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "binary")
-                                } else {
-                                    let pos = src
-                                        .find(|ch: char| !ch.is_ascii_digit())
-                                        .expect("should contain an invalid digit");
-                                    let suffix = src
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "decimal")
-                                };
-                            write!(
-                                f,
-                                "the suffix `{suffix}` is not valid for {base_name} integer literals",
-                            )
-                        }
-
-                        IntErrorKind::PosOverflow => write!(
-                            f,
-                            "the largest supported unsigned integer value is {}",
-                            usize::MAX
-                        ),
-
-                        _ => unimplemented!(),
-                    },
-
-                    NumLitError::SInt(e) => match e.kind() {
-                        IntErrorKind::Empty => unreachable!(
-                            "tokenizer should not emit number tokens that have no number"
-                        ),
-
-                        IntErrorKind::InvalidDigit => {
-                            let digits = src.strip_prefix('-').unwrap_or(src);
-                            let (suffix, base_name) =
-                                if let Some(digits) = digits.strip_prefix(HEX_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_ascii_hexdigit())
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "hexadecimal")
-                                } else if let Some(digits) = digits.strip_prefix(OCT_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_digit(8))
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "octal")
-                                } else if let Some(digits) = digits.strip_prefix(BIN_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_digit(2))
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "binary")
-                                } else {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_ascii_digit())
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "decimal")
-                                };
-                            write!(
-                                f,
-                                "the suffix `{suffix}` is not valid for {base_name} integer literals",
-                            )
-                        }
-
-                        IntErrorKind::PosOverflow => write!(
-                            f,
-                            "the largest supported signed integer value is {}",
-                            isize::MAX
-                        ),
-
-                        IntErrorKind::NegOverflow => write!(
-                            f,
-                            "the smallest supported signed integer value is {}",
-                            isize::MIN
-                        ),
-
-                        _ => unimplemented!(),
-                    },
-
-                    NumLitError::Flt(_) => write!(f, "I'm not sure how to help with this yet"),
-                }
-            }
-
-            ErrorType::MacroUndefined => write!(f, "try moving the definition ahead of this usage"),
-
-            ErrorType::IncorrectCloseBracket { expect, actual } => write!(
-                f,
-                "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or the `{}`",
-                expect.0.close(),
-                actual.close(),
-                actual.open(),
-                expect.0.open(),
-                expect.0.open(),
-                actual.close(),
-            ),
-
-            ErrorType::ExcessCloseBracket { actual } => write!(
-                f,
-                "try removing the `{}` or add a `{}` before it",
-                actual.close(),
-                actual.open(),
-            ),
-
-            ErrorType::MissingCloseBracket { expect } => write!(
-                f,
-                "try inserting a `{}` or remove the `{}`",
-                expect.0.close(),
-                expect.0.open(),
-            ),
-
-            ErrorType::MissingToken { expect } => write!(f, "try inserting {expect}"),
-
-            ErrorType::UnexpectedToken { expect, actual } => {
-                write!(
-                    f,
-                    "try inserting {expect} before the `{actual}` or remove the `{actual}`"
-                )
-            }
-
-            ErrorType::DivByZero { .. } => write!(f, "ensure the right side cannot be 0"),
-            ErrorType::Incompatible { .. } => {
-                write!(f, "try a different operator or convert the types")
-            }
-            ErrorType::Unsupported { .. } => {
-                write!(f, "try a different operator or convert the type")
-            }
-            ErrorType::UnsignedNeg => write!(f, "remove the `-` or convert the integer to signed"),
-            ErrorType::Overflow => write!(f, "ensure the result will fit in an integer"),
-            ErrorType::FailedConvert(_) => {
-                write!(f, "ensure the conversion will not result in overflow")
-            }
-        }
-    }
-}
 
 /// Returns [`None`] if `range` is out of bounds for `src`
 #[must_use]
@@ -893,82 +884,71 @@ fn line_ref(
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct UnsupportedOpMsg {
-    op: Punctuation,
-    is_binary: bool,
-}
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct InlineErrMsg<'src, 'err>(&'err ErrorType<'src>);
 
-impl std::fmt::Display for UnsupportedOpMsg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (s, by, these) = if self.is_binary {
-            ("s", "between", "these")
-        } else {
-            ("", "by", "this")
-        };
-        let op = match self.op {
-            Punctuation::Not => "logical or bitwise 'not'",
-            Punctuation::MacroStringify => "token stringification",
-            Punctuation::Rem => "remainder",
-            Punctuation::And => "logical or bitwise 'and'",
-            Punctuation::Mul => "multiplication",
-            Punctuation::Add => "addition",
-            Punctuation::Sub if self.is_binary => "subtraction",
-            Punctuation::Sub => "arithmetic negation",
-            Punctuation::Div => "division",
-            Punctuation::Ref => "referencing",
-            Punctuation::Xor => "logical or bitwise 'xor'",
-            Punctuation::Or => "logical or bitwise 'or'",
-            Punctuation::Nand => "logical or bitwise 'nand'",
-            Punctuation::Nor => "logical or bitwise 'nor'",
-            Punctuation::Xnor => "logical or bitwise 'xnor'",
-            Punctuation::MacroConcatenate => "token concatenation",
-            Punctuation::Exp => "exponentiation",
-            Punctuation::Shl => "left bitshift",
-            Punctuation::Shr => "right bitshift",
+fn op_desc(op: Punctuation, is_binary: bool) -> &'static str {
+    match op {
+        Punctuation::Not => "logical or bitwise 'not'",
+        Punctuation::MacroStringify => "token stringification",
+        Punctuation::Rem => "remainder",
+        Punctuation::And => "logical or bitwise 'and'",
+        Punctuation::Mul => "multiplication",
+        Punctuation::Add => "addition",
+        Punctuation::Sub if is_binary => "subtraction",
+        Punctuation::Sub => "arithmetic negation",
+        Punctuation::Div => "division",
+        Punctuation::Ref => "referencing",
+        Punctuation::Xor => "logical or bitwise 'xor'",
+        Punctuation::Or => "logical or bitwise 'or'",
+        Punctuation::Nand => "logical or bitwise 'nand'",
+        Punctuation::Nor => "logical or bitwise 'nor'",
+        Punctuation::Xnor => "logical or bitwise 'xnor'",
+        Punctuation::MacroConcatenate => "token concatenation",
+        Punctuation::Exp => "exponentiation",
+        Punctuation::Shl => "left bitshift",
+        Punctuation::Shr => "right bitshift",
 
-            Punctuation::Lt
-            | Punctuation::Gt
-            | Punctuation::Neq
-            | Punctuation::Le
-            | Punctuation::Eq
-            | Punctuation::Ge => "comparison",
+        Punctuation::Lt
+        | Punctuation::Gt
+        | Punctuation::Neq
+        | Punctuation::Le
+        | Punctuation::Eq
+        | Punctuation::Ge => "comparison",
 
-            Punctuation::LParen
-            | Punctuation::RParen
-            | Punctuation::Comma
-            | Punctuation::Dot
-            | Punctuation::Colon
-            | Punctuation::Semi
-            | Punctuation::Assign
-            | Punctuation::QMark // TODO: will this be an operation?
-            | Punctuation::LBrack
-            | Punctuation::RBrack
-            | Punctuation::LBrace
-            | Punctuation::RBrace
-            | Punctuation::RemAssign
-            | Punctuation::AndAssign
-            | Punctuation::MulAssign
-            | Punctuation::AddAssign
-            | Punctuation::SubAssign
-            | Punctuation::Arrow
-            | Punctuation::DotDot // TODO: will this be an operation?
-            | Punctuation::DivAssign
-            | Punctuation::PathSep
-            | Punctuation::ColonEq
-            | Punctuation::FatArrow
-            | Punctuation::XorAssign
-            | Punctuation::OrAssign
-            | Punctuation::ExpAssign
-            | Punctuation::ShlAssign
-            | Punctuation::ShrAssign
-            | Punctuation::NandAssign
-            | Punctuation::NorAssign
-            | Punctuation::XnorAssign => {
-                unimplemented!("not an operator")
-            }
-        };
-        write!(f, "{op} not supported {by} operand{s} of {these} type{s}")
+        Punctuation::LParen
+        | Punctuation::RParen
+        | Punctuation::Comma
+        | Punctuation::Dot
+        | Punctuation::Colon
+        | Punctuation::Semi
+        | Punctuation::Assign
+        | Punctuation::QMark // TODO: will this be an operation?
+        | Punctuation::LBrack
+        | Punctuation::RBrack
+        | Punctuation::LBrace
+        | Punctuation::RBrace
+        | Punctuation::RemAssign
+        | Punctuation::AndAssign
+        | Punctuation::MulAssign
+        | Punctuation::AddAssign
+        | Punctuation::SubAssign
+        | Punctuation::Arrow
+        | Punctuation::DotDot // TODO: will this be an operation?
+        | Punctuation::DivAssign
+        | Punctuation::PathSep
+        | Punctuation::ColonEq
+        | Punctuation::FatArrow
+        | Punctuation::XorAssign
+        | Punctuation::OrAssign
+        | Punctuation::ExpAssign
+        | Punctuation::ShlAssign
+        | Punctuation::ShrAssign
+        | Punctuation::NandAssign
+        | Punctuation::NorAssign
+        | Punctuation::XnorAssign => {
+            unimplemented!("not an operator")
+        }
     }
 }
 
@@ -981,18 +961,6 @@ impl std::fmt::Display for TypeResolutionMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "type resolves to {}", self.ty)
     }
-}
-
-fn encode_slice<T: Copy, const N: usize, const M: usize>(
-    buf: &mut [T; N],
-    src: [T; M],
-) -> &mut [T] {
-    const {
-        assert!(M <= N, "buf must be large enough to contain src");
-    }
-    let buf = &mut buf[..src.len()];
-    buf.copy_from_slice(&src);
-    buf
 }
 
 impl std::fmt::Display for RenderedContextError<'_, '_> {
@@ -1020,92 +988,18 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
             if has_prev {
                 writeln!(f)?;
             }
-            let unsupported_op_buf: UnsupportedOpMsg;
             line_ref(
                 f,
                 self.0.source,
                 self.0.range,
                 "\x1b[91m",
                 '^',
-                match self.0.err {
-                    ErrorType::UnknownToken => &"what is this?",
-                    ErrorType::EndlessBlockComment
-                    | ErrorType::EndlessCharLiteral
-                    | ErrorType::EndlessStringLiteral => &"never ends",
-                    ErrorType::EmptyCharLiteral => &"empty",
-                    ErrorType::MultiCharLiteral => &"a char should be 1 char",
-                    ErrorType::EscapedCharLiteralEnd | ErrorType::EscapedStringLiteralEnd => {
-                        &"never ends, unless you remove the `\\`"
-                    }
-                    ErrorType::InvalidEscape(_) => &"has an invalid escape sequence",
-                    ErrorType::InvalidNumLiteral(_) => &"not a valid number",
-                    ErrorType::MacroUndefined => &"not defined",
-                    ErrorType::IncorrectCloseBracket { .. } => &"incorrect partner",
-                    ErrorType::ExcessCloseBracket { .. } => &"missing a partner",
-                    ErrorType::MissingCloseBracket { .. } => &"missing close bracket",
-                    ErrorType::MissingToken { .. } => &"missing token",
-                    ErrorType::UnexpectedToken { .. } => &"wrong token",
-                    ErrorType::DivByZero { .. } => &"dividing by 0",
-                    ErrorType::Incompatible { op, .. } => {
-                        unsupported_op_buf = UnsupportedOpMsg {
-                            op,
-                            is_binary: true,
-                        };
-                        &unsupported_op_buf
-                    }
-                    ErrorType::Unsupported { op, .. } => {
-                        unsupported_op_buf = UnsupportedOpMsg {
-                            op,
-                            is_binary: false,
-                        };
-                        &unsupported_op_buf
-                    }
-                    ErrorType::UnsignedNeg => &"uint can't be negated",
-                    ErrorType::Overflow => &"unhandled integer overflow",
-                    ErrorType::FailedConvert(_) => &"integer conversion failed",
-                },
+                &InlineErrMsg(&self.0.err),
             )?;
             has_prev = true;
         }
 
         // info
-        const MAX_ITEMS: usize = 2;
-        let mut buf: [(_, &dyn std::fmt::Display); _] = [(Range::default(), &""); MAX_ITEMS];
-        let lhs_ty_buf: TypeResolutionMsg;
-        let rhs_ty_buf: TypeResolutionMsg;
-        let items = match self.0.err {
-            ErrorType::IncorrectCloseBracket {
-                expect: (_, range), ..
-            } => encode_slice(&mut buf, [(range, &"bracket type introduced here")]),
-
-            ErrorType::MissingCloseBracket { expect: (_, range) } => {
-                encode_slice(&mut buf, [(range, &"missing a partner")])
-            }
-
-            ErrorType::DivByZero { zero } => {
-                encode_slice(&mut buf, [(zero, &"this expression evaluates to 0")])
-            }
-
-            ErrorType::Incompatible { lhs, rhs, .. } => {
-                lhs_ty_buf = TypeResolutionMsg { ty: lhs.0 };
-                rhs_ty_buf = TypeResolutionMsg { ty: rhs.0 };
-                encode_slice(&mut buf, [(lhs.1, &lhs_ty_buf), (rhs.1, &rhs_ty_buf)])
-            }
-            ErrorType::Unsupported { rhs, .. } => {
-                rhs_ty_buf = TypeResolutionMsg { ty: rhs.0 };
-                encode_slice(&mut buf, [(rhs.1, &rhs_ty_buf)])
-            }
-
-            _ => encode_slice(&mut buf, []),
-        };
-        for (range, explanation) in items {
-            if has_prev {
-                writeln!(f)?;
-            }
-            line_ref(f, self.0.source, *range, "\x1b[96m", '-', *explanation)?;
-            has_prev = true;
-        }
-
-        Ok(())
+        self.0.info_line(f, &mut has_prev)
     }
 }
