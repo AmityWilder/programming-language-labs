@@ -201,20 +201,15 @@ define_error_type! {
                         .expect("should have at least one character if MultiCharLiteral instead of EmptyCharLiteral")
                         .len_utf8(),
                 });
-                write!(
-                    f,
-                    "try removing the character(s) after `{first}` (remove trailing `{rest}`) \
-                     or change this to a string ({STR_DELIM}{inner}{STR_DELIM})"
-                )
+                write!(f, "try removing the character(s) after `{first}` (remove trailing `{rest}`) \
+                           or change this to a string ({STR_DELIM}{inner}{STR_DELIM})")
             },
         },
         /// A character literal has no `'` to end it
         EndlessCharLiteral LEX 5 {
             err => write!(f, "char literal opens (`'`) but never closes (missing unescaped `'`)"),
             inlay => write!(f, "never ends"),
-            help => {
-                write!(f, "try adding a `{CHAR_DELIM}` to the end of the char")
-            },
+            help => write!(f, "try adding a `{CHAR_DELIM}` to the end of the char"),
         },
         /// A character literal has no `'` to end it, but contains a `\'`
         EscapedCharLiteralEnd LEX 6 {
@@ -240,9 +235,7 @@ define_error_type! {
         EndlessStringLiteral LEX 7 {
             err => write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"),
             inlay => write!(f, "never ends"),
-            help => {
-                write!(f, "try adding a `{STR_DELIM}` to the end of the string")
-            },
+            help => write!(f, "try adding a `{STR_DELIM}` to the end of the string"),
         },
         /// A string literal has no `"` to end it, but contains a `\"`
         EscapedStringLiteralEnd LEX 8 {
@@ -274,35 +267,24 @@ define_error_type! {
                 iter.next()
                     .filter(|ch| *ch == ESCAPE)
                     .expect("InvalidEscape should include `\\`");
-                let ch = iter.next().expect(
-                    "should have at least 2 characters or else be an EscapedStringLiteralEnd",
-                );
+                let ch = iter.next().expect("should have at least 2 characters or else be an EscapedStringLiteralEnd");
 
                 if ch == 'x' {
                     let n = iter.take(2).filter(char::is_ascii_hexdigit).count();
                     assert!(n < 2, "why is this an error?");
-                    write!(
-                        f,
-                        "`\\x` should be followed by 2 hexadecimal digits ([0-9a-fA-F]), this escape sequence has {n}"
-                    )
+                    write!(f, "`\\x` should be followed by 2 hexadecimal digits ([0-9a-fA-F]), this escape sequence has {n}")
                 } else if ch == 'o' {
                     let n = iter.take(3).filter(|ch| ch.is_digit(8)).count();
                     assert!(n < 3, "why is this an error?");
-                    write!(
-                        f,
-                        "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}"
-                    )
+                    write!(f, "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}")
                 } else if ch.is_alphabetic() {
                     write!(
                         f,
                         "`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
-                                ASCII letters that can be escape sequences"
+                        ASCII letters that can be escape sequences"
                     )
                 } else if ch.is_numeric() {
-                    write!(
-                        f,
-                        "only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences"
-                    )
+                    write!(f, "only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences")
                 } else {
                     write!(
                         f,
@@ -320,9 +302,7 @@ define_error_type! {
                 use std::num::IntErrorKind;
                 match e {
                     NumLitError::UInt(e) => match e.kind() {
-                        IntErrorKind::Empty => unreachable!(
-                            "tokenizer should not emit number tokens that have no number"
-                        ),
+                        IntErrorKind::Empty => unreachable!("tokenizer should not emit number tokens that have no number"),
 
                         IntErrorKind::InvalidDigit => {
                             // TODO: dry this up
@@ -363,25 +343,16 @@ define_error_type! {
                                         .expect("find should not be within a UTF-8 character");
                                     (suffix, "decimal")
                                 };
-                            write!(
-                                f,
-                                "the suffix `{suffix}` is not valid for {base_name} integer literals",
-                            )
+                            write!(f, "the suffix `{suffix}` is not valid for {base_name} integer literals")
                         }
 
-                        IntErrorKind::PosOverflow => write!(
-                            f,
-                            "the largest supported unsigned integer value is {}",
-                            usize::MAX
-                        ),
+                        IntErrorKind::PosOverflow => write!(f, "the largest supported unsigned integer value is {}", usize::MAX),
 
                         _ => unimplemented!(),
                     },
 
                     NumLitError::SInt(e) => match e.kind() {
-                        IntErrorKind::Empty => unreachable!(
-                            "tokenizer should not emit number tokens that have no number"
-                        ),
+                        IntErrorKind::Empty => unreachable!("tokenizer should not emit number tokens that have no number"),
 
                         IntErrorKind::InvalidDigit => {
                             let digits = src.strip_prefix('-').unwrap_or(src);
@@ -425,17 +396,9 @@ define_error_type! {
                             )
                         }
 
-                        IntErrorKind::PosOverflow => write!(
-                            f,
-                            "the largest supported signed integer value is {}",
-                            isize::MAX
-                        ),
+                        IntErrorKind::PosOverflow => write!(f, "the largest supported signed integer value is {}", isize::MAX),
 
-                        IntErrorKind::NegOverflow => write!(
-                            f,
-                            "the smallest supported signed integer value is {}",
-                            isize::MIN
-                        ),
+                        IntErrorKind::NegOverflow => write!(f, "the smallest supported signed integer value is {}", isize::MIN),
 
                         _ => unimplemented!(),
                     },
@@ -484,21 +447,16 @@ define_error_type! {
             /// The bracket type that was found
             actual: Bracket,
         } GRA 32 {
-            err { actual } => write!(f, "too many close brackets: expected none, found `{}`", actual.close() ),
+            err { actual } => write!(f, "too many close brackets: expected none, found `{}`", actual.close()),
             inlay { .. } => write!(f, "missing a partner"),
-            help { actual } => write!(
-                f,
-                "try removing the `{}` or add a `{}` before it",
-                actual.close(),
-                actual.open(),
-            ),
+            help { actual } => write!(f, "try removing the `{}` or add a `{}` before it", actual.close(), actual.open()),
         },
         /// An open bracket was found with no close bracket
         MissingCloseBracket {
             /// The bracket type being expected based on the opening side
             expect: (Bracket, Range<usize>),
         } GRA 33 {
-            err { expect: (expect, _) } => write!(f, "missing close bracket: expected `{}`, found none", expect.close() ),
+            err { expect: (expect, _) } => write!(f, "missing close bracket: expected `{}`, found none", expect.close()),
             inlay { .. } => write!(f, "missing close bracket"),
             help { expect } => write!(
                 f,
