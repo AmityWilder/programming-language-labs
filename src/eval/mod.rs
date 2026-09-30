@@ -425,11 +425,11 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, Cont
 
         Expr::Unary(inner) => {
             let Unary { op, rhs } = &**inner;
-            let r = evaluate(source, rhs)?;
             match op.val {
                 TokenValue::Punctuation(punc) => match punc {
-                    Punctuation::Not => r.eval_not(),
-                    Punctuation::Sub => r.eval_neg(),
+                    Punctuation::Not => evaluate(source, rhs)?.eval_not(),
+                    Punctuation::Sub => evaluate(source, rhs)?.eval_neg(),
+                    Punctuation::MacroStringify => Ok(Value::Str(rhs.to_string())),
 
                     _ => unimplemented!(),
                 },

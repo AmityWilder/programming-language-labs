@@ -152,6 +152,12 @@ pub enum ErrorType<'src> {
     InvalidNumLiteral(NumLitError),
 
     // ----------------------------
+    // preprocessor
+    // ----------------------------
+    /// A macro was encountered that has not been defined
+    MacroUndefined,
+
+    // ----------------------------
     // parse
     // ----------------------------
     /// A closing bracket is of the wrong type for the open bracket at its depth
@@ -243,6 +249,8 @@ impl std::fmt::Display for ErrorType<'_> {
             Self::InvalidEscape(s) => write!(f, "unknown character escape: {s:?}"),
 
             Self::InvalidNumLiteral(e) => write!(f, "invalid number literal: {e}"),
+
+            Self::MacroUndefined => write!(f, "macro has not been defined at this point"),
 
             Self::IncorrectCloseBracket { expect, actual } => write!(
                 f,
@@ -458,6 +466,8 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             | ErrorType::InvalidEscape(_)
             | ErrorType::InvalidNumLiteral(_) => "LEX",
 
+            ErrorType::MacroUndefined => "PRE",
+
             ErrorType::IncorrectCloseBracket { .. }
             | ErrorType::ExcessCloseBracket { .. }
             | ErrorType::MissingCloseBracket { .. }
@@ -483,18 +493,20 @@ impl std::fmt::Display for ContextErrorCode<'_, '_> {
             ErrorType::InvalidEscape(_) => 8,
             ErrorType::InvalidNumLiteral(_) => 9,
 
-            ErrorType::IncorrectCloseBracket { .. } => 11,
-            ErrorType::ExcessCloseBracket { .. } => 12,
-            ErrorType::MissingCloseBracket { .. } => 13,
-            ErrorType::MissingToken { .. } => 14,
-            ErrorType::UnexpectedToken { .. } => 15,
+            ErrorType::MacroUndefined => 11,
 
-            ErrorType::DivByZero { .. } => 20,
-            ErrorType::Incompatible { .. } => 21,
-            ErrorType::Unsupported { .. } => 22,
-            ErrorType::UnsignedNeg => 23,
-            ErrorType::Overflow => 24,
-            ErrorType::FailedConvert(_) => 25,
+            ErrorType::IncorrectCloseBracket { .. } => 21,
+            ErrorType::ExcessCloseBracket { .. } => 22,
+            ErrorType::MissingCloseBracket { .. } => 23,
+            ErrorType::MissingToken { .. } => 24,
+            ErrorType::UnexpectedToken { .. } => 25,
+
+            ErrorType::DivByZero { .. } => 31,
+            ErrorType::Incompatible { .. } => 32,
+            ErrorType::Unsupported { .. } => 33,
+            ErrorType::UnsignedNeg => 34,
+            ErrorType::Overflow => 35,
+            ErrorType::FailedConvert(_) => 36,
         };
         write!(f, "err[{area}{code:>03}]")
     }
@@ -756,6 +768,8 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 }
             }
 
+            ErrorType::MacroUndefined => write!(f, "try moving the definition ahead of this usage"),
+
             ErrorType::IncorrectCloseBracket { expect, actual } => write!(
                 f,
                 "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or the `{}`",
@@ -925,6 +939,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
                     ErrorType::InvalidNumLiteral(_) => {
                         Box::new(|f| f.write_str("not a valid number"))
                     }
+                    ErrorType::MacroUndefined => Box::new(|f| f.write_str("not defined")),
                     ErrorType::IncorrectCloseBracket { .. } => {
                         Box::new(|f| f.write_str("incorrect partner"))
                     }
