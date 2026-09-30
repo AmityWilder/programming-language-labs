@@ -176,8 +176,9 @@ impl<'src> Preprocessor<'src> {
                         break;
                     }
                 }
-                _ => def.push(token),
+                _ => (),
             }
+            def.push(token);
         }
         // replace existing definition
         _ = self.macros.insert(
@@ -229,8 +230,9 @@ impl<'src> Preprocessor<'src> {
                             break;
                         }
                     }
-                    _ => arg.push(token),
+                    _ => (),
                 }
+                arg.push(token);
             }
             args.push(arg);
         }
