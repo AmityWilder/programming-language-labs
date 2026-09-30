@@ -183,7 +183,8 @@ define_error_type! {
         EmptyCharLiteral LEX 3 {
             err => write!(f, "empty character literal"),
             inlay => write!(f, "empty"),
-            help => write!(f, "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` with `{STR_DELIM}{STR_DELIM}` or insert a character"),
+            help => write!(f, "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` \
+                               with `{STR_DELIM}{STR_DELIM}` or insert a character"),
         },
         /// A character literal with multiple codepoints
         MultiCharLiteral LEX 4 {
@@ -212,7 +213,7 @@ define_error_type! {
             help => write!(f, "try adding a `{CHAR_DELIM}` to the end of the char"),
         },
         /// A character literal has no `'` to end it, but contains a `\'`
-        EscapedCharLiteralEnd LEX 6 {
+        EscapedCharLiteralEnd LEX 5 {
             err => write!(f, "char literal opens (`'`) but never closes (missing unescaped `'`)"),
             inlay => write!(f, "never ends, unless you remove the `\\`"),
             help => {
@@ -232,13 +233,13 @@ define_error_type! {
             },
         },
         /// A string literal has no `"` to end it
-        EndlessStringLiteral LEX 7 {
+        EndlessStringLiteral LEX 6 {
             err => write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"),
             inlay => write!(f, "never ends"),
             help => write!(f, "try adding a `{STR_DELIM}` to the end of the string"),
         },
         /// A string literal has no `"` to end it, but contains a `\"`
-        EscapedStringLiteralEnd LEX 8 {
+        EscapedStringLiteralEnd LEX 6 {
             err => write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"),
             inlay => write!(f, "never ends, unless you remove the `\\`"),
             help => {
@@ -259,7 +260,7 @@ define_error_type! {
             },
         },
         /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
-        InvalidEscape(&'src str) LEX 9 {
+        InvalidEscape(&'src str) LEX 7 {
             err(esc) => write!(f, "unknown character escape: {esc:?}"),
             inlay(_) => write!(f, "has an invalid escape sequence"),
             help(esc) => {
@@ -295,7 +296,7 @@ define_error_type! {
             }
         },
         /// A number literal could not be evaluated as a number
-        InvalidNumLiteral(NumLitError) LEX 10 {
+        InvalidNumLiteral(NumLitError) LEX 8 {
             err(e) => write!(f, "invalid number literal: {e}"),
             inlay(_) => write!(f, "not a valid number"),
             help(e) => {
@@ -428,11 +429,16 @@ define_error_type! {
             /// The bracket type that was found
             actual: Bracket,
         } GRA 31 {
-            err { expect: (expect, _), actual } => write!(f, "incorrect close bracket: expected `{}`, found `{}`", expect.close(), actual.close()),
+            err { expect: (expect, _), actual } => write!(f,
+                "incorrect close bracket: expected `{}`, found `{}`",
+                expect.close(),
+                actual.close(),
+            ),
             inlay { .. } => write!(f, "incorrect partner"),
             help { expect, actual } => write!(
                 f,
-                "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or the `{}`",
+                "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, \
+                or remove either the `{}` or the `{}`",
                 expect.0.close(),
                 actual.close(),
                 actual.open(),
