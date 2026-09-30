@@ -55,10 +55,13 @@ use highlight::{
 use scanner::tokenize;
 use std::{fmt::Write, range::Range};
 
+use crate::{preproc::preprocess, scanner::token::Token};
+
 mod error;
 mod eval;
 mod grammar;
 mod highlight;
+mod preproc;
 mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
@@ -213,18 +216,13 @@ where
     }
 }
 
-/// # Panics
-/// This method can panic if [`scanner::Scanner`] isn't written correctly
-pub fn run_code(source: &str) {
-    // token debug
-    println!("source code:\n```\n{source}\n```");
-
-    println!();
-    println!("tokens:");
-    let tokens: Vec<_> = tokenize(source).collect();
+fn print_tokens<'src: 'arr, 'arr, I>(source: &str, tokens: I)
+where
+    I: IntoIterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
+{
     let max_cols = source.lines().map(str::len).max().unwrap_or(0);
     let max_range_digits = max_cols.to_string().len().strict_mul(2);
-    for item in &tokens {
+    for item in tokens {
         let (_, syn, _) = syntax_of(item);
         let style = SYNTAX_STYLE_ANSI[syn];
         let range = match item {
@@ -248,8 +246,20 @@ pub fn run_code(source: &str) {
             }
         }
     }
+}
 
-    // grammar highlighted
+/// # Panics
+/// This method can panic if [`scanner::Scanner`] isn't written correctly
+pub fn run_code(source: &str) {
+    // token debug
+    println!("source code:\n```\n{source}\n```");
+
+    println!();
+    println!("tokens:");
+    let tokens: Vec<_> = tokenize(source).collect();
+    print_tokens(source, &tokens);
+
+    // syntax highlighted
     let mut buf = String::new();
     for (lexeme, syntax) in highlight(&tokens) {
         _ = write!(buf, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
@@ -289,6 +299,12 @@ pub fn run_code(source: &str) {
     // lex errors
     println!();
     list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err));
+
+    // preprocessing
+    println!();
+    println!("preprocessor:");
+    let tokens: Vec<_> = preprocess(source, tokens).collect();
+    print_tokens(source, &tokens);
 
     // parse debug
     println!();

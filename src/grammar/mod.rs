@@ -21,6 +21,7 @@ macro_rules! match_token {
         |token| matches!(token.val, $($crate::scanner::token::value::Value::$variant$(($pattern))?)|+)
     };
 }
+pub(crate) use match_token;
 
 macro_rules! binary_op_seq {
     ($( $outer:ident -> $lhs:ident ( ( $($op:ident)|+ ) $rhs:ident )* ; )+) => {$(
@@ -61,7 +62,7 @@ impl std::fmt::Display for Binary<'_> {
             op: Token { lex: op, .. },
             rhs,
         } = self;
-        write!(f, "{lhs}{op}{rhs}")
+        write!(f, "{lhs} {op} {rhs}")
     }
 }
 
@@ -248,7 +249,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         use Punctuation::*;
 
-        if let Some(op) = self.tokens.next_if(match_token!(Punctuation(Not | Sub))) {
+        if let Some(op) = self
+            .tokens
+            .next_if(match_token!(Punctuation(Not | Sub | MacroStringify)))
+        {
             Ok(Expr::unary(Unary {
                 op,
                 rhs: self.unary()?,
