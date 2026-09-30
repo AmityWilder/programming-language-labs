@@ -454,9 +454,5 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, Cont
 
         Expr::Grouping(group) => Ok(evaluate(source, &group.expr)?),
     }
-    .map_err(|(token, err)| ContextError {
-        source,
-        range: token.lex_range(source),
-        err,
-    })
+    .map_err(|(token, err)| ContextError::token_error(source, Some(*token), err))
 }

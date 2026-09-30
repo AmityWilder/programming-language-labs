@@ -285,40 +285,30 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         )?;
         let expr = self.expression()?;
         self.try_pull(
-                match_token!(Punctuation(Punctuation::RParen)),
-                Expecting::an("expression or `)`"),
-            )
-            .map(move |close| Expr::grouping(Grouping { open, expr, close }))
-            .map_err(|e| ContextError {
-                source: e.source,
-                range: e.range,
-                err: match e.err {
-                    ErrorType::MissingToken { .. } => ErrorType::MissingCloseBracket {
-                        expect: (Bracket::Paren, open.lex_range(self.source)),
-                    },
-
-                    ErrorType::UnexpectedToken {
-                        actual:
-                            Token {
-                                val:
-                                    Value::Punctuation(
-                                        punc @ (Punctuation::RBrace | Punctuation::RBrack),
-                                    ),
-                                ..
-                            },
-                        ..
-                    } => ErrorType::IncorrectCloseBracket {
-                        expect: (Bracket::Paren, open.lex_range(self.source)),
-                        actual: match punc {
-                            Punctuation::RBrace => Bracket::Brace,
-                            Punctuation::RBrack => Bracket::Brack,
-                            _ => unreachable!("guarded by outer match arm"),
-                        },
-                    },
-
-                    _ => e.err,
+            match_token!(Punctuation(Punctuation::RParen)),
+            Expecting::an("expression or `)`"),
+        )
+        .map(move |close| Expr::grouping(Grouping { open, expr, close }))
+        .map_err(|e| {
+            e.map_type(|err| match err {
+                ErrorType::MissingToken { .. } => ErrorType::MissingCloseBracket {
+                    expect: (Bracket::Paren, open.lex_range(self.source)),
                 },
+
+                ErrorType::UnexpectedToken {
+                    actual: punc @ ("}" | "]"), .. // Sorry this doesn't use Value anymore, Token is huge now...
+                } => ErrorType::IncorrectCloseBracket {
+                    expect: (Bracket::Paren, open.lex_range(self.source)),
+                    actual: match punc {
+                        "}" => Bracket::Brace,
+                        "]" => Bracket::Brack,
+                        _ => unreachable!("guarded by outer match arm"),
+                    },
+                },
+
+                err => err,
             })
+        })
     }
 
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
@@ -396,50 +386,60 @@ mod tests {
             &[Expr::binary(Binary {
                 lhs: Expr::literal(Token {
                     lex: "5",
-                    val: Value::UIntLiteral(5)
+                    val: Value::UIntLiteral(5),
+                    mac: None
                 }),
                 op: Token {
                     lex: "+",
-                    val: Value::Punctuation(Punctuation::Add)
+                    val: Value::Punctuation(Punctuation::Add),
+                    mac: None
                 },
                 rhs: Expr::binary(Binary {
                     lhs: Expr::unary(Unary {
                         op: Token {
                             lex: "-",
-                            val: Value::Punctuation(Punctuation::Sub)
+                            val: Value::Punctuation(Punctuation::Sub),
+                            mac: None
                         },
                         rhs: Expr::grouping(Grouping {
                             open: Token {
                                 lex: "(",
-                                val: Value::Punctuation(Punctuation::LParen)
+                                val: Value::Punctuation(Punctuation::LParen),
+                                mac: None
                             },
                             expr: Expr::binary(Binary {
                                 lhs: Expr::literal(Token {
                                     lex: "7",
-                                    val: Value::UIntLiteral(7)
+                                    val: Value::UIntLiteral(7),
+                                    mac: None
                                 }),
                                 op: Token {
                                     lex: "/",
-                                    val: Value::Punctuation(Punctuation::Div)
+                                    val: Value::Punctuation(Punctuation::Div),
+                                    mac: None
                                 },
                                 rhs: Expr::literal(Token {
                                     lex: "8",
-                                    val: Value::UIntLiteral(8)
+                                    val: Value::UIntLiteral(8),
+                                    mac: None
                                 })
                             }),
                             close: Token {
                                 lex: ")",
-                                val: Value::Punctuation(Punctuation::RParen)
+                                val: Value::Punctuation(Punctuation::RParen),
+                                mac: None
                             }
                         })
                     }),
                     op: Token {
                         lex: "*",
-                        val: Value::Punctuation(Punctuation::Mul)
+                        val: Value::Punctuation(Punctuation::Mul),
+                        mac: None
                     },
                     rhs: Expr::Literal(Token {
                         lex: "3",
-                        val: Value::UIntLiteral(3)
+                        val: Value::UIntLiteral(3),
+                        mac: None
                     })
                 })
             })]

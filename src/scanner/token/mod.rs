@@ -97,11 +97,14 @@ pub struct Token<'src> {
 
     /// The value of the token
     pub val: Value<'src>,
+
+    /// The range of the macro this token expanded from
+    pub mac: Option<Range<usize>>,
 }
 
 impl std::fmt::Debug for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { lex, val } = self;
+        let Self { lex, val, mac } = self;
         let (name, val): (&str, Option<&dyn std::fmt::Debug>) = match val {
             Value::Whitespace => ("Whitespace", None),
             Value::Comment => ("Comment", None),
@@ -117,7 +120,11 @@ impl std::fmt::Debug for Token<'_> {
             Value::Keyword(x) => ("Keyword", Some(x)),
             Value::Punctuation(x) => ("Punctuation", Some(x)),
         };
-        write!(f, "{name}({lex:?})")?;
+        write!(f, "{name}({lex:?}")?;
+        if let Some(mac) = mac {
+            write!(f, " from {mac:?}")?;
+        }
+        write!(f, ")")?;
         if let Some(val) = val {
             write!(f, ": {val:?}")
         } else {

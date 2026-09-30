@@ -187,7 +187,7 @@ pub enum ErrorType<'src> {
         /// The token pattern expected
         expect: Expecting,
         /// The token found
-        actual: Token<'src>,
+        actual: &'src str,
     },
 
     // ----------------------------
@@ -200,12 +200,20 @@ pub enum ErrorType<'src> {
     },
     /// The operands in a binary operation are of incompatible type
     Incompatible {
+        /// The binary operator
         op: Punctuation,
+        /// The type of the value on the left side of the operator
         lhs: ValueType,
+        /// The type of the value on the right side of the operator
         rhs: ValueType,
     },
     /// The operand in a unary operation is of an unsupported type
-    Unsupported { op: Punctuation, rhs: ValueType },
+    Unsupported {
+        /// The unary operator
+        op: Punctuation,
+        /// The type of the value on the right side of the operator
+        rhs: ValueType,
+    },
     /// Unsigned cannot be negated
     UnsignedNeg,
     /// An operation resulted in overflow/underflow
@@ -277,9 +285,9 @@ impl std::fmt::Display for ErrorType<'_> {
 
             Self::UnexpectedToken {
                 expect: Expecting { expect, article },
-                actual: Token { lex: found, .. },
+                actual,
             } => {
-                write!(f, "expected {article} {expect}, found `{found}`")
+                write!(f, "expected {article} {expect}, found `{actual}`")
             }
 
             Self::DivByZero { .. } => write!(f, "divide by zero"),
@@ -310,37 +318,78 @@ pub struct ContextError<'src> {
     pub source: &'src str,
     /// The range in [`Self::source`] of precisely where the error occurred
     pub range: Range<usize>,
+    /// The range in [`Self::source`] of the macro call site that expanded to the erroneous code.
+    /// [`None`] if the error did not occur in a macro expansion.
+    pub macro_range: Option<Range<usize>>,
     /// The exact error that was found
     pub err: ErrorType<'src>,
 }
 
 impl<'src> ContextError<'src> {
-    /// A token was found but not the right kind
-    pub fn unexpected(
-        token: Token<'src>,
+    /// Produce an error with optional range
+    pub const fn error(
         source: &'src str,
-        expected: Expecting,
-    ) -> ContextError<'src> {
-        ContextError {
+        range: Option<Range<usize>>,
+        macro_range: Option<Range<usize>>,
+        err: ErrorType<'src>,
+    ) -> Self {
+        Self {
             source,
-            range: token.lex_range(source),
-            err: ErrorType::UnexpectedToken {
-                expect: expected,
-                actual: token,
+            range: match range {
+                Some(range) => range,
+                None => Range {
+                    start: source.len(),
+                    end: source.len(),
+                },
             },
+            macro_range,
+            err,
         }
     }
 
-    /// No token was found despite expecting one
-    pub const fn missing(source: &'src str, expected: Expecting) -> ContextError<'src> {
-        ContextError {
+    /// Produce an error on an optional token (the range will be its lexeme)
+    pub fn token_error(
+        source: &'src str,
+        token: Option<Token<'src>>,
+        err: ErrorType<'src>,
+    ) -> Self {
+        Self::error(
             source,
-            range: Range {
-                start: source.len(),
-                end: source.len(),
+            token.map(|token| token.lex_range(source)),
+            token.and_then(|token| token.mac),
+            err,
+        )
+    }
+
+    /// Map the [`ErrorType`] of a [`ContextError`]
+    pub fn map_type<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(ErrorType<'src>) -> ErrorType<'src>,
+    {
+        self.err = f(self.err);
+        self
+    }
+
+    /// A token was found but not the right kind
+    pub fn unexpected(token: Token<'src>, source: &'src str, expected: Expecting) -> Self {
+        Self::token_error(
+            source,
+            Some(token),
+            ErrorType::UnexpectedToken {
+                expect: expected,
+                actual: token.lex,
             },
-            err: ErrorType::MissingToken { expect: expected },
-        }
+        )
+    }
+
+    /// No token was found despite expecting one
+    pub const fn missing(source: &'src str, expected: Expecting) -> Self {
+        Self::error(
+            source,
+            None,
+            None, // TODO: is there a case where macro expansion can have a missing token?
+            ErrorType::MissingToken { expect: expected },
+        )
     }
 
     /// A token is expected but wasn't found; determine from its existence if it's unexpected or missing
@@ -348,7 +397,7 @@ impl<'src> ContextError<'src> {
         token: Option<Token<'src>>,
         source: &'src str,
         expected: Expecting,
-    ) -> ContextError<'src> {
+    ) -> Self {
         match token {
             Some(token) => Self::unexpected(token, source, expected),
             None => Self::missing(source, expected),
@@ -358,17 +407,23 @@ impl<'src> ContextError<'src> {
 
 impl std::fmt::Debug for ContextError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[derive(Debug)]
-        struct Invalid;
-        f.debug_struct("ContextError")
-            .field(
-                "source[range]",
-                // this closure looks pointless, but it's actually coercing `s` from `&&str` into `&dyn std::fmt::Debug`
-                self.source.get(self.range).as_ref().map_or(&Invalid, |s| s),
-            )
-            .field("range", &self.range)
-            .field("err", &self.err)
-            .finish()
+        let Self {
+            source,
+            range,
+            macro_range,
+            err,
+        } = self;
+        let src = source
+            .get(*range)
+            .expect("range should be a range in source");
+        write!(f, "ContextError({src:?}")?;
+        if let Some(macro_range) = macro_range {
+            let src = source
+                .get(*macro_range)
+                .expect("macro_range should be a range in source");
+            write!(f, " in expansion of {src:?}")?;
+        }
+        writeln!(f, "): {err:?}")
     }
 }
 
@@ -801,11 +856,11 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
 
             ErrorType::UnexpectedToken {
                 expect: Expecting { expect, article },
-                actual: Token { lex: found, .. },
+                actual,
             } => {
                 write!(
                     f,
-                    "try inserting {article} {expect} before the `{found}` or remove the `{found}`"
+                    "try inserting {article} {expect} before the `{actual}` or remove the `{actual}`"
                 )
             }
 
@@ -845,6 +900,8 @@ pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
 #[derive(Debug, Clone)]
 pub struct RenderedContextError<'src, 'err>(&'err ContextError<'src>);
 
+/// Dynamic write function
+// TODO: surely this can be done more cheaply?
 type DynDisplay = Box<dyn FnOnce(&mut std::fmt::Formatter<'_>) -> std::fmt::Result>;
 
 /// Outputs a line reference to `f`.
@@ -913,8 +970,27 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut has_prev = false;
 
+        // info
+        if let Some(macro_range) = self.0.macro_range {
+            if has_prev {
+                writeln!(f)?;
+            }
+            line_ref(
+                f,
+                self.0.source,
+                macro_range,
+                "\x1b[96m",
+                '-',
+                Box::new(|f| f.write_str("within this macro expansion")),
+            )?;
+            has_prev = true;
+        }
+
         // error
         if !self.0.range.is_empty() {
+            if has_prev {
+                writeln!(f)?;
+            }
             line_ref(
                 f,
                 self.0.source,

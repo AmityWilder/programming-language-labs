@@ -21,6 +21,7 @@ mod scan {
             &[Err(ContextError {
                 source: SOURCE,
                 range: (0..SOURCE.len()).into(),
+                macro_range: None,
                 err: ErrorType::UnknownToken,
             })]
         );
@@ -38,7 +39,8 @@ mod scan {
                 &[Ok(Token {
                     lex: SOURCE,
                     val: Value::Whitespace,
-                },)]
+                    mac: None
+                })]
             );
         }
 
@@ -50,7 +52,8 @@ mod scan {
                 &[Ok(Token {
                     lex: SOURCE,
                     val: Value::Whitespace,
-                },)]
+                    mac: None
+                })]
             );
         }
     }
@@ -70,8 +73,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::Comment
-                    },)]
+                        val: Value::Comment,
+                        mac: None
+                    })]
                 );
             }
 
@@ -83,12 +87,14 @@ mod scan {
                     &[
                         Ok(Token {
                             lex: "// apple",
-                            val: Value::Comment
-                        },),
+                            val: Value::Comment,
+                            mac: None
+                        }),
                         Ok(Token {
                             lex: "\n",
-                            val: Value::Whitespace
-                        },)
+                            val: Value::Whitespace,
+                            mac: None
+                        })
                     ]
                 );
             }
@@ -109,8 +115,9 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: Value::Identifier
-                },)]
+                    val: Value::Identifier,
+                    mac: None
+                })]
             );
         }
 
@@ -121,8 +128,9 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: Value::Identifier
-                },)]
+                    val: Value::Identifier,
+                    mac: None
+                })]
             );
         }
 
@@ -133,8 +141,9 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: Value::Identifier
-                },)]
+                    val: Value::Identifier,
+                    mac: None
+                })]
             );
         }
     }
@@ -154,8 +163,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::UIntLiteral(5)
-                    },)]
+                        val: Value::UIntLiteral(5),
+                        mac: None
+                    })]
                 );
             }
 
@@ -166,8 +176,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::UIntLiteral(35)
-                    },)]
+                        val: Value::UIntLiteral(35),
+                        mac: None
+                    })]
                 );
             }
 
@@ -178,8 +189,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::SIntLiteral(-5)
-                    },)]
+                        val: Value::SIntLiteral(-5),
+                        mac: None
+                    })]
                 );
             }
 
@@ -190,8 +202,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::FltLiteral(2.5)
-                    },)]
+                        val: Value::FltLiteral(2.5),
+                        mac: None
+                    })]
                 );
             }
 
@@ -202,8 +215,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::FltLiteral(25.25)
-                    },)]
+                        val: Value::FltLiteral(25.25),
+                        mac: None
+                    })]
                 );
             }
 
@@ -214,8 +228,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::FltLiteral(-25.25)
-                    },)]
+                        val: Value::FltLiteral(-25.25),
+                        mac: None
+                    })]
                 );
             }
         }
@@ -231,8 +246,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::FltLiteral(5e0)
-                    },)]
+                        val: Value::FltLiteral(5e0),
+                        mac: None
+                    })]
                 );
             }
 
@@ -243,8 +259,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::FltLiteral(5e-5)
-                    },)]
+                        val: Value::FltLiteral(5e-5),
+                        mac: None
+                    })]
                 );
             }
 
@@ -255,8 +272,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::FltLiteral(5e-50)
-                    },)]
+                        val: Value::FltLiteral(5e-50),
+                        mac: None
+                    })]
                 );
             }
 
@@ -267,8 +285,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::FltLiteral(-5e-50)
-                    },)]
+                        val: Value::FltLiteral(-5e-50),
+                        mac: None
+                    })]
                 );
             }
 
@@ -280,15 +299,18 @@ mod scan {
                     &[
                         Ok(Token {
                             lex: "-5e-5",
-                            val: Value::FltLiteral(-5e-5)
+                            val: Value::FltLiteral(-5e-5),
+                            mac: None
                         }),
                         Ok(Token {
                             lex: "-",
-                            val: Value::Punctuation(Punctuation::Sub)
+                            val: Value::Punctuation(Punctuation::Sub),
+                            mac: None
                         }),
                         Ok(Token {
                             lex: "3",
-                            val: Value::UIntLiteral(3)
+                            val: Value::UIntLiteral(3),
+                            mac: None
                         })
                     ]
                 );
@@ -308,11 +330,13 @@ mod scan {
                         // but "e" isn't a valid number literal suffix
                         Ok(Token {
                             lex: "-",
-                            val: Value::Punctuation(Punctuation::Sub)
+                            val: Value::Punctuation(Punctuation::Sub),
+                            mac: None
                         }),
                         Ok(Token {
                             lex: "-5",
-                            val: Value::SIntLiteral(-5)
+                            val: Value::SIntLiteral(-5),
+                            mac: None
                         })
                     ]
                 );
@@ -330,8 +354,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::UIntLiteral(0x9F)
-                    },)]
+                        val: Value::UIntLiteral(0x9F),
+                        mac: None
+                    })]
                 );
             }
 
@@ -343,6 +368,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: _,
+                        macro_range: None,
                         err: ErrorType::InvalidNumLiteral(_)
                     })]
                 );
@@ -360,8 +386,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::UIntLiteral(0o253)
-                    },)]
+                        val: Value::UIntLiteral(0o253),
+                        mac: None
+                    })]
                 );
             }
 
@@ -373,6 +400,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: _,
+                        macro_range: None,
                         err: ErrorType::InvalidNumLiteral(_)
                     })]
                 );
@@ -390,8 +418,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::UIntLiteral(0b1101_1011)
-                    },)]
+                        val: Value::UIntLiteral(0b1101_1011),
+                        mac: None
+                    })]
                 );
             }
 
@@ -403,6 +432,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: _,
+                        macro_range: None,
                         err: ErrorType::InvalidNumLiteral(_)
                     })]
                 );
@@ -425,7 +455,8 @@ mod scan {
                         ch: 'a',
                         is_escaped: false
                     }),
-                },)]
+                    mac: None
+                })]
             );
         }
 
@@ -437,6 +468,7 @@ mod scan {
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
+                    macro_range: None,
                     err: ErrorType::MultiCharLiteral,
                 })]
             );
@@ -450,6 +482,7 @@ mod scan {
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
+                    macro_range: None,
                     err: ErrorType::EmptyCharLiteral,
                 })]
             );
@@ -463,6 +496,7 @@ mod scan {
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
+                    macro_range: None,
                     err: ErrorType::EndlessCharLiteral,
                 })]
             );
@@ -481,8 +515,9 @@ mod scan {
                         val: Value::CharLiteral(CharLiteral {
                             ch: '\0',
                             is_escaped: true
-                        })
-                    },)]
+                        }),
+                        mac: None
+                    })]
                 );
             }
 
@@ -496,8 +531,9 @@ mod scan {
                         val: Value::CharLiteral(CharLiteral {
                             ch: '\x1b',
                             is_escaped: true
-                        })
-                    },)]
+                        }),
+                        mac: None
+                    })]
                 );
             }
 
@@ -509,6 +545,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: (0..SOURCE.len()).into(),
+                        macro_range: None,
                         err: ErrorType::MultiCharLiteral,
                     })]
                 );
@@ -522,6 +559,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: (0..SOURCE.len()).into(),
+                        macro_range: None,
                         err: ErrorType::EscapedCharLiteralEnd,
                     })]
                 );
@@ -541,7 +579,8 @@ mod scan {
                 &[Ok(Token {
                     lex: SOURCE,
                     val: Value::StringLiteral(StrLiteral { content: "a" }),
-                },)]
+                    mac: None
+                })]
             );
         }
 
@@ -553,6 +592,7 @@ mod scan {
                 &[Ok(Token {
                     lex: SOURCE,
                     val: Value::StringLiteral(StrLiteral { content: "aa" }),
+                    mac: None
                 })]
             );
         }
@@ -565,6 +605,7 @@ mod scan {
                 &[Ok(Token {
                     lex: SOURCE,
                     val: Value::StringLiteral(StrLiteral { content: "" }),
+                    mac: None
                 })]
             );
         }
@@ -577,6 +618,7 @@ mod scan {
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
+                    macro_range: None,
                     err: ErrorType::EndlessStringLiteral,
                 })]
             );
@@ -592,8 +634,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::StringLiteral(StrLiteral { content: "\\0" })
-                    },)]
+                        val: Value::StringLiteral(StrLiteral { content: "\\0" }),
+                        mac: None
+                    })]
                 );
             }
 
@@ -604,8 +647,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::StringLiteral(StrLiteral { content: "\\x1b" })
-                    },)]
+                        val: Value::StringLiteral(StrLiteral { content: "\\x1b" }),
+                        mac: None
+                    })]
                 );
             }
 
@@ -616,8 +660,9 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: Value::StringLiteral(StrLiteral { content: "\\1b" })
-                    },)]
+                        val: Value::StringLiteral(StrLiteral { content: "\\1b" }),
+                        mac: None
+                    })]
                 );
             }
 
@@ -629,6 +674,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: (0..SOURCE.len()).into(),
+                        macro_range: None,
                         err: ErrorType::EscapedStringLiteralEnd,
                     })]
                 );
