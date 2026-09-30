@@ -983,6 +983,18 @@ impl std::fmt::Display for TypeResolutionMsg {
     }
 }
 
+fn encode_slice<T: Copy, const N: usize, const M: usize>(
+    buf: &mut [T; N],
+    src: [T; M],
+) -> &mut [T] {
+    const {
+        assert!(M <= N, "buf must be large enough to contain src");
+    }
+    let buf = &mut buf[..src.len()];
+    buf.copy_from_slice(&src);
+    buf
+}
+
 impl std::fmt::Display for RenderedContextError<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut has_prev = false;
@@ -1057,38 +1069,40 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
         }
 
         // info
+        const MAX_ITEMS: usize = 2;
+        let mut buf: [(_, &dyn std::fmt::Display); _] = [(Range::default(), &""); MAX_ITEMS];
         let lhs_ty_buf: TypeResolutionMsg;
         let rhs_ty_buf: TypeResolutionMsg;
-        let items: Vec<(Range<usize>, &dyn std::fmt::Display)> = match self.0.err {
+        let items = match self.0.err {
             ErrorType::IncorrectCloseBracket {
                 expect: (_, range), ..
-            } => vec![(range, &"bracket type introduced here")],
+            } => encode_slice(&mut buf, [(range, &"bracket type introduced here")]),
 
             ErrorType::MissingCloseBracket { expect: (_, range) } => {
-                vec![(range, &"missing a partner")]
+                encode_slice(&mut buf, [(range, &"missing a partner")])
             }
 
             ErrorType::DivByZero { zero } => {
-                vec![(zero, &"this expression evaluates to 0")]
+                encode_slice(&mut buf, [(zero, &"this expression evaluates to 0")])
             }
 
             ErrorType::Incompatible { lhs, rhs, .. } => {
                 lhs_ty_buf = TypeResolutionMsg { ty: lhs.0 };
                 rhs_ty_buf = TypeResolutionMsg { ty: rhs.0 };
-                vec![(lhs.1, &lhs_ty_buf), (rhs.1, &rhs_ty_buf)]
+                encode_slice(&mut buf, [(lhs.1, &lhs_ty_buf), (rhs.1, &rhs_ty_buf)])
             }
             ErrorType::Unsupported { rhs, .. } => {
                 rhs_ty_buf = TypeResolutionMsg { ty: rhs.0 };
-                vec![(rhs.1, &rhs_ty_buf)]
+                encode_slice(&mut buf, [(rhs.1, &rhs_ty_buf)])
             }
 
-            _ => Vec::new(),
+            _ => encode_slice(&mut buf, []),
         };
         for (range, explanation) in items {
             if has_prev {
                 writeln!(f)?;
             }
-            line_ref(f, self.0.source, range, "\x1b[96m", '-', explanation)?;
+            line_ref(f, self.0.source, *range, "\x1b[96m", '-', *explanation)?;
             has_prev = true;
         }
 
