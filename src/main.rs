@@ -23,7 +23,7 @@
 #![warn(
     // clippy::pedantic,
     clippy::missing_const_for_fn,
-    clippy::missing_docs_in_private_items,
+    // clippy::missing_docs_in_private_items,
     clippy::too_many_lines,
     reason = "yucky. clean that up."
 )]

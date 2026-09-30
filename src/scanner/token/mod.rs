@@ -46,7 +46,7 @@ macro_rules! define_token_eq {
             /// The constant string name of the token
             pub const fn as_str(self) -> &'static str {
                 match self {
-                    $(Self::$Variant => $value,)+
+                    $(Self::$Variant => $value),+
                 }
             }
         }

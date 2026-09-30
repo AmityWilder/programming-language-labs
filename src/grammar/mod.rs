@@ -243,7 +243,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         equality   -> comparison ( (Neq | Eq) comparison )* ;
         comparison -> term ( (Gt | Ge | Lt | Le) term )* ;
         term       -> factor ( (Add | Sub) factor )* ;
-        factor     -> exponent ( (Mul | Div) exponent )* ;
+        factor     -> exponent ( (Mul | Div | Rem) exponent )* ;
         exponent   -> unary ( (Exp) unary )* ;
     }
 
