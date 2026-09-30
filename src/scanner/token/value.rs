@@ -1,3 +1,5 @@
+//! [`Value`] of tokens
+
 use std::{range::Range, sync::LazyLock};
 
 use crate::{
@@ -142,7 +144,7 @@ pub enum Value<'src> {
     /// An identifier - its value is the lexeme itself
     Identifier,
     /// An identifier followed by `(` or following a `fn` keyword
-    #[deprecated(note = "will be determined by parser in future versions")]
+    // TODO: #[deprecated(note = "will be determined by parser in future versions")]
     Callable,
     /// An identifier prefixed with `\`
     Macro,

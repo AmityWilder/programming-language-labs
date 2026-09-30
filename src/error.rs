@@ -12,87 +12,6 @@ use crate::{
 };
 use std::range::Range;
 
-/// Either "a" or "an"
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Article {
-    /// Article used before consonant sounds
-    A,
-    /// Article used before vowel sounds
-    An,
-}
-
-impl std::fmt::Display for Article {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Article::A => "a",
-            Article::An => "an",
-        })
-    }
-}
-
-/// Description of an expectation
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Expecting {
-    /// Description of what type of value is expected
-    pub expect: &'static str,
-
-    /// Determines "a/an".
-    ///
-    /// **Note:** This cannot be determined programatically by whether a word is prefixed with a vowel.
-    ///
-    /// 1. Sometimes words start with a silent consonant followed by a not-silent vowel.
-    ///
-    ///     **Examples:**
-    ///     - honest ("on-est")
-    ///     - hour ("our")
-    ///     - heir ("air")
-    ///     - honor ("on-or")
-    ///
-    /// 2. Additionally, letters saying their names (such as initialisms) may be pronounced starting
-    ///    with a vowel despite *being* a consonant.
-    ///
-    ///     **Examples:**
-    ///     - F ("eff")
-    ///     - H ("ayche")
-    ///     - L ("el")
-    ///     - M ("em")
-    ///     - N ("en")
-    ///     - R ("are")
-    ///     - S ("ess")
-    ///     - X ("ecks")
-    ///
-    /// 3. And to make it even more confusing, sometimes vowels will make a **consonant** sound.
-    ///
-    ///     **Examples:**
-    ///     - unit ("you-nit"; 'u' is made to say its name by 'i' on the other side of 'n')
-    ///     - utility ("you-till-itty"; 'u' is made to say its name by 'i' on the other side of 't')
-    ///     - one ("won"; I don't even know why it's pronounced this way)
-    ///
-    /// And of course there are limitless exceptions when it comes to English, because while all
-    /// languages are formulated by culture rather than committees, English in particular was
-    /// formulated by three separate cultures all doing their own thing independently before
-    /// deciding to mash all their languages together with little regard for bystanders.
-    pub article: Article,
-}
-
-impl Expecting {
-    /// Expectaion starts with a consonant sound
-    pub const fn a(expect: &'static str) -> Self {
-        Self {
-            expect,
-            article: Article::A,
-        }
-    }
-
-    /// Expectaion starts with a vowel sound
-    pub const fn an(expect: &'static str) -> Self {
-        Self {
-            expect,
-            article: Article::An,
-        }
-    }
-}
-
 /// Invalid number literal
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NumLitError {
@@ -122,6 +41,21 @@ impl std::error::Error for NumLitError {
             Self::Flt(e) => Some(e),
         }
     }
+}
+
+/// Remove an article ("a ", "an ", "a(n) ", "the ", or "") from the beginning of a string
+#[expect(
+    dead_code,
+    reason = "reserved for if error expectations ever need to replace \"a\"/\"an\" with \"the\""
+)]
+fn trim_article(s: &str) -> &str {
+    const ARTICLES: [&str; 4] = ["a ", "an ", "a(n) ", "the "];
+    for article in ARTICLES {
+        if let Some(trimmed) = s.strip_prefix(article) {
+            return trimmed;
+        }
+    }
+    s
 }
 
 /// The kind of error describing a [`ContextError`]
@@ -179,13 +113,15 @@ pub enum ErrorType<'src> {
     },
     /// A token was expected, but instead found EOF
     MissingToken {
-        /// The token pattern expected
-        expect: Expecting,
+        /// The token pattern expected - should start with the proper article
+        /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
+        expect: &'static str,
     },
     /// A token was expected, but instead found `actual`
     UnexpectedToken {
-        /// The token pattern expected
-        expect: Expecting,
+        /// The token pattern expected - should start with the proper article
+        /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
+        expect: &'static str,
         /// The token found
         actual: &'src str,
     },
@@ -279,15 +215,10 @@ impl std::fmt::Display for ErrorType<'_> {
                 expect.0.close()
             ),
 
-            Self::MissingToken {
-                expect: Expecting { expect, article },
-            } => write!(f, "missing {article} {expect}"),
+            Self::MissingToken { expect } => write!(f, "missing {expect}"),
 
-            Self::UnexpectedToken {
-                expect: Expecting { expect, article },
-                actual,
-            } => {
-                write!(f, "expected {article} {expect}, found `{actual}`")
+            Self::UnexpectedToken { expect, actual } => {
+                write!(f, "expected {expect}, found `{actual}`")
             }
 
             Self::DivByZero { .. } => write!(f, "divide by zero"),
@@ -371,7 +302,7 @@ impl<'src> ContextError<'src> {
     }
 
     /// A token was found but not the right kind
-    pub fn unexpected(token: Token<'src>, source: &'src str, expected: Expecting) -> Self {
+    pub fn unexpected(token: Token<'src>, source: &'src str, expected: &'static str) -> Self {
         Self::token_error(
             source,
             Some(token),
@@ -383,7 +314,7 @@ impl<'src> ContextError<'src> {
     }
 
     /// No token was found despite expecting one
-    pub const fn missing(source: &'src str, expected: Expecting) -> Self {
+    pub const fn missing(source: &'src str, expected: &'static str) -> Self {
         Self::error(
             source,
             None,
@@ -396,7 +327,7 @@ impl<'src> ContextError<'src> {
     pub fn missing_or_unexpected(
         token: Option<Token<'src>>,
         source: &'src str,
-        expected: Expecting,
+        expected: &'static str,
     ) -> Self {
         match token {
             Some(token) => Self::unexpected(token, source, expected),
@@ -850,17 +781,12 @@ impl std::fmt::Display for ContextErrorHelp<'_, '_> {
                 expect.0.open(),
             ),
 
-            ErrorType::MissingToken {
-                expect: Expecting { expect, article },
-            } => write!(f, "try inserting {article} {expect}"),
+            ErrorType::MissingToken { expect } => write!(f, "try inserting {expect}"),
 
-            ErrorType::UnexpectedToken {
-                expect: Expecting { expect, article },
-                actual,
-            } => {
+            ErrorType::UnexpectedToken { expect, actual } => {
                 write!(
                     f,
-                    "try inserting {article} {expect} before the `{actual}` or remove the `{actual}`"
+                    "try inserting {expect} before the `{actual}` or remove the `{actual}`"
                 )
             }
 
