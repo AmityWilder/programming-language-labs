@@ -252,11 +252,13 @@ pub fn run_code(source: &str) {
     println!("source code:\n```\n{source}\n```");
 
     println!();
-    println!("tokens:");
+    println!("tokenizer:");
     let tokens: Vec<_> = tokenize(source).collect();
     print_tokens(source, &tokens);
 
     // syntax highlighted
+    println!();
+    println!("syntax highlighting:");
     let mut buf = String::new();
     for (lexeme, syntax) in highlight(&tokens) {
         _ = write!(buf, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
@@ -293,20 +295,27 @@ pub fn run_code(source: &str) {
     }
     println!("```");
 
-    // lex errors
-    println!();
-    list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err));
-
     // preprocessing
     println!();
     println!("preprocessor:");
     let tokens: Vec<_> = preprocess(source, tokens).collect();
     print_tokens(source, &tokens);
 
+    let num_ok = tokens.iter().filter(|item| item.is_ok()).count();
+    let num_err = tokens.len().checked_sub(num_ok).expect("complement");
+    let mut lex_tokens = Vec::with_capacity(num_ok);
+    let mut lex_errors = Vec::with_capacity(num_err);
+    for res in tokens {
+        match res {
+            Ok(x) => lex_tokens.push(x),
+            Err(e) => lex_errors.push(e),
+        }
+    }
+
     // parse debug
     println!();
-    println!("ast:");
-    let ast: Vec<_> = parse(source, tokens.into_iter().filter_map(Result::ok)).collect();
+    println!("parser:");
+    let ast: Vec<_> = parse(source, lex_tokens).collect();
     for res in &ast {
         match res {
             Ok(node) => {
@@ -320,14 +329,10 @@ pub fn run_code(source: &str) {
         }
     }
 
-    // parse errors
-    println!();
-    list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err));
-
     // eval
     println!();
     println!("evaluation:");
-    let errors: Vec<_> = ast
+    let runtime_errors: Vec<_> = ast
         .iter()
         .flatten()
         .map(|expr| {
@@ -349,8 +354,16 @@ pub fn run_code(source: &str) {
         .filter_map(Result::err)
         .collect();
 
+    // errors
     println!();
-    list_errors(errors.iter());
+    list_errors(
+        // lex/preproc errors
+        (lex_errors.iter())
+            // parse errors
+            .chain(ast.iter().map(Result::as_ref).filter_map(Result::err))
+            // eval errors
+            .chain(runtime_errors.iter()),
+    );
 }
 
 fn main() {
