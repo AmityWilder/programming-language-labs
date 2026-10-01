@@ -899,6 +899,8 @@ struct LineRefs<'src, 'arr, 'msg> {
 impl std::fmt::Display for LineRefs<'_, '_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const EDGE_STYLE: Style = Style::new().foreground(Color::BrightBlue);
+        /// Displayed in place of the line numbers between non-contiguous lines
+        const ELLIPSES: &str = "...";
 
         debug_assert!(
             self.items
@@ -911,28 +913,39 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
             .iter()
             .map(|item| item.span.end.line)
             .max()
-            .map(|n| n.to_string().len())
+            // this map is being applied to an Option, not an iterator,
+            // so only the biggest number calls `to_string()`
+            .map(|n| n.to_string().len().max(ELLIPSES.len()))
         else {
             // no items to display
             return Ok(());
         };
 
         macro_rules! write_line_start {
-            ($f:expr, $n:expr) => {
+            ($dst:expr, $line_number:expr) => {
                 write!(
-                    $f,
+                    $dst,
                     " {}{:>line_num_width$} |{}  ",
                     EDGE_STYLE.begin(),
-                    $n,
-                    EDGE_STYLE.end()
+                    $line_number,
+                    EDGE_STYLE.end(),
                 )
             };
 
-            ($f:expr) => {
-                write_line_start!($f, "")
+            ($dst:expr) => {
+                write_line_start!($dst, "")
             };
         }
 
+        // [`None`] represents -1
+        let mut prev_line = self
+            .items
+            .first()
+            .expect("would have returned if there were no items")
+            .span
+            .start
+            .line
+            .checked_sub(1);
         for line_items in self.items.chunk_by(|a, b| {
             a.span.start.line == b.span.start.line
                 && a.span.end.line == b.span.end.line
@@ -949,16 +962,23 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
                 .source
                 .get(first.block)
                 .expect("block should be a range in source");
+            // will only have multiple lines if there are multiple lines in a single line_item
             let lines = block
                 .lines()
                 .enumerate()
                 .map(|(n, line)| (n.strict_add(start_line), line));
-            // balancing line
-            write_line_start!(f)?;
+            if prev_line != start_line.checked_sub(1) {
+                // ellipses line
+                write_line_start!(f, ELLIPSES)?;
+            } else {
+                // balancing line
+                write_line_start!(f)?;
+            }
+            prev_line = Some(start_line);
             writeln!(f)?;
             // draw the underlines
             for (i, line) in lines {
-                // first code line
+                // print the line content
                 write_line_start!(f, i)?;
                 writeln!(f, "{line}")?;
                 // per-line
