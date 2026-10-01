@@ -74,7 +74,7 @@ define_token_eq! {
         // ----------------------------
 
         /// Not equal - Equivalent to `!(lhs == rhs)`
-        Neq = "!=",
+        Ne = "!=",
         /// Nand - Equivalent to `!(lhs & rhs)`
         Nand = "!&",
         /// Nor - Equivalent to `!(lhs | rhs)`
@@ -89,8 +89,8 @@ define_token_eq! {
         AndAssign = "&=",
         /// Multiply assign - Equivalent to `lhs = lhs * rhs`
         MulAssign = "*=",
-        /// Exponent - Put `lhs` to the power of `rhs`
-        Exp = "**",
+        /// Power - Put `lhs` to the power of `rhs`
+        Pow = "**",
         /// Add assign - Equivalent to `lhs = lhs + rhs`
         AddAssign = "+=",
         /// Sub assign - Equivalent to `lhs = lhs - rhs`
@@ -126,8 +126,8 @@ define_token_eq! {
         // 3-char
         // ----------------------------
 
-        /// Exponent assign - Equivalent to `lhs = lhs ** rhs`
-        ExpAssign = "**=",
+        /// Power assign - Equivalent to `lhs = lhs ** rhs`
+        PowAssign = "**=",
         /// Bitshift left assign - Equivalent to `lhs = lhs << rhs`
         ShlAssign = "<<=",
         /// Bitshift right assign - Equivalent to `lhs = lhs >> rhs`

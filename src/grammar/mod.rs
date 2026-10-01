@@ -142,6 +142,14 @@ impl<'src> Binary<'src> {
             end: self.rhs.range(source).end,
         }
     }
+
+    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
+    pub fn macro_range(&self, source: &'src str) -> Option<Range<usize>> {
+        let lhs_mac = self.lhs.macro_range(source)?;
+        // don't need to check op because it's between them, so it must be in the same expansion if the other two are
+        let rhs_mac = self.rhs.macro_range(source)?;
+        (lhs_mac == rhs_mac).then_some(lhs_mac)
+    }
 }
 
 impl std::fmt::Display for Binary<'_> {
@@ -171,7 +179,7 @@ impl MathDisplay for Binary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let sep = match self.op.val {
             Value::Punctuation(
-                Punctuation::Rem | Punctuation::Mul | Punctuation::Div | Punctuation::Exp,
+                Punctuation::Rem | Punctuation::Mul | Punctuation::Div | Punctuation::Pow,
             ) => "",
             _ => " ",
         };
@@ -197,6 +205,13 @@ impl<'src> Unary<'src> {
             start: self.op.lex_range(source).start,
             end: self.rhs.range(source).end,
         }
+    }
+
+    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
+    pub fn macro_range(&self, source: &'src str) -> Option<Range<usize>> {
+        let op_mac = self.op.mac?;
+        let rhs_mac = self.rhs.macro_range(source)?;
+        (op_mac == rhs_mac).then_some(op_mac)
     }
 }
 
@@ -239,6 +254,16 @@ impl<'src> Grouping<'src> {
             start: self.open.lex_range(source).start,
             end: self.close.lex_range(source).end,
         }
+    }
+
+    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
+    pub fn macro_range(&self, _: &'src str) -> Option<Range<usize>> {
+        let open_mac = self.open.mac?;
+        // don't need to check expr because it's between open and close,
+        // and therefore must be in the same expansion if the other two are.
+        // this is also cheaper, since now we don't have to recursively check the inner expressions :)
+        let close_mac = self.close.mac?;
+        (open_mac == close_mac).then_some(open_mac)
     }
 }
 
@@ -315,6 +340,17 @@ impl<'src> Expr<'src> {
             Self::Unary(unary) => unary.range(source),
             Self::Literal(token) => token.lex_range(source),
             Self::Grouping(group) => group.range(source),
+        }
+    }
+
+    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
+    // TODO: what if part of it is from a nested macro?
+    pub fn macro_range(&self, source: &'src str) -> Option<Range<usize>> {
+        match self {
+            Expr::Binary(binary) => binary.macro_range(source),
+            Expr::Unary(unary) => unary.macro_range(source),
+            Expr::Literal(token) => token.mac,
+            Expr::Grouping(grouping) => grouping.macro_range(source),
         }
     }
 
@@ -402,13 +438,13 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     bnf_notation_multi! {
         expression -> equality ;
-        equality   -> comparison ( (Neq | Eq) comparison )* ;
+        equality   -> comparison ( (Ne | Eq) comparison )* ;
         comparison -> shift ( (Gt | Ge | Lt | Le) shift )* ;
         shift      -> term ( (Shl | Shr) term )* ;
         term       -> factor ( (Add | Sub) factor )* ;
         factor     -> unary ( (Mul | Div | Rem) unary )* ;
-        unary      -> ((Not | Sub | MacroStringify) exponent)* ;
-        exponent   -> primary ( (Exp) primary )* ; // TODO: exponents should be greater precedence than unary!!
+        unary      -> ((Not | Sub) exponent)* ;
+        exponent   -> primary ( (Pow) primary )* ; // TODO: exponents should be greater precedence than unary!!
         literal    -> ((
             BoolLiteral(_)
             | Keyword(Keyword::None)

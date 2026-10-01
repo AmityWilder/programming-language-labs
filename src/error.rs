@@ -44,6 +44,42 @@ impl std::error::Error for NumLitError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverflowError {
+    UAdd {
+        lhs: (usize, Range<usize>),
+        rhs: (usize, Range<usize>),
+    },
+    SAdd {
+        lhs: (isize, Range<usize>),
+        rhs: (isize, Range<usize>),
+    },
+    USub {
+        lhs: (usize, Range<usize>),
+        rhs: (usize, Range<usize>),
+    },
+    SSub {
+        lhs: (isize, Range<usize>),
+        rhs: (isize, Range<usize>),
+    },
+    UMul {
+        lhs: (usize, Range<usize>),
+        rhs: (usize, Range<usize>),
+    },
+    SMul {
+        lhs: (isize, Range<usize>),
+        rhs: (isize, Range<usize>),
+    },
+    UPow {
+        lhs: (usize, Range<usize>),
+        rhs: (usize, Range<usize>),
+    },
+    SPow {
+        lhs: (isize, Range<usize>),
+        rhs: (isize, Range<usize>),
+    },
+}
+
 /// Remove an article ("a ", "an ", "a(n) ", "the ", or "") from the beginning of a string
 #[expect(
     dead_code,
@@ -261,9 +297,9 @@ define_error_type! {
         },
         /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
         InvalidEscape(&'src str) LEX 7 {
-            err(esc) => write!(f, "unknown character escape: {esc:?}"),
-            inlay(_) => write!(f, "has an invalid escape sequence"),
-            help(esc) => {
+            err (esc) => write!(f, "unknown character escape: {esc:?}"),
+            inlay (_) => write!(f, "has an invalid escape sequence"),
+            help (esc) => {
                 let mut iter = esc.chars();
                 iter.next()
                     .filter(|ch| *ch == ESCAPE)
@@ -297,9 +333,9 @@ define_error_type! {
         },
         /// A number literal could not be evaluated as a number
         InvalidNumLiteral(NumLitError) LEX 8 {
-            err(e) => write!(f, "invalid number literal: {e}"),
-            inlay(_) => write!(f, "not a valid number"),
-            help(e) => {
+            err (e) => write!(f, "invalid number literal: {e}"),
+            inlay (_) => write!(f, "not a valid number"),
+            help (e) => {
                 use std::num::IntErrorKind;
                 match e {
                     NumLitError::UInt(e) => match e.kind() {
@@ -543,17 +579,17 @@ define_error_type! {
             inlay => write!(f, "uint can't be negated"),
             help => write!(f, "remove the `-` or convert the integer to signed"),
         },
-        /// An operation resulted in overflow/underflow
-        Overflow RUN 45 {
-            err => write!(f, "arithmetic overflow"),
-            inlay => write!(f, "unhandled integer overflow"),
-            help => write!(f, "ensure the result will fit in an integer"),
+        /// An operation resulted in overflow
+        Overflow(OverflowError) RUN 45 {
+            err (_) => write!(f, "arithmetic overflow"),
+            inlay (_) => write!(f, "unhandled integer overflow"),
+            help (_) => write!(f, "ensure the result will fit in an integer"),
         },
         /// Failed to convert between integer types
         FailedConvert(std::num::TryFromIntError) RUN 46 {
-            err(e) => write!(f, "failed conversion: {e}"),
-            inlay(_) => write!(f, "integer conversion failed"),
-            help(_) => write!(f, "ensure the conversion will not result in overflow"),
+            err (e) => write!(f, "failed conversion: {e}"),
+            inlay (_) => write!(f, "integer conversion failed"),
+            help (_) => write!(f, "ensure the conversion will not result in overflow"),
         },
     }
 }
@@ -1079,13 +1115,13 @@ fn op_desc(op: Punctuation, is_binary: bool) -> &'static str {
         Punctuation::Nor => "logical or bitwise 'nor'",
         Punctuation::Xnor => "logical or bitwise 'xnor'",
         Punctuation::MacroConcatenate => "token concatenation",
-        Punctuation::Exp => "exponentiation",
+        Punctuation::Pow => "exponentiation",
         Punctuation::Shl => "left bitshift",
         Punctuation::Shr => "right bitshift",
 
         Punctuation::Lt
         | Punctuation::Gt
-        | Punctuation::Neq
+        | Punctuation::Ne
         | Punctuation::Le
         | Punctuation::Eq
         | Punctuation::Ge => "comparison",
@@ -1115,7 +1151,7 @@ fn op_desc(op: Punctuation, is_binary: bool) -> &'static str {
         | Punctuation::FatArrow
         | Punctuation::XorAssign
         | Punctuation::OrAssign
-        | Punctuation::ExpAssign
+        | Punctuation::PowAssign
         | Punctuation::ShlAssign
         | Punctuation::ShrAssign
         | Punctuation::NandAssign
