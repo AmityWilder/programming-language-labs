@@ -7,6 +7,7 @@
     try_from_int_error_kind, // used in number literal error
     iter_next_chunk,
     deque_extend_front,
+    debug_closure_helpers,
 )]
 #![forbid(
     clippy::missing_safety_doc,
