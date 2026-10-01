@@ -6,8 +6,6 @@
     reason = "under construction"
 )]
 
-use std::range::Range;
-
 use crate::{
     error::{ContextError, ErrorType},
     scanner::{
@@ -15,6 +13,53 @@ use crate::{
         token::{Token, keyword::Keyword, punc::Punctuation, value::Value},
     },
 };
+use std::range::Range;
+
+// Means of displaying content with lisp style
+pub trait LispDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+}
+
+/// Adapter to display contents as lisp
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct Lisp<T: ?Sized + LispDisplay>(T);
+
+impl<T: ?Sized + LispDisplay> Lisp<T> {
+    pub const fn new(value: &T) -> &Self {
+        // SAFETY: Lisp is a transparent wrapper for `T`.
+        unsafe { std::mem::transmute(value) }
+    }
+}
+
+impl<T: ?Sized + LispDisplay> std::fmt::Display for Lisp<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        LispDisplay::fmt(&self.0, f) // calls LispDisplay::fmt, since T isn't proven to implement any other fmt
+    }
+}
+
+// Means of displaying content with math style
+pub trait MathDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+}
+
+/// Adapter to display contents as math
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct Math<T: ?Sized + MathDisplay>(T);
+
+impl<T: ?Sized + MathDisplay> Math<T> {
+    pub const fn new(value: &T) -> &Self {
+        // SAFETY: Math is a transparent wrapper for `T`.
+        unsafe { std::mem::transmute(value) }
+    }
+}
+
+impl<T: ?Sized + MathDisplay> std::fmt::Display for Math<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        MathDisplay::fmt(&self.0, f) // calls MathDisplay::fmt, since T isn't proven to implement any other fmt
+    }
+}
 
 macro_rules! match_token {
     ($($variant:ident$(($pattern:pat))?)|+) => {
@@ -66,6 +111,36 @@ impl std::fmt::Display for Binary<'_> {
     }
 }
 
+impl LispDisplay for Binary<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "({} {} {})",
+            self.op.lex,
+            Lisp::new(&self.lhs),
+            Lisp::new(&self.rhs)
+        )
+    }
+}
+
+impl MathDisplay for Binary<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let sep = match self.op.val {
+            Value::Punctuation(
+                Punctuation::Rem | Punctuation::Mul | Punctuation::Div | Punctuation::Exp,
+            ) => "",
+            _ => " ",
+        };
+        write!(
+            f,
+            "({}{sep}{}{sep}{})",
+            Math::new(&self.lhs),
+            self.op.lex,
+            Math::new(&self.rhs)
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unary<'src> {
     pub op: Token<'src>,
@@ -88,6 +163,22 @@ impl std::fmt::Display for Unary<'_> {
             rhs,
         } = self;
         write!(f, "{op}{rhs}")
+    }
+}
+
+impl LispDisplay for Unary<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({} {})", self.op.lex, Lisp::new(&self.rhs))
+    }
+}
+
+impl MathDisplay for Unary<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let sep = match self.op.val {
+            Value::Punctuation(Punctuation::Sub /* negate */ | Punctuation::Not | Punctuation::MacroStringify) => "",
+            _ => " ",
+        };
+        write!(f, "({}{sep}{})", self.op.lex, Math::new(&self.rhs))
     }
 }
 
@@ -118,6 +209,20 @@ impl std::fmt::Display for Grouping<'_> {
     }
 }
 
+impl LispDisplay for Grouping<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { expr, .. } = self;
+        write!(f, "(group {})", Lisp::new(expr))
+    }
+}
+
+impl MathDisplay for Grouping<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { expr, .. } = self;
+        write!(f, "{}", Math::new(expr)) // contents will be parenthesized anyway
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'src> {
     Binary(Box<Binary<'src>>),
@@ -133,6 +238,28 @@ impl std::fmt::Display for Expr<'_> {
             Self::Unary(inner) => inner.fmt(f),
             Self::Literal(Token { lex, .. }) => lex.fmt(f),
             Self::Grouping(inner) => inner.fmt(f),
+        }
+    }
+}
+
+impl LispDisplay for Expr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Binary(inner) => LispDisplay::fmt(&**inner, f),
+            Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
+            Self::Literal(Token { lex, .. }) => f.write_str(lex), // TODO: should this use val instead of lex?
+            Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
+        }
+    }
+}
+
+impl MathDisplay for Expr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Binary(inner) => MathDisplay::fmt(&**inner, f),
+            Self::Unary(inner) => MathDisplay::fmt(&**inner, f),
+            Self::Literal(Token { lex, .. }) => f.write_str(lex), // TODO: should this use val instead of lex?
+            Self::Grouping(inner) => MathDisplay::fmt(&**inner, f),
         }
     }
 }

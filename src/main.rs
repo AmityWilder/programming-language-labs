@@ -48,7 +48,7 @@
 
 use error::ContextError;
 use eval::evaluate;
-use grammar::{Binary, Expr, Grouping, Unary, parse};
+use grammar::{Binary, Expr, Grouping, Lisp, Math, Unary, parse};
 use highlight::{
     highlight,
     style::{Color, Style, StyleWrapper},
@@ -310,6 +310,7 @@ pub fn run_code(source: &str) {
     for res in &ast {
         match res {
             Ok(node) => {
+                println!("lisp: {}", Lisp::new(node));
                 print_ast(node, 0, 0);
             }
             Err(e) => {
@@ -331,8 +332,8 @@ pub fn run_code(source: &str) {
         .flatten()
         .map(|expr| {
             evaluate(source, expr)
-                .map(|x| {
-                    print!("\x1b[90m{expr}:\x1b[0m ");
+                .inspect(|x| {
+                    print!("\x1b[90m{}:\x1b[0m ", Math::new(expr));
                     match x {
                         eval::Value::Bool(x) => println!("{x}"),
                         eval::Value::UInt(x) => println!("{x}"),
@@ -342,6 +343,7 @@ pub fn run_code(source: &str) {
                         eval::Value::Str(x) => println!("{x:?}"),
                     }
                 })
+                .map(|_| ())
                 .inspect_err(|e| println!("error: {e:?}"))
         })
         .filter_map(Result::err)
