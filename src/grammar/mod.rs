@@ -68,20 +68,64 @@ macro_rules! match_token {
 }
 pub(crate) use match_token;
 
-macro_rules! binary_op_seq {
-    ($( $outer:ident -> $lhs:ident ( ( $($op:ident)|+ ) $rhs:ident )* ; )+) => {$(
-        #[doc = concat!("`", stringify!($outer -> $lhs ( ( $($op)|+ ) $rhs )* ;), "`")]
-        fn $outer(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-            let mut expr = self.$lhs()?;
+macro_rules! bnf_notation {
+    // direct
+    ($head:ident -> $inner:ident) => {
+        /// Direct
+        ///
+        #[doc = concat!("`", stringify!($head -> $inner ;), "`")]
+        fn $head(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+            self.$inner()
+        }
+    };
 
+    // binary
+    ($head:ident -> $lhs:ident ( ( $($op:ident)|+ ) $rhs:ident )*) => {
+        /// Binary
+        ///
+        #[doc = concat!("`", stringify!($head -> $lhs ( ( $($op)|+ ) $rhs )* ;), "`")]
+        fn $head(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+            let mut expr = self.$lhs()?;
+            // left associative
             while let Some(op) = self.tokens.next_if(match_token!(Punctuation($(Punctuation::$op)|+))) {
                 let rhs = self.$rhs()?;
                 expr = Expr::binary(Binary { lhs: expr, op, rhs });
             }
-
             Ok(expr)
         }
-    )+};
+    };
+
+    // unary
+    ($head:ident -> ( ( $($op:ident)|+ ) $rhs:ident )*) => {
+        /// Unary
+        ///
+        #[doc = concat!("`", stringify!($head -> ( ( $($op)|+ ) $rhs )* ;), "`")]
+        fn $head(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+            // right associative
+            if let Some(op) = self.tokens.next_if(match_token!(Punctuation($(Punctuation::$op)|+))) {
+                let rhs = self.$head()?;
+                Ok(Expr::unary(Unary { op, rhs }))
+            } else {
+                self.$rhs()
+            }
+        }
+    };
+
+    // literal
+    ($head:ident -> ( ( $($variant:ident$(( $pattern:pat ))?)|+ ) ) $(*)?) => {
+        /// Literal
+        ///
+        #[doc = concat!("`", stringify!($head -> $($variant$(($pattern))?)|+ ;), "`")]
+        fn $head(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+            self.try_pull(match_token!($($variant$(($pattern))?)|+), "a literal").map(Expr::literal)
+        }
+    };
+}
+
+macro_rules! bnf_notation_multi {
+    ($( $head:ident -> $($lhs_or_inner:ident)? $(( ( $($variant_or_op:ident$(($pattern:pat))?)|+ ) $($rhs:ident)? )$(*)?)? ; )*) => {$(
+        bnf_notation! { $head -> $($lhs_or_inner)? $(( ( $($variant_or_op$(($pattern))?)|+ ) $($rhs)? )*)? }
+    )*};
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -356,54 +400,24 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    fn statement(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let expr = self.expression()?;
-        self.try_pull(match_token!(Punctuation(Punctuation::Semi)), "a `;`")?;
-        Ok(expr)
-    }
-
-    fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        self.equality()
-    }
-
-    binary_op_seq! {
+    bnf_notation_multi! {
+        expression -> equality ;
         equality   -> comparison ( (Neq | Eq) comparison )* ;
-        comparison -> term ( (Gt | Ge | Lt | Le) term )* ;
+        comparison -> shift ( (Gt | Ge | Lt | Le) shift )* ;
+        shift      -> term ( (Shl | Shr) term )* ;
         term       -> factor ( (Add | Sub) factor )* ;
-        factor     -> exponent ( (Mul | Div | Rem) exponent )* ;
-        exponent   -> unary ( (Exp) unary )* ;
-    }
-
-    fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        use Punctuation::*;
-
-        if let Some(op) = self
-            .tokens
-            .next_if(match_token!(Punctuation(Not | Sub | MacroStringify)))
-        {
-            Ok(Expr::unary(Unary {
-                op,
-                rhs: self.unary()?,
-            }))
-        } else {
-            self.primary()
-        }
-    }
-
-    fn literal(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        self.try_pull(
-            match_token!(
-                BoolLiteral(_)
-                    | Keyword(Keyword::None)
-                    | UIntLiteral(_)
-                    | SIntLiteral(_)
-                    | FltLiteral(_)
-                    | CharLiteral(_)
-                    | StringLiteral(_)
-            ),
-            "a literal",
-        )
-        .map(Expr::literal)
+        factor     -> unary ( (Mul | Div | Rem) unary )* ;
+        unary      -> ((Not | Sub | MacroStringify) exponent)* ;
+        exponent   -> primary ( (Exp) primary )* ; // TODO: exponents should be greater precedence than unary!!
+        literal    -> ((
+            BoolLiteral(_)
+            | Keyword(Keyword::None)
+            | UIntLiteral(_)
+            | SIntLiteral(_)
+            | FltLiteral(_)
+            | CharLiteral(_)
+            | StringLiteral(_)
+        )) ;
     }
 
     fn group(&mut self) -> Result<Expr<'src>, ContextError<'src>> {

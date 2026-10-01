@@ -454,7 +454,9 @@ impl<'src> Value {
 
     fn eval_neg(self, source: &'src str, rhs_expr: &Expr<'src>) -> Result<Self, ErrorType<'src>> {
         match self {
-            Self::UInt(_) => Err(ErrorType::UnsignedNeg),
+            Self::UInt(x) => Ok(Self::SInt(
+                isize::try_from(x).map_err(ErrorType::FailedConvert)?,
+            )),
 
             Self::SInt(x) => x.checked_neg().map(Self::SInt).ok_or(ErrorType::Overflow),
 

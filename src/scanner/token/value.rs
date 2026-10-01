@@ -170,6 +170,19 @@ impl<'src> Value<'src> {
             let stripped = src.strip_prefix('-');
             let is_negative = stripped.is_some();
             let magnitude = stripped.unwrap_or(src);
+            let (magnitude, is_signed) = if let Some(pre) = magnitude.strip_suffix('i') {
+                (pre, true)
+            } else if let Some(pre) = magnitude.strip_suffix('u') {
+                if is_negative {
+                    return Err(ErrorType::UnsignedNeg); // TODO: this is the wrong error for this
+                }
+                (pre, false)
+            } else {
+                // default to signed
+                // users should explicitly confirm they are doing unsigned math for safety reason (e.g. indexing).
+                // signed math should need to be filled with suffixes.
+                (magnitude, true)
+            };
 
             let (digits, radix) = if let Some(n) = magnitude.strip_prefix(HEX_PREFIX) {
                 (n, 16)
@@ -183,7 +196,7 @@ impl<'src> Value<'src> {
             usize::from_str_radix(digits, radix)
                 .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::UInt(e)))
                 .and_then(|value| {
-                    if is_negative {
+                    if is_signed {
                         (isize::try_from(value)
                             .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::SInt(e)))
                             .and_then(|x| {
