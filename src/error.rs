@@ -2,6 +2,7 @@
 
 use crate::{
     eval::ValueType,
+    highlight::style::{Color, Style, StyleWrapper},
     scanner::{
         Bracket,
         symbols::{
@@ -91,22 +92,21 @@ macro_rules! define_error_type {
             ),*))?
         ),*}
 
-        impl ContextError<'_> {
-            fn info_line(&self, $f: &mut std::fmt::Formatter<'_>, has_prev: &mut bool) -> std::fmt::Result {
+        impl<'src> ContextError<'src> {
+            fn info_line<'msg, A>(&'msg self, vec: &mut A)
+            where
+                'src: 'msg,
+                A: Extend<LineRef<'msg>>
+            {
                 match &self.err {
                     $($($Enum::$Variant$({$( $info_s_ident$(: $info_s_pat)?, )* ..})?$(($( $info_t_pat ),*))? => {
-                        $({
-                            if *has_prev {
-                                writeln!($f)?;
-                            }
+                        vec.extend([$({
                             let (range, msg) = $info;
-                            line_ref($f, self.source, *range, "\x1b[94m", '-', &msg)?;
-                            *has_prev = true;
-                        })*
+                            LineRef::new(self.source, RefStyleKind::Info, *range, Box::new(msg))
+                        }),*])
                     },)?)*
                     _ => ()
                 }
-                Ok(())
             }
         }
 
@@ -767,7 +767,9 @@ pub struct ContextErrorCode<'src, 'err>(&'err ContextError<'src>);
 #[derive(Debug, Clone)]
 pub struct ContextErrorHelp<'src, 'err>(&'err ContextError<'src>);
 
-/// Returns [`None`] if `range` is out of bounds for `src`
+/// Returns the range from the start of the first line in the range to the end of the last line in the range.
+///
+/// [`None`] if `range` is out of bounds for `src`
 #[must_use]
 pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
     let line_start = src.get(..range.start)?.rfind('\n').map_or(0, |pos| {
@@ -787,65 +789,239 @@ pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
 #[derive(Debug, Clone)]
 pub struct RenderedContextError<'src, 'err>(&'err ContextError<'src>);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+struct RefStyle {
+    pub color: Style,
+    pub underline: char,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+enum RefStyleKind {
+    #[default]
+    Info,
+    Warning,
+    Error,
+}
+
+impl RefStyleKind {
+    const INFO_STYLE: RefStyle = RefStyle {
+        color: Style::new().foreground(Color::BrightBlue),
+        underline: '-',
+    };
+    const WARNING_STYLE: RefStyle = RefStyle {
+        color: Style::new().foreground(Color::Yellow),
+        underline: '~',
+    };
+    const ERROR_STYLE: RefStyle = RefStyle {
+        color: Style::new().foreground(Color::BrightRed),
+        underline: '^',
+    };
+
+    pub const fn style(self) -> RefStyle {
+        match self {
+            Self::Info => Self::INFO_STYLE,
+            Self::Warning => Self::WARNING_STYLE,
+            Self::Error => Self::ERROR_STYLE,
+        }
+    }
+}
+
+struct LineRef<'msg> {
+    pub style: RefStyleKind,
+    pub range: Range<usize>,
+    pub block: Range<usize>,
+    pub span: Range<LineCol>,
+    pub msg: Box<dyn 'msg + std::fmt::Display>,
+}
+
+impl<'msg> LineRef<'msg> {
+    fn new(
+        source: &str,
+        style: RefStyleKind,
+        range: Range<usize>,
+        msg: Box<dyn 'msg + std::fmt::Display>,
+    ) -> Self {
+        Self {
+            style,
+            range,
+            block: line_containing(source, range).expect("range should be within source"),
+            span: line_col_range(source, range).expect("range should be within source"),
+            msg,
+        }
+    }
+}
+
+impl std::fmt::Debug for LineRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LineRef")
+            .field("style", &self.style)
+            .field("range", &self.range)
+            .field_with("msg", |f| write!(f, "{}", self.msg))
+            .finish()
+    }
+}
+
+impl PartialEq for LineRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.style == other.style
+            && self.range == other.range
+            && std::ptr::eq(&self.msg, &other.msg)
+    }
+}
+impl Eq for LineRef<'_> {}
+
+/// User must ensure slice is in order of range
+#[derive(Debug)]
+struct LineRefs<'src, 'arr, 'msg> {
+    pub source: &'src str,
+    pub items: &'arr [LineRef<'msg>],
+}
+
 /// Outputs a line reference to `f`.
 ///
 /// Example:
 /// ```not_code
 ///    |
 ///  1 |    let foo = 5;
-///    |        ~~~ message
+///    |        ^^^ message
 /// ```
-fn line_ref(
-    f: &mut std::fmt::Formatter<'_>,
-    source: &str,
-    range: Range<usize>,
-    underline_style: &str,
-    underline_char: char,
-    msg: &dyn std::fmt::Display,
-) -> std::fmt::Result {
-    const PRE_NUM: &str = "   \x1b[94m";
-    const POST_NUM: &str = " |\x1b[0m  ";
+///
+/// Multiple items in one line:
+/// ```not_code
+///    |
+///  1 |    let foo = 5x;
+///    |    ^^^ ^^^   ^^ message 3
+///    |    |   |
+///    |    |   message 2
+///    |    |
+///    |    message 1
+/// ```
+///
+/// # Panics
+/// This implementation may panic if refs overlap
+impl std::fmt::Display for LineRefs<'_, '_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const EDGE_STYLE: Style = Style::new().foreground(Color::BrightBlue);
+        debug_assert!(
+            self.items
+                .is_sorted_by_key(|item| (item.range.start, item.range.end)),
+            "LineRefs expects references to be sorted by range"
+        );
 
-    let (Range { start, end }, line_range) = line_col_range(source, range)
-        .zip(line_containing(source, range))
-        .expect("range should be a range in source");
-    // bigger numbers have more digits so the last line number should have the most digits
-    let num_width = end.line.to_string().len(); // ew, an allocation just to count the digits :c
-    writeln!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
-    let num_lines = end
-        .line
-        .checked_sub(start.line)
-        .expect("range should be ascending order");
-    for (idx, line) in source
-        .get(line_range)
-        .expect("line_containing should return a valid range within the source string")
-        .split('\n')
-        .enumerate()
-    {
-        let line_number = start
-            .line
-            .checked_add(idx)
-            .expect("the number of lines should be at most the number of bytes in source");
-        let start_col = if idx == 0 { start.col } else { 0 };
-        let end_col = if idx == num_lines {
-            end.col
-        } else {
-            line.len()
+        let Some(line_num_width) = self
+            .items
+            .iter()
+            .map(|item| item.span.end.line)
+            .max()
+            .map(|n| n.to_string().len())
+        else {
+            // no items to display
+            return Ok(());
         };
 
-        writeln!(f, "{PRE_NUM}{line_number:>num_width$}{POST_NUM}{line}")?;
-        write!(f, "{PRE_NUM}{:>num_width$}{POST_NUM}", "")?;
-        for _ in 0..start_col {
-            write!(f, " ")?;
+        for line_items in self.items.chunk_by(|a, b| {
+            a.span.start.line == b.span.start.line && a.span.end.line == b.span.end.line
+        }) {
+            let first = line_items
+                .first()
+                .expect("chunk_by should not produce empty chunks");
+            let start_line = first.span.start.line;
+            let block = self
+                .source
+                .get(first.block)
+                .expect("block should be a range in source");
+            let mut lines = block
+                .lines()
+                .enumerate()
+                .map(|(n, line)| (n.strict_add(start_line), line));
+            // balancing line
+            writeln!(
+                f,
+                " {}{:>line_num_width$} |{}",
+                EDGE_STYLE.begin(),
+                "",
+                EDGE_STYLE.end()
+            )?;
+            let (n, line) = lines
+                .next()
+                .expect("cannot display line reference for empty line"); // TODO: how to handle this better?
+            // first code line
+            writeln!(
+                f,
+                " {}{n:>line_num_width$} |{}  {line}",
+                EDGE_STYLE.begin(),
+                EDGE_STYLE.end()
+            )?;
+            // per-line
+            write!(
+                f,
+                " {}{:>line_num_width$} |{}  ",
+                EDGE_STYLE.begin(),
+                "",
+                EDGE_STYLE.end()
+            )?;
+            // assumes line items are in order
+            let mut prev_end = 0;
+            for item in line_items {
+                for _ in prev_end..item.span.start.col {
+                    write!(f, " ")?;
+                }
+                let style = item.style.style();
+                style.color.begin().fmt(f)?;
+                for _ in item.span.start.col..item.span.end.col {
+                    write!(f, "{}", style.underline)?;
+                }
+                style.color.end().fmt(f)?;
+                prev_end = item.span.end.col;
+            }
+            let mut rev_items = line_items
+                .iter()
+                .enumerate()
+                .map(|(n, item)| (n.strict_add(1), item))
+                .rev();
+            let (_, last) = rev_items
+                .next()
+                .expect("chunk_by should not produce empty chunks");
+            writeln!(f, " {}", last.style.style().color.style(&last.msg))?;
+            for (n, item) in rev_items {
+                write!(
+                    f,
+                    " {}{:>line_num_width$} |{}  ",
+                    EDGE_STYLE.begin(),
+                    "",
+                    EDGE_STYLE.end()
+                )?;
+                let mut prev_end = 0;
+                for item in line_items.iter().take(n) {
+                    for _ in prev_end..item.span.start.col {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", item.style.style().color.style('|'))?;
+                    prev_end = item.span.start.col.strict_add(1);
+                }
+                writeln!(f)?;
+                write!(
+                    f,
+                    " {}{:>line_num_width$} |{}  ",
+                    EDGE_STYLE.begin(),
+                    "",
+                    EDGE_STYLE.end()
+                )?;
+                let mut prev_end = 0;
+                for (i, item) in line_items.iter().take(n).enumerate() {
+                    for _ in prev_end..item.span.start.col {
+                        write!(f, " ")?;
+                    }
+                    if i < n.saturating_sub(1) {
+                        write!(f, "{}", item.style.style().color.style('|'))?;
+                        prev_end = item.span.start.col.strict_add(1);
+                    }
+                }
+                writeln!(f, "{}", item.style.style().color.style(&item.msg))?;
+            }
         }
-        write!(f, "{underline_style}")?;
-        for _ in start_col..end_col {
-            write!(f, "{underline_char}")?;
-        }
+        writeln!(f)
     }
-    f.write_str(" ")?;
-    writeln!(f, " {msg}\x1b[0m")?;
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -929,41 +1105,33 @@ impl std::fmt::Display for TypeResolutionMsg {
 
 impl std::fmt::Display for RenderedContextError<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut has_prev = false;
+        let err = InlineErrMsg(&self.0.err);
+        LineRefs {
+            source: self.0.source,
+            items: {
+                let mut refs = vec![LineRef::new(
+                    self.0.source,
+                    RefStyleKind::Error,
+                    self.0.range,
+                    Box::new(err),
+                )];
 
-        // info
-        if let Some(macro_range) = self.0.macro_range {
-            if has_prev {
-                writeln!(f)?;
+                if let Some(macro_range) = self.0.macro_range {
+                    refs.push(LineRef::new(
+                        self.0.source,
+                        RefStyleKind::Info,
+                        macro_range,
+                        Box::new("within this macro expansion"),
+                    ));
+                }
+
+                self.0.info_line(&mut refs);
+
+                refs.sort_by_key(|item| (item.span.start, item.span.end));
+                refs
             }
-            line_ref(
-                f,
-                self.0.source,
-                macro_range,
-                "\x1b[96m",
-                '-',
-                &"within this macro expansion",
-            )?;
-            has_prev = true;
+            .as_slice(),
         }
-
-        // error
-        if !self.0.range.is_empty() {
-            if has_prev {
-                writeln!(f)?;
-            }
-            line_ref(
-                f,
-                self.0.source,
-                self.0.range,
-                "\x1b[91m",
-                '^',
-                &InlineErrMsg(&self.0.err),
-            )?;
-            has_prev = true;
-        }
-
-        // info
-        self.0.info_line(f, &mut has_prev)
+        .fmt(f)
     }
 }
