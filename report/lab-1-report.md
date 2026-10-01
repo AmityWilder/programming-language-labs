@@ -16,34 +16,8 @@ A hyphen (`-`) is a subtraction operator instead of a negative sign **unless** t
 
 ### String literals
 
-This one is nearly impossible for me to accurately represent with regex. Instead I will represent it roughly with python.
-
-```py
-def string_literal(source):
-    """
-    Checks if the very first token in `source` is a string literal
-    and returns the string literal (delimiters (`"`) included) if it is.
-    Escape sequences are not evaluated by the scanner.
-    """
-    if source[0] == '"':
-        is_escaped = False
-        count = 1 # not 0 because the opening '"' is included
-        for ch in source[1:]:
-            # the current character will always be included,
-            # even if it ends the string literal
-            count += 1
-
-            # unescaped double-quote (`"`)
-            if not is_escaped and ch == '"':
-                return source[0:count]
-
-            # next character is escaped if the current character is an
-            # UNESCAPED backslash (`\`)
-            is_escaped = not is_escaped and ch == '\\'
-        # reached EOF without finding an unescaped double-quote (`"`)
-        raise Exception("string literal is missing a closing double-quote (`\"`)")
-    else:
-        return None # not a string literal
+```re
+"([^"\\]|\\.)*"
 ```
 
 If a token starts with a double-quote (`"`), it is a string literal without exception.
