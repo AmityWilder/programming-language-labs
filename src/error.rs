@@ -902,6 +902,7 @@ struct LineRefs<'src, 'arr, 'msg> {
 impl std::fmt::Display for LineRefs<'_, '_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const EDGE_STYLE: Style = Style::new().foreground(Color::BrightBlue);
+
         debug_assert!(
             self.items
                 .is_sorted_by_key(|item| (item.range.start, item.range.end)),
@@ -919,78 +920,96 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
             return Ok(());
         };
 
+        macro_rules! write_line_start {
+            ($f:expr, $n:expr) => {
+                write!(
+                    $f,
+                    " {}{:>line_num_width$} |{}  ",
+                    EDGE_STYLE.begin(),
+                    $n,
+                    EDGE_STYLE.end()
+                )
+            };
+
+            ($f:expr) => {
+                write_line_start!($f, "")
+            };
+        }
+
         for line_items in self.items.chunk_by(|a, b| {
-            a.span.start.line == b.span.start.line && a.span.end.line == b.span.end.line
+            a.span.start.line == b.span.start.line
+                && a.span.end.line == b.span.end.line
+                // overlapping items not supported - they go in separate chunks
+                && a.span.start.line == a.span.end.line
         }) {
             let first = line_items
                 .first()
                 .expect("chunk_by should not produce empty chunks");
             let start_line = first.span.start.line;
-            let block = self
+            let end_line = first.span.end.line;
+            // the collection of source code lines containing the items
+            let block: &str = self
                 .source
                 .get(first.block)
                 .expect("block should be a range in source");
-            let mut lines = block
+            let lines = block
                 .lines()
                 .enumerate()
                 .map(|(n, line)| (n.strict_add(start_line), line));
             // balancing line
-            writeln!(
-                f,
-                " {}{:>line_num_width$} |{}",
-                EDGE_STYLE.begin(),
-                "",
-                EDGE_STYLE.end()
-            )?;
-            let (n, line) = lines
-                .next()
-                .expect("cannot display line reference for empty line"); // TODO: how to handle this better?
-            // first code line
-            writeln!(
-                f,
-                " {}{n:>line_num_width$} |{}  {line}",
-                EDGE_STYLE.begin(),
-                EDGE_STYLE.end()
-            )?;
-            // per-line
-            write!(
-                f,
-                " {}{:>line_num_width$} |{}  ",
-                EDGE_STYLE.begin(),
-                "",
-                EDGE_STYLE.end()
-            )?;
-            // assumes line items are in order
-            let mut prev_end = 0;
-            for item in line_items {
-                for _ in prev_end..item.span.start.col {
-                    write!(f, " ")?;
+            write_line_start!(f)?;
+            writeln!(f)?;
+            // draw the underlines
+            for (i, line) in lines {
+                // first code line
+                write_line_start!(f, i)?;
+                writeln!(f, "{line}")?;
+                // per-line
+                write_line_start!(f)?;
+                // assumes line items are in order
+                let mut prev_end = 0;
+                // assumes that if there are multiple lines, there is only one line_item
+                for item in line_items {
+                    let start_col = if i == start_line {
+                        item.span.start.col
+                    } else {
+                        0
+                    };
+                    let end_col = if i == end_line {
+                        item.span.end.col
+                    } else {
+                        line.len()
+                    };
+                    for _ in prev_end..start_col {
+                        write!(f, " ")?;
+                    }
+                    let style = item.style.style();
+                    style.color.begin().fmt(f)?;
+                    for _ in start_col..end_col {
+                        write!(f, "{}", style.underline)?;
+                    }
+                    style.color.end().fmt(f)?;
+                    prev_end = end_col;
                 }
-                let style = item.style.style();
-                style.color.begin().fmt(f)?;
-                for _ in item.span.start.col..item.span.end.col {
-                    write!(f, "{}", style.underline)?;
+                if i != end_line {
+                    writeln!(f)?;
                 }
-                style.color.end().fmt(f)?;
-                prev_end = item.span.end.col;
             }
+            // this iterator is over the item whose name will be displayed next.
+            // it is in reverse, since the names are printed right to left.
             let mut rev_items = line_items
                 .iter()
                 .enumerate()
                 .map(|(n, item)| (n.strict_add(1), item))
                 .rev();
+            // last one (on the same line as the underlines) is displayed immediately without pipes
             let (_, last) = rev_items
                 .next()
                 .expect("chunk_by should not produce empty chunks");
             writeln!(f, " {}", last.style.style().color.style(&last.msg))?;
             for (n, item) in rev_items {
-                write!(
-                    f,
-                    " {}{:>line_num_width$} |{}  ",
-                    EDGE_STYLE.begin(),
-                    "",
-                    EDGE_STYLE.end()
-                )?;
+                write_line_start!(f)?;
+                // this loop is forward, because it prints the bar annotating the underline
                 let mut prev_end = 0;
                 for item in line_items.iter().take(n) {
                     for _ in prev_end..item.span.start.col {
@@ -999,25 +1018,23 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
                     write!(f, "{}", item.style.style().color.style('|'))?;
                     prev_end = item.span.start.col.strict_add(1);
                 }
-                writeln!(f)?;
-                write!(
-                    f,
-                    " {}{:>line_num_width$} |{}  ",
-                    EDGE_STYLE.begin(),
-                    "",
-                    EDGE_STYLE.end()
-                )?;
-                let mut prev_end = 0;
-                for (i, item) in line_items.iter().take(n).enumerate() {
-                    for _ in prev_end..item.span.start.col {
-                        write!(f, " ")?;
+                for msg_line in item.msg.to_string().lines() {
+                    writeln!(f)?;
+                    write_line_start!(f)?;
+                    // second loop replaces the final bar with its message.
+                    // there are two loops because we want a line of space between each message.
+                    let mut prev_end = 0;
+                    for (i, item) in line_items.iter().take(n).enumerate() {
+                        for _ in prev_end..item.span.start.col {
+                            write!(f, " ")?;
+                        }
+                        if i < n.saturating_sub(1) {
+                            write!(f, "{}", item.style.style().color.style('|'))?;
+                            prev_end = item.span.start.col.strict_add(1);
+                        }
                     }
-                    if i < n.saturating_sub(1) {
-                        write!(f, "{}", item.style.style().color.style('|'))?;
-                        prev_end = item.span.start.col.strict_add(1);
-                    }
+                    writeln!(f, "{}", item.style.style().color.style(msg_line))?;
                 }
-                writeln!(f, "{}", item.style.style().color.style(&item.msg))?;
             }
         }
         writeln!(f)
