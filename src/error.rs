@@ -521,8 +521,8 @@ define_error_type! {
             inlay { op, .. } => write!(f, "{} is not supported for operands of these types", op_desc(*op, true)),
             help { .. } => write!(f, "try a different operator or convert the types"),
             info { lhs: (l_ty, l_range), rhs: (r_ty, r_range), .. } => [
-                (l_range, TypeResolutionMsg { ty: *l_ty }),
-                (r_range, TypeResolutionMsg { ty: *r_ty }),
+                (l_range, TypeResolutionMsg { side: OpSide::Left, ty: *l_ty }),
+                (r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty }),
             ],
         },
         /// The operand in a unary operation is of an unsupported type
@@ -535,7 +535,7 @@ define_error_type! {
             err { op, rhs: (r_ty, _) } => write!(f, "`{op}` is not supported for {r_ty}"),
             inlay { op, .. } => write!(f, "{} is not supported for operands of this type", op_desc(*op, false)),
             help { .. } => write!(f, "try a different operator or convert the type"),
-            info { rhs: (r_ty, r_range), .. } => [(r_range, TypeResolutionMsg { ty: *r_ty })],
+            info { rhs: (r_ty, r_range), .. } => [(r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })],
         },
         /// Unsigned cannot be negated
         UnsignedNeg RUN 44 {
@@ -877,28 +877,25 @@ struct LineRefs<'src, 'arr, 'msg> {
     pub items: &'arr [LineRef<'msg>],
 }
 
-/// Outputs a line reference to `f`.
+/// Renders a line reference with one or more messages.
 ///
 /// Example:
 /// ```not_code
 ///    |
-///  1 |    let foo = 5;
-///    |        ^^^ message
+///  1 |  let foo = 5;
+///    |      ^^^ message
 /// ```
 ///
 /// Multiple items in one line:
 /// ```not_code
 ///    |
-///  1 |    let foo = 5x;
-///    |    ^^^ ^^^   ^^ message 3
-///    |    |   |
-///    |    |   message 2
-///    |    |
-///    |    message 1
+///  1 |  let foo = 5x;
+///    |  ^^^ ^^^   ^^ message 3
+///    |  |   |
+///    |  |   message 2
+///    |  |
+///    |  message 1
 /// ```
-///
-/// # Panics
-/// This implementation may panic if refs overlap
 impl std::fmt::Display for LineRefs<'_, '_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const EDGE_STYLE: Style = Style::new().foreground(Color::BrightBlue);
@@ -1110,13 +1107,31 @@ fn op_desc(op: Punctuation, is_binary: bool) -> &'static str {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum OpSide {
+    Left,
+    Right,
+}
+
+impl std::fmt::Display for OpSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Left => "lhs",
+            Self::Right => "rhs",
+        }
+        .fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct TypeResolutionMsg {
+    side: OpSide,
     ty: ValueType,
 }
 
 impl std::fmt::Display for TypeResolutionMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "type resolves to {}", self.ty)
+        let Self { side, ty } = self;
+        write!(f, "{side}: type resolves to {ty}")
     }
 }
 
