@@ -3,7 +3,7 @@
 use crate::{
     error::{ContextError, ErrorType},
     scanner::{
-        token::{Token, punc::Punctuation, value::Value},
+        token::{Token, punc::Punctuation, value::LexValue},
         tokenize,
     },
 };

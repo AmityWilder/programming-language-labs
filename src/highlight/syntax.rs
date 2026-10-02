@@ -2,7 +2,7 @@
 
 use crate::{
     error::ContextError,
-    scanner::token::{Token, value::Value},
+    scanner::token::{Token, value::LexValue},
 };
 
 /// Syntactic element category for highlighting
@@ -131,7 +131,7 @@ impl<T> std::ops::Index<Syntax> for SyntaxStyle<'_, T> {
 /// This method may panic if `item` is an error with a malformed [`range`](crate::error::ContextError::range).
 pub fn syntax_of<'src, 'res>(
     item: &'res Result<Token<'src>, ContextError<'src>>,
-) -> (&'src str, Syntax, &'res Value<'src>)
+) -> (&'src str, Syntax, &'res LexValue<'src>)
 where
     'src: 'res,
 {
@@ -139,15 +139,15 @@ where
         Ok(token) => (
             token.lex,
             match token.val {
-                Value::Comment => Syntax::Comment,
-                Value::Whitespace => Syntax::Dimmed,
-                Value::UIntLiteral(_) | Value::SIntLiteral(_) | Value::FltLiteral(_) => {
+                LexValue::Comment => Syntax::Comment,
+                LexValue::Whitespace => Syntax::Dimmed,
+                LexValue::UIntLiteral(_) | LexValue::SIntLiteral(_) | LexValue::FltLiteral(_) => {
                     Syntax::NumberLiteral
                 }
-                Value::CharLiteral(_) => Syntax::CharLiteral,
-                Value::StringLiteral(_) => Syntax::StringLiteral,
-                Value::BoolLiteral(_) => Syntax::LanguageDefined,
-                Value::Identifier => {
+                LexValue::CharLiteral(_) => Syntax::CharLiteral,
+                LexValue::StringLiteral(_) => Syntax::StringLiteral,
+                LexValue::BoolLiteral(_) => Syntax::LanguageDefined,
+                LexValue::Identifier => {
                     // constants are all-caps
                     if token.lex.chars().any(char::is_uppercase) {
                         if token.lex.chars().any(char::is_lowercase) {
@@ -159,8 +159,8 @@ where
                         Syntax::Variable
                     }
                 }
-                Value::Callable => Syntax::Callable,
-                Value::Keyword(kw) => {
+                LexValue::Callable => Syntax::Callable,
+                LexValue::Keyword(kw) => {
                     if kw.is_flow() {
                         Syntax::CtrlKeyword
                     } else if kw.is_type() {
@@ -169,8 +169,8 @@ where
                         Syntax::Keyword
                     }
                 }
-                Value::Macro => Syntax::MacroName,
-                Value::MacroParam => Syntax::MacroParam,
+                LexValue::Macro => Syntax::MacroName,
+                LexValue::MacroParam => Syntax::MacroParam,
 
                 _ => Syntax::Normal,
             },
@@ -181,7 +181,7 @@ where
                 .get(e.range)
                 .expect("range should be a range of source"),
             Syntax::Invalid,
-            &Value::Comment,
+            &LexValue::Comment,
         ),
     }
 }

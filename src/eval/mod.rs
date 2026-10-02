@@ -12,7 +12,7 @@ use crate::{
     scanner::token::{
         Token,
         punc::Punctuation,
-        value::{CharLiteral, Value as TokenValue},
+        value::{CharLiteral, LexValue},
     },
 };
 use std::cmp::Ordering;
@@ -39,7 +39,6 @@ impl OpError {
         self,
         source: &'src str,
         op: &Token<'src>,
-        punc: Punctuation,
         lhs: &Expr<'src>,
         rhs: &Expr<'src>,
         l_ty: ValueType,
@@ -50,7 +49,10 @@ impl OpError {
                 source,
                 Some(*op),
                 ErrorType::Incompatible {
-                    op: punc,
+                    op: match op.val {
+                        LexValue::Punctuation(punc) => punc,
+                        _ => unimplemented!(),
+                    },
                     lhs: (l_ty, lhs.range(source)),
                     rhs: (r_ty, rhs.range(source)),
                 },
@@ -207,7 +209,7 @@ impl std::fmt::Display for ValueType {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value {
+pub enum RunValue {
     Bool(bool),
     UInt(usize),
     SInt(isize),
@@ -216,7 +218,7 @@ pub enum Value {
     Str(String),
 }
 
-impl Value {
+impl RunValue {
     pub const fn as_type(&self) -> ValueType {
         match self {
             Self::Bool(_) => ValueType::Bool,
@@ -430,7 +432,7 @@ impl Value {
     }
 }
 
-pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, ContextError<'src>> {
+pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, ContextError<'src>> {
     use Punctuation::*;
     match ast {
         Expr::Binary(inner) => {
@@ -439,7 +441,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, Cont
             let r = evaluate(source, rhs)?;
             let l_ty = l.as_type();
             let r_ty = r.as_type();
-            let TokenValue::Punctuation(punc) = op.val else {
+            let LexValue::Punctuation(punc) = op.val else {
                 unimplemented!();
             };
             match punc {
@@ -452,7 +454,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, Cont
                 Shl => l.shl(r),
                 Shr => l.shr(r),
                 Eq | Ne | Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
-                    Value::Bool(match punc {
+                    RunValue::Bool(match punc {
                         Ne => ord.is_none_or(Ordering::is_ne),
                         Eq => ord.is_some_and(Ordering::is_eq),
                         Lt => ord.is_some_and(Ordering::is_lt),
@@ -465,14 +467,14 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, Cont
 
                 _ => unimplemented!(),
             }
-            .map_err(|e| e.binary(source, op, punc, lhs, rhs, l_ty, r_ty))
+            .map_err(|e| e.binary(source, op, lhs, rhs, l_ty, r_ty))
         }
 
         Expr::Unary(inner) => {
             let Unary { op, rhs } = &**inner;
             let r = evaluate(source, rhs)?;
             let r_ty = r.as_type();
-            let TokenValue::Punctuation(punc) = op.val else {
+            let LexValue::Punctuation(punc) = op.val else {
                 unimplemented!();
             };
             match punc {
@@ -485,14 +487,14 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, Cont
         }
 
         Expr::Literal(token) => match token.val {
-            TokenValue::BoolLiteral(b) => Ok(Value::Bool(b)),
-            TokenValue::UIntLiteral(n) => Ok(Value::UInt(n)),
-            TokenValue::SIntLiteral(n) => Ok(Value::SInt(n)),
-            TokenValue::FltLiteral(x) => Ok(Value::Frac(x)),
-            TokenValue::CharLiteral(CharLiteral { ch, .. }) => Ok(Value::Char(ch)),
-            TokenValue::StringLiteral(s) => s
+            LexValue::BoolLiteral(b) => Ok(RunValue::Bool(b)),
+            LexValue::UIntLiteral(n) => Ok(RunValue::UInt(n)),
+            LexValue::SIntLiteral(n) => Ok(RunValue::SInt(n)),
+            LexValue::FltLiteral(x) => Ok(RunValue::Frac(x)),
+            LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
+            LexValue::StringLiteral(s) => s
                 .process()
-                .map(|s| Value::Str(s.text))
+                .map(|s| RunValue::Str(s.text))
                 .map_err(|e| ContextError::token_error(source, Some(*token), e)),
 
             _ => unimplemented!(),

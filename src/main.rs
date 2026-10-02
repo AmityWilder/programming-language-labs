@@ -340,12 +340,12 @@ pub fn run_code(source: &str) {
                 .inspect(|x| {
                     print!("\x1b[90m{}:\x1b[0m ", Math::new(expr));
                     match x {
-                        eval::Value::Bool(x) => println!("{x}"),
-                        eval::Value::UInt(x) => println!("{x}"),
-                        eval::Value::SInt(x) => println!("{x}"),
-                        eval::Value::Frac(x) => println!("{x}"),
-                        eval::Value::Char(x) => println!("{x:?}"),
-                        eval::Value::Str(x) => println!("{x:?}"),
+                        eval::RunValue::Bool(x) => println!("{x}"),
+                        eval::RunValue::UInt(x) => println!("{x}"),
+                        eval::RunValue::SInt(x) => println!("{x}"),
+                        eval::RunValue::Frac(x) => println!("{x}"),
+                        eval::RunValue::Char(x) => println!("{x:?}"),
+                        eval::RunValue::Str(x) => println!("{x:?}"),
                     }
                 })
                 .map(|_| ())

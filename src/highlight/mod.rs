@@ -7,7 +7,7 @@ use crate::{
         symbols::{CHAR_DELIM, STR_DELIM},
         token::{
             Token,
-            value::{CharLiteral, Escapes, StrLiteral, StringLiteral, Value},
+            value::{CharLiteral, Escapes, LexValue, StrLiteral, StringLiteral},
         },
     },
 };
@@ -295,12 +295,12 @@ impl<'src: 'arr, 'arr, I: Iterator<Item = &'arr Result<Token<'src>, ContextError
             let (lex, syn, val) = syntax_of(res);
             match val {
                 // char literal with escape - an iterator
-                Value::CharLiteral(CharLiteral {
+                LexValue::CharLiteral(CharLiteral {
                     is_escaped: true, ..
                 }) => HighlightToken::CharLiteral(escaped_char_literal(lex, syn)),
 
                 // string literal with escapes or interpolated string with escapes and no expressions - an iterator
-                Value::StringLiteral(literal) if literal.has_escapes() => {
+                LexValue::StringLiteral(literal) if literal.has_escapes() => {
                     HighlightToken::StrLiteral(StrLiteral::escaped_str_literal(lex, syn, literal))
                 }
 

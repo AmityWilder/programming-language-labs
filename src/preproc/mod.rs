@@ -5,7 +5,7 @@ use crate::{
     grammar::match_token,
     scanner::{
         Bracket,
-        token::{Token, keyword::Keyword, punc::Punctuation, value::Value},
+        token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
     },
 };
 use std::collections::{HashMap, VecDeque};
@@ -33,7 +33,7 @@ where
                 break item;
             } else if let Some(token) = self.tokens.next() {
                 match token.val {
-                    Value::MacroParam if let Some(arg) = self.arg_map.get(&token.lex) => {
+                    LexValue::MacroParam if let Some(arg) = self.arg_map.get(&token.lex) => {
                         self.curr = arg.clone().into_iter();
                     }
                     _ => break Some(token),
@@ -116,7 +116,7 @@ impl<'src> Preprocessor<'src> {
             .tokens
             .pop_front_if(|res| {
                 res.as_ref()
-                    .is_ok_and(|token| matches!(token.val, Value::Whitespace | Value::Comment))
+                    .is_ok_and(|token| matches!(token.val, LexValue::Whitespace | LexValue::Comment))
             })
             .is_some()
         {}
@@ -155,8 +155,8 @@ impl<'src> Preprocessor<'src> {
                     )?
                     .val
                 {
-                    Value::Punctuation(Punctuation::Comma) => (),
-                    Value::Punctuation(Punctuation::RParen) => break,
+                    LexValue::Punctuation(Punctuation::Comma) => (),
+                    LexValue::Punctuation(Punctuation::RParen) => break,
 
                     _ => unreachable!(),
                 }
@@ -167,8 +167,8 @@ impl<'src> Preprocessor<'src> {
                 "a macro parameter or `)`",
             )?;
             match token.val {
-                Value::MacroParam => params.push(token.lex),
-                Value::Punctuation(Punctuation::RParen) => break,
+                LexValue::MacroParam => params.push(token.lex),
+                LexValue::Punctuation(Punctuation::RParen) => break,
 
                 _ => unreachable!(),
             }
@@ -193,8 +193,8 @@ impl<'src> Preprocessor<'src> {
                 )
             })??;
             match token.val {
-                Value::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
-                Value::Punctuation(Punctuation::RBrace) => {
+                LexValue::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
+                LexValue::Punctuation(Punctuation::RBrace) => {
                     if let Some(n) = depth.checked_sub(1) {
                         depth = n;
                     } else {
@@ -253,8 +253,8 @@ impl<'src> Preprocessor<'src> {
                     )
                 })??;
                 match token.val {
-                    Value::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
-                    Value::Punctuation(Punctuation::RBrace) => {
+                    LexValue::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
+                    LexValue::Punctuation(Punctuation::RBrace) => {
                         if let Some(n) = depth.checked_sub(1) {
                             depth = n;
                         } else {
@@ -296,7 +296,7 @@ impl<'src> Iterator for Preprocessor<'src> {
             match self.tokens.pop_front() {
                 // define macro
                 Some(Ok(Token {
-                    val: Value::Keyword(Keyword::Def),
+                    val: LexValue::Keyword(Keyword::Def),
                     ..
                 })) => {
                     if let Err(e) = self.macro_define() {
@@ -307,7 +307,7 @@ impl<'src> Iterator for Preprocessor<'src> {
                 // expand macro
                 Some(Ok(
                     token @ Token {
-                        val: Value::Macro, ..
+                        val: LexValue::Macro, ..
                     },
                 )) => {
                     if let Err(e) = self.macro_expand(token) {

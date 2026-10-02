@@ -10,7 +10,7 @@ use crate::{
     error::{ContextError, ErrorType},
     scanner::{
         Bracket,
-        token::{Token, keyword::Keyword, punc::Punctuation, value::Value},
+        token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
     },
 };
 use std::range::Range;
@@ -63,7 +63,7 @@ impl<T: ?Sized + MathDisplay> std::fmt::Display for Math<T> {
 
 macro_rules! match_token {
     ($($variant:ident$(($pattern:pat))?)|+) => {
-        |token| matches!(token.val, $($crate::scanner::token::value::Value::$variant$(($pattern))?)|+)
+        |token| matches!(token.val, $($crate::scanner::token::value::LexValue::$variant$(($pattern))?)|+)
     };
 }
 pub(crate) use match_token;
@@ -178,7 +178,7 @@ impl LispDisplay for Binary<'_> {
 impl MathDisplay for Binary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let sep = match self.op.val {
-            Value::Punctuation(
+            LexValue::Punctuation(
                 Punctuation::Rem | Punctuation::Mul | Punctuation::Div | Punctuation::Pow,
             ) => "",
             _ => " ",
@@ -234,7 +234,7 @@ impl LispDisplay for Unary<'_> {
 impl MathDisplay for Unary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let sep = match self.op.val {
-            Value::Punctuation(Punctuation::Sub /* negate */ | Punctuation::Not | Punctuation::MacroStringify) => "",
+            LexValue::Punctuation(Punctuation::Sub /* negate */ | Punctuation::Not | Punctuation::MacroStringify) => "",
             _ => " ",
         };
         write!(f, "({}{sep}{})", self.op.lex, Math::new(&self.rhs))
@@ -411,7 +411,7 @@ where
         source,
         tokens
             .into_iter()
-            .filter(|token| !matches!(token.val, Value::Whitespace | Value::Comment)),
+            .filter(|token| !matches!(token.val, LexValue::Whitespace | LexValue::Comment)),
     )
 }
 
@@ -504,7 +504,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn synchronize(&mut self) {
         while let Some(token) = self.tokens.next() {
             // end of current statement
-            if matches!(token.val, Value::Punctuation(Punctuation::Semi)) {
+            if matches!(token.val, LexValue::Punctuation(Punctuation::Semi)) {
                 break;
             }
 
@@ -512,7 +512,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             if self.tokens.peek().is_some_and(|token| {
                 matches!(
                     token.val,
-                    Value::Keyword(
+                    LexValue::Keyword(
                         Keyword::Rec
                             | Keyword::Sup
                             | Keyword::Cat
@@ -564,59 +564,59 @@ mod tests {
             &[Expr::binary(Binary {
                 lhs: Expr::literal(Token {
                     lex: "5",
-                    val: Value::UIntLiteral(5),
+                    val: LexValue::UIntLiteral(5),
                     mac: None
                 }),
                 op: Token {
                     lex: "+",
-                    val: Value::Punctuation(Punctuation::Add),
+                    val: LexValue::Punctuation(Punctuation::Add),
                     mac: None
                 },
                 rhs: Expr::binary(Binary {
                     lhs: Expr::unary(Unary {
                         op: Token {
                             lex: "-",
-                            val: Value::Punctuation(Punctuation::Sub),
+                            val: LexValue::Punctuation(Punctuation::Sub),
                             mac: None
                         },
                         rhs: Expr::grouping(Grouping {
                             open: Token {
                                 lex: "(",
-                                val: Value::Punctuation(Punctuation::LParen),
+                                val: LexValue::Punctuation(Punctuation::LParen),
                                 mac: None
                             },
                             expr: Expr::binary(Binary {
                                 lhs: Expr::literal(Token {
                                     lex: "7",
-                                    val: Value::UIntLiteral(7),
+                                    val: LexValue::UIntLiteral(7),
                                     mac: None
                                 }),
                                 op: Token {
                                     lex: "/",
-                                    val: Value::Punctuation(Punctuation::Div),
+                                    val: LexValue::Punctuation(Punctuation::Div),
                                     mac: None
                                 },
                                 rhs: Expr::literal(Token {
                                     lex: "8",
-                                    val: Value::UIntLiteral(8),
+                                    val: LexValue::UIntLiteral(8),
                                     mac: None
                                 })
                             }),
                             close: Token {
                                 lex: ")",
-                                val: Value::Punctuation(Punctuation::RParen),
+                                val: LexValue::Punctuation(Punctuation::RParen),
                                 mac: None
                             }
                         })
                     }),
                     op: Token {
                         lex: "*",
-                        val: Value::Punctuation(Punctuation::Mul),
+                        val: LexValue::Punctuation(Punctuation::Mul),
                         mac: None
                     },
                     rhs: Expr::Literal(Token {
                         lex: "3",
-                        val: Value::UIntLiteral(3),
+                        val: LexValue::UIntLiteral(3),
                         mac: None
                     })
                 })
