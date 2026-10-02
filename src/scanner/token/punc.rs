@@ -11,7 +11,7 @@ define_token_eq! {
     /// The only operations that output booleans are
     /// - Boolean literals (`true`/`false`)
     /// - Comparisons
-    /// - "Bitwise" operations on booleans
+    /// - "Bitwise" (logical) operations on booleans
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum Punctuation = operator {
         // ----------------------------
@@ -38,6 +38,8 @@ define_token_eq! {
         Comma = ",",
         /// Subtract - Find the difference of `lhs - rhs`
         Sub = "-",
+        /// Negate - Find the result of `-rhs`
+        Neg = #[expect(unreachable_patterns, reason = "unary alias of Sub")] "-",
         /// Dot - Access a rec member
         Dot = ".",
         /// Divide - Find the quotient of `lhs / rhs`

@@ -25,7 +25,6 @@ const fn unescaped(looking_for: char) -> impl FnMut(char) -> bool {
 }
 
 /// A bracket character
-#[allow(dead_code, reason = "reserved for future use")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Bracket {
     /// `[`/`]`
@@ -55,6 +54,59 @@ impl Bracket {
             Self::Paren => ')',
             Self::Brace => '}',
         }
+    }
+}
+
+/// An invalid combination of brackets (order matters)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BadBracketCombo {
+    /// `[`/`)`
+    BrackParen,
+    /// `[`/`}`
+    BrackBrace,
+    /// `(`/`]`
+    ParenBrack,
+    /// `(`/`}`
+    ParenBrace,
+    /// `{`/`]`
+    BraceParen,
+    /// `{`/`)`
+    BraceBrack,
+}
+
+impl BadBracketCombo {
+    #[must_use]
+    pub const fn new(open: Bracket, close: Bracket) -> Option<Self> {
+        match (open, close) {
+            (Bracket::Brack, Bracket::Paren) => Some(Self::BrackParen),
+            (Bracket::Brack, Bracket::Brace) => Some(Self::BrackBrace),
+            (Bracket::Paren, Bracket::Brack) => Some(Self::ParenBrack),
+            (Bracket::Paren, Bracket::Brace) => Some(Self::ParenBrace),
+            (Bracket::Brace, Bracket::Brack) => Some(Self::BraceBrack),
+            (Bracket::Brace, Bracket::Paren) => Some(Self::BraceParen),
+
+            _ => None,
+        }
+    }
+
+    /// (open, close)
+    #[must_use]
+    pub const fn decompose(self) -> (Bracket, Bracket) {
+        match self {
+            BadBracketCombo::BrackParen => (Bracket::Brack, Bracket::Paren),
+            BadBracketCombo::BrackBrace => (Bracket::Brack, Bracket::Brace),
+            BadBracketCombo::ParenBrack => (Bracket::Paren, Bracket::Brack),
+            BadBracketCombo::ParenBrace => (Bracket::Paren, Bracket::Brace),
+            BadBracketCombo::BraceParen => (Bracket::Brace, Bracket::Brack),
+            BadBracketCombo::BraceBrack => (Bracket::Brace, Bracket::Paren),
+        }
+    }
+}
+
+impl From<BadBracketCombo> for (Bracket, Bracket) {
+    #[inline]
+    fn from(value: BadBracketCombo) -> Self {
+        value.decompose()
     }
 }
 
@@ -364,15 +416,11 @@ impl<'src> Scanner<'src> {
                 is_end
             }
         };
-        let number = self
-            .source
-            .find(number_end)
-            .map(|pos| {
-                self.source
-                    .get(..pos)
-                    .expect("find should not be within a UTF-8 character")
-            })
-            .unwrap_or(self.source);
+        let number = self.source.find(number_end).map_or(self.source, |pos| {
+            self.source
+                .get(..pos)
+                .expect("find should not be within a UTF-8 character")
+        });
         // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
         // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
         let len = number.trim_end_matches(['.', '-']).len();

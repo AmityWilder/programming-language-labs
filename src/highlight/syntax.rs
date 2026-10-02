@@ -171,8 +171,7 @@ where
                 }
                 LexValue::Macro => Syntax::MacroName,
                 LexValue::MacroParam => Syntax::MacroParam,
-
-                _ => Syntax::Normal,
+                LexValue::Punctuation(_) => Syntax::Normal,
             },
             &token.val,
         ),
