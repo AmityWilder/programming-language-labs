@@ -22,7 +22,7 @@
     reason = "could cause mistakes"
 )]
 #![warn(
-    // clippy::pedantic,
+    clippy::pedantic,
     clippy::missing_const_for_fn,
     // clippy::missing_docs_in_private_items,
     clippy::too_many_lines,
@@ -45,6 +45,7 @@
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 #![allow(clippy::wildcard_imports, reason = "don't care")]
+#![allow(clippy::result_large_err)]
 
 use error::ContextError;
 use eval::evaluate;
@@ -239,7 +240,7 @@ where
             }
             Err(e) => {
                 let style = &SYNTAX_STYLE_ANSI.invalid;
-                println!("{}{e:?}{}", style.begin(), style.end())
+                println!("{}{e:?}{}", style.begin(), style.end());
             }
         }
     }
@@ -324,7 +325,7 @@ pub fn run_code(source: &str) {
             }
             Err(e) => {
                 let style = &SYNTAX_STYLE_ANSI.invalid;
-                println!("{}{e:?}{}", style.begin(), style.end())
+                println!("{}{e:?}{}", style.begin(), style.end());
             }
         }
     }

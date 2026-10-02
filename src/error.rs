@@ -1,10 +1,10 @@
 //! Errors regarding code validity
 
 use crate::{
-    eval::{RunValue, ValueType},
+    eval::ValueType,
     highlight::style::{Color, Style, StyleWrapper},
     scanner::{
-        Bracket,
+        BadBracketCombo, Bracket,
         symbols::{
             BIN_PREFIX, BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM,
         },
@@ -44,27 +44,89 @@ impl std::error::Error for NumLitError {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntValue {
+    UInt(usize),
+    SInt(isize),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum OverflowError {
     Add {
-        lhs: (RunValue, Range<usize>),
-        rhs: (RunValue, Range<usize>),
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: IntValue,
+        r_value: IntValue,
     },
     Sub {
-        lhs: (RunValue, Range<usize>),
-        rhs: (RunValue, Range<usize>),
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: IntValue,
+        r_value: IntValue,
     },
     Mul {
-        lhs: (RunValue, Range<usize>),
-        rhs: (RunValue, Range<usize>),
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: IntValue,
+        r_value: IntValue,
     },
     Pow {
-        lhs: (RunValue, Range<usize>),
-        rhs: (RunValue, Range<usize>),
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: IntValue,
+        r_value: IntValue,
     },
     Neg {
-        rhs: (isize, Range<usize>),
+        r_range: Range<usize>,
+        r_value: isize,
     },
+}
+
+macro_rules! expected_token {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $Enum:ident {$(
+            $Variant:ident = $desc:expr
+        ),* $(,)?}
+    ) => {
+        $(#[$meta])*
+        $vis enum $Enum {$(
+            $Variant
+        ),*}
+
+        impl $Enum {
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$Variant => $desc),*
+                }
+            }
+        }
+    };
+}
+
+expected_token! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum ExpectedToken {
+        // preproc
+        MacroIdent = "a macro identifier",
+        LParen = "a `(`",
+        CommaOrRParen = "a `,` or `)`",
+        MacroParamOrRParen = "a macro parameter or `)`",
+        MacroDefLBrace = "a `{` for macro definition",
+        MacroArgLBrace = "a `{` for macro argument",
+
+        // grammar
+        Literal = "a literal",
+        ParenExpr = "a parenthesized expression",
+        ExprOrRParen = "an expression or `)`",
+        Expr = "an expression",
+    }
+}
+
+impl std::fmt::Display for ExpectedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Remove an article ("a ", "an ", "a(n) ", "the ", or "") from the beginning of a string
@@ -448,28 +510,33 @@ define_error_type! {
         /// A closing bracket is of the wrong type for the open bracket at its depth
         IncorrectCloseBracket {
             /// The bracket type being expected based on the opening side
-            expect: (Bracket, Range<usize>),
-            /// The bracket type that was found
-            actual: Bracket,
+            open_range: Range<usize>,
+            failure: BadBracketCombo,
         } GRA 31 {
-            err { expect: (expect, _), actual } => write!(f,
-                "incorrect close bracket: expected `{}`, found `{}`",
-                expect.close(),
-                actual.close(),
-            ),
+            err { failure } => {
+                let (expect, actual) = failure.decompose();
+                write!(f,
+                    "incorrect close bracket: expected `{}`, found `{}`",
+                    expect.close(),
+                    actual.close(),
+                )
+            },
             inlay { .. } => write!(f, "incorrect partner"),
-            help { expect, actual } => write!(
-                f,
-                "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, \
-                or remove either the `{}` or the `{}`",
-                expect.0.close(),
-                actual.close(),
-                actual.open(),
-                expect.0.open(),
-                expect.0.open(),
-                actual.close(),
-            ),
-            info { expect: (_, range) } => [(range, "bracket type introduced here")],
+            help { failure } => {
+                let (expect, actual) = failure.decompose();
+                write!(
+                    f,
+                    "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, \
+                    or remove either the `{}` or the `{}`",
+                    expect.close(),
+                    actual.close(),
+                    actual.open(),
+                    expect.open(),
+                    expect.open(),
+                    actual.close(),
+                )
+            },
+            info { open_range } => [(open_range, "bracket type introduced here")],
         },
         /// A closing bracket was found with no open bracket
         ExcessCloseBracket {
@@ -482,24 +549,24 @@ define_error_type! {
         },
         /// An open bracket was found with no close bracket
         MissingCloseBracket {
-            /// The bracket type being expected based on the opening side
-            expect: (Bracket, Range<usize>),
+            open_range: Range<usize>,
+            expect: Bracket,
         } GRA 33 {
-            err { expect: (expect, _) } => write!(f, "missing close bracket: expected `{}`, found none", expect.close()),
+            err { expect } => write!(f, "missing close bracket: expected `{}`, found none", expect.close()),
             inlay { .. } => write!(f, "missing close bracket"),
             help { expect } => write!(
                 f,
                 "try inserting a `{}` or remove the `{}`",
-                expect.0.close(),
-                expect.0.open(),
+                expect.close(),
+                expect.open(),
             ),
-            info { expect: (_, range) } => [(range, "missing a partner")],
+            info { open_range } => [(open_range, "missing a partner")],
         },
         /// A token was expected, but instead found EOF
         MissingToken {
             /// The token pattern expected - should start with the proper article
             /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
-            expect: &'static str,
+            expect: ExpectedToken,
         } GRA 34 {
             err { expect } => write!(f, "missing {expect}"),
             inlay { .. } => write!(f, "missing token"),
@@ -509,7 +576,7 @@ define_error_type! {
         UnexpectedToken {
             /// The token pattern expected - should start with the proper article
             /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
-            expect: &'static str,
+            expect: ExpectedToken,
             /// The token found
             actual: &'src str,
         } GRA 35 {
@@ -535,15 +602,15 @@ define_error_type! {
         Incompatible {
             /// The binary operator
             op: Punctuation,
-            /// The type of the value on the left side of the operator
-            lhs: (ValueType, Range<usize>),
-            /// The type of the value on the right side of the operator
-            rhs: (ValueType, Range<usize>),
+            l_range: Range<usize>,
+            r_range: Range<usize>,
+            l_ty: ValueType,
+            r_ty: ValueType,
         } RUN 42 {
-            err { op, lhs: (l_ty, _), rhs: (r_ty, _) } => write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"),
-            inlay { op, .. } => write!(f, "{} is not supported for operands of these types", op_desc(*op, true)),
+            err { op, l_ty, r_ty, .. } => write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"),
+            inlay { op, .. } => write!(f, "{} is not supported for operands of these types", op.op_desc()),
             help { .. } => write!(f, "try a different operator or convert the types"),
-            info { lhs: (l_ty, l_range), rhs: (r_ty, r_range), .. } => [
+            info { l_ty, l_range, r_ty, r_range, .. } => [
                 (l_range, TypeResolutionMsg { side: OpSide::Left, ty: *l_ty }),
                 (r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty }),
             ],
@@ -553,12 +620,13 @@ define_error_type! {
             /// The unary operator
             op: Punctuation,
             /// The type of the value on the right side of the operator
-            rhs: (ValueType, Range<usize>),
+            r_ty: ValueType,
+            r_range: Range<usize>,
         } RUN 43 {
-            err { op, rhs: (r_ty, _) } => write!(f, "`{op}` is not supported for {r_ty}"),
-            inlay { op, .. } => write!(f, "{} is not supported for operands of this type", op_desc(*op, false)),
+            err { op, r_ty, .. } => write!(f, "`{op}` is not supported for {r_ty}"),
+            inlay { op, .. } => write!(f, "{} is not supported for operands of this type", op.op_desc()),
             help { .. } => write!(f, "try a different operator or convert the type"),
-            info { rhs: (r_ty, r_range), .. } => [(r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })],
+            info { r_ty, r_range, .. } => [(r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })],
         },
         /// Unsigned cannot be negated
         UnsignedNeg RUN 44 {
@@ -574,19 +642,19 @@ define_error_type! {
         },
         /// Failed to convert between integer types
         FailedConvert {
-            value: RunValue,
-            op: (Punctuation, Range<usize>),
+            value: IntValue,
+            op: Punctuation,
+            op_range: Range<usize>,
             side: OpSide,
             /// Should be prefixed with an article (a/an)
             target_ty: TargetTy,
-            is_binary: bool,
             e: std::num::TryFromIntError,
         } RUN 46 {
             err { e, .. } => write!(f, "failed conversion: {e}"),
             inlay { .. } => write!(f, "integer conversion failed"),
             help { .. } => write!(f, "ensure the expression fits in the target type"),
-            info { value, op: (op, op_range), side, target_ty, is_binary } => [
-                (op_range, FailedConversionMsg::new(value, *op, *side, *target_ty, *is_binary)),
+            info { value, op, op_range, side, target_ty } => [
+                (op_range, FailedConversionMsg::new(*value, *op, *side, *target_ty)),
             ],
         },
     }
@@ -661,24 +729,24 @@ impl<'src> ContextError<'src> {
     }
 
     /// A token was found but not the right kind
-    pub fn unexpected(token: Token<'src>, source: &'src str, expected: &'static str) -> Self {
+    pub fn unexpected(token: Token<'src>, source: &'src str, expect: ExpectedToken) -> Self {
         Self::token_error(
             source,
             Some(token),
             ErrorType::UnexpectedToken {
-                expect: expected,
+                expect,
                 actual: token.lex,
             },
         )
     }
 
     /// No token was found despite expecting one
-    pub const fn missing(source: &'src str, expected: &'static str) -> Self {
+    pub const fn missing(source: &'src str, expect: ExpectedToken) -> Self {
         Self::error(
             source,
             None,
             None, // TODO: is there a case where macro expansion can have a missing token?
-            ErrorType::MissingToken { expect: expected },
+            ErrorType::MissingToken { expect },
         )
     }
 
@@ -686,11 +754,11 @@ impl<'src> ContextError<'src> {
     pub fn missing_or_unexpected(
         token: Option<Token<'src>>,
         source: &'src str,
-        expected: &'static str,
+        expect: ExpectedToken,
     ) -> Self {
         match token {
-            Some(token) => Self::unexpected(token, source, expected),
-            None => Self::missing(source, expected),
+            Some(token) => Self::unexpected(token, source, expect),
+            None => Self::missing(source, expect),
         }
     }
 }
@@ -848,6 +916,7 @@ struct RefStyle {
 enum RefStyleKind {
     #[default]
     Info,
+    #[expect(dead_code, reason = "reserved for use in static analysis")]
     Warning,
     Error,
 }
@@ -899,7 +968,7 @@ impl PartialEq for LineRef<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.style == other.style
             && self.range == other.range
-            && std::ptr::eq(&self.msg, &other.msg)
+            && std::ptr::eq(&raw const self.msg, &raw const other.msg)
     }
 }
 impl Eq for LineRef<'_> {}
@@ -982,7 +1051,6 @@ impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
     }
 
     fn underlines(
-        &self,
         f: &mut std::fmt::Formatter<'_>,
         start_line: usize,
         end_line: usize,
@@ -1171,18 +1239,18 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
             // separator line
             Self::write_line_start(f, line_num_width, {
                 if std::mem::replace(&mut prev_line, start_line)
-                    != start_line
+                    == start_line
                         .checked_sub(1)
                         .expect("line_col promises the line number will never be below 1")
                 {
-                    Self::ELLIPSES
-                } else {
                     ""
+                } else {
+                    Self::ELLIPSES
                 }
             })?;
             writeln!(f)?;
             // draw the underlines
-            self.underlines(f, start_line, end_line, line_num_width, block, line_items)?;
+            Self::underlines(f, start_line, end_line, line_num_width, block, line_items)?;
             Self::inline_messages(f, line_items, line_num_width)?;
         }
         writeln!(f)
@@ -1192,67 +1260,69 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct InlineErrMsg<'src, 'err>(&'err ErrorType<'src>);
 
-fn op_desc(op: Punctuation, is_binary: bool) -> &'static str {
-    match op {
-        Punctuation::Not => "logical or bitwise 'not'",
-        Punctuation::MacroStringify => "token stringification",
-        Punctuation::Rem => "remainder",
-        Punctuation::And => "logical or bitwise 'and'",
-        Punctuation::Mul => "multiplication",
-        Punctuation::Add => "addition",
-        Punctuation::Sub if is_binary => "subtraction",
-        Punctuation::Sub => "arithmetic negation",
-        Punctuation::Div => "division",
-        Punctuation::Ref => "referencing",
-        Punctuation::Xor => "logical or bitwise 'xor'",
-        Punctuation::Or => "logical or bitwise 'or'",
-        Punctuation::Nand => "logical or bitwise 'nand'",
-        Punctuation::Nor => "logical or bitwise 'nor'",
-        Punctuation::Xnor => "logical or bitwise 'xnor'",
-        Punctuation::MacroConcatenate => "token concatenation",
-        Punctuation::Pow => "exponentiation",
-        Punctuation::Shl => "left bitshift",
-        Punctuation::Shr => "right bitshift",
+impl Punctuation {
+    fn op_desc(self) -> &'static str {
+        match self {
+            Punctuation::Not => "logical or bitwise 'not'",
+            Punctuation::MacroStringify => "token stringification",
+            Punctuation::Rem => "remainder",
+            Punctuation::And => "logical or bitwise 'and'",
+            Punctuation::Mul => "multiplication",
+            Punctuation::Add => "addition",
+            Punctuation::Sub => "subtraction",
+            Punctuation::Neg => "arithmetic negation",
+            Punctuation::Div => "division",
+            Punctuation::Ref => "referencing",
+            Punctuation::Xor => "logical or bitwise 'xor'",
+            Punctuation::Or => "logical or bitwise 'or'",
+            Punctuation::Nand => "logical or bitwise 'nand'",
+            Punctuation::Nor => "logical or bitwise 'nor'",
+            Punctuation::Xnor => "logical or bitwise 'xnor'",
+            Punctuation::MacroConcatenate => "token concatenation",
+            Punctuation::Pow => "exponentiation",
+            Punctuation::Shl => "left bitshift",
+            Punctuation::Shr => "right bitshift",
 
-        Punctuation::Lt
-        | Punctuation::Gt
-        | Punctuation::Ne
-        | Punctuation::Le
-        | Punctuation::Eq
-        | Punctuation::Ge => "comparison",
+            Punctuation::Lt
+            | Punctuation::Gt
+            | Punctuation::Ne
+            | Punctuation::Le
+            | Punctuation::Eq
+            | Punctuation::Ge => "comparison",
 
-        Punctuation::LParen
-        | Punctuation::RParen
-        | Punctuation::Comma
-        | Punctuation::Dot
-        | Punctuation::Colon
-        | Punctuation::Semi
-        | Punctuation::Assign
-        | Punctuation::QMark // TODO: will this be an operation?
-        | Punctuation::LBrack
-        | Punctuation::RBrack
-        | Punctuation::LBrace
-        | Punctuation::RBrace
-        | Punctuation::RemAssign
-        | Punctuation::AndAssign
-        | Punctuation::MulAssign
-        | Punctuation::AddAssign
-        | Punctuation::SubAssign
-        | Punctuation::Arrow
-        | Punctuation::DotDot // TODO: will this be an operation?
-        | Punctuation::DivAssign
-        | Punctuation::PathSep
-        | Punctuation::ColonEq
-        | Punctuation::FatArrow
-        | Punctuation::XorAssign
-        | Punctuation::OrAssign
-        | Punctuation::PowAssign
-        | Punctuation::ShlAssign
-        | Punctuation::ShrAssign
-        | Punctuation::NandAssign
-        | Punctuation::NorAssign
-        | Punctuation::XnorAssign => {
-            unimplemented!("not an operator")
+            Punctuation::LParen
+            | Punctuation::RParen
+            | Punctuation::Comma
+            | Punctuation::Dot
+            | Punctuation::Colon
+            | Punctuation::Semi
+            | Punctuation::Assign
+            | Punctuation::QMark // TODO: will this be an operation?
+            | Punctuation::LBrack
+            | Punctuation::RBrack
+            | Punctuation::LBrace
+            | Punctuation::RBrace
+            | Punctuation::RemAssign
+            | Punctuation::AndAssign
+            | Punctuation::MulAssign
+            | Punctuation::AddAssign
+            | Punctuation::SubAssign
+            | Punctuation::Arrow
+            | Punctuation::DotDot // TODO: will this be an operation?
+            | Punctuation::DivAssign
+            | Punctuation::PathSep
+            | Punctuation::ColonEq
+            | Punctuation::FatArrow
+            | Punctuation::XorAssign
+            | Punctuation::OrAssign
+            | Punctuation::PowAssign
+            | Punctuation::ShlAssign
+            | Punctuation::ShrAssign
+            | Punctuation::NandAssign
+            | Punctuation::NorAssign
+            | Punctuation::XnorAssign => {
+                unimplemented!("not an operator")
+            }
         }
     }
 }
@@ -1305,11 +1375,7 @@ impl TargetTy {
     }
 
     #[allow(clippy::as_conversions)]
-    const fn bounds(&self) -> (u32, i128, i128) {
-        const {
-            assert!(usize::BITS <= u128::BITS);
-            assert!(usize::BITS < i128::BITS);
-        }
+    const fn bounds(self) -> (u32, i128, i128) {
         match self {
             Self::UInt => (usize::BITS, usize::MIN as i128, usize::MAX as i128),
             Self::SInt => (isize::BITS, isize::MIN as i128, isize::MAX as i128),
@@ -1328,81 +1394,69 @@ impl std::fmt::Display for TargetTy {
 #[derive(Debug, Clone, PartialEq)]
 struct FailedConversionMsg {
     /// Cannot be [`RunValue::Str`]
-    value: RunValue,
+    value: IntValue,
     op: Punctuation,
     side: OpSide,
     target_ty: TargetTy,
-    is_binary: bool,
 }
 
 impl FailedConversionMsg {
-    fn new(
-        value: &RunValue,
-        op: Punctuation,
-        side: OpSide,
-        target_ty: TargetTy,
-        is_binary: bool,
-    ) -> Self {
+    const fn new(value: IntValue, op: Punctuation, side: OpSide, target_ty: TargetTy) -> Self {
         Self {
-            value: match value {
-                RunValue::Bool(x) => RunValue::Bool(*x),
-                RunValue::UInt(x) => RunValue::UInt(*x),
-                RunValue::SInt(x) => RunValue::SInt(*x),
-                RunValue::Frac(x) => RunValue::Frac(*x),
-                RunValue::Char(x) => RunValue::Char(*x),
-                RunValue::Str(_) => unimplemented!(
-                    "should not emit FailedConversionMsg for str (str should parse, not convert)"
-                ),
-            },
+            value,
             op,
             side,
             target_ty,
-            is_binary,
         }
     }
 }
 
 impl std::fmt::Display for FailedConversionMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::cmp::Ordering::*;
-        const {
-            assert!(usize::BITS <= u64::BITS);
-            assert!(isize::BITS <= i64::BITS);
-        }
+        use std::cmp::Ordering;
         let Self {
             value,
             op,
             side,
             target_ty,
-            is_binary,
         } = self;
         let (_bits, min, max) = target_ty.bounds();
-        let n = match value {
-            &RunValue::UInt(val) => val as i128,
-            &RunValue::SInt(val) => val as i128,
-            &RunValue::Frac(val) => val as i128, // TODO: does f64 produce TryFromInt error?
-            &RunValue::Char(val) => val as i128,
-            &RunValue::Bool(_) => {
-                unreachable!("how did you fail to convert 0|1 to an integer?!")
-            }
-            RunValue::Str(_) => unreachable!("FailedConversionMsg should not be str"),
+        #[expect(
+            clippy::as_conversions,
+            reason = "i128 can fit any usize/isize with 64 bits or fewer, but doesn't implement From<usize>/From<isize>"
+        )]
+        let n = match *value {
+            IntValue::UInt(val) => cfg_select! {
+                any(
+                    target_pointer_width = "16",
+                    target_pointer_width = "32",
+                    target_pointer_width = "64"
+                ) => val as i128,
+            },
+            IntValue::SInt(val) => cfg_select! {
+                any(
+                    target_pointer_width = "16",
+                    target_pointer_width = "32",
+                    target_pointer_width = "64"
+                ) => val as i128,
+            },
         };
         let (broken_bound, ord) = if n < min {
-            (min, Less)
+            (min, Ordering::Less)
         } else {
-            debug_assert!(n > max);
-            (max, Greater)
+            debug_assert!(n > max, "conversion should not have failed");
+            (max, Ordering::Greater)
         };
         write!(
             f,
             "expression evaluated to {value:?}.\n\
             {} requires {side} to be {target_ty}, which must be between {min} and {max}\n\
             ({n} {} {broken_bound})",
-            op_desc(*op, *is_binary),
+            op.op_desc(),
             match ord {
-                Less => "<",
-                Greater => ">",
-                Equal => unreachable!(),
+                Ordering::Less => '<',
+                Ordering::Greater => '>',
+                Ordering::Equal => unreachable!(),
             }
         )
     }

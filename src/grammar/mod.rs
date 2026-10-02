@@ -7,9 +7,9 @@
 )]
 
 use crate::{
-    error::{ContextError, ErrorType},
+    error::{ContextError, ErrorType, ExpectedToken},
     scanner::{
-        Bracket,
+        BadBracketCombo, Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
     },
 };
@@ -117,7 +117,7 @@ macro_rules! bnf_notation {
         ///
         #[doc = concat!("`", stringify!($head -> $($variant$(($pattern))?)|+ ;), "`")]
         fn $head(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-            self.try_pull(match_token!($($variant$(($pattern))?)|+), "a literal").map(Expr::literal)
+            self.try_pull(match_token!($($variant$(($pattern))?)|+), ExpectedToken::Literal).map(Expr::literal)
         }
     };
 }
@@ -426,7 +426,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn try_pull<P>(
         &mut self,
         p: P,
-        expected: &'static str,
+        expected: ExpectedToken,
     ) -> Result<Token<'src>, ContextError<'src>>
     where
         P: FnOnce(&Token<'src>) -> bool,
@@ -444,7 +444,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         term       -> factor ( (Add | Sub) factor )* ;
         factor     -> unary ( (Mul | Div | Rem) unary )* ;
         unary      -> ((Not | Sub) exponent)* ;
-        exponent   -> primary ( (Pow) primary )* ; // TODO: exponents should be greater precedence than unary!!
+        exponent   -> primary ( (Pow) primary )* ;
         literal    -> ((
             BoolLiteral(_)
             | Keyword(Keyword::None)
@@ -459,27 +459,28 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn group(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let open = self.try_pull(
             match_token!(Punctuation(Punctuation::LParen)),
-            "a parenthesized expression",
+            ExpectedToken::ParenExpr,
         )?;
         let expr = self.expression()?;
         self.try_pull(
             match_token!(Punctuation(Punctuation::RParen)),
-            "an expression or `)`",
+            ExpectedToken::ExprOrRParen,
         )
         .map(move |close| Expr::grouping(Grouping { open, expr, close }))
         .map_err(|e| {
             e.map_type(|err| match err {
                 ErrorType::MissingToken { .. } => ErrorType::MissingCloseBracket {
-                    expect: (Bracket::Paren, open.lex_range(self.source)),
+                    open_range: open.lex_range(self.source),
+                    expect: Bracket::Paren,
                 },
 
                 ErrorType::UnexpectedToken {
                     actual: punc @ ("}" | "]"), .. // Sorry this doesn't use Value anymore, Token is huge now...
                 } => ErrorType::IncorrectCloseBracket {
-                    expect: (Bracket::Paren, open.lex_range(self.source)),
-                    actual: match punc {
-                        "}" => Bracket::Brace,
-                        "]" => Bracket::Brack,
+                    open_range: open.lex_range(self.source),
+                    failure: match punc {
+                        "}" => BadBracketCombo::ParenBrace,
+                        "]" => BadBracketCombo::ParenBrack,
                         _ => unreachable!("guarded by outer match arm"),
                     },
                 },
@@ -493,9 +494,9 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.literal().or_else(|_| self.group()).map_err(|mut e| {
             if let ErrorType::MissingToken { expect } | ErrorType::UnexpectedToken { expect, .. } =
                 &mut e.err
-                && *expect == "parenthesized expression"
+                && *expect == ExpectedToken::ParenExpr
             {
-                *expect = "an expression";
+                *expect = ExpectedToken::Expr;
             }
             e
         })

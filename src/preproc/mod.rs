@@ -1,7 +1,7 @@
 //! Preprocessing (macros)
 
 use crate::{
-    error::{ContextError, ErrorType},
+    error::{ContextError, ErrorType, ExpectedToken},
     grammar::match_token,
     scanner::{
         Bracket,
@@ -106,7 +106,7 @@ impl<'src> Preprocessor<'src> {
     fn require<P>(
         &mut self,
         p: P,
-        expecting: &'static str,
+        expecting: ExpectedToken,
     ) -> Result<Token<'src>, ContextError<'src>>
     where
         P: FnOnce(Token<'src>) -> bool,
@@ -115,8 +115,9 @@ impl<'src> Preprocessor<'src> {
         while self
             .tokens
             .pop_front_if(|res| {
-                res.as_ref()
-                    .is_ok_and(|token| matches!(token.val, LexValue::Whitespace | LexValue::Comment))
+                res.as_ref().is_ok_and(|token| {
+                    matches!(token.val, LexValue::Whitespace | LexValue::Comment)
+                })
             })
             .is_some()
         {}
@@ -141,9 +142,12 @@ impl<'src> Preprocessor<'src> {
 
     /// Consume a macro definition (expects `def` keyword to have already been consumed)
     fn macro_define(&mut self) -> Result<(), ContextError<'src>> {
-        let macro_name = self.require(match_token!(Macro), "a macro identifier")?;
+        let macro_name = self.require(match_token!(Macro), ExpectedToken::MacroIdent)?;
 
-        _ = self.require(match_token!(Punctuation(Punctuation::LParen)), "a `(`")?;
+        _ = self.require(
+            match_token!(Punctuation(Punctuation::LParen)),
+            ExpectedToken::LParen,
+        )?;
 
         let mut params = Vec::new();
         loop {
@@ -151,7 +155,7 @@ impl<'src> Preprocessor<'src> {
                 match self
                     .require(
                         match_token!(Punctuation(Punctuation::Comma | Punctuation::RParen)),
-                        "a `,` or `)`",
+                        ExpectedToken::CommaOrRParen,
                     )?
                     .val
                 {
@@ -164,7 +168,7 @@ impl<'src> Preprocessor<'src> {
 
             let token = self.require(
                 match_token!(MacroParam | Punctuation(Punctuation::RParen)),
-                "a macro parameter or `)`",
+                ExpectedToken::MacroParamOrRParen,
             )?;
             match token.val {
                 LexValue::MacroParam => params.push(token.lex),
@@ -176,7 +180,7 @@ impl<'src> Preprocessor<'src> {
 
         let open_brace = self.require(
             match_token!(Punctuation(Punctuation::LBrace)),
-            "a `{` for macro definition",
+            ExpectedToken::MacroDefLBrace,
         )?;
 
         let mut def = Vec::new();
@@ -188,7 +192,8 @@ impl<'src> Preprocessor<'src> {
                     None,
                     None,
                     ErrorType::MissingCloseBracket {
-                        expect: (Bracket::Brace, open_brace.lex_range(self.source)),
+                        open_range: open_brace.lex_range(self.source),
+                        expect: Bracket::Brace,
                     },
                 )
             })??;
@@ -237,7 +242,7 @@ impl<'src> Preprocessor<'src> {
         for _ in 0..param_count {
             let open_brace = self.require(
                 match_token!(Punctuation(Punctuation::LBrace)),
-                "a `{` for macro argument",
+                ExpectedToken::MacroArgLBrace,
             )?;
             let mut arg = Vec::new();
             let mut depth: usize = 0;
@@ -248,7 +253,8 @@ impl<'src> Preprocessor<'src> {
                         None,
                         Some(macro_range),
                         ErrorType::MissingCloseBracket {
-                            expect: (Bracket::Brace, open_brace.lex_range(self.source)),
+                            open_range: open_brace.lex_range(self.source),
+                            expect: Bracket::Brace,
                         },
                     )
                 })??;
@@ -307,7 +313,8 @@ impl<'src> Iterator for Preprocessor<'src> {
                 // expand macro
                 Some(Ok(
                     token @ Token {
-                        val: LexValue::Macro, ..
+                        val: LexValue::Macro,
+                        ..
                     },
                 )) => {
                     if let Err(e) = self.macro_expand(token) {

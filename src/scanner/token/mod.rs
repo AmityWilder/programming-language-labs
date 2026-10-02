@@ -14,7 +14,7 @@ macro_rules! define_token_eq {
         $(#[$em:meta])*
         $vis:vis enum $Enum:ident = $name:ident {$(
             $(#[$vm:meta])*
-            $Variant:ident = $value:literal
+            $Variant:ident = $(#[$valm:meta])* $value:literal
         ),+ $(,)?}
     ) => {
         $(#[$em])*
@@ -38,7 +38,7 @@ macro_rules! define_token_eq {
             /// Like [`Self::from_prefix`], but matches the full string
             pub fn try_from_str(s: &str) -> Option<Self> {
                 match s {
-                    $($value => Some(Self::$Variant),)+
+                    $($(#[$valm])* $value => Some(Self::$Variant),)+
                     _ => None,
                 }
             }
