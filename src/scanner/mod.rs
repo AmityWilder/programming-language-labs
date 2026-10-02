@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use std::range::Range;
-use token::{Token, keyword::Keyword, punc::Punctuation, value::Value};
+use token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue};
 
 pub mod symbols;
 pub mod token;
@@ -145,7 +145,7 @@ impl<'src> Scanner<'src> {
             lex: self
                 .split_off(len)
                 .expect("find and len should return safe positions within source"),
-            val: Value::Whitespace,
+            val: LexValue::Whitespace,
             mac: None,
         }
     }
@@ -174,7 +174,7 @@ impl<'src> Scanner<'src> {
             .expect("find and len should return safe positions to split at");
         Token {
             lex,
-            val: Value::Macro,
+            val: LexValue::Macro,
             mac: None,
         }
     }
@@ -203,7 +203,7 @@ impl<'src> Scanner<'src> {
             .expect("find and len should return safe positions to split at");
         Token {
             lex,
-            val: Value::MacroParam,
+            val: LexValue::MacroParam,
             mac: None,
         }
     }
@@ -274,12 +274,12 @@ impl<'src> Scanner<'src> {
                     .split_off(len)
                     .expect("find and len should return safe positions to split at");
                 match open_delim {
-                    STR_DELIM => Value::string_literal(lex).map(|val| Token {
+                    STR_DELIM => LexValue::string_literal(lex).map(|val| Token {
                         lex,
                         val,
                         mac: None,
                     }),
-                    CHAR_DELIM => Value::char_literal(lex).map(|val| Token {
+                    CHAR_DELIM => LexValue::char_literal(lex).map(|val| Token {
                         lex,
                         val,
                         mac: None,
@@ -310,18 +310,18 @@ impl<'src> Scanner<'src> {
             .split_off(len)
             .expect("find and len should return safe positions to split at");
         let val = if let Some(kw) = Keyword::try_from_str(lex) {
-            Value::Keyword(kw)
+            LexValue::Keyword(kw)
         } else {
             match lex {
-                "true" => Value::BoolLiteral(true),
-                "fals" => Value::BoolLiteral(false),
+                "true" => LexValue::BoolLiteral(true),
+                "fals" => LexValue::BoolLiteral(false),
                 _ => {
                     if self.is_following_fn || self.source.starts_with('(')
                     // assumes the token has already been split off
                     {
-                        Value::Callable
+                        LexValue::Callable
                     } else {
-                        Value::Identifier
+                        LexValue::Identifier
                     }
                 }
             }
@@ -379,7 +379,7 @@ impl<'src> Scanner<'src> {
         let lex = self
             .split_off(len)
             .expect("should be a safe position to split at");
-        Value::number_literal(lex)
+        LexValue::number_literal(lex)
             .map(|val| Token {
                 lex,
                 val,
@@ -408,7 +408,7 @@ impl<'src> Scanner<'src> {
             lex: self
                 .split_off(len)
                 .expect("should be a safe position to split at"),
-            val: Value::Comment,
+            val: LexValue::Comment,
             mac: None,
         }
     }
@@ -450,7 +450,7 @@ impl<'src> Scanner<'src> {
             lex: self
                 .split_off(len)
                 .expect("should be a safe position to split at"),
-            val: Value::Comment,
+            val: LexValue::Comment,
             mac: None,
         })
         .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
@@ -474,7 +474,7 @@ impl<'src> Scanner<'src> {
                     .expect("should be a safe position to split at");
                 Token {
                     lex,
-                    val: Value::Punctuation(punc),
+                    val: LexValue::Punctuation(punc),
                     mac: None,
                 }
             })
@@ -532,11 +532,11 @@ impl<'src> Iterator for Scanner<'src> {
             }
             .inspect(|token| {
                 // non-whitespace, non-comment token
-                if !matches!(token.val, Value::Whitespace | Value::Comment) {
-                    self.is_following_fn = matches!(token.val, Value::Keyword(Keyword::Fn));
+                if !matches!(token.val, LexValue::Whitespace | LexValue::Comment) {
+                    self.is_following_fn = matches!(token.val, LexValue::Keyword(Keyword::Fn));
 
                     // punctuation except for close bracket
-                    self.can_be_negative = matches!(token.val, Value::Punctuation(punc) if
+                    self.can_be_negative = matches!(token.val, LexValue::Punctuation(punc) if
                         !matches!(punc, Punctuation::RParen | Punctuation::RBrack | Punctuation::RBrace));
                 }
             })

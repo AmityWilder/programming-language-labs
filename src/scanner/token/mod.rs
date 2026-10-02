@@ -2,7 +2,7 @@
 
 use crate::{
     error::ErrorType,
-    scanner::{symbols::ESCAPE, token::value::Value},
+    scanner::{symbols::ESCAPE, token::value::LexValue},
 };
 use std::range::Range;
 
@@ -96,7 +96,7 @@ pub struct Token<'src> {
     pub lex: &'src str,
 
     /// The value of the token
-    pub val: Value<'src>,
+    pub val: LexValue<'src>,
 
     /// The range of the macro this token expanded from
     pub mac: Option<Range<usize>>,
@@ -106,19 +106,19 @@ impl std::fmt::Debug for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { lex, val, mac } = self;
         let (name, val): (&str, Option<&dyn std::fmt::Debug>) = match val {
-            Value::Whitespace => ("Whitespace", None),
-            Value::Comment => ("Comment", None),
-            Value::UIntLiteral(x) => ("UIntLiteral", Some(x)),
-            Value::SIntLiteral(x) => ("SIntLiteral", Some(x)),
-            Value::FltLiteral(x) => ("FltLiteral", Some(x)),
-            Value::CharLiteral(x) => ("CharLiteral", Some(x)),
-            Value::StringLiteral(x) => ("StringLiteral", Some(x)),
-            Value::BoolLiteral(x) => ("BoolLiteral", Some(x)),
-            Value::Identifier | Value::Callable => ("Identifier", None),
-            Value::Macro => ("Macro", None),
-            Value::MacroParam => ("MacroParam", None),
-            Value::Keyword(x) => ("Keyword", Some(x)),
-            Value::Punctuation(x) => ("Punctuation", Some(x)),
+            LexValue::Whitespace => ("Whitespace", None),
+            LexValue::Comment => ("Comment", None),
+            LexValue::UIntLiteral(x) => ("UIntLiteral", Some(x)),
+            LexValue::SIntLiteral(x) => ("SIntLiteral", Some(x)),
+            LexValue::FltLiteral(x) => ("FltLiteral", Some(x)),
+            LexValue::CharLiteral(x) => ("CharLiteral", Some(x)),
+            LexValue::StringLiteral(x) => ("StringLiteral", Some(x)),
+            LexValue::BoolLiteral(x) => ("BoolLiteral", Some(x)),
+            LexValue::Identifier | LexValue::Callable => ("Identifier", None),
+            LexValue::Macro => ("Macro", None),
+            LexValue::MacroParam => ("MacroParam", None),
+            LexValue::Keyword(x) => ("Keyword", Some(x)),
+            LexValue::Punctuation(x) => ("Punctuation", Some(x)),
         };
         write!(f, "{name}({lex:?}")?;
         if let Some(mac) = mac {

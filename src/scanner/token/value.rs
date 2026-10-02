@@ -114,7 +114,7 @@ impl<'src> TryFrom<StrLiteral<'src>> for StringLiteral {
 
 /// The value represented by a [`Token`]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum Value<'src> {
+pub enum LexValue<'src> {
     // ignored
     /// An entire chunk of whitespace, not just one character
     #[default]
@@ -157,7 +157,7 @@ pub enum Value<'src> {
     Punctuation(Punctuation),
 }
 
-impl<'src> Value<'src> {
+impl<'src> LexValue<'src> {
     /// Parses a number literal lexeme into its value
     pub fn number_literal(src: &'src str) -> Result<Self, ErrorType<'src>> {
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.
