@@ -78,6 +78,9 @@ pub enum OverflowError {
         lhs: (isize, Range<usize>),
         rhs: (isize, Range<usize>),
     },
+    Neg {
+        rhs: (isize, Range<usize>),
+    },
 }
 
 /// Remove an article ("a ", "an ", "a(n) ", "the ", or "") from the beginning of a string
