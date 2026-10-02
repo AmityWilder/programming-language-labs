@@ -16,6 +16,14 @@ use crate::{
 };
 use std::cmp::Ordering;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpError {
+    Incompatible,
+    FailedConversion(std::num::TryFromIntError),
+    Overflow,
+    DivByZero,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ValueType {
     Bool,
@@ -61,9 +69,9 @@ impl Value {
         }
     }
 
-    /// Returns [`Err`] if comparison is incompatible, [`None`] if compatible but incomparable
+    /// Returns [`None`] if compatible but incomparable
     /// (i.e. a non-existent `NotEqual` variant of [`std::cmp::Ordering`]).
-    fn cmp(&self, other: &Self) -> Result<Option<std::cmp::Ordering>, ()> {
+    fn cmp(&self, other: &Self) -> Result<Option<std::cmp::Ordering>, OpError> {
         match (self, other) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Some(l.cmp(r))),
             (Self::UInt(l), Self::UInt(r)) => Ok(Some(l.cmp(r))),
@@ -71,17 +79,21 @@ impl Value {
             (Self::Frac(l), Self::Frac(r)) => Ok(l.partial_cmp(r)),
             (Self::Char(l), Self::Char(r)) => Ok(Some(l.cmp(r))),
             (Self::Str(l), Self::Str(r)) => Ok(Some(l.cmp(r))),
+
             // TODO: coersions?
-            _ => Err(()),
+            _ => Err(OpError::Incompatible),
         }
     }
 
-    /// Returns [`Err`] if operation is incompatible
-    fn add(self, other: Self) -> Result<Self, ()> {
+    fn add(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l | r)),
-            (Self::UInt(l), Self::UInt(r)) => l.checked_add(r).map(Self::UInt).ok_or(()),
-            (Self::SInt(l), Self::SInt(r)) => l.checked_add(r).map(Self::SInt).ok_or(()),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_add(r).map(Self::UInt).ok_or(OpError::Overflow)
+            }
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_add(r).map(Self::SInt).ok_or(OpError::Overflow)
+            }
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l + r)),
 
             (Self::Str(l), Self::Bool(r)) => Ok(Self::Str(format!("{l}{r}"))),
@@ -99,10 +111,135 @@ impl Value {
             (Self::Str(l), Self::Str(r)) => Ok(Self::Str(l + &r)),
 
             // TODO: coersions?
-            // TODO: char arithmetic
-            _ => Err(()),
+            // TODO: char arithmetic?
+            _ => Err(OpError::Incompatible),
         }
     }
+
+    fn sub(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_sub(r).map(Self::UInt).ok_or(OpError::Overflow)
+            }
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_sub(r).map(Self::SInt).ok_or(OpError::Overflow)
+            }
+            (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l - r)),
+
+            // TODO: coersions?
+            // TODO: char arithmetic?
+            _ => Err(OpError::Incompatible),
+        }
+    }
+
+    fn mul(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l & r)),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_mul(r).map(Self::UInt).ok_or(OpError::Overflow)
+            }
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_mul(r).map(Self::SInt).ok_or(OpError::Overflow)
+            }
+            (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l * r)),
+
+            // TODO: coersions?
+            _ => Err(OpError::Incompatible),
+        }
+    }
+
+    fn div(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_div(r).map(Self::UInt).ok_or(OpError::DivByZero)
+            }
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_div(r).map(Self::SInt).ok_or(OpError::DivByZero)
+            }
+            (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l / r)),
+
+            // TODO: coersions?
+            _ => Err(OpError::Incompatible),
+        }
+    }
+
+    fn rem(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_rem(r).map(Self::UInt).ok_or(OpError::DivByZero)
+            }
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_rem(r).map(Self::SInt).ok_or(OpError::DivByZero)
+            }
+            (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l / r)),
+
+            // TODO: coersions?
+            _ => Err(OpError::Incompatible),
+        }
+    }
+
+    fn pow(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::UInt(l), Self::UInt(r)) => l
+                .checked_pow(r.try_into().map_err(OpError::FailedConversion)?)
+                .map(Self::UInt)
+                .ok_or(OpError::Overflow),
+            (Self::SInt(l), Self::SInt(r)) => l
+                .checked_pow(r.try_into().map_err(OpError::FailedConversion)?)
+                .map(Self::SInt)
+                .ok_or(OpError::Overflow),
+            (Self::Frac(l), Self::UInt(r)) => Ok(Self::Frac(
+                l.powi(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+            (Self::Frac(l), Self::SInt(r)) => Ok(Self::Frac(
+                l.powi(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+            (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l.powf(r))),
+
+            // TODO: coersions?
+            _ => Err(OpError::Incompatible),
+        }
+    }
+
+    fn shl(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(
+                l.unbounded_shl(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+            (Self::UInt(l), Self::SInt(r)) => Ok(Self::UInt(
+                l.unbounded_shl(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+            (Self::SInt(l), Self::UInt(r)) => Ok(Self::SInt(
+                l.unbounded_shl(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(
+                l.unbounded_shl(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+
+            _ => Err(OpError::Incompatible),
+        }
+    }
+
+    fn shr(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(
+                l.unbounded_shr(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+            (Self::UInt(l), Self::SInt(r)) => Ok(Self::UInt(
+                l.unbounded_shr(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+            (Self::SInt(l), Self::UInt(r)) => Ok(Self::SInt(
+                l.unbounded_shr(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(
+                l.unbounded_shr(r.try_into().map_err(OpError::FailedConversion)?),
+            )),
+
+            _ => Err(OpError::Incompatible),
+        }
+    }
+
+    // TODO: Unary
 }
 
 pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, ContextError<'src>> {
@@ -195,7 +332,8 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<Value, Cont
 
                 // Comparison
                 (TokenValue::Punctuation(cmp @ (Ne | Eq | Gt | Ge | Lt | Le)), l, r) => {
-                    let ord = l.cmp(&r).map_err(|()| {
+                    let ord = l.cmp(&r).map_err(|e| {
+                        debug_assert_eq!(e, OpError::Incompatible, "assumption");
                         ContextError::token_error(
                             source,
                             Some(*op),
