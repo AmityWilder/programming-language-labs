@@ -1,7 +1,7 @@
 //! Errors regarding code validity
 
 use crate::{
-    eval::ValueType,
+    eval::{RunValue, ValueType},
     highlight::style::{Color, Style, StyleWrapper},
     scanner::{
         Bracket,
@@ -44,39 +44,23 @@ impl std::error::Error for NumLitError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum OverflowError {
-    UAdd {
-        lhs: (usize, Range<usize>),
-        rhs: (usize, Range<usize>),
+    Add {
+        lhs: (RunValue, Range<usize>),
+        rhs: (RunValue, Range<usize>),
     },
-    SAdd {
-        lhs: (isize, Range<usize>),
-        rhs: (isize, Range<usize>),
+    Sub {
+        lhs: (RunValue, Range<usize>),
+        rhs: (RunValue, Range<usize>),
     },
-    USub {
-        lhs: (usize, Range<usize>),
-        rhs: (usize, Range<usize>),
+    Mul {
+        lhs: (RunValue, Range<usize>),
+        rhs: (RunValue, Range<usize>),
     },
-    SSub {
-        lhs: (isize, Range<usize>),
-        rhs: (isize, Range<usize>),
-    },
-    UMul {
-        lhs: (usize, Range<usize>),
-        rhs: (usize, Range<usize>),
-    },
-    SMul {
-        lhs: (isize, Range<usize>),
-        rhs: (isize, Range<usize>),
-    },
-    UPow {
-        lhs: (usize, Range<usize>),
-        rhs: (usize, Range<usize>),
-    },
-    SPow {
-        lhs: (isize, Range<usize>),
-        rhs: (isize, Range<usize>),
+    Pow {
+        lhs: (RunValue, Range<usize>),
+        rhs: (RunValue, Range<usize>),
     },
     Neg {
         rhs: (isize, Range<usize>),
@@ -589,10 +573,21 @@ define_error_type! {
             help (_) => write!(f, "ensure the result will fit in an integer"),
         },
         /// Failed to convert between integer types
-        FailedConvert(std::num::TryFromIntError) RUN 46 {
-            err (e) => write!(f, "failed conversion: {e}"),
-            inlay (_) => write!(f, "integer conversion failed"),
-            help (_) => write!(f, "ensure the conversion will not result in overflow"),
+        FailedConvert {
+            value: RunValue,
+            op: (Punctuation, Range<usize>),
+            side: OpSide,
+            /// Should be prefixed with an article (a/an)
+            target_ty: TargetTy,
+            is_binary: bool,
+            e: std::num::TryFromIntError,
+        } RUN 46 {
+            err { e, .. } => write!(f, "failed conversion: {e}"),
+            inlay { .. } => write!(f, "integer conversion failed"),
+            help { .. } => write!(f, "ensure the expression fits in the target type"),
+            info { value, op: (op, op_range), side, target_ty, is_binary } => [
+                (op_range, FailedConversionMsg::new(value, *op, *side, *target_ty, *is_binary)),
+            ],
         },
     }
 }
@@ -744,16 +739,31 @@ impl std::fmt::Display for LineCol {
     }
 }
 
+pub fn lines_in(s: &str) -> usize {
+    s.matches('\n').count().strict_add(1) // +1 to convert from 0-based to 1-based
+}
+
+pub fn last_line_cols(s: &str) -> usize {
+    s.rsplit_once('\n').map_or(s, |(_, tail)| tail).len()
+}
+
+/// The line of `position` within `s`
+pub fn line_of(s: &str, position: usize) -> Option<usize> {
+    s.get(..position).map(last_line_cols)
+}
+
+/// The column of `position` within `s`
+pub fn col_of(s: &str, position: usize) -> Option<usize> {
+    s.get(..position).map(last_line_cols)
+}
+
 /// The line and column of `position` within `s`
+///
+/// It is slightly cheaper to call this function if you are doing both, since they use the same substring
 pub fn line_col(s: &str, position: usize) -> Option<LineCol> {
-    s.get(..position).map(|s| {
-        s.split('\n') // assumes \n\r will never happen, except for \r\n\r\n
-            .enumerate()
-            .last()
-            .map_or_default(|(row, line)| LineCol {
-                line: row.strict_add(1), // +1 to convert from 0-based to 1-based
-                col: line.len(),
-            })
+    s.get(..position).map(|s: &str| LineCol {
+        line: lines_in(s),
+        col: last_line_cols(s),
     })
 }
 
@@ -873,6 +883,27 @@ struct LineRef<'msg> {
     pub msg: Box<dyn 'msg + std::fmt::Display>,
 }
 
+impl std::fmt::Debug for LineRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LineRef")
+            .field("style", &self.style)
+            .field("range", &self.range)
+            .field("block", &self.block)
+            .field("span", &self.span)
+            .field_with("msg", |f| write!(f, "{:?}", self.msg.to_string()))
+            .finish()
+    }
+}
+
+impl PartialEq for LineRef<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.style == other.style
+            && self.range == other.range
+            && std::ptr::eq(&self.msg, &other.msg)
+    }
+}
+impl Eq for LineRef<'_> {}
+
 impl<'msg> LineRef<'msg> {
     fn new(
         source: &str,
@@ -890,30 +921,194 @@ impl<'msg> LineRef<'msg> {
     }
 }
 
-impl std::fmt::Debug for LineRef<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LineRef")
-            .field("style", &self.style)
-            .field("range", &self.range)
-            .field_with("msg", |f| write!(f, "{}", self.msg))
-            .finish()
-    }
-}
-
-impl PartialEq for LineRef<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.style == other.style
-            && self.range == other.range
-            && std::ptr::eq(&self.msg, &other.msg)
-    }
-}
-impl Eq for LineRef<'_> {}
-
 /// User must ensure slice is in order of range
 #[derive(Debug)]
 struct LineRefs<'src, 'arr, 'msg> {
     pub source: &'src str,
     pub items: &'arr [LineRef<'msg>],
+}
+
+impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
+    const EDGE_STYLE: Style = Style::new().foreground(Color::BrightBlue);
+    /// Displayed in place of the line numbers between non-contiguous lines
+    const ELLIPSES: &str = "...";
+    /// Currently, no inline error message has multiple lines.
+    /// If one does in the future, enable this.
+    /// Having this disabled saves from allocating a string to iterate over its lines,
+    /// but messes up rendering if an error message has multiple lines.
+    const SUPPORT_MULTILINE_MSG: bool = true;
+
+    const fn new(source: &'src str, items: &'arr [LineRef<'msg>]) -> Self {
+        Self { source, items }
+    }
+
+    fn write_line_start<T>(
+        f: &mut std::fmt::Formatter<'_>,
+        line_num_width: usize,
+        line_number: T,
+    ) -> std::fmt::Result
+    where
+        T: std::fmt::Display,
+    {
+        write!(
+            f,
+            " {}{:>line_num_width$} |{}  ",
+            LineRefs::EDGE_STYLE.begin(),
+            line_number,
+            LineRefs::EDGE_STYLE.end(),
+        )
+    }
+
+    fn line_num_width(&self) -> Option<usize> {
+        self.items
+            .iter()
+            .map(|item| item.span.end.line)
+            .max()
+            // this map is being applied to an Option, not an iterator,
+            // so only the biggest number calls `to_string()`
+            .map(|n| n.to_string().len().max(Self::ELLIPSES.len()))
+    }
+
+    fn span_chunks(
+        &self,
+    ) -> std::slice::ChunkBy<'arr, LineRef<'msg>, fn(&LineRef<'_>, &LineRef<'_>) -> bool> {
+        const fn p(a: &LineRef<'_>, b: &LineRef<'_>) -> bool {
+            a.span.start.line == b.span.start.line
+                && a.span.end.line == b.span.end.line
+                // overlapping items not supported - they go in separate chunks
+                && a.span.start.line == a.span.end.line
+        }
+        self.items.chunk_by(p)
+    }
+
+    fn underlines(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        start_line: usize,
+        end_line: usize,
+        line_num_width: usize,
+        block: &str,
+        line_items: &[LineRef<'_>],
+    ) -> std::fmt::Result {
+        // will only have multiple lines if there are multiple lines in a single line_item
+        let lines = block
+            .lines()
+            .enumerate()
+            .map(|(n, line)| (n.strict_add(start_line), line));
+        for (i, line) in lines {
+            // print the line content
+            Self::write_line_start(f, line_num_width, i)?;
+            writeln!(f, "{line}")?;
+            // per-line
+            Self::write_line_start(f, line_num_width, "")?;
+            // assumes line items are in order
+            let mut prev_end = 0;
+            // assumes that if there are multiple lines, there is only one line_item
+            for item in line_items {
+                let start_col = if i == start_line {
+                    item.span.start.col
+                } else {
+                    0
+                };
+                let end_col = if i == end_line {
+                    item.span.end.col
+                } else {
+                    line.len()
+                };
+                for _ in prev_end..start_col {
+                    write!(f, " ")?;
+                }
+                let style = item.style.style();
+                std::fmt::Display::fmt(&style.color.begin(), f)?;
+                for _ in start_col..end_col {
+                    write!(f, "{}", style.underline)?;
+                }
+                std::fmt::Display::fmt(&style.color.end(), f)?;
+                prev_end = end_col;
+            }
+            if i != end_line {
+                writeln!(f)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Enables [`Self::SUPPORT_MULTILINE_MSG`] to be either enabled or disabled.
+    fn print_message<T>(
+        f: &mut std::fmt::Formatter<'_>,
+        line_num_width: usize,
+        n: usize,
+        line_items: &[LineRef<'_>],
+        item: &LineRef<'_>,
+        msg_line: &T,
+    ) -> std::fmt::Result
+    where
+        T: ?Sized + std::fmt::Display,
+    {
+        writeln!(f)?;
+        Self::write_line_start(f, line_num_width, "")?;
+        // second loop replaces the final bar with its message.
+        // there are two loops because we want a line of space between each message.
+        let mut prev_end = 0;
+        for (i, item) in line_items.iter().take(n).enumerate() {
+            for _ in prev_end..item.span.start.col {
+                write!(f, " ")?;
+            }
+            if i < n.saturating_sub(1) {
+                write!(f, "{}", item.style.style().color.style('|'))?;
+                prev_end = item.span.start.col.strict_add(1);
+            }
+        }
+        write!(f, "{}", item.style.style().color.style(msg_line))
+    }
+
+    fn inline_messages(
+        f: &mut std::fmt::Formatter<'_>,
+        line_items: &[LineRef<'_>],
+        line_num_width: usize,
+    ) -> std::fmt::Result {
+        // this iterator is over the item whose name will be displayed next.
+        // it is in reverse, since the names are printed right to left.
+        let mut rev_items = line_items
+            .iter()
+            .enumerate()
+            .map(|(n, item)| (n.strict_add(1), item))
+            .rev();
+        // last one (on the same line as the underlines) is displayed immediately without pipes
+        let (_, last) = rev_items
+            .next()
+            .expect("chunk_by should not produce empty chunks");
+        writeln!(f, " {}", last.style.style().color.style(&last.msg))?;
+        for (n, item) in rev_items {
+            Self::write_line_start(f, line_num_width, "")?;
+            // this loop is forward, because it prints the bar annotating the underline
+            let mut prev_end = 0;
+            for item in line_items.iter().take(n) {
+                for _ in prev_end..item.span.start.col {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}", item.style.style().color.style('|'))?;
+                prev_end = item.span.start.col.strict_add(1);
+            }
+
+            if Self::SUPPORT_MULTILINE_MSG {
+                for msg_line in item
+                    .msg
+                    .to_string() // <- what we are avoiding by disabling SUPPORT_MULTILINE_MSG
+                    .lines()
+                {
+                    Self::print_message(f, line_num_width, n, line_items, item, msg_line)?;
+                }
+            } else {
+                debug_assert!(
+                    !item.msg.to_string().contains('\n'),
+                    "multiline inline messages not supported, implementor promised no inline error message would be multiple lines"
+                );
+                Self::print_message(f, line_num_width, n, line_items, item, &*item.msg)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Renders a line reference with one or more messages.
@@ -937,60 +1132,32 @@ struct LineRefs<'src, 'arr, 'msg> {
 /// ```
 impl std::fmt::Display for LineRefs<'_, '_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const EDGE_STYLE: Style = Style::new().foreground(Color::BrightBlue);
-        /// Displayed in place of the line numbers between non-contiguous lines
-        const ELLIPSES: &str = "...";
-
         debug_assert!(
             self.items
                 .is_sorted_by_key(|item| (item.range.start, item.range.end)),
             "LineRefs expects references to be sorted by range"
         );
 
-        let Some(line_num_width) = self
-            .items
-            .iter()
-            .map(|item| item.span.end.line)
-            .max()
-            // this map is being applied to an Option, not an iterator,
-            // so only the biggest number calls `to_string()`
-            .map(|n| n.to_string().len().max(ELLIPSES.len()))
-        else {
+        let Some((very_first, line_num_width)) = self.line_num_width().map(|n| {
+            (
+                self.items
+                    .first()
+                    .expect("guaranteed at least one element if a max element exists"),
+                n,
+            )
+        }) else {
             // no items to display
             return Ok(());
         };
 
-        macro_rules! write_line_start {
-            ($dst:expr, $line_number:expr) => {
-                write!(
-                    $dst,
-                    " {}{:>line_num_width$} |{}  ",
-                    EDGE_STYLE.begin(),
-                    $line_number,
-                    EDGE_STYLE.end(),
-                )
-            };
-
-            ($dst:expr) => {
-                write_line_start!($dst, "")
-            };
-        }
-
-        // [`None`] represents -1
-        let mut prev_line = self
-            .items
-            .first()
-            .expect("would have returned if there were no items")
+        let mut prev_line = very_first
             .span
             .start
             .line
-            .checked_sub(1);
-        for line_items in self.items.chunk_by(|a, b| {
-            a.span.start.line == b.span.start.line
-                && a.span.end.line == b.span.end.line
-                // overlapping items not supported - they go in separate chunks
-                && a.span.start.line == a.span.end.line
-        }) {
+            .checked_sub(1)
+            .expect("line_col promises the line number will never be below 1");
+
+        for line_items in self.span_chunks() {
             let first = line_items
                 .first()
                 .expect("chunk_by should not produce empty chunks");
@@ -1001,97 +1168,22 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
                 .source
                 .get(first.block)
                 .expect("block should be a range in source");
-            // will only have multiple lines if there are multiple lines in a single line_item
-            let lines = block
-                .lines()
-                .enumerate()
-                .map(|(n, line)| (n.strict_add(start_line), line));
-            if prev_line != start_line.checked_sub(1) {
-                // ellipses line
-                write_line_start!(f, ELLIPSES)?;
-            } else {
-                // balancing line
-                write_line_start!(f)?;
-            }
-            prev_line = Some(start_line);
+            // separator line
+            Self::write_line_start(f, line_num_width, {
+                if std::mem::replace(&mut prev_line, start_line)
+                    != start_line
+                        .checked_sub(1)
+                        .expect("line_col promises the line number will never be below 1")
+                {
+                    Self::ELLIPSES
+                } else {
+                    ""
+                }
+            })?;
             writeln!(f)?;
             // draw the underlines
-            for (i, line) in lines {
-                // print the line content
-                write_line_start!(f, i)?;
-                writeln!(f, "{line}")?;
-                // per-line
-                write_line_start!(f)?;
-                // assumes line items are in order
-                let mut prev_end = 0;
-                // assumes that if there are multiple lines, there is only one line_item
-                for item in line_items {
-                    let start_col = if i == start_line {
-                        item.span.start.col
-                    } else {
-                        0
-                    };
-                    let end_col = if i == end_line {
-                        item.span.end.col
-                    } else {
-                        line.len()
-                    };
-                    for _ in prev_end..start_col {
-                        write!(f, " ")?;
-                    }
-                    let style = item.style.style();
-                    style.color.begin().fmt(f)?;
-                    for _ in start_col..end_col {
-                        write!(f, "{}", style.underline)?;
-                    }
-                    style.color.end().fmt(f)?;
-                    prev_end = end_col;
-                }
-                if i != end_line {
-                    writeln!(f)?;
-                }
-            }
-            // this iterator is over the item whose name will be displayed next.
-            // it is in reverse, since the names are printed right to left.
-            let mut rev_items = line_items
-                .iter()
-                .enumerate()
-                .map(|(n, item)| (n.strict_add(1), item))
-                .rev();
-            // last one (on the same line as the underlines) is displayed immediately without pipes
-            let (_, last) = rev_items
-                .next()
-                .expect("chunk_by should not produce empty chunks");
-            writeln!(f, " {}", last.style.style().color.style(&last.msg))?;
-            for (n, item) in rev_items {
-                write_line_start!(f)?;
-                // this loop is forward, because it prints the bar annotating the underline
-                let mut prev_end = 0;
-                for item in line_items.iter().take(n) {
-                    for _ in prev_end..item.span.start.col {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", item.style.style().color.style('|'))?;
-                    prev_end = item.span.start.col.strict_add(1);
-                }
-                for msg_line in item.msg.to_string().lines() {
-                    writeln!(f)?;
-                    write_line_start!(f)?;
-                    // second loop replaces the final bar with its message.
-                    // there are two loops because we want a line of space between each message.
-                    let mut prev_end = 0;
-                    for (i, item) in line_items.iter().take(n).enumerate() {
-                        for _ in prev_end..item.span.start.col {
-                            write!(f, " ")?;
-                        }
-                        if i < n.saturating_sub(1) {
-                            write!(f, "{}", item.style.style().color.style('|'))?;
-                            prev_end = item.span.start.col.strict_add(1);
-                        }
-                    }
-                    writeln!(f, "{}", item.style.style().color.style(msg_line))?;
-                }
-            }
+            self.underlines(f, start_line, end_line, line_num_width, block, line_items)?;
+            Self::inline_messages(f, line_items, line_num_width)?;
         }
         writeln!(f)
     }
@@ -1166,7 +1258,7 @@ fn op_desc(op: Punctuation, is_binary: bool) -> &'static str {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum OpSide {
+pub enum OpSide {
     Left,
     Right,
 }
@@ -1194,12 +1286,134 @@ impl std::fmt::Display for TypeResolutionMsg {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TargetTy {
+    UInt,
+    SInt,
+    U32,
+    S32,
+}
+
+impl TargetTy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UInt => "an unsigned integer",
+            Self::SInt => "a signed integer",
+            Self::U32 => "an unsigned 32-bit integer",
+            Self::S32 => "a signed 32-bit integer",
+        }
+    }
+
+    #[allow(clippy::as_conversions)]
+    const fn bounds(&self) -> (u32, i128, i128) {
+        const {
+            assert!(usize::BITS <= u128::BITS);
+            assert!(usize::BITS < i128::BITS);
+        }
+        match self {
+            Self::UInt => (usize::BITS, usize::MIN as i128, usize::MAX as i128),
+            Self::SInt => (isize::BITS, isize::MIN as i128, isize::MAX as i128),
+            Self::U32 => (u32::BITS, u32::MIN as i128, u32::MAX as i128),
+            Self::S32 => (i32::BITS, i32::MIN as i128, i32::MAX as i128),
+        }
+    }
+}
+
+impl std::fmt::Display for TargetTy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct FailedConversionMsg {
+    /// Cannot be [`RunValue::Str`]
+    value: RunValue,
+    op: Punctuation,
+    side: OpSide,
+    target_ty: TargetTy,
+    is_binary: bool,
+}
+
+impl FailedConversionMsg {
+    fn new(
+        value: &RunValue,
+        op: Punctuation,
+        side: OpSide,
+        target_ty: TargetTy,
+        is_binary: bool,
+    ) -> Self {
+        Self {
+            value: match value {
+                RunValue::Bool(x) => RunValue::Bool(*x),
+                RunValue::UInt(x) => RunValue::UInt(*x),
+                RunValue::SInt(x) => RunValue::SInt(*x),
+                RunValue::Frac(x) => RunValue::Frac(*x),
+                RunValue::Char(x) => RunValue::Char(*x),
+                RunValue::Str(_) => unimplemented!(
+                    "should not emit FailedConversionMsg for str (str should parse, not convert)"
+                ),
+            },
+            op,
+            side,
+            target_ty,
+            is_binary,
+        }
+    }
+}
+
+impl std::fmt::Display for FailedConversionMsg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::cmp::Ordering::*;
+        const {
+            assert!(usize::BITS <= u64::BITS);
+            assert!(isize::BITS <= i64::BITS);
+        }
+        let Self {
+            value,
+            op,
+            side,
+            target_ty,
+            is_binary,
+        } = self;
+        let (_bits, min, max) = target_ty.bounds();
+        let n = match value {
+            &RunValue::UInt(val) => val as i128,
+            &RunValue::SInt(val) => val as i128,
+            &RunValue::Frac(val) => val as i128, // TODO: does f64 produce TryFromInt error?
+            &RunValue::Char(val) => val as i128,
+            &RunValue::Bool(_) => {
+                unreachable!("how did you fail to convert 0|1 to an integer?!")
+            }
+            RunValue::Str(_) => unreachable!("FailedConversionMsg should not be str"),
+        };
+        let (broken_bound, ord) = if n < min {
+            (min, Less)
+        } else {
+            debug_assert!(n > max);
+            (max, Greater)
+        };
+        write!(
+            f,
+            "expression evaluated to {value:?}.\n\
+            {} requires {side} to be {target_ty}, which must be between {min} and {max}\n\
+            ({n} {} {broken_bound})",
+            op_desc(*op, *is_binary),
+            match ord {
+                Less => "<",
+                Greater => ">",
+                Equal => unreachable!(),
+            }
+        )
+    }
+}
+
 impl std::fmt::Display for RenderedContextError<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let err = InlineErrMsg(&self.0.err);
-        LineRefs {
-            source: self.0.source,
-            items: {
+        LineRefs::new(
+            self.0.source,
+            {
                 let mut refs = vec![LineRef::new(
                     self.0.source,
                     RefStyleKind::Error,
@@ -1222,7 +1436,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
                 refs
             }
             .as_slice(),
-        }
+        )
         .fmt(f)
     }
 }

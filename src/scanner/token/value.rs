@@ -200,9 +200,15 @@ impl<'src> LexValue<'src> {
                         (isize::try_from(value)
                             .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::SInt(e)))
                             .and_then(|x| {
-                                x.checked_neg().ok_or_else(|| {
-                                    ErrorType::InvalidNumLiteral(NumLitError::SInt(*NEG_UNDERFLOW))
-                                })
+                                if is_negative {
+                                    x.checked_neg().ok_or_else(|| {
+                                        ErrorType::InvalidNumLiteral(NumLitError::SInt(
+                                            *NEG_UNDERFLOW,
+                                        ))
+                                    })
+                                } else {
+                                    Ok(x)
+                                }
                             }))
                         .map(Self::SIntLiteral)
                     } else {
