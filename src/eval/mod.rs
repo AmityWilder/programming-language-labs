@@ -626,6 +626,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
         Add, And, Div, Eq, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Pow, Rem, Rotl, Rotr, Shl,
         Shr, SubNeg, Xnor, Xor,
     };
+    // TODO: what about `none`?
     match ast {
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;

@@ -135,32 +135,48 @@ impl Style {
     /// Make this style bold
     #[must_use]
     #[allow(dead_code, reason = "flexibility")]
-    pub const fn bold(mut self) -> Self {
-        self.flags |= Self::BOLD_FLAG;
+    pub const fn bold(mut self, value: bool) -> Self {
+        if value {
+            self.flags |= Self::BOLD_FLAG;
+        } else {
+            self.flags &= !Self::BOLD_FLAG;
+        }
         self
     }
 
     /// Make this style italic
     #[must_use]
     #[allow(dead_code, reason = "flexibility")]
-    pub const fn italic(mut self) -> Self {
-        self.flags |= Self::ITALIC_FLAG;
+    pub const fn italic(mut self, value: bool) -> Self {
+        if value {
+            self.flags |= Self::ITALIC_FLAG;
+        } else {
+            self.flags &= !Self::ITALIC_FLAG;
+        }
         self
     }
 
     /// Make this style underline
     #[must_use]
     #[allow(dead_code, reason = "flexibility")]
-    pub const fn underline(mut self) -> Self {
-        self.flags |= Self::UNDERLINE_FLAG;
+    pub const fn underline(mut self, value: bool) -> Self {
+        if value {
+            self.flags |= Self::UNDERLINE_FLAG;
+        } else {
+            self.flags &= !Self::UNDERLINE_FLAG;
+        }
         self
     }
 
     /// Make this style strikethrough
     #[must_use]
     #[allow(dead_code, reason = "flexibility")]
-    pub const fn strikethrough(mut self) -> Self {
-        self.flags |= Self::STRIKETHROUGH_FLAG;
+    pub const fn strikethrough(mut self, value: bool) -> Self {
+        if value {
+            self.flags |= Self::STRIKETHROUGH_FLAG;
+        } else {
+            self.flags &= !Self::STRIKETHROUGH_FLAG;
+        }
         self
     }
 

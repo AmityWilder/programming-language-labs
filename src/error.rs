@@ -236,31 +236,26 @@ fn trim_article(s: &str) -> &str {
     s
 }
 
-macro_rules! define_error_type {
-    (
-        formatter: $f:ident
-        source: $src:ident
-
-        $(#[$emeta:meta])*
-        $vis:vis enum $Enum:ident<$lt:lifetime> {$(
-            $(#[$vmeta:meta])*
-            $Variant:ident$({$(
-                $(#[$sfmeta:meta])*
-                $sfield:ident: $SType:ty
-            ),* $(,)?})?$(($(
-                $TType:ty
-            ),* $(,)?))?
-            $kind:ident $code:literal {
-                err$({$(..)? $( $err_s_ident:ident$(: $err_s_pat:pat)? ),* $(, ..)?})?$(($( $err_t_pat:pat ),*))? => $display:expr,
-                inlay$({$(..)? $( $inlay_s_ident:ident$(: $inlay_s_pat:pat)? ),* $(, ..)?})?$(($( $inlay_t_pat:pat ),*))? => $inlay:expr,
-                help$({$(..)? $( $help_s_ident:ident$(: $help_s_pat:pat)? ),* $(, ..)?})?$(($( $help_t_pat:pat ),*))? => $help:expr$(,
-                info$({$(..)? $( $info_s_ident:ident$(: $info_s_pat:pat)? ),* $(, ..)?})?$(($( $info_t_pat:pat ),*))? => $info:expr)?$(,)?
-            }
-        ),* $(,)?}
-    ) => {
+macro_rules! CtxErrType {{
+    $(#[$emeta:meta])*
+    $vis:vis enum $Enum:ident<$lt:lifetime> {$(
+        $(#[doc = $doc:expr])*
+        #[code($kind:ident, $code:literal)]
+        #[err($({$(..)? $( $err_s_ident:ident$(: $err_s_pat:pat)? ),* $(, ..)?},)?$(($( $err_t_pat:pat ),*),)? |$err_f:ident| $display:expr)]
+        #[inlay($({$(..)? $( $inlay_s_ident:ident$(: $inlay_s_pat:pat)? ),* $(, ..)?},)?$(($( $inlay_t_pat:pat ),*),)? |$inlay_f:ident| $inlay:expr)]
+        #[help($({$(..)? $( $help_s_ident:ident$(: $help_s_pat:pat)? ),* $(, ..)?},)?$(($( $help_t_pat:pat ),*),)? |$help_f:ident, $src:ident| $help:expr)]
+        $(#[info($({$(..)? $( $info_s_ident:ident$(: $info_s_pat:pat)? ),* $(, ..)?},)?$(($( $info_t_pat:pat ),*),)? |$info_f:ident| $info:expr)])?
+        $Variant:ident$({$(
+            $(#[$sfmeta:meta])*
+            $sfield:ident: $SType:ty
+        ),* $(,)?})?$(($(
+            $TType:ty
+        ),* $(,)?))?
+    ),* $(,)?}
+    } => {
         $(#[$emeta])*
         $vis enum $Enum<$lt> {$(
-            $(#[$vmeta])*
+            $(#[doc = $doc])*
             $Variant$({$(
                 $(#[$sfmeta])*
                 $sfield: $SType
@@ -285,17 +280,17 @@ macro_rules! define_error_type {
         }
 
         impl std::fmt::Display for $Enum<'_> {
-            fn fmt(&self, $f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {$(
-                    $Enum::$Variant$({$( $err_s_ident$(: $err_s_pat)?, )* .. })?$(($( $err_t_pat ),*))? => $display
+                    $Enum::$Variant$({$( $err_s_ident$(: $err_s_pat)?, )* .. })?$(($( $err_t_pat ),*))? => { let $err_f = f; $display }
                 ),*}
             }
         }
 
         impl std::fmt::Display for InlineErrMsg<'_, '_> {
-            fn fmt(&self, $f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match &self.0 {$(
-                    $Enum::$Variant$({$( $inlay_s_ident$(: $inlay_s_pat)?, )* ..})?$(($( $inlay_t_pat ),*))? => $inlay
+                    $Enum::$Variant$({$( $inlay_s_ident$(: $inlay_s_pat)?, )* ..})?$(($( $inlay_t_pat ),*))? => { let $inlay_f = f; $inlay }
                 ),*}
             }
         }
@@ -305,14 +300,14 @@ macro_rules! define_error_type {
             //     clippy::too_many_lines,
             //     reason = "it would be even more complicated to make a separate function for each of these"
             // )]
-            fn fmt(&self, $f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let $src: &str = self
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let src: &str = self
                     .0
                     .source
                     .get(self.0.range)
                     .expect("range should be a range in source");
                 match &self.0.err {$(
-                    $Enum::$Variant$({$( $help_s_ident$(: $help_s_pat)?, )* ..})?$(($( $help_t_pat ),*))? => $help
+                    $Enum::$Variant$({$( $help_s_ident$(: $help_s_pat)?, )* ..})?$(($( $help_t_pat ),*))? => { let $help_f = f; let $src = src; $help }
                 ),*}
             }
         }
@@ -331,339 +326,353 @@ macro_rules! define_error_type {
     };
 }
 
-define_error_type! {
-    formatter: f
-    source: src
+CtxErrType! {
+/// The kind of error describing a [`ContextError`]
+#[derive(Debug, Clone, PartialEq)]
+pub enum ErrorType<'src> {
+    // ----------------------------
+    // lex
+    // ----------------------------
+    /// Token type could not be identified from the initial character, and so is not a valid token
+    #[code(LEX, 1)]
+    #[err(|f| write!(f, "unknown token"))]
+    #[inlay(|f| write!(f, "what is this?"))]
+    #[help(|f, _src| write!(f, "try removing the character"))]
+    UnknownToken,
 
-    /// The kind of error describing a [`ContextError`]
-    #[derive(Debug, Clone, PartialEq)]
-    pub enum ErrorType<'src> {
-        // ----------------------------
-        // lex
-        // ----------------------------
-        /// Token type could not be identified from the initial character, and so is not a valid token
-        UnknownToken LEX 1 {
-            err => write!(f, "unknown token"),
-            inlay => write!(f, "what is this?"),
-            help => write!(f, "try removing the character"),
-        },
-        /// A block comment has no `*/` to end it
-        EndlessBlockComment LEX 2 {
-            err => write!(f, "block comment opens (`/*`) but never closes (missing `*/`)"),
-            inlay => write!(f, "never ends"),
-            help => write!(f, "try adding `{BLOCK_COMMENT_CLOSE}`"),
-        },
-        /// A character literal that is just `''`
-        EmptyCharLiteral LEX 3 {
-            err => write!(f, "empty character literal"),
-            inlay => write!(f, "empty"),
-            help => write!(f, "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` \
-                               with `{STR_DELIM}{STR_DELIM}` or insert a character"),
-        },
-        /// A character literal with multiple codepoints
-        MultiCharLiteral LEX 4 {
-            err => write!(f, "character literal may only contain one codepoint"),
-            inlay => write!(f, "a char should be 1 char"),
-            help => {
-                let inner = src
-                    .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
-                    .expect("char literals should include delimiters");
-                let (first, rest) = inner.split_at(match escape_char(inner) {
-                    Some((len, _)) => len,
-                    // normal character
-                    None => inner.chars()
-                        .next()
-                        .expect("should have at least one character if MultiCharLiteral instead of EmptyCharLiteral")
-                        .len_utf8(),
-                });
-                write!(f, "try removing the character(s) after `{first}` (remove trailing `{rest}`) \
-                           or change this to a string ({STR_DELIM}{inner}{STR_DELIM})")
-            },
-        },
-        /// A character literal has no `'` to end it
-        EndlessCharLiteral LEX 5 {
-            err => write!(f, "char literal opens (`'`) but never closes (missing unescaped `'`)"),
-            inlay => write!(f, "never ends"),
-            help => write!(f, "try adding a `{CHAR_DELIM}` to the end of the char"),
-        },
-        /// A character literal has no `'` to end it, but contains a `\'`
-        EscapedCharLiteralEnd LEX 5 {
-            err => write!(f, "char literal opens (`'`) but never closes (missing unescaped `'`)"),
-            inlay => write!(f, "never ends, unless you remove the `\\`"),
-            help => {
-                let substr = src.strip_prefix(CHAR_DELIM)
-                    .expect("string literal should include at least the open delimiter, in EscapedCharLiteralEnd")
-                    .split_once("\\'")
-                    .expect("should be EscapedCharLiteralEnd if this is not present")
-                    .0;
-                write!(
-                    f,
-                    "there is a closing single-quote candidate, but it is escaped (`{ESCAPE}{CHAR_DELIM}`). \n\
-                     char literals cannot end with an unescaped backslash (`{ESCAPE}`), \
-                     it is indistinguishable from an escaped single-quote (`{ESCAPE}{CHAR_DELIM}`). \n\
-                     try adding a `{CHAR_DELIM}` to the end of the char or remove the `{ESCAPE}` from `{ESCAPE}{CHAR_DELIM}` \
-                     to make the char `{CHAR_DELIM}{substr}{CHAR_DELIM}`"
-                )
-            },
-        },
-        /// A string literal has no `"` to end it
-        EndlessStringLiteral LEX 6 {
-            err => write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"),
-            inlay => write!(f, "never ends"),
-            help => write!(f, "try adding a `{STR_DELIM}` to the end of the string"),
-        },
-        /// A string literal has no `"` to end it, but contains a `\"`
-        EscapedStringLiteralEnd LEX 6 {
-            err => write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"),
-            inlay => write!(f, "never ends, unless you remove the `\\`"),
-            help => {
-                let substr = src
-                    .strip_prefix(STR_DELIM)
-                    .expect("string literal should include delimiter")
-                    .split_once("\\\"")
-                    .expect("should be EndlessStringLiteral if this is not present")
-                    .0;
-                write!(
-                    f,
-                    "there is a closing double-quote candidate, but it is escaped (`{ESCAPE}{STR_DELIM}`).\n\
-                     string literals cannot end with an unescaped backslash (`{ESCAPE}`), \
-                     it is indistinguishable from an escaped double-quote (`{ESCAPE}{STR_DELIM}`).\n\
-                     try adding a `{STR_DELIM}` to the end of the string or remove the `{ESCAPE}` from `{ESCAPE}{STR_DELIM}` \
-                     to make the string `{STR_DELIM}{substr}{STR_DELIM}`"
-                )
-            },
-        },
-        /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
-        InvalidEscape(&'src str) LEX 7 {
-            err (esc) => write!(f, "unknown character escape: {esc:?}"),
-            inlay (_) => write!(f, "has an invalid escape sequence"),
-            help (esc) => {
-                let mut iter = esc.chars();
-                iter.next()
-                    .filter(|ch| *ch == ESCAPE)
-                    .expect("InvalidEscape should include `\\`");
-                let ch = iter.next().expect("should have at least 2 characters or else be an EscapedStringLiteralEnd");
+    /// A block comment has no `*/` to end it
+    #[code(LEX, 2)]
+    #[err(|f| write!(f, "block comment opens (`/*`) but never closes (missing `*/`)"))]
+    #[inlay(|f| write!(f, "never ends"))]
+    #[help(|f, _src| write!(f, "try adding `{BLOCK_COMMENT_CLOSE}`"))]
+    EndlessBlockComment,
 
-                if ch == 'x' {
-                    let n = iter.take(2).filter(char::is_ascii_hexdigit).count();
-                    assert!(n < 2, "why is this an error?");
-                    write!(f, "`\\x` should be followed by 2 hexadecimal digits ([0-9a-fA-F]), this escape sequence has {n}")
-                } else if ch == 'o' {
-                    let n = iter.take(3).filter(|ch| ch.is_digit(8)).count();
-                    assert!(n < 3, "why is this an error?");
-                    write!(f, "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}")
-                } else if ch.is_alphabetic() {
-                    write!(
-                        f,
-                        "`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
-                        ASCII letters that can be escape sequences"
-                    )
-                } else if ch.is_numeric() {
-                    write!(f, "only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences")
-                } else {
-                    write!(
-                        f,
-                        "supported escape sequences: `\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, `\\0`-`\\9`,\n\\
-                        `\\x##` (where # is a hexadecimal digit), `\\o###` (where # is an octal digit)"
-                    )
-                }
-            }
-        },
-        /// A number literal could not be evaluated as a number
-        InvalidNumLiteral(NumErrorKind) LEX 8 {
-            err (e) => write!(f, "invalid number literal: {e}"),
-            inlay (_) => write!(f, "not a valid number"),
-            help (e) => {
-                match e {
-                    NumErrorKind::InvalidInt => {
-                        let (suffix, base_name) = invalid_num_suffix(src);
-                        write!(f, "the suffix `{suffix}` is not valid for {base_name} unsigned integer literals")
-                    }
-                    NumErrorKind::PosOverflow => write!(f, "the largest supported integer value is {}", usize::MAX),
-                    NumErrorKind::NegOverflow => write!(f, "the smallest supported integer value is {}", isize::MIN),
-                    NumErrorKind::NegUnsigned => write!(f, "the smallest supported unsigned integer value is {}", usize::MIN),
-                    NumErrorKind::InvalidFrac => write!(f, "I'm not sure how to help with this yet"), // TODO: float literal guidance
-                }
-            }
-        },
+    /// A character literal that is just `''`
+    #[code(LEX, 3)]
+    #[err(|f| write!(f, "empty character literal"))]
+    #[inlay(|f| write!(f, "empty"))]
+    #[help(|f, _src| write!(f, "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` with `{STR_DELIM}{STR_DELIM}` or insert a character"))]
+    EmptyCharLiteral,
 
-        // ----------------------------
-        // preprocessor
-        // ----------------------------
-        /// A macro was encountered that has not been defined
-        MacroUndefined PRE 21 {
-            err => write!(f, "macro has not been defined at this point"),
-            inlay => write!(f, "not defined"),
-            help => write!(f, "try moving the definition ahead of this usage"),
-        },
+    /// A character literal with multiple codepoints
+    #[code(LEX, 4)]
+    #[err(|f| write!(f, "character literal may only contain one codepoint"))]
+    #[inlay(|f| write!(f, "a char should be 1 char"))]
+    #[help(|f, src| {
+        let inner = src
+            .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
+            .expect("char literals should include delimiters");
+        let (first, rest) = inner.split_at(match escape_char(inner) {
+            Some((len, _)) => len,
+            // normal character
+            None => inner.chars()
+                .next()
+                .expect("should have at least one character if MultiCharLiteral instead of EmptyCharLiteral")
+                .len_utf8(),
+        });
+        write!(f, "try removing the character(s) after `{first}` (remove trailing `{rest}`) \
+                    or change this to a string ({STR_DELIM}{inner}{STR_DELIM})")
+    })]
+    MultiCharLiteral,
 
-        // ----------------------------
-        // parse
-        // ----------------------------
-        /// A closing bracket is of the wrong type for the open bracket at its depth
-        IncorrectCloseBracket {
-            /// The bracket type being expected based on the opening side
-            open_range: Range<usize>,
-            failure: BadBracketCombo,
-        } GRA 31 {
-            err { failure } => {
-                let (expect, actual) = failure.decompose();
-                write!(f,
-                    "incorrect close bracket: expected `{}`, found `{}`",
-                    expect.close(),
-                    actual.close(),
-                )
-            },
-            inlay { .. } => write!(f, "incorrect partner"),
-            help { failure } => {
-                let (expect, actual) = failure.decompose();
-                write!(
-                    f,
-                    "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, \
-                    or remove either the `{}` or the `{}`",
-                    expect.close(),
-                    actual.close(),
-                    actual.open(),
-                    expect.open(),
-                    expect.open(),
-                    actual.close(),
-                )
-            },
-            info { open_range } => [(*open_range, "bracket type introduced here")],
-        },
-        /// A closing bracket was found with no open bracket
-        ExcessCloseBracket {
-            /// The bracket type that was found
-            actual: Bracket,
-        } GRA 32 {
-            err { actual } => write!(f, "too many close brackets: expected none, found `{}`", actual.close()),
-            inlay { .. } => write!(f, "missing a partner"),
-            help { actual } => write!(f, "try removing the `{}` or add a `{}` before it", actual.close(), actual.open()),
-        },
-        /// An open bracket was found with no close bracket
-        MissingCloseBracket {
-            open_range: Range<usize>,
-            expect: Bracket,
-        } GRA 33 {
-            err { expect } => write!(f, "missing close bracket: expected `{}`, found none", expect.close()),
-            inlay { .. } => write!(f, "missing close bracket"),
-            help { expect } => write!(
+    /// A character literal has no `'` to end it
+    #[code(LEX, 5)]
+    #[err(|f| write!(f, "char literal opens (`'`) but never closes (missing unescaped `'`)"))]
+    #[inlay(|f| write!(f, "never ends"))]
+    #[help(|f, _src| write!(f, "try adding a `{CHAR_DELIM}` to the end of the char"))]
+    EndlessCharLiteral,
+
+    /// A character literal has no `'` to end it, but contains a `\'`
+    #[code(LEX, 5)]
+    #[err(|f| write!(f, "char literal opens (`'`) but never closes (missing unescaped `'`)"))]
+    #[inlay(|f| write!(f, "never ends, unless you remove the `\\`"))]
+    #[help(|f, src| {
+        let substr = src.strip_prefix(CHAR_DELIM)
+            .expect("string literal should include at least the open delimiter, in EscapedCharLiteralEnd")
+            .split_once("\\'")
+            .expect("should be EscapedCharLiteralEnd if this is not present")
+            .0;
+        write!(
+            f,
+            "there is a closing single-quote candidate, but it is escaped (`{ESCAPE}{CHAR_DELIM}`). \n\
+                char literals cannot end with an unescaped backslash (`{ESCAPE}`), \
+                it is indistinguishable from an escaped single-quote (`{ESCAPE}{CHAR_DELIM}`). \n\
+                try adding a `{CHAR_DELIM}` to the end of the char or remove the `{ESCAPE}` from `{ESCAPE}{CHAR_DELIM}` \
+                to make the char `{CHAR_DELIM}{substr}{CHAR_DELIM}`"
+        )
+    })]
+    EscapedCharLiteralEnd,
+
+    /// A string literal has no `"` to end it
+    #[code(LEX, 6)]
+    #[err(|f| write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"))]
+    #[inlay(|f| write!(f, "never ends"))]
+    #[help(|f, _src| write!(f, "try adding a `{STR_DELIM}` to the end of the string"))]
+    EndlessStringLiteral,
+
+    /// A string literal has no `"` to end it, but contains a `\"`
+    #[code(LEX, 6)]
+    #[err(|f| write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"))]
+    #[inlay(|f| write!(f, "never ends, unless you remove the `\\`"))]
+    #[help(|f, src| {
+        let substr = src
+            .strip_prefix(STR_DELIM)
+            .expect("string literal should include delimiter")
+            .split_once("\\\"")
+            .expect("should be EndlessStringLiteral if this is not present")
+            .0;
+        write!(
+            f,
+            "there is a closing double-quote candidate, but it is escaped (`{ESCAPE}{STR_DELIM}`).\n\
+                string literals cannot end with an unescaped backslash (`{ESCAPE}`), \
+                it is indistinguishable from an escaped double-quote (`{ESCAPE}{STR_DELIM}`).\n\
+                try adding a `{STR_DELIM}` to the end of the string or remove the `{ESCAPE}` from `{ESCAPE}{STR_DELIM}` \
+                to make the string `{STR_DELIM}{substr}{STR_DELIM}`"
+        )
+    })]
+    EscapedStringLiteralEnd,
+
+    /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
+    #[code(LEX, 7)]
+    #[err((esc), |f| write!(f, "unknown character escape: {esc:?}"))]
+    #[inlay((_), |f| write!(f, "has an invalid escape sequence"))]
+    #[help((esc), |f, _src| {
+        let mut iter = esc.chars();
+        iter.next()
+            .filter(|ch| *ch == ESCAPE)
+            .expect("InvalidEscape should include `\\`");
+        let ch = iter.next().expect("should have at least 2 characters or else be an EscapedStringLiteralEnd");
+
+        if ch == 'x' {
+            let n = iter.take(2).filter(char::is_ascii_hexdigit).count();
+            assert!(n < 2, "why is this an error?");
+            write!(f, "`\\x` should be followed by 2 hexadecimal digits ([0-9a-fA-F]), this escape sequence has {n}")
+        } else if ch == 'o' {
+            let n = iter.take(3).filter(|ch| ch.is_digit(8)).count();
+            assert!(n < 3, "why is this an error?");
+            write!(f, "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}")
+        } else if ch.is_alphabetic() {
+            write!(
                 f,
-                "try inserting a `{}` or remove the `{}`",
-                expect.close(),
-                expect.open(),
-            ),
-            info { open_range } => [(*open_range, "missing a partner")],
-        },
-        /// A token was expected, but instead found EOF
-        MissingToken {
-            /// The token pattern expected - should start with the proper article
-            /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
-            expect: ExpectedToken,
-        } GRA 34 {
-            err { expect } => write!(f, "missing {expect}"),
-            inlay { .. } => write!(f, "missing token"),
-            help { expect } => write!(f, "try inserting {expect}"),
-        },
-        /// A token was expected, but instead found `actual`
-        UnexpectedToken {
-            /// The token pattern expected - should start with the proper article
-            /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
-            expect: ExpectedToken,
-            /// The token found
-            actual: &'src str,
-        } GRA 35 {
-            err { expect, actual } => write!(f, "expected {expect}, found `{actual}`"),
-            inlay { .. } => write!(f, "wrong token"),
-            help { expect, actual } => write!(f, "try inserting {expect} before the `{actual}` or remove the `{actual}`"),
-        },
+                "`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported \
+                ASCII letters that can be escape sequences"
+            )
+        } else if ch.is_numeric() {
+            write!(f, "only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences")
+        } else {
+            write!(
+                f,
+                "supported escape sequences: `\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, `\\0`-`\\9`,\n\\
+                `\\x##` (where # is a hexadecimal digit), `\\o###` (where # is an octal digit)"
+            )
+        }
+    })]
+    InvalidEscape(&'src str),
 
-        // ----------------------------
-        // eval
-        // ----------------------------
-        /// Attempted to find the quotient or remainder with a denominator of 0
-        DivByZero {
-            /// The range of the expression evaluating to zero
-            zero: Range<usize>,
-        } RUN 41 {
-            err { .. } => write!(f, "divide by zero"),
-            inlay { .. } => write!(f, "dividing by 0"),
-            help { .. } => write!(f, "ensure the right side cannot be 0"),
-            info { zero } => [(*zero, "this expression evaluates to 0")],
-        },
-        /// The operands in a binary operation are of incompatible type
-        Incompatible {
-            /// The binary operator
-            op: Punctuation,
-            l_range: Range<usize>,
-            r_range: Range<usize>,
-            l_ty: ValueType,
-            r_ty: ValueType,
-        } RUN 42 {
-            err { op, l_ty, r_ty, .. } => write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"),
-            inlay { op, l_ty, r_ty, .. } => write!(f, "{} is not supported between operands of these types", op.op_description(&[*l_ty, *r_ty])),
-            help { op, l_ty, r_ty, .. } => {
-                write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
-                match op {
-                    Punctuation::And |
-                    Punctuation::Xor |
-                    Punctuation::Or |
-                    Punctuation::Nand |
-                    Punctuation::Nor |
-                    Punctuation::Xnor if matches!(l_ty, ValueType::Bool) != matches!(r_ty, ValueType::Bool)
-                        // TODO: the user might have used a boolean literal/variable, not a comparison; this message might not be helpful in that case
-                        => write!(f, "\n\nit looks like you may have been trying to perform a bitwise operation, but one side resolves to a boolean.\n\
-                            bitwise/logic operations have lower precedence than comparisons, so you may need to wrap the bitwise operation in parentheses."),
+    /// A number literal could not be evaluated as a number
+    #[code(LEX, 8)]
+    #[err((e), |f| write!(f, "invalid number literal: {e}"))]
+    #[inlay((_), |f| write!(f, "not a valid number"))]
+    #[help((e), |f, src| {
+        match e {
+            NumErrorKind::InvalidInt => {
+                let (suffix, base_name) = invalid_num_suffix(src);
+                write!(f, "the suffix `{suffix}` is not valid for {base_name} unsigned integer literals")
+            }
+            NumErrorKind::PosOverflow => write!(f, "the largest supported integer value is {}", usize::MAX),
+            NumErrorKind::NegOverflow => write!(f, "the smallest supported integer value is {}", isize::MIN),
+            NumErrorKind::NegUnsigned => write!(f, "the smallest supported unsigned integer value is {}", usize::MIN),
+            NumErrorKind::InvalidFrac => write!(f, "I'm not sure how to help with this yet"), // TODO: float literal guidance
+        }
+    })]
+    InvalidNumLiteral(NumErrorKind),
 
-                    _ => Ok(())
-                }
-            },
-            info { l_ty, l_range, r_ty, r_range, .. } => [
-                (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: *l_ty }),
-                (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty }),
-            ],
-        },
-        /// The operand in a unary operation is of an unsupported type
-        Unsupported {
-            /// The unary operator
-            op: Punctuation,
-            /// The type of the value on the right side of the operator
-            r_ty: ValueType,
-            r_range: Range<usize>,
-        } RUN 43 {
-            err { op, r_ty, .. } => write!(f, "`{op}` is not supported for {r_ty}"),
-            inlay { op, r_ty, .. } => write!(f, "{} is not supported for operands of this type", op.op_description(&[*r_ty])),
-            help { .. } => write!(f, "try a different operator or convert the type"),
-            info { r_ty, r_range, .. } => [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })],
-        },
-        /// Unsigned cannot be negated
-        UnsignedNeg RUN 44 {
-            err => write!(f, "unsigned integer cannot be negated"),
-            inlay => write!(f, "uint can't be negated"),
-            help => write!(f, "remove the `-` or convert the integer to signed"),
-        },
-        /// An operation resulted in overflow
-        Overflow(OverflowError) RUN 45 {
-            err (_) => write!(f, "arithmetic overflow"),
-            inlay (_) => write!(f, "unhandled integer overflow"),
-            help (_) => write!(f, "ensure the result will fit in an integer"),
-            info (e) => *e,
-        },
-        /// Failed to convert between integer types
-        FailedConvert {
-            op: Punctuation,
-            is_binary: bool,
-            op_range: Range<usize>,
-            failure: IntConversionFailure,
-        } RUN 46 {
-            err { failure, .. } => write!(f, "failed conversion: {failure}"),
-            inlay { .. } => write!(f, "integer conversion failed"),
-            help { .. } => write!(f, "ensure the expression fits in the target type"),
-            info { op, op_range, failure, is_binary } => [
-                (*op_range, FailedConversionMsg::new(*op, OpSide::Right, *failure, *is_binary)),
-            ],
-        },
-    }
+    // ----------------------------
+    // preprocessor
+    // ----------------------------
+    /// A macro was encountered that has not been defined
+    #[code(PRE, 21)]
+    #[err(|f| write!(f, "macro has not been defined at this point"))]
+    #[inlay(|f| write!(f, "not defined"))]
+    #[help(|f, _src| write!(f, "try moving the definition ahead of this usage"))]
+    MacroUndefined,
+
+    // ----------------------------
+    // parse
+    // ----------------------------
+    /// A closing bracket is of the wrong type for the open bracket at its depth
+    #[code(GRA, 31)]
+    #[err({ failure }, |f| {
+        let (expect, actual) = failure.decompose();
+        write!(f,
+            "incorrect close bracket: expected `{}`, found `{}`",
+            expect.close(),
+            actual.close(),
+        )
+    })]
+    #[inlay({ .. }, |f| write!(f, "incorrect partner"))]
+    #[help({ failure }, |f, _src| {
+        let (expect, actual) = failure.decompose();
+        write!(
+            f,
+            "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, \
+            or remove either the `{}` or the `{}`",
+            expect.close(),
+            actual.close(),
+            actual.open(),
+            expect.open(),
+            expect.open(),
+            actual.close(),
+        )
+    })]
+    #[info({ open_range }, |f| [(*open_range, "bracket type introduced here")])]
+    IncorrectCloseBracket {
+        /// The bracket type being expected based on the opening side
+        open_range: Range<usize>,
+        failure: BadBracketCombo,
+    },
+
+    /// A closing bracket was found with no open bracket
+    #[code(GRA, 32)]
+    #[err({ actual }, |f| write!(f, "too many close brackets: expected none, found `{}`", actual.close()))]
+    #[inlay({ .. }, |f| write!(f, "missing a partner"))]
+    #[help({ actual }, |f, _src| write!(f, "try removing the `{}` or add a `{}` before it", actual.close(), actual.open()))]
+    ExcessCloseBracket {
+        /// The bracket type that was found
+        actual: Bracket,
+    },
+
+    /// An open bracket was found with no close bracket
+    #[code(GRA, 33)]
+    #[err({ expect }, |f| write!(f, "missing close bracket: expected `{}`, found none", expect.close()))]
+    #[inlay({ .. }, |f| write!(f, "missing close bracket"))]
+    #[help({ expect }, |f, _src| write!(
+        f,
+        "try inserting a `{}` or remove the `{}`",
+        expect.close(),
+        expect.open(),
+    ))]
+    #[info({ open_range }, |f| [(*open_range, "missing a partner")])]
+    MissingCloseBracket {
+        open_range: Range<usize>,
+        expect: Bracket,
+    },
+
+    /// A token was expected, but instead found EOF
+    #[code(GRA, 34)]
+    #[err({ expect }, |f| write!(f, "missing {expect}"))]
+    #[inlay({ .. }, |f| write!(f, "missing token"))]
+    #[help({ expect }, |f, _src| write!(f, "try inserting {expect}"))]
+    MissingToken {
+        /// The token pattern expected - should start with the proper article
+        /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
+        expect: ExpectedToken,
+    },
+
+    /// A token was expected, but instead found `actual`
+    #[code(GRA, 35)]
+    #[err({ expect, actual }, |f| write!(f, "expected {expect}, found `{actual}`"))]
+    #[inlay({ .. }, |f| write!(f, "wrong token"))]
+    #[help({ expect, actual }, |f, _src| write!(f, "try inserting {expect} before the `{actual}` or remove the `{actual}`"))]
+    UnexpectedToken {
+        /// The token pattern expected - should start with the proper article
+        /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
+        expect: ExpectedToken,
+        /// The token found
+        actual: &'src str,
+    },
+
+    // ----------------------------
+    // eval
+    // ----------------------------
+    /// Attempted to find the quotient or remainder with a denominator of 0
+    #[code(RUN, 41)]
+    #[err({ .. }, |f| write!(f, "divide by zero"))]
+    #[inlay({ .. }, |f| write!(f, "dividing by 0"))]
+    #[help({ .. }, |f, _src| write!(f, "ensure the right side cannot be 0"))]
+    #[info({ zero }, |f| [(*zero, "this expression evaluates to 0")])]
+    DivByZero {
+        /// The range of the expression evaluating to zero
+        zero: Range<usize>,
+    },
+
+    /// The operands in a binary operation are of incompatible type
+    #[code(RUN, 42)]
+    #[err({ op, l_ty, r_ty, .. }, |f| write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"))]
+    #[inlay({ op, l_ty, r_ty, .. }, |f| write!(f, "{} is not supported between operands of these types", op.op_description(&[*l_ty, *r_ty])))]
+    #[help({ op, l_ty, r_ty, .. }, |f, _src| {
+        write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
+        match op {
+            Punctuation::And |
+            Punctuation::Xor |
+            Punctuation::Or |
+            Punctuation::Nand |
+            Punctuation::Nor |
+            Punctuation::Xnor if matches!(l_ty, ValueType::Bool) != matches!(r_ty, ValueType::Bool)
+                // TODO: the user might have used a boolean literal/variable, not a comparison; this message might not be helpful in that case
+                => write!(f, "\n\nit looks like you may have been trying to perform a bitwise operation, but one side resolves to a boolean.\n\
+                    bitwise/logic operations have lower precedence than comparisons, so you may need to wrap the bitwise operation in parentheses."),
+
+            _ => Ok(())
+        }
+    })]
+    #[info({ l_ty, l_range, r_ty, r_range, .. }, |f| [
+        (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: *l_ty }),
+        (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty }),
+    ])]
+    Incompatible {
+        /// The binary operator
+        op: Punctuation,
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_ty: ValueType,
+        r_ty: ValueType,
+    },
+
+    /// The operand in a unary operation is of an unsupported type
+    #[code(RUN, 43)]
+    #[err({ op, r_ty, .. }, |f| write!(f, "`{op}` is not supported for {r_ty}"))]
+    #[inlay({ op, r_ty, .. }, |f| write!(f, "{} is not supported for operands of this type", op.op_description(&[*r_ty])))]
+    #[help({ .. }, |f, _src| write!(f, "try a different operator or convert the type"))]
+    #[info({ r_ty, r_range, .. }, |f| [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })])]
+    Unsupported {
+        /// The unary operator
+        op: Punctuation,
+        /// The type of the value on the right side of the operator
+        r_ty: ValueType,
+        r_range: Range<usize>,
+    },
+
+    /// Unsigned cannot be negated
+    #[code(RUN, 44)]
+    #[err(|f| write!(f, "unsigned integer cannot be negated"))]
+    #[inlay(|f| write!(f, "uint can't be negated"))]
+    #[help(|f, _src| write!(f, "remove the `-` or convert the integer to signed"))]
+    UnsignedNeg,
+
+    /// An operation resulted in overflow
+    #[code(RUN, 45)]
+    #[err((_), |f| write!(f, "arithmetic overflow"))]
+    #[inlay((_), |f| write!(f, "unhandled integer overflow"))]
+    #[help((_), |f, _src| write!(f, "ensure the result will fit in an integer"))]
+    #[info((e), |f| *e)]
+    Overflow(OverflowError),
+
+    /// Failed to convert between integer types
+    #[code(RUN, 46)]
+    #[err({ failure, .. }, |f| write!(f, "failed conversion: {failure}"))]
+    #[inlay({ .. }, |f| write!(f, "integer conversion failed"))]
+    #[help({ .. }, |f, _src| write!(f, "ensure the expression fits in the target type"))]
+    #[info({ op, op_range, failure, is_binary }, |f| [
+        (*op_range, FailedConversionMsg::new(*op, OpSide::Right, *failure, *is_binary)),
+    ])]
+    FailedConvert {
+        op: Punctuation,
+        is_binary: bool,
+        op_range: Range<usize>,
+        failure: IntConversionFailure,
+    },
+}
 }
 
 impl std::error::Error for ErrorType<'_> {}
