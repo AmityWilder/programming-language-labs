@@ -141,7 +141,7 @@ where
             match token.val {
                 LexValue::Comment => Syntax::Comment,
                 LexValue::Whitespace => Syntax::Dimmed,
-                LexValue::UIntLiteral(_) | LexValue::SIntLiteral(_) | LexValue::FltLiteral(_) => {
+                LexValue::UIntLiteral(_) | LexValue::SIntLiteral(_) | LexValue::FracLiteral(_) => {
                     Syntax::NumberLiteral
                 }
                 LexValue::CharLiteral(_) => Syntax::CharLiteral,

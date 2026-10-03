@@ -50,36 +50,74 @@ pub enum IntValue {
     SInt(isize),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl Default for IntValue {
+    fn default() -> Self {
+        Self::UInt(Default::default())
+    }
+}
+
+impl std::fmt::Display for IntValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UInt(x) => x.fmt(f),
+            Self::SInt(x) => x.fmt(f),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct OverflowErrorInfoMsg {
+    value: IntValue,
+}
+
+impl std::fmt::Display for OverflowErrorInfoMsg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { value } = self;
+        write!(f, "this expression evaluated to {value}")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverflowError {
-    Add {
+    Binary {
         l_range: Range<usize>,
         r_range: Range<usize>,
         l_value: IntValue,
         r_value: IntValue,
     },
-    Sub {
-        l_range: Range<usize>,
+    Unary {
         r_range: Range<usize>,
-        l_value: IntValue,
         r_value: IntValue,
     },
-    Mul {
-        l_range: Range<usize>,
-        r_range: Range<usize>,
-        l_value: IntValue,
-        r_value: IntValue,
-    },
-    Pow {
-        l_range: Range<usize>,
-        r_range: Range<usize>,
-        l_value: IntValue,
-        r_value: IntValue,
-    },
-    Neg {
-        r_range: Range<usize>,
-        r_value: isize,
-    },
+}
+
+impl IntoIterator for OverflowError {
+    type Item = (Range<usize>, OverflowErrorInfoMsg);
+    type IntoIter = std::array::IntoIter<(Range<usize>, OverflowErrorInfoMsg), 2>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            OverflowError::Binary {
+                l_range,
+                r_range,
+                l_value,
+                r_value,
+            } => [
+                (l_range, OverflowErrorInfoMsg { value: l_value }),
+                (r_range, OverflowErrorInfoMsg { value: r_value }),
+            ]
+            .into_iter(),
+            OverflowError::Unary { r_range, r_value } => {
+                let mut iter = [
+                    Default::default(),
+                    (r_range, OverflowErrorInfoMsg { value: r_value }),
+                ]
+                .into_iter();
+                _ = iter.next(); // skip first
+                iter
+            }
+        }
+    }
 }
 
 macro_rules! expected_token {
@@ -162,7 +200,7 @@ macro_rules! define_error_type {
                 err$({$(..)? $( $err_s_ident:ident$(: $err_s_pat:pat)? ),* $(, ..)?})?$(($( $err_t_pat:pat ),*))? => $display:expr,
                 inlay$({$(..)? $( $inlay_s_ident:ident$(: $inlay_s_pat:pat)? ),* $(, ..)?})?$(($( $inlay_t_pat:pat ),*))? => $inlay:expr,
                 help$({$(..)? $( $help_s_ident:ident$(: $help_s_pat:pat)? ),* $(, ..)?})?$(($( $help_t_pat:pat ),*))? => $help:expr$(,
-                info$({$(..)? $( $info_s_ident:ident$(: $info_s_pat:pat)? ),* $(, ..)?})?$(($( $info_t_pat:pat ),*))? => [$($info:expr),+$(,)?])?$(,)?
+                info$({$(..)? $( $info_s_ident:ident$(: $info_s_pat:pat)? ),* $(, ..)?})?$(($( $info_t_pat:pat ),*))? => $info:expr)?$(,)?
             }
         ),* $(,)?}
     ) => {
@@ -185,10 +223,7 @@ macro_rules! define_error_type {
             {
                 match &self.err {
                     $($($Enum::$Variant$({$( $info_s_ident$(: $info_s_pat)?, )* ..})?$(($( $info_t_pat ),*))? => {
-                        vec.extend([$({
-                            let (range, msg) = $info;
-                            LineRef::new(self.source, RefStyleKind::Info, *range, Box::new(msg))
-                        }),*])
+                        vec.extend($info.into_iter().map(|(range, msg)| LineRef::new(self.source, RefStyleKind::Info, range, Box::new(msg))))
                     },)?)*
                     _ => ()
                 }
@@ -536,7 +571,7 @@ define_error_type! {
                     actual.close(),
                 )
             },
-            info { open_range } => [(open_range, "bracket type introduced here")],
+            info { open_range } => [(*open_range, "bracket type introduced here")],
         },
         /// A closing bracket was found with no open bracket
         ExcessCloseBracket {
@@ -560,7 +595,7 @@ define_error_type! {
                 expect.close(),
                 expect.open(),
             ),
-            info { open_range } => [(open_range, "missing a partner")],
+            info { open_range } => [(*open_range, "missing a partner")],
         },
         /// A token was expected, but instead found EOF
         MissingToken {
@@ -596,7 +631,7 @@ define_error_type! {
             err { .. } => write!(f, "divide by zero"),
             inlay { .. } => write!(f, "dividing by 0"),
             help { .. } => write!(f, "ensure the right side cannot be 0"),
-            info { zero } => [(zero, "this expression evaluates to 0")],
+            info { zero } => [(*zero, "this expression evaluates to 0")],
         },
         /// The operands in a binary operation are of incompatible type
         Incompatible {
@@ -608,11 +643,26 @@ define_error_type! {
             r_ty: ValueType,
         } RUN 42 {
             err { op, l_ty, r_ty, .. } => write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"),
-            inlay { op, .. } => write!(f, "{} is not supported for operands of these types", op.op_desc()),
-            help { .. } => write!(f, "try a different operator or convert the types"),
+            inlay { op, l_ty, r_ty, .. } => write!(f, "{} is not supported between operands of these types", op.op_description(&[*l_ty, *r_ty])),
+            help { op, l_ty, r_ty, .. } => {
+                write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
+                match op {
+                    Punctuation::And |
+                    Punctuation::Xor |
+                    Punctuation::Or |
+                    Punctuation::Nand |
+                    Punctuation::Nor |
+                    Punctuation::Xnor if matches!(l_ty, ValueType::Bool) != matches!(r_ty, ValueType::Bool)
+                        // TODO: the user might have used a boolean literal/variable, not a comparison; this message might not be helpful in that case
+                        => write!(f, "\n\nit looks like you may have been trying to perform a bitwise operation, but one side resolves to a boolean.\n\
+                            bitwise/logic operations have lower precedence than comparisons, so you may need to wrap the bitwise operation in parentheses."),
+
+                    _ => Ok(())
+                }
+            },
             info { l_ty, l_range, r_ty, r_range, .. } => [
-                (l_range, TypeResolutionMsg { side: OpSide::Left, ty: *l_ty }),
-                (r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty }),
+                (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: *l_ty }),
+                (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty }),
             ],
         },
         /// The operand in a unary operation is of an unsupported type
@@ -624,9 +674,9 @@ define_error_type! {
             r_range: Range<usize>,
         } RUN 43 {
             err { op, r_ty, .. } => write!(f, "`{op}` is not supported for {r_ty}"),
-            inlay { op, .. } => write!(f, "{} is not supported for operands of this type", op.op_desc()),
+            inlay { op, r_ty, .. } => write!(f, "{} is not supported for operands of this type", op.op_description(&[*r_ty])),
             help { .. } => write!(f, "try a different operator or convert the type"),
-            info { r_ty, r_range, .. } => [(r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })],
+            info { r_ty, r_range, .. } => [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })],
         },
         /// Unsigned cannot be negated
         UnsignedNeg RUN 44 {
@@ -639,22 +689,20 @@ define_error_type! {
             err (_) => write!(f, "arithmetic overflow"),
             inlay (_) => write!(f, "unhandled integer overflow"),
             help (_) => write!(f, "ensure the result will fit in an integer"),
+            info (e) => *e,
         },
         /// Failed to convert between integer types
         FailedConvert {
-            value: IntValue,
             op: Punctuation,
+            is_binary: bool,
             op_range: Range<usize>,
-            side: OpSide,
-            /// Should be prefixed with an article (a/an)
-            target_ty: TargetTy,
-            e: std::num::TryFromIntError,
+            failure: IntConversionFailure,
         } RUN 46 {
-            err { e, .. } => write!(f, "failed conversion: {e}"),
+            err { failure, .. } => write!(f, "failed conversion: {failure}"),
             inlay { .. } => write!(f, "integer conversion failed"),
             help { .. } => write!(f, "ensure the expression fits in the target type"),
-            info { value, op, op_range, side, target_ty } => [
-                (op_range, FailedConversionMsg::new(*value, *op, *side, *target_ty)),
+            info { op, op_range, failure, is_binary } => [
+                (*op_range, FailedConversionMsg::new(*op, OpSide::Right, *failure, *is_binary)),
             ],
         },
     }
@@ -816,11 +864,19 @@ pub fn last_line_cols(s: &str) -> usize {
 }
 
 /// The line of `position` within `s`
+#[expect(
+    dead_code,
+    reason = "optimized alternative to line_col for when only line part is needed"
+)]
 pub fn line_of(s: &str, position: usize) -> Option<usize> {
     s.get(..position).map(last_line_cols)
 }
 
 /// The column of `position` within `s`
+#[expect(
+    dead_code,
+    reason = "optimized alternative to line_col for when only col part is needed"
+)]
 pub fn col_of(s: &str, position: usize) -> Option<usize> {
     s.get(..position).map(last_line_cols)
 }
@@ -1174,6 +1230,7 @@ impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
                 );
                 Self::print_message(f, line_num_width, n, line_items, item, &*item.msg)?;
             }
+            writeln!(f)?;
         }
         Ok(())
     }
@@ -1261,68 +1318,87 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
 struct InlineErrMsg<'src, 'err>(&'err ErrorType<'src>);
 
 impl Punctuation {
-    fn op_desc(self) -> &'static str {
-        match self {
-            Punctuation::Not => "logical or bitwise 'not'",
-            Punctuation::MacroStringify => "token stringification",
-            Punctuation::Rem => "remainder",
-            Punctuation::And => "logical or bitwise 'and'",
-            Punctuation::Mul => "multiplication",
-            Punctuation::Add => "addition",
-            Punctuation::Sub => "subtraction",
-            Punctuation::Neg => "arithmetic negation",
-            Punctuation::Div => "division",
-            Punctuation::Ref => "referencing",
-            Punctuation::Xor => "logical or bitwise 'xor'",
-            Punctuation::Or => "logical or bitwise 'or'",
-            Punctuation::Nand => "logical or bitwise 'nand'",
-            Punctuation::Nor => "logical or bitwise 'nor'",
-            Punctuation::Xnor => "logical or bitwise 'xnor'",
-            Punctuation::MacroConcatenate => "token concatenation",
-            Punctuation::Pow => "exponentiation",
-            Punctuation::Shl => "left bitshift",
-            Punctuation::Shr => "right bitshift",
+    fn op_description(self, operands: &[ValueType]) -> &'static str {
+        #[allow(clippy::enum_glob_use, reason = "we're using all of them")]
+        use Punctuation::*;
+        match (self, operands) {
+            (Not, [ValueType::Bool]) => "logical 'not'",
+            (Not, [_]) => "bitflip",
+            (MacroStringify, [_]) => "token stringification",
+            (Rem, [_, _]) => "remainder",
+            (And, [ValueType::Bool, ValueType::Bool]) => "logical 'and'",
+            (And, [ValueType::Bool, _] | [_, ValueType::Bool]) => "logical/bitwise 'and'",
+            (And, [_, _]) => "bitwise 'and'",
+            (Mul, [_, _]) => "multiplication",
+            (Add, [ValueType::Str, _] | [_, ValueType::Str]) => "string concatenation",
+            (Add, [_, _]) => "addition",
+            (SubNeg, [_, _]) => "subtraction",
+            (SubNeg, [_]) => "arithmetic negation",
+            (Div, [_, _]) => "division",
+            (Ref, [_, _]) => "referencing",
+            (Xor, [ValueType::Bool, ValueType::Bool]) => "logical 'xor'",
+            (Xor, [ValueType::Bool, _] | [_, ValueType::Bool]) => "logical/bitwise 'xor'",
+            (Xor, [_, _]) => "bitwise 'xor'",
+            (Or, [ValueType::Bool, ValueType::Bool]) => "logical 'or'",
+            (Or, [ValueType::Bool, _] | [_, ValueType::Bool]) => "logical/bitwise 'or'",
+            (Or, [_, _]) => "bitwise 'or'",
+            (Nand, [ValueType::Bool, ValueType::Bool]) => "logical 'nand'",
+            (Nand, [ValueType::Bool, _] | [_, ValueType::Bool]) => "logical/bitwise 'nand'",
+            (Nand, [_, _]) => "bitwise 'nand'",
+            (Nor, [ValueType::Bool, ValueType::Bool]) => "logical 'nor'",
+            (Nor, [ValueType::Bool, _] | [_, ValueType::Bool]) => "logical/bitwise 'nor'",
+            (Nor, [_, _]) => "bitwise 'nor'",
+            (Xnor, [ValueType::Bool, ValueType::Bool]) => "logical 'xnor'",
+            (Xnor, [ValueType::Bool, _] | [_, ValueType::Bool]) => "logical/bitwise 'xnor'",
+            (Xnor, [_, _]) => "bitwise 'xnor'",
+            (MacroConcat, [_, _]) => "token concatenation",
+            (Pow, [_, _]) => "arithmetic power",
+            (Shl, [_, _]) => "left bitshift",
+            (Shr, [_, _]) => "right bitshift",
+            (Rotl, [_, _]) => "left bitwise rotate",
+            (Rotr, [_, _]) => "right bitwise rotate",
 
-            Punctuation::Lt
-            | Punctuation::Gt
-            | Punctuation::Ne
-            | Punctuation::Le
-            | Punctuation::Eq
-            | Punctuation::Ge => "comparison",
+            (Ne | Eq, [_, _]) => "equality",
 
-            Punctuation::LParen
-            | Punctuation::RParen
-            | Punctuation::Comma
-            | Punctuation::Dot
-            | Punctuation::Colon
-            | Punctuation::Semi
-            | Punctuation::Assign
-            | Punctuation::QMark // TODO: will this be an operation?
-            | Punctuation::LBrack
-            | Punctuation::RBrack
-            | Punctuation::LBrace
-            | Punctuation::RBrace
-            | Punctuation::RemAssign
-            | Punctuation::AndAssign
-            | Punctuation::MulAssign
-            | Punctuation::AddAssign
-            | Punctuation::SubAssign
-            | Punctuation::Arrow
-            | Punctuation::DotDot // TODO: will this be an operation?
-            | Punctuation::DivAssign
-            | Punctuation::PathSep
-            | Punctuation::ColonEq
-            | Punctuation::FatArrow
-            | Punctuation::XorAssign
-            | Punctuation::OrAssign
-            | Punctuation::PowAssign
-            | Punctuation::ShlAssign
-            | Punctuation::ShrAssign
-            | Punctuation::NandAssign
-            | Punctuation::NorAssign
-            | Punctuation::XnorAssign => {
+            (Lt | Gt | Le | Ge, [_, _]) => "comparison",
+
+            (LParen
+            | RParen
+            | Comma
+            | Dot
+            | Colon
+            | Semi
+            | Assign
+            | QMark // TODO: will this be an operation?
+            | LBrack
+            | RBrack
+            | LBrace
+            | RBrace
+            | RemAssign
+            | AndAssign
+            | MulAssign
+            | AddAssign
+            | SubAssign
+            | Arrow
+            | DotDot // TODO: will this be an operation?
+            | DivAssign
+            | PathSep
+            | ColonEq
+            | FatArrow
+            | XorAssign
+            | OrAssign
+            | PowAssign
+            | ShlAssign
+            | ShrAssign
+            | NandAssign
+            | NorAssign
+            | XnorAssign
+            | RotlAssign
+            | RotrAssign, _) => {
                 unimplemented!("not an operator")
             }
+
+            _ => unimplemented!("invalid combination of operands"),
         }
     }
 }
@@ -1353,6 +1429,69 @@ impl std::fmt::Display for TypeResolutionMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { side, ty } = self;
         write!(f, "{side}: type resolves to {ty}")
+    }
+}
+
+/// Combines [`IntValue`], [`TargetTy`], and [`std::num::TryFromIntError`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntConversionFailure {
+    UIntToSInt(usize),
+    UIntToU32(usize),
+    UIntToS32(usize),
+    SIntToUInt(isize),
+    SIntToU32(isize),
+    SIntToS32(isize),
+}
+
+impl IntConversionFailure {
+    pub const fn new(value: IntValue, target_ty: TargetTy) -> Option<Self> {
+        match (value, target_ty) {
+            (IntValue::UInt(x), TargetTy::SInt) => Some(Self::UIntToSInt(x)),
+            (IntValue::UInt(x), TargetTy::U32) => Some(Self::UIntToU32(x)),
+            (IntValue::UInt(x), TargetTy::S32) => Some(Self::UIntToS32(x)),
+            (IntValue::SInt(x), TargetTy::UInt) => Some(Self::SIntToUInt(x)),
+            (IntValue::SInt(x), TargetTy::U32) => Some(Self::SIntToU32(x)),
+            (IntValue::SInt(x), TargetTy::S32) => Some(Self::SIntToS32(x)),
+
+            // Infallible
+            (IntValue::UInt(_), TargetTy::UInt) | (IntValue::SInt(_), TargetTy::SInt) => None,
+        }
+    }
+
+    pub const fn reason(&self) -> &'static str {
+        match self {
+            Self::UIntToSInt(_)
+            | Self::UIntToU32(_)
+            | Self::UIntToS32(_)
+            | Self::SIntToU32(0..)
+            | Self::SIntToS32(0..) => "number too large to fit in target type",
+
+            Self::SIntToUInt(_) | Self::SIntToU32(..0) | Self::SIntToS32(..0) => {
+                "number too small to fit in target type"
+            }
+        }
+    }
+
+    pub const fn target_ty(self) -> TargetTy {
+        match self {
+            Self::UIntToSInt(_) => TargetTy::SInt,
+            Self::UIntToU32(_) | Self::SIntToU32(_) => TargetTy::U32,
+            Self::UIntToS32(_) | Self::SIntToS32(_) => TargetTy::S32,
+            Self::SIntToUInt(_) => TargetTy::UInt,
+        }
+    }
+
+    pub const fn value(self) -> IntValue {
+        match self {
+            Self::UIntToSInt(x) | Self::UIntToU32(x) | Self::UIntToS32(x) => IntValue::UInt(x),
+            Self::SIntToUInt(x) | Self::SIntToU32(x) | Self::SIntToS32(x) => IntValue::SInt(x),
+        }
+    }
+}
+
+impl std::fmt::Display for IntConversionFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.reason().fmt(f)
     }
 }
 
@@ -1393,20 +1532,24 @@ impl std::fmt::Display for TargetTy {
 
 #[derive(Debug, Clone, PartialEq)]
 struct FailedConversionMsg {
-    /// Cannot be [`RunValue::Str`]
-    value: IntValue,
     op: Punctuation,
     side: OpSide,
-    target_ty: TargetTy,
+    failure: IntConversionFailure,
+    is_binary: bool,
 }
 
 impl FailedConversionMsg {
-    const fn new(value: IntValue, op: Punctuation, side: OpSide, target_ty: TargetTy) -> Self {
+    const fn new(
+        op: Punctuation,
+        side: OpSide,
+        failure: IntConversionFailure,
+        is_binary: bool,
+    ) -> Self {
         Self {
-            value,
             op,
             side,
-            target_ty,
+            failure,
+            is_binary,
         }
     }
 }
@@ -1415,17 +1558,19 @@ impl std::fmt::Display for FailedConversionMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use std::cmp::Ordering;
         let Self {
-            value,
             op,
             side,
-            target_ty,
+            failure,
+            is_binary,
         } = self;
+        let target_ty = failure.target_ty();
         let (_bits, min, max) = target_ty.bounds();
+        let value = failure.value();
         #[expect(
             clippy::as_conversions,
             reason = "i128 can fit any usize/isize with 64 bits or fewer, but doesn't implement From<usize>/From<isize>"
         )]
-        let n = match *value {
+        let n = match value {
             IntValue::UInt(val) => cfg_select! {
                 any(
                     target_pointer_width = "16",
@@ -1452,7 +1597,12 @@ impl std::fmt::Display for FailedConversionMsg {
             "expression evaluated to {value:?}.\n\
             {} requires {side} to be {target_ty}, which must be between {min} and {max}\n\
             ({n} {} {broken_bound})",
-            op.op_desc(),
+            // HACK: not the actual value types, but correct quantity. should be fine as long as uint vs sint doesn't change the description
+            op.op_description(if *is_binary {
+                [ValueType::SInt, ValueType::SInt].as_slice()
+            } else {
+                [ValueType::SInt].as_slice()
+            }),
             match ord {
                 Ordering::Less => '<',
                 Ordering::Greater => '>',
