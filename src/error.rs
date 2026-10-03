@@ -13,34 +13,50 @@ use crate::{
 };
 use std::range::Range;
 
-/// Invalid number literal
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NumLitError {
-    /// Unsigned integer
-    UInt(std::num::ParseIntError),
-    /// Signed integer
-    SInt(std::num::TryFromIntError),
-    /// Floating point
-    Flt(std::num::ParseFloatError),
+/// The standard library is allergic to letting me construct its error types, so I've made my own version
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NumErrorKind {
+    InvalidInt,
+    InvalidFrac,
+    PosOverflow,
+    NegOverflow,
+    NegUnsigned,
 }
 
-impl std::fmt::Display for NumLitError {
+impl std::fmt::Display for NumErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::UInt(e) => e.fmt(f),
-            Self::SInt(e) => e.fmt(f),
-            Self::Flt(e) => e.fmt(f),
+            Self::InvalidInt | Self::InvalidFrac => "invalid digit found in source code",
+            Self::PosOverflow => "number too large to fit in target type",
+            Self::NegOverflow | Self::NegUnsigned => "number too small to fit in target type",
+        }
+        .fmt(f)
+    }
+}
+
+impl From<std::num::IntErrorKind> for NumErrorKind {
+    fn from(value: std::num::IntErrorKind) -> Self {
+        match value {
+            std::num::IntErrorKind::Empty => {
+                unreachable!("tokens can't be empty, this is the wrong error")
+            }
+            std::num::IntErrorKind::InvalidDigit => Self::InvalidInt,
+            std::num::IntErrorKind::PosOverflow => Self::PosOverflow,
+            std::num::IntErrorKind::NegOverflow => Self::NegOverflow,
+            _ => unimplemented!("not a real int error"),
         }
     }
 }
 
-impl std::error::Error for NumLitError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::UInt(e) => Some(e),
-            Self::SInt(e) => Some(e),
-            Self::Flt(e) => Some(e),
-        }
+impl From<std::num::ParseIntError> for NumErrorKind {
+    fn from(value: std::num::ParseIntError) -> Self {
+        Self::from(*value.kind())
+    }
+}
+
+impl From<std::num::TryFromIntError> for NumErrorKind {
+    fn from(value: std::num::TryFromIntError) -> Self {
+        Self::from(*value.kind())
     }
 }
 
@@ -117,6 +133,44 @@ impl IntoIterator for OverflowError {
                 iter
             }
         }
+    }
+}
+
+/// (suffix, name of base)
+fn invalid_num_suffix(src: &str) -> (&str, &'static str) {
+    let src = src.strip_prefix('-').unwrap_or(src);
+    if let Some(digits) = src.strip_prefix(HEX_PREFIX) {
+        let pos = digits
+            .find(|ch: char| !ch.is_ascii_hexdigit())
+            .expect("should contain an invalid digit");
+        let suffix = digits
+            .get(pos..)
+            .expect("find should not be within a UTF-8 character");
+        (suffix, "hexadecimal")
+    } else if let Some(digits) = src.strip_prefix(OCT_PREFIX) {
+        let pos = digits
+            .find(|ch: char| !ch.is_digit(8))
+            .expect("should contain an invalid digit");
+        let suffix = digits
+            .get(pos..)
+            .expect("find should not be within a UTF-8 character");
+        (suffix, "octal")
+    } else if let Some(digits) = src.strip_prefix(BIN_PREFIX) {
+        let pos = digits
+            .find(|ch: char| !ch.is_digit(2))
+            .expect("should contain an invalid digit");
+        let suffix = digits
+            .get(pos..)
+            .expect("find should not be within a UTF-8 character");
+        (suffix, "binary")
+    } else {
+        let pos = src
+            .find(|ch: char| !ch.is_ascii_digit())
+            .expect("should contain an invalid digit");
+        let suffix = src
+            .get(pos..)
+            .expect("find should not be within a UTF-8 character");
+        (suffix, "decimal")
     }
 }
 
@@ -416,115 +470,19 @@ define_error_type! {
             }
         },
         /// A number literal could not be evaluated as a number
-        InvalidNumLiteral(NumLitError) LEX 8 {
+        InvalidNumLiteral(NumErrorKind) LEX 8 {
             err (e) => write!(f, "invalid number literal: {e}"),
             inlay (_) => write!(f, "not a valid number"),
             help (e) => {
-                use std::num::IntErrorKind;
                 match e {
-                    NumLitError::UInt(e) => match e.kind() {
-                        IntErrorKind::Empty => unreachable!("tokenizer should not emit number tokens that have no number"),
-
-                        IntErrorKind::InvalidDigit => {
-                            // TODO: dry this up
-                            let (suffix, base_name) =
-                                if let Some(digits) = src.strip_prefix(HEX_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_ascii_hexdigit())
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "hexadecimal")
-                                } else if let Some(digits) = src.strip_prefix(OCT_PREFIX) {
-                                    digits
-                                        .find(|ch: char| !ch.is_digit(8))
-                                        .expect("should contain an invalid digit");
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_digit(8))
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "octal")
-                                } else if let Some(digits) = src.strip_prefix(BIN_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_digit(2))
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "binary")
-                                } else {
-                                    let pos = src
-                                        .find(|ch: char| !ch.is_ascii_digit())
-                                        .expect("should contain an invalid digit");
-                                    let suffix = src
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "decimal")
-                                };
-                            write!(f, "the suffix `{suffix}` is not valid for {base_name} integer literals")
-                        }
-
-                        IntErrorKind::PosOverflow => write!(f, "the largest supported unsigned integer value is {}", usize::MAX),
-
-                        _ => unimplemented!(),
-                    },
-
-                    NumLitError::SInt(e) => match e.kind() {
-                        IntErrorKind::Empty => unreachable!("tokenizer should not emit number tokens that have no number"),
-
-                        IntErrorKind::InvalidDigit => {
-                            let digits = src.strip_prefix('-').unwrap_or(src);
-                            let (suffix, base_name) =
-                                if let Some(digits) = digits.strip_prefix(HEX_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_ascii_hexdigit())
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "hexadecimal")
-                                } else if let Some(digits) = digits.strip_prefix(OCT_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_digit(8))
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "octal")
-                                } else if let Some(digits) = digits.strip_prefix(BIN_PREFIX) {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_digit(2))
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "binary")
-                                } else {
-                                    let pos = digits
-                                        .find(|ch: char| !ch.is_ascii_digit())
-                                        .expect("should contain an invalid digit");
-                                    let suffix = digits
-                                        .get(pos..)
-                                        .expect("find should not be within a UTF-8 character");
-                                    (suffix, "decimal")
-                                };
-                            write!(
-                                f,
-                                "the suffix `{suffix}` is not valid for {base_name} integer literals",
-                            )
-                        }
-
-                        IntErrorKind::PosOverflow => write!(f, "the largest supported signed integer value is {}", isize::MAX),
-
-                        IntErrorKind::NegOverflow => write!(f, "the smallest supported signed integer value is {}", isize::MIN),
-
-                        _ => unimplemented!(),
-                    },
-
-                    NumLitError::Flt(_) => write!(f, "I'm not sure how to help with this yet"),
+                    NumErrorKind::InvalidInt => {
+                        let (suffix, base_name) = invalid_num_suffix(src);
+                        write!(f, "the suffix `{suffix}` is not valid for {base_name} unsigned integer literals")
+                    }
+                    NumErrorKind::PosOverflow => write!(f, "the largest supported integer value is {}", usize::MAX),
+                    NumErrorKind::NegOverflow => write!(f, "the smallest supported integer value is {}", isize::MIN),
+                    NumErrorKind::NegUnsigned => write!(f, "the smallest supported unsigned integer value is {}", usize::MIN),
+                    NumErrorKind::InvalidFrac => write!(f, "I'm not sure how to help with this yet"), // TODO: float literal guidance
                 }
             }
         },
@@ -708,14 +666,7 @@ define_error_type! {
     }
 }
 
-impl std::error::Error for ErrorType<'_> {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidNumLiteral(e) => Some(e),
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for ErrorType<'_> {}
 
 /// A code error with the range of the error in the source code
 #[derive(Clone, PartialEq)]

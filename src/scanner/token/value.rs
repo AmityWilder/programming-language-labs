@@ -1,27 +1,13 @@
 //! [`Value`] of tokens
 
-use std::{range::Range, sync::LazyLock};
-
 use crate::{
-    error::{ErrorType, NumLitError},
+    error::{ErrorType, NumErrorKind},
     scanner::{
         symbols::{BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM},
         token::{escape_char, escape_seq, keyword::Keyword, punc::Punctuation},
     },
 };
-
-/// A `IntErrorKind::NegOverflow`, since those are private :/
-static NEG_UNDERFLOW: LazyLock<std::num::TryFromIntError> = LazyLock::new(|| {
-    #[allow(clippy::as_conversions, reason = "into is not const")]
-    #[expect(clippy::invalid_upcast_comparisons, reason = "further proves my point")]
-    const {
-        assert!(i16::MIN < i8::MIN as i16, "proof. i16::MIN < i8::MIN");
-    }
-    // SAFETY: `i16::MIN < i8::MIN`. Because it is `<` and not `<=`, and both are integers,
-    // there must be a difference of at least 1.
-    i8::try_from(unsafe { i16::from(i8::MIN).unchecked_sub(1) })
-        .expect_err("should result in negative overflow")
-});
+use std::range::Range;
 
 /// Information about a character literal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -163,9 +149,10 @@ impl<'src> LexValue<'src> {
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.
         // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
         if !src.starts_with(HEX_PREFIX) && src.contains(['e', 'E']) || src.contains('.') {
+            assert_ne!(src, "", "scanner should not emit empty tokens");
             src.parse() // turns out parse already handles the "e" syntax on its own
                 .map(Self::FracLiteral)
-                .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::Flt(e)))
+                .map_err(|_| ErrorType::InvalidNumLiteral(NumErrorKind::InvalidFrac))
         } else {
             let stripped = src.strip_prefix('-');
             let is_negative = stripped.is_some();
@@ -174,13 +161,13 @@ impl<'src> LexValue<'src> {
                 (pre, true)
             } else if let Some(pre) = magnitude.strip_suffix('u') {
                 if is_negative {
-                    return Err(ErrorType::UnsignedNeg); // TODO: this is the wrong error for this
+                    return Err(ErrorType::InvalidNumLiteral(NumErrorKind::NegUnsigned));
                 }
                 (pre, false)
             } else {
                 // default to signed
                 // users should explicitly confirm they are doing unsigned math for safety reason (e.g. indexing).
-                // signed math should need to be filled with suffixes.
+                // signed math shouldn't need to be filled with suffixes.
                 (magnitude, true)
             };
 
@@ -193,19 +180,23 @@ impl<'src> LexValue<'src> {
             } else {
                 (magnitude, 10)
             };
+            if digits.is_empty() {
+                // for digits to be empty, we must have something like "0x".
+                // this is a valid prefix for a number, but without a number following it,
+                // we treat it like "0" with the suffix "x" (which isn't allowed).
+                return Err(ErrorType::InvalidNumLiteral(NumErrorKind::InvalidInt));
+            }
             usize::from_str_radix(digits, radix)
-                .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::UInt(e)))
+                .map_err(|e| ErrorType::InvalidNumLiteral(e.into()))
                 .and_then(|value| {
                     if is_signed {
                         (isize::try_from(value)
-                            .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::SInt(e)))
+                            .map_err(|e| ErrorType::InvalidNumLiteral(e.into()))
                             .and_then(|x| {
                                 if is_negative {
-                                    x.checked_neg().ok_or_else(|| {
-                                        ErrorType::InvalidNumLiteral(NumLitError::SInt(
-                                            *NEG_UNDERFLOW,
-                                        ))
-                                    })
+                                    x.checked_neg().ok_or(ErrorType::InvalidNumLiteral(
+                                        NumErrorKind::NegOverflow,
+                                    ))
                                 } else {
                                     Ok(x)
                                 }
