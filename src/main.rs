@@ -185,17 +185,37 @@ pub fn print_ast(node: &Expr<'_>, depth: usize, bracket_depth: usize) {
     }
 }
 
+trait ContextErrorOrRef<'src> {
+    fn as_ref(&self) -> &ContextError<'src>;
+}
+
+impl<'src> ContextErrorOrRef<'src> for ContextError<'src> {
+    fn as_ref(&self) -> &ContextError<'src> {
+        self
+    }
+}
+
+impl<'src> ContextErrorOrRef<'src> for &ContextError<'src> {
+    fn as_ref(&self) -> &ContextError<'src> {
+        self
+    }
+}
+
 /// Print a list of all errors with clean formatting
-fn list_errors<'src, 'err, I>(errs: I)
+///
+/// Returns true if the iterator was not empty
+#[must_use = "indicates that an error occurred"]
+fn list_errors<'src, 'err, I>(errs: I) -> bool
 where
     'src: 'err,
-    I: IntoIterator<IntoIter: 'err, Item = &'err ContextError<'src>>,
+    I: IntoIterator<IntoIter: 'err, Item: ContextErrorOrRef<'src>>,
 {
     println!("errors:");
     let mut any_errors = false;
     for e in errs {
         const INDENT: &str = "          ";
-        eprint!(
+        let e = e.as_ref();
+        print!(
             "  \x1b[91m{}:\x1b[0m {}\n{}    \x1b[92mhelp:\x1b[0m ",
             e.code(),
             e.err,
@@ -204,17 +224,18 @@ where
         let mut has_prev = false;
         for line in e.help().to_string().lines() {
             if has_prev {
-                eprint!("{INDENT}");
+                print!("{INDENT}");
             }
-            eprintln!("{line}");
+            println!("{line}");
             has_prev = true;
         }
-        eprintln!();
+        println!();
         any_errors = true;
     }
     if !any_errors {
         println!("  \x1b[92mnone\x1b[0m");
     }
+    any_errors
 }
 
 /// Display the debug of tokens in a stream
@@ -294,27 +315,28 @@ pub fn run_code(source: &str) {
     }
     println!("```");
 
+    // lex errors
+    println!();
+    if list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err)) {
+        return;
+    }
+
     // preprocessing
     println!();
     println!("preprocessor:");
     let tokens: Vec<_> = preprocess(source, tokens).collect();
     print_tokens(source, &tokens);
 
-    let num_ok = tokens.iter().filter(|item| item.is_ok()).count();
-    let num_err = tokens.len().checked_sub(num_ok).expect("complement");
-    let mut lex_tokens = Vec::with_capacity(num_ok);
-    let mut lex_errors = Vec::with_capacity(num_err);
-    for res in tokens {
-        match res {
-            Ok(x) => lex_tokens.push(x),
-            Err(e) => lex_errors.push(e),
-        }
+    // preproc errors
+    println!();
+    if list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err)) {
+        return;
     }
 
     // parse debug
     println!();
     println!("parser:");
-    let ast: Vec<_> = parse(source, lex_tokens).collect();
+    let ast: Vec<_> = parse(source, tokens.into_iter().flatten()).collect();
     for res in &ast {
         match res {
             Ok(node) => {
@@ -328,41 +350,38 @@ pub fn run_code(source: &str) {
         }
     }
 
+    // parse errors
+    println!();
+    if list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err)) {
+        return;
+    }
+
     // eval
     println!();
     println!("evaluation:");
-    let runtime_errors: Vec<_> = ast
-        .iter()
-        .flatten()
-        .map(|expr| {
-            evaluate(source, expr)
-                .inspect(|x| {
-                    print!("\x1b[90m{}:\x1b[0m ", Math::new(expr));
-                    match x {
-                        eval::RunValue::Bool(x) => println!("{x}"),
-                        eval::RunValue::UInt(x) => println!("{x}"),
-                        eval::RunValue::SInt(x) => println!("{x}"),
-                        eval::RunValue::Frac(x) => println!("{x}"),
-                        eval::RunValue::Char(x) => println!("{x:?}"),
-                        eval::RunValue::Str(x) => println!("{x:?}"),
-                    }
-                })
-                .map(|_| ())
-                .inspect_err(|e| println!("error: {e:?}"))
+    let eval_results = ast.iter().flatten().map(|expr| {
+        evaluate(source, expr).inspect(|x| {
+            print!("\x1b[90m{}:\x1b[0m ", Math::new(expr));
+            match x {
+                eval::RunValue::Bool(x) => println!("{x:?}"),
+                eval::RunValue::UInt(x) => println!("{x:?}"),
+                eval::RunValue::SInt(x) => println!("{x:?}"),
+                eval::RunValue::Frac(x) => println!("{x:?}"),
+                eval::RunValue::Char(x) => println!("{x:?}"),
+                eval::RunValue::Str(x) => println!("{x:?}"),
+            }
         })
-        .filter_map(Result::err)
-        .collect();
+    });
 
-    // errors
+    // eval errors
     println!();
-    list_errors(
-        // lex/preproc errors
-        (lex_errors.iter())
-            // parse errors
-            .chain(ast.iter().map(Result::as_ref).filter_map(Result::err))
-            // eval errors
-            .chain(runtime_errors.iter()),
-    );
+    if list_errors(eval_results.filter_map(Result::err)) {
+        #[expect(
+            clippy::needless_return,
+            reason = "should return here if more items follow this in the future"
+        )]
+        return;
+    }
 }
 
 fn main() {
