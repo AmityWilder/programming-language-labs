@@ -2,6 +2,7 @@
 
 use crate::{
     error::{ContextError, ErrorType, ExpectedToken},
+    highlight::{style::StyleWrapper, syntax::Syntax},
     scanner::{
         BadBracketCombo, Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
@@ -32,26 +33,26 @@ impl<T: ?Sized + LispDisplay> std::fmt::Display for Lisp<T> {
     }
 }
 
-// Means of displaying content with math style
-pub trait MathDisplay {
+// Means of displaying content with Polish notation
+pub trait PolishDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 }
 
-/// Adapter to display contents as math
+/// Adapter to display contents as Polish
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct Math<T: ?Sized + MathDisplay>(T);
+pub struct Polish<T: ?Sized + PolishDisplay>(T);
 
-impl<T: ?Sized + MathDisplay> Math<T> {
+impl<T: ?Sized + PolishDisplay> Polish<T> {
     pub const fn new(value: &T) -> &Self {
         // SAFETY: Math is a transparent wrapper for `T`.
         unsafe { std::mem::transmute(value) }
     }
 }
 
-impl<T: ?Sized + MathDisplay> std::fmt::Display for Math<T> {
+impl<T: ?Sized + PolishDisplay> std::fmt::Display for Polish<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        MathDisplay::fmt(&self.0, f) // calls MathDisplay::fmt, since T isn't proven to implement any other fmt
+        PolishDisplay::fmt(&self.0, f) // calls MathDisplay::fmt, since T isn't proven to implement any other fmt
     }
 }
 
@@ -99,30 +100,34 @@ impl std::fmt::Display for Binary<'_> {
 
 impl LispDisplay for Binary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "({} {} {})",
-            self.op.lex,
-            Lisp::new(&self.lhs),
-            Lisp::new(&self.rhs)
-        )
+        if f.alternate() {
+            write!(
+                f,
+                "({} {:#} {:#})",
+                crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(self.op.lex),
+                Lisp::new(&self.lhs),
+                Lisp::new(&self.rhs)
+            )
+        } else {
+            write!(
+                f,
+                "({} {} {})",
+                self.op.lex,
+                Lisp::new(&self.lhs),
+                Lisp::new(&self.rhs)
+            )
+        }
     }
 }
 
-impl MathDisplay for Binary<'_> {
+impl PolishDisplay for Binary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let sep = match self.op.val {
-            LexValue::Punctuation(
-                Punctuation::Rem | Punctuation::Mul | Punctuation::Div | Punctuation::Pow,
-            ) => "",
-            _ => " ",
-        };
         write!(
             f,
-            "({}{sep}{}{sep}{})",
-            Math::new(&self.lhs),
+            "{} {} {}",
             self.op.lex,
-            Math::new(&self.rhs)
+            Polish::new(&self.lhs),
+            Polish::new(&self.rhs)
         )
     }
 }
@@ -162,17 +167,27 @@ impl std::fmt::Display for Unary<'_> {
 
 impl LispDisplay for Unary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({} {})", self.op.lex, Lisp::new(&self.rhs))
+        if f.alternate() {
+            write!(
+                f,
+                "({} {:#})",
+                crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(self.op.lex),
+                Lisp::new(&self.rhs)
+            )
+        } else {
+            write!(f, "({} {})", self.op.lex, Lisp::new(&self.rhs))
+        }
     }
 }
 
-impl MathDisplay for Unary<'_> {
+impl PolishDisplay for Unary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let sep = match self.op.val {
-            LexValue::Punctuation(Punctuation::SubNeg /* negate */ | Punctuation::Not | Punctuation::MacroStringify) => "",
-            _ => " ",
+        let op = match self.op.val {
+            // TODO: how does polish notation represent unary negative?
+            LexValue::Punctuation(Punctuation::SubNeg) => "- 0",
+            _ => self.op.lex,
         };
-        write!(f, "({}{sep}{})", self.op.lex, Math::new(&self.rhs))
+        write!(f, "{op} {}", Polish::new(&self.rhs))
     }
 }
 
@@ -216,14 +231,19 @@ impl std::fmt::Display for Grouping<'_> {
 impl LispDisplay for Grouping<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { expr, .. } = self;
-        write!(f, "(group {})", Lisp::new(expr))
+        if f.alternate() {
+            let kw = crate::SYNTAX_STYLE_ANSI[Syntax::Keyword];
+            write!(f, "({}group{} {:#})", kw.begin(), kw.end(), Lisp::new(expr))
+        } else {
+            write!(f, "(group {})", Lisp::new(expr))
+        }
     }
 }
 
-impl MathDisplay for Grouping<'_> {
+impl PolishDisplay for Grouping<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { expr, .. } = self;
-        write!(f, "{}", Math::new(expr)) // contents will be parenthesized anyway
+        write!(f, "{}", Polish::new(expr))
     }
 }
 
@@ -251,19 +271,25 @@ impl LispDisplay for Expr<'_> {
         match self {
             Self::Binary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
-            Self::Literal(Token { lex, .. }) => f.write_str(lex), // TODO: should this use val instead of lex?
+            Self::Literal(tkn @ Token { lex, .. }) => {
+                if f.alternate() {
+                    std::fmt::Display::fmt(&crate::SYNTAX_STYLE_ANSI[tkn.syntax()].style(lex), f)
+                } else {
+                    f.write_str(lex)
+                }
+            } // TODO: should this use val instead of lex?
             Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
         }
     }
 }
 
-impl MathDisplay for Expr<'_> {
+impl PolishDisplay for Expr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Binary(inner) => MathDisplay::fmt(&**inner, f),
-            Self::Unary(inner) => MathDisplay::fmt(&**inner, f),
+            Self::Binary(inner) => PolishDisplay::fmt(&**inner, f),
+            Self::Unary(inner) => PolishDisplay::fmt(&**inner, f),
             Self::Literal(Token { lex, .. }) => f.write_str(lex), // TODO: should this use val instead of lex?
-            Self::Grouping(inner) => MathDisplay::fmt(&**inner, f),
+            Self::Grouping(inner) => PolishDisplay::fmt(&**inner, f),
         }
     }
 }

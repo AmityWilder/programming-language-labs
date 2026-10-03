@@ -8,6 +8,39 @@
     iter_next_chunk,
     deque_extend_front,
     debug_closure_helpers,
+    const_destruct,
+    const_trait_impl,
+    const_convert,
+    const_array,
+    const_bool,
+    const_clone,
+    const_cmp,
+    const_control_flow,
+    const_default,
+    const_iter,
+    const_index,
+    const_for,
+    const_format_args,
+    const_ops,
+    const_option_ops,
+    const_range,
+    const_range_bounds,
+    derive_const,
+    min_adt_const_params,
+    more_float_constants,
+    adt_const_params,
+    const_closures,
+    unboxed_closures,
+    fn_traits,
+    allocator_api,
+    split_array,
+    pattern,
+    deref_patterns,
+    slice_pattern,
+    pattern_type_range_trait,
+    deref_pure_trait,
+    macro_derive,
+    macro_attr
 )]
 #![forbid(
     clippy::missing_safety_doc,
@@ -47,11 +80,11 @@
 
 use error::ContextError;
 use eval::evaluate;
-use grammar::{Binary, Expr, Grouping, Lisp, Math, Unary, parse};
+use grammar::{Binary, Expr, Grouping, Lisp, Polish, Unary, parse};
 use highlight::{
     highlight,
-    style::{Color, Style, StyleWrapper},
-    syntax::{Syntax, SyntaxStyle, syntax_of},
+    style::{Style, StyleWrapper},
+    syntax::{Syntax, SyntaxStyle, syntax_of, syntax_style},
 };
 use scanner::tokenize;
 use std::{fmt::Write, range::Range};
@@ -70,56 +103,68 @@ mod test;
 
 /// The style table currently being used
 // TODO: make this configurable by file(?)
-const SYNTAX_STYLE_ANSI: SyntaxStyle<Style> = SyntaxStyle {
-    normal: Style::new(),
-
-    comment: Style::new().foreground(Color::Rgb(0x6a, 0x99, 0x55)),
-
-    dimmed: Style::new().foreground(Color::BrightBlack),
-
-    number_literal: Style::new().foreground(Color::Rgb(0xb5, 0xce, 0xa8)),
-
-    char_literal: Style::new().foreground(Color::Rgb(0xce, 0x91, 0x78)),
-
-    string_literal: Style::new().foreground(Color::Rgb(0xce, 0x91, 0x78)),
-
-    escape_seq: Style::new().foreground(Color::Rgb(0xd7, 0xba, 0x7d)),
-
-    language_defined: Style::new().foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
-
-    variable: Style::new()
-        .underline()
-        .foreground(Color::Rgb(0x9c, 0xdc, 0xfe)),
-
-    constant: Style::new()
-        .underline()
-        .foreground(Color::Rgb(0x4f, 0xc1, 0xff)),
-
-    callable: Style::new()
-        .underline()
-        .foreground(Color::Rgb(0xdc, 0xdc, 0xaa)),
-
-    keyword: Style::new().foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
-
-    ctrl_keyword: Style::new().foreground(Color::Rgb(0xc5, 0x86, 0xc0)),
-
-    typename: Style::new().foreground(Color::Rgb(0x4e, 0xc9, 0xb0)),
-
-    macro_name: Style::new()
-        .underline()
-        .foreground(Color::Rgb(0x56, 0x9c, 0xd6)),
-
-    macro_arg: Style::new()
-        .underline()
-        .foreground(Color::Rgb(0x4f, 0xc1, 0xff)),
-
-    bracket: &[
-        Style::new().foreground(Color::Rgb(0xff, 0xd7, 0x00)),
-        Style::new().foreground(Color::Rgb(0xda, 0x70, 0xd6)),
-        Style::new().foreground(Color::Rgb(0x17, 0x9f, 0xff)),
-    ],
-
-    invalid: Style::new().foreground(Color::Rgb(0xcc, 0x0e, 0x0e)),
+pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
+    normal: {},
+    comment: {
+        foreground: Rgb(0x6a, 0x99, 0x55)
+    },
+    dimmed: {
+        foreground: BrightBlack
+    },
+    number_literal: {
+        foreground: Rgb(0xb5, 0xce, 0xa8)
+    },
+    char_literal: {
+        foreground: Rgb(0xce, 0x91, 0x78)
+    },
+    string_literal: {
+        foreground: Rgb(0xce, 0x91, 0x78)
+    },
+    escape_seq: {
+        foreground: Rgb(0xd7, 0xba, 0x7d)
+    },
+    language_defined: {
+        foreground: Rgb(0x56, 0x9c, 0xd6)
+    },
+    variable: {
+        foreground: Rgb(0x9c, 0xdc, 0xfe),
+        underline: true
+    },
+    constant: {
+        foreground: Rgb(0x4f, 0xc1, 0xff),
+        underline: true
+    },
+    callable: {
+        foreground: Rgb(0xdc, 0xdc, 0xaa),
+        underline: true
+    },
+    keyword: {
+        foreground: Rgb(0x56, 0x9c, 0xd6)
+    },
+    ctrl_keyword: {
+        foreground: Rgb(0xc5, 0x86, 0xc0)
+    },
+    typename: {
+        foreground: Rgb(0x4e, 0xc9, 0xb0)
+    },
+    macro_name: {
+        foreground: Rgb(0x56, 0x9c, 0xd6),
+        underline: true
+    },
+    macro_arg: {
+        foreground: Rgb(0x4f, 0xc1, 0xff),
+        underline: true
+    },
+    bracket: [{
+        foreground: Rgb(0xff, 0xd7, 0x00)
+    }, {
+        foreground: Rgb(0xda, 0x70, 0xd6)
+    }, {
+        foreground: Rgb(0x17, 0x9f, 0xff)
+    }],
+    invalid: {
+        foreground: Rgb(0xcc, 0x0e, 0x0e)
+    }
 };
 
 pub fn print_ast(node: &Expr<'_>, depth: usize, bracket_depth: usize) {
@@ -361,7 +406,7 @@ pub fn run_code(source: &str) {
     println!("evaluation:");
     let eval_results = ast.iter().flatten().map(|expr| {
         evaluate(source, expr).inspect(|x| {
-            print!("\x1b[90m{}:\x1b[0m ", Math::new(expr));
+            print!("\x1b[90m{}:\x1b[0m ", Polish::new(expr));
             match x {
                 eval::RunValue::Bool(x) => println!("{x:?}"),
                 eval::RunValue::UInt(x) => println!("{x:?}"),
