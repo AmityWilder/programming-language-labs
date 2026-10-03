@@ -128,7 +128,7 @@ pub enum LexValue<'src> {
     /// Signed integer literal
     SIntLiteral(isize),
     /// Floating point literal
-    FltLiteral(f64),
+    FracLiteral(f64),
 
     // strlike literal
     /// Character literal
@@ -164,7 +164,7 @@ impl<'src> LexValue<'src> {
         // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
         if !src.starts_with(HEX_PREFIX) && src.contains(['e', 'E']) || src.contains('.') {
             src.parse() // turns out parse already handles the "e" syntax on its own
-                .map(Self::FltLiteral)
+                .map(Self::FracLiteral)
                 .map_err(|e| ErrorType::InvalidNumLiteral(NumLitError::Flt(e)))
         } else {
             let stripped = src.strip_prefix('-');

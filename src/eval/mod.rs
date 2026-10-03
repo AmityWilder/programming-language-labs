@@ -1,13 +1,7 @@
 //! Code execution
 
-#![allow(
-    clippy::missing_docs_in_private_items,
-    dead_code,
-    reason = "under construction"
-)]
-
 use crate::{
-    error::{ContextError, ErrorType, IntValue, OpSide, OverflowError, TargetTy},
+    error::{ContextError, ErrorType, IntConversionFailure, IntValue, OverflowError, TargetTy},
     grammar::{Binary, Expr, Unary},
     scanner::token::{
         Token,
@@ -22,15 +16,12 @@ enum OpError {
     Incompatible(ValueType, ValueType),
     Unsupported(ValueType),
     FailedConversion {
-        e: std::num::TryFromIntError,
         target_ty: TargetTy,
         value: IntValue,
+        is_binary: bool,
     },
-    OverflowAdd(IntValue, IntValue),
-    OverflowSub(IntValue, IntValue),
-    OverflowMul(IntValue, IntValue),
-    OverflowPow(IntValue, IntValue),
-    OverflowNeg(isize),
+    OverflowBinary(IntValue, IntValue),
+    OverflowUnary(IntValue),
     UNeg,
     DivByZero,
 }
@@ -60,23 +51,22 @@ impl OpError {
             ),
             // Assumes the only conversion failure can happen on the right hand side
             OpError::FailedConversion {
-                e,
                 target_ty,
                 value,
+                is_binary,
             } => ContextError::error(
                 source,
                 Some(rhs.range(source)),
                 rhs.macro_range(source),
                 ErrorType::FailedConvert {
-                    value,
                     op: match op.val {
                         LexValue::Punctuation(punc) => punc,
                         _ => unimplemented!(),
                     },
+                    is_binary,
                     op_range: op.lex_range(source),
-                    side: OpSide::Right,
-                    target_ty,
-                    e,
+                    failure: IntConversionFailure::new(value, target_ty)
+                        .expect("should not produce an error on infallible conversion"),
                 },
             ),
             OpError::DivByZero => ContextError::token_error(
@@ -86,40 +76,10 @@ impl OpError {
                     zero: rhs.range(source),
                 },
             ),
-            OpError::OverflowAdd(l, r) => ContextError::token_error(
+            OpError::OverflowBinary(l, r) => ContextError::token_error(
                 source,
                 Some(*op),
-                ErrorType::Overflow(OverflowError::Add {
-                    l_range: lhs.range(source),
-                    r_range: rhs.range(source),
-                    l_value: l,
-                    r_value: r,
-                }),
-            ),
-            OpError::OverflowSub(l, r) => ContextError::token_error(
-                source,
-                Some(*op),
-                ErrorType::Overflow(OverflowError::Sub {
-                    l_range: lhs.range(source),
-                    r_range: rhs.range(source),
-                    l_value: l,
-                    r_value: r,
-                }),
-            ),
-            OpError::OverflowMul(l, r) => ContextError::token_error(
-                source,
-                Some(*op),
-                ErrorType::Overflow(OverflowError::Mul {
-                    l_range: lhs.range(source),
-                    r_range: rhs.range(source),
-                    l_value: l,
-                    r_value: r,
-                }),
-            ),
-            OpError::OverflowPow(l, r) => ContextError::token_error(
-                source,
-                Some(*op),
-                ErrorType::Overflow(OverflowError::Pow {
+                ErrorType::Overflow(OverflowError::Binary {
                     l_range: lhs.range(source),
                     r_range: rhs.range(source),
                     l_value: l,
@@ -127,7 +87,7 @@ impl OpError {
                 }),
             ),
 
-            OpError::Unsupported(_) | OpError::UNeg | OpError::OverflowNeg(_) => {
+            OpError::Unsupported(_) | OpError::UNeg | OpError::OverflowUnary(_) => {
                 unimplemented!("not valid for binary")
             }
         }
@@ -152,42 +112,40 @@ impl OpError {
             ),
             // assumes all unary operators are prefix ops
             Self::FailedConversion {
-                e,
                 target_ty,
                 value,
+                is_binary,
             } => ContextError::error(
                 source,
                 Some(rhs.range(source)),
                 rhs.macro_range(source),
                 ErrorType::FailedConvert {
-                    value,
                     op: match op.val {
-                        LexValue::Punctuation(Punctuation::Sub) => Punctuation::Neg,
+                        LexValue::Punctuation(Punctuation::SubNeg) => {
+                            unreachable!("grammar module should have converted unary Sub into Neg")
+                        }
                         LexValue::Punctuation(punc) => punc,
                         _ => unimplemented!(),
                     },
+                    is_binary,
                     op_range: op.lex_range(source),
-                    side: OpSide::Right,
-                    target_ty,
-                    e,
+                    failure: IntConversionFailure::new(value, target_ty)
+                        .expect("should not produce an error on infallible conversion"),
                 },
             ),
-            Self::OverflowNeg(r) => ContextError::token_error(
+            Self::OverflowUnary(r) => ContextError::token_error(
                 source,
                 Some(*op),
-                ErrorType::Overflow(OverflowError::Neg {
+                ErrorType::Overflow(OverflowError::Unary {
                     r_value: r,
                     r_range: rhs.range(source),
                 }),
             ),
             Self::UNeg => ContextError::token_error(source, Some(*op), ErrorType::UnsignedNeg),
 
-            Self::Incompatible(_, _)
-            | Self::DivByZero
-            | Self::OverflowAdd(_, _)
-            | Self::OverflowSub(_, _)
-            | Self::OverflowMul(_, _)
-            | Self::OverflowPow(_, _) => unimplemented!("not valid for unary"),
+            Self::Incompatible(_, _) | Self::DivByZero | Self::OverflowBinary(_, _) => {
+                unimplemented!("not valid for unary")
+            }
         }
     }
 }
@@ -253,17 +211,97 @@ impl RunValue {
         }
     }
 
+    fn and(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l & r)),
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l & r)),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l & r)),
+
+            // TODO: coersions?
+            // TODO: char arithmetic?
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
+        }
+    }
+
+    fn or(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l | r)),
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l | r)),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l | r)),
+
+            // TODO: coersions?
+            // TODO: char arithmetic?
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
+        }
+    }
+
+    fn xor(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l ^ r)),
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l ^ r)),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l ^ r)),
+
+            // TODO: coersions?
+            // TODO: char arithmetic?
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
+        }
+    }
+
+    fn nand(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(!(l & r))),
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l & r))),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l & r))),
+
+            // TODO: coersions?
+            // TODO: char arithmetic?
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
+        }
+    }
+
+    fn nor(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(!(l | r))),
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l | r))),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l | r))),
+
+            // TODO: coersions?
+            // TODO: char arithmetic?
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
+        }
+    }
+
+    fn xnor(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(!(l ^ r))),
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l ^ r))),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l ^ r))),
+
+            // TODO: coersions?
+            // TODO: char arithmetic?
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
+        }
+    }
+
     fn add(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l | r)),
-            (Self::UInt(l), Self::UInt(r)) => l
-                .checked_add(r)
-                .map(Self::UInt)
-                .ok_or(OpError::OverflowAdd(IntValue::UInt(l), IntValue::UInt(r))),
-            (Self::SInt(l), Self::SInt(r)) => l
-                .checked_add(r)
-                .map(Self::SInt)
-                .ok_or(OpError::OverflowAdd(IntValue::SInt(l), IntValue::SInt(r))),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_add(r)
+                    .map(Self::UInt)
+                    .ok_or(OpError::OverflowBinary(
+                        IntValue::UInt(l),
+                        IntValue::UInt(r),
+                    ))
+            }
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_add(r)
+                    .map(Self::SInt)
+                    .ok_or(OpError::OverflowBinary(
+                        IntValue::SInt(l),
+                        IntValue::SInt(r),
+                    ))
+            }
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l + r)),
 
             (Self::Str(l), Self::Bool(r)) => Ok(Self::Str(format!("{l}{r}"))),
@@ -288,14 +326,22 @@ impl RunValue {
 
     fn sub(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
-            (Self::UInt(l), Self::UInt(r)) => l
-                .checked_sub(r)
-                .map(Self::UInt)
-                .ok_or(OpError::OverflowSub(IntValue::UInt(l), IntValue::UInt(r))),
-            (Self::SInt(l), Self::SInt(r)) => l
-                .checked_sub(r)
-                .map(Self::SInt)
-                .ok_or(OpError::OverflowSub(IntValue::SInt(l), IntValue::SInt(r))),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_sub(r)
+                    .map(Self::UInt)
+                    .ok_or(OpError::OverflowBinary(
+                        IntValue::UInt(l),
+                        IntValue::UInt(r),
+                    ))
+            }
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_sub(r)
+                    .map(Self::SInt)
+                    .ok_or(OpError::OverflowBinary(
+                        IntValue::SInt(l),
+                        IntValue::SInt(r),
+                    ))
+            }
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l - r)),
 
             // TODO: coersions?
@@ -307,14 +353,22 @@ impl RunValue {
     fn mul(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l & r)),
-            (Self::UInt(l), Self::UInt(r)) => l
-                .checked_mul(r)
-                .map(Self::UInt)
-                .ok_or(OpError::OverflowMul(IntValue::UInt(l), IntValue::UInt(r))),
-            (Self::SInt(l), Self::SInt(r)) => l
-                .checked_mul(r)
-                .map(Self::SInt)
-                .ok_or(OpError::OverflowMul(IntValue::SInt(l), IntValue::SInt(r))),
+            (Self::UInt(l), Self::UInt(r)) => {
+                l.checked_mul(r)
+                    .map(Self::UInt)
+                    .ok_or(OpError::OverflowBinary(
+                        IntValue::UInt(l),
+                        IntValue::UInt(r),
+                    ))
+            }
+            (Self::SInt(l), Self::SInt(r)) => {
+                l.checked_mul(r)
+                    .map(Self::SInt)
+                    .ok_or(OpError::OverflowBinary(
+                        IntValue::SInt(l),
+                        IntValue::SInt(r),
+                    ))
+            }
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l * r)),
 
             // TODO: coersions?
@@ -355,34 +409,40 @@ impl RunValue {
     fn pow(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
             (Self::UInt(l), Self::UInt(r)) => l
-                .checked_pow(u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                .checked_pow(u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::UInt(r),
                 })?)
                 .map(Self::UInt)
-                .ok_or(OpError::OverflowPow(IntValue::UInt(l), IntValue::UInt(r))),
+                .ok_or(OpError::OverflowBinary(
+                    IntValue::UInt(l),
+                    IntValue::UInt(r),
+                )),
             (Self::SInt(l), Self::SInt(r)) => l
-                .checked_pow(u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                .checked_pow(u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::SInt(r),
                 })?)
                 .map(Self::SInt)
-                .ok_or(OpError::OverflowPow(IntValue::SInt(l), IntValue::SInt(r))),
+                .ok_or(OpError::OverflowBinary(
+                    IntValue::SInt(l),
+                    IntValue::SInt(r),
+                )),
             (Self::Frac(l), Self::UInt(r)) => {
-                Ok(Self::Frac(l.powi(i32::try_from(r).map_err(|e| {
+                Ok(Self::Frac(l.powi(i32::try_from(r).map_err(|_| {
                     OpError::FailedConversion {
-                        e,
+                        is_binary: true,
                         target_ty: TargetTy::S32,
                         value: IntValue::UInt(r),
                     }
                 })?)))
             }
             (Self::Frac(l), Self::SInt(r)) => {
-                Ok(Self::Frac(l.powi(i32::try_from(r).map_err(|e| {
+                Ok(Self::Frac(l.powi(i32::try_from(r).map_err(|_| {
                     OpError::FailedConversion {
-                        e,
+                        is_binary: true,
                         target_ty: TargetTy::S32,
                         value: IntValue::SInt(r),
                     }
@@ -398,29 +458,29 @@ impl RunValue {
     fn shl(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l.unbounded_shl(
-                u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::UInt(r),
                 })?,
             ))),
             (Self::UInt(l), Self::SInt(r)) => Ok(Self::UInt(l.unbounded_shl(
-                u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::SInt(r),
                 })?,
             ))),
             (Self::SInt(l), Self::UInt(r)) => Ok(Self::SInt(l.unbounded_shl(
-                u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::UInt(r),
                 })?,
             ))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l.unbounded_shl(
-                u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::SInt(r),
                 })?,
@@ -433,29 +493,99 @@ impl RunValue {
     fn shr(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l.unbounded_shr(
-                u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::UInt(r),
                 })?,
             ))),
             (Self::UInt(l), Self::SInt(r)) => Ok(Self::UInt(l.unbounded_shr(
-                u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::SInt(r),
                 })?,
             ))),
             (Self::SInt(l), Self::UInt(r)) => Ok(Self::SInt(l.unbounded_shr(
-                u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::UInt(r),
                 })?,
             ))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l.unbounded_shr(
-                u32::try_from(r).map_err(|e| OpError::FailedConversion {
-                    e,
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
+                    target_ty: TargetTy::U32,
+                    value: IntValue::SInt(r),
+                })?,
+            ))),
+
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
+        }
+    }
+
+    fn rotl(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l.rotate_left(
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
+                    target_ty: TargetTy::U32,
+                    value: IntValue::UInt(r),
+                })?,
+            ))),
+            (Self::UInt(l), Self::SInt(r)) => Ok(Self::UInt(l.rotate_left(
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
+                    target_ty: TargetTy::U32,
+                    value: IntValue::SInt(r),
+                })?,
+            ))),
+            (Self::SInt(l), Self::UInt(r)) => Ok(Self::SInt(l.rotate_left(
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
+                    target_ty: TargetTy::U32,
+                    value: IntValue::UInt(r),
+                })?,
+            ))),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l.rotate_left(
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
+                    target_ty: TargetTy::U32,
+                    value: IntValue::SInt(r),
+                })?,
+            ))),
+
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
+        }
+    }
+
+    fn rotr(self, other: Self) -> Result<Self, OpError> {
+        match (self, other) {
+            (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l.rotate_right(
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
+                    target_ty: TargetTy::U32,
+                    value: IntValue::UInt(r),
+                })?,
+            ))),
+            (Self::UInt(l), Self::SInt(r)) => Ok(Self::UInt(l.rotate_right(
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
+                    target_ty: TargetTy::U32,
+                    value: IntValue::SInt(r),
+                })?,
+            ))),
+            (Self::SInt(l), Self::UInt(r)) => Ok(Self::SInt(l.rotate_right(
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
+                    target_ty: TargetTy::U32,
+                    value: IntValue::UInt(r),
+                })?,
+            ))),
+            (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l.rotate_right(
+                u32::try_from(r).map_err(|_| OpError::FailedConversion {
+                    is_binary: true,
                     target_ty: TargetTy::U32,
                     value: IntValue::SInt(r),
                 })?,
@@ -483,7 +613,7 @@ impl RunValue {
             Self::SInt(r) => r
                 .checked_neg()
                 .map(Self::SInt)
-                .ok_or(OpError::OverflowNeg(r)),
+                .ok_or(OpError::OverflowUnary(IntValue::SInt(r))),
 
             // TODO: other types
             r => Err(OpError::Unsupported(r.as_type())),
@@ -492,7 +622,10 @@ impl RunValue {
 }
 
 pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, ContextError<'src>> {
-    use Punctuation::{Add, Div, Eq, Ge, Gt, Le, Lt, Mul, Ne, Neg, Not, Pow, Rem, Shl, Shr, Sub};
+    use Punctuation::{
+        Add, And, Div, Eq, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Pow, Rem, Rotl, Rotr, Shl,
+        Shr, SubNeg, Xnor, Xor,
+    };
     match ast {
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
@@ -502,14 +635,22 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 unimplemented!();
             };
             match punc {
+                And => l.and(r),
+                Xor => l.xor(r),
+                Or => l.or(r),
+                Nand => l.nand(r),
+                Xnor => l.xnor(r),
+                Nor => l.nor(r),
                 Add => l.add(r),
-                Sub => l.sub(r),
+                SubNeg => l.sub(r),
                 Mul => l.mul(r),
                 Div => l.div(r),
                 Rem => l.rem(r),
                 Pow => l.pow(r),
                 Shl => l.shl(r),
                 Shr => l.shr(r),
+                Rotl => l.rotl(r),
+                Rotr => l.rotr(r),
                 Eq | Ne | Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
                     RunValue::Bool(match punc {
                         Ne => ord.is_none_or(Ordering::is_ne),
@@ -535,7 +676,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
             };
             match punc {
                 Not => r.not(),
-                Sub | Neg => r.neg(),
+                SubNeg => r.neg(),
 
                 _ => unimplemented!(),
             }
@@ -546,7 +687,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
             LexValue::BoolLiteral(b) => Ok(RunValue::Bool(b)),
             LexValue::UIntLiteral(n) => Ok(RunValue::UInt(n)),
             LexValue::SIntLiteral(n) => Ok(RunValue::SInt(n)),
-            LexValue::FltLiteral(x) => Ok(RunValue::Frac(x)),
+            LexValue::FracLiteral(x) => Ok(RunValue::Frac(x)),
             LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
             LexValue::StringLiteral(s) => s
                 .process()

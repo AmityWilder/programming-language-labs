@@ -14,10 +14,6 @@ define_token_eq! {
     /// - "Bitwise" (logical) operations on booleans
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum Punctuation = operator {
-        // ----------------------------
-        // 1-char
-        // ----------------------------
-
         /// Not - Logical negation (booleans) or bitflip (integers)
         Not = "!",
         /// Stringify - Replace tokens with their lexemes in a macro
@@ -36,10 +32,8 @@ define_token_eq! {
         Add = "+",
         /// Comma - Separate items in a list
         Comma = ",",
-        /// Subtract - Find the difference of `lhs - rhs`
-        Sub = "-",
-        /// Negate - Find the result of `-rhs`
-        Neg = #[expect(unreachable_patterns, reason = "unary alias of Sub")] "-",
+        /// Subtract or negate - Find the difference of `lhs - rhs` or the negation `-rhs`
+        SubNeg = "-",
         /// Dot - Access a rec member
         Dot = ".",
         /// Divide - Find the quotient of `lhs / rhs`
@@ -70,11 +64,6 @@ define_token_eq! {
         Or = "|",
         /// Right brace
         RBrace = "}",
-
-        // ----------------------------
-        // 2-char
-        // ----------------------------
-
         /// Not equal - Equivalent to `!(lhs == rhs)`
         Ne = "!=",
         /// Nand - Equivalent to `!(lhs & rhs)`
@@ -84,7 +73,7 @@ define_token_eq! {
         /// Xnor - Equivalent to `!(lhs ^ rhs)`
         Xnor = "!^",
         /// Concatenate - Combine macro arguments without whitespace (possibly forming new tokens)
-        MacroConcatenate = "##",
+        MacroConcat = "##",
         /// Remainder assign - Equivalent to `lhs = lhs % rhs`
         RemAssign = "%=",
         /// And assign - Equivalent to `lhs = lhs & rhs`
@@ -117,28 +106,31 @@ define_token_eq! {
         FatArrow = "=>",
         /// Greater or equal - Equivalent to `lhs < rhs | lhs == rhs`
         Ge = ">=",
-        /// Shr - Shift the bits in `lhs` to the right (towards 0) by `rhs` bits
+        /// Bitshift right - Shift the bits in `lhs` to the right (towards 0) by `rhs` bits
         Shr = ">>",
         /// Xor assign - Equivalent to `lhs = lhs ^ rhs`
         XorAssign = "^=",
         /// Or assign - Equivalent to `lhs = lhs | rhs`
         OrAssign = "|=",
-
-        // ----------------------------
-        // 3-char
-        // ----------------------------
-
         /// Power assign - Equivalent to `lhs = lhs ** rhs`
         PowAssign = "**=",
         /// Bitshift left assign - Equivalent to `lhs = lhs << rhs`
         ShlAssign = "<<=",
         /// Bitshift right assign - Equivalent to `lhs = lhs >> rhs`
         ShrAssign = ">>=",
-        /// Nand assign - Equivalent to `lhs = lhs !& rhs`
+        /// Nand assign - Equivalent to `lhs = !(lhs & rhs)`
         NandAssign = "!&=",
-        /// Nor assign - Equivalent to `lhs = lhs !| rhs`
+        /// Nor assign - Equivalent to `lhs = !(lhs | rhs)`
         NorAssign = "!|=",
-        /// Xnor assign - Equivalent to `lhs = lhs !^ rhs`
+        /// Xnor assign - Equivalent to `lhs = !(lhs ^ rhs)`
         XnorAssign = "!^=",
+        /// Bit rotate left - Rotate the bits in `lhs` to the left (away from 0) by `rhs` bits
+        Rotl = "[<<]",
+        /// Bit rotate right - Rotate the bits in `lhs` to the right (towards 0) by `rhs` bits
+        Rotr = "[>>]",
+        /// Bit rotate left assign - Equivalent to `lhs = lhs [<<] rhs`
+        RotlAssign = "[<<]=",
+        /// Bit rotate right assign - Equivalent to `lhs = lhs [>>] rhs`
+        RotrAssign = "[>>]=",
     }
 }

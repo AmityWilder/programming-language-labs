@@ -1,11 +1,5 @@
 //! Context-free grammar
 
-#![allow(
-    clippy::missing_docs_in_private_items,
-    dead_code,
-    reason = "under construction"
-)]
-
 use crate::{
     error::{ContextError, ErrorType, ExpectedToken},
     scanner::{
@@ -67,66 +61,6 @@ macro_rules! match_token {
     };
 }
 pub(crate) use match_token;
-
-macro_rules! bnf_notation {
-    // direct
-    ($head:ident -> $inner:ident) => {
-        /// Direct
-        ///
-        #[doc = concat!("`", stringify!($head -> $inner ;), "`")]
-        fn $head(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-            self.$inner()
-        }
-    };
-
-    // binary
-    ($head:ident -> $lhs:ident ( ( $($op:ident)|+ ) $rhs:ident )*) => {
-        /// Binary
-        ///
-        #[doc = concat!("`", stringify!($head -> $lhs ( ( $($op)|+ ) $rhs )* ;), "`")]
-        fn $head(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-            let mut expr = self.$lhs()?;
-            // left associative
-            while let Some(op) = self.tokens.next_if(match_token!(Punctuation($(Punctuation::$op)|+))) {
-                let rhs = self.$rhs()?;
-                expr = Expr::binary(Binary { lhs: expr, op, rhs });
-            }
-            Ok(expr)
-        }
-    };
-
-    // unary
-    ($head:ident -> ( ( $($op:ident)|+ ) $rhs:ident )*) => {
-        /// Unary
-        ///
-        #[doc = concat!("`", stringify!($head -> ( ( $($op)|+ ) $rhs )* ;), "`")]
-        fn $head(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-            // right associative
-            if let Some(op) = self.tokens.next_if(match_token!(Punctuation($(Punctuation::$op)|+))) {
-                let rhs = self.$head()?;
-                Ok(Expr::unary(Unary { op, rhs }))
-            } else {
-                self.$rhs()
-            }
-        }
-    };
-
-    // literal
-    ($head:ident -> ( ( $($variant:ident$(( $pattern:pat ))?)|+ ) ) $(*)?) => {
-        /// Literal
-        ///
-        #[doc = concat!("`", stringify!($head -> $($variant$(($pattern))?)|+ ;), "`")]
-        fn $head(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-            self.try_pull(match_token!($($variant$(($pattern))?)|+), ExpectedToken::Literal).map(Expr::literal)
-        }
-    };
-}
-
-macro_rules! bnf_notation_multi {
-    ($( $head:ident -> $($lhs_or_inner:ident)? $(( ( $($variant_or_op:ident$(($pattern:pat))?)|+ ) $($rhs:ident)? )$(*)?)? ; )*) => {$(
-        bnf_notation! { $head -> $($lhs_or_inner)? $(( ( $($variant_or_op$(($pattern))?)|+ ) $($rhs)? )*)? }
-    )*};
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Binary<'src> {
@@ -195,6 +129,7 @@ impl MathDisplay for Binary<'_> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unary<'src> {
+    /// Promises to use [`Punctuation::Neg`] instead of [`Punctuation::Sub`]
     pub op: Token<'src>,
     pub rhs: Expr<'src>,
 }
@@ -234,7 +169,7 @@ impl LispDisplay for Unary<'_> {
 impl MathDisplay for Unary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let sep = match self.op.val {
-            LexValue::Punctuation(Punctuation::Sub /* negate */ | Punctuation::Not | Punctuation::MacroStringify) => "",
+            LexValue::Punctuation(Punctuation::SubNeg /* negate */ | Punctuation::Not | Punctuation::MacroStringify) => "",
             _ => " ",
         };
         write!(f, "({}{sep}{})", self.op.lex, Math::new(&self.rhs))
@@ -436,24 +371,160 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    bnf_notation_multi! {
-        expression -> equality ;
-        equality   -> comparison ( (Ne | Eq) comparison )* ;
-        comparison -> shift ( (Gt | Ge | Lt | Le) shift )* ;
-        shift      -> term ( (Shl | Shr) term )* ;
-        term       -> factor ( (Add | Sub) factor )* ;
-        factor     -> unary ( (Mul | Div | Rem) unary )* ;
-        unary      -> ((Not | Sub) exponent)* ;
-        exponent   -> primary ( (Pow) primary )* ;
-        literal    -> ((
-            BoolLiteral(_)
-            | Keyword(Keyword::None)
-            | UIntLiteral(_)
-            | SIntLiteral(_)
-            | FltLiteral(_)
-            | CharLiteral(_)
-            | StringLiteral(_)
-        )) ;
+    /// `expression -> or ;`
+    fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        self.or()
+    }
+
+    /// `or -> xor ( ("|" | "!|") xor )* ;`
+    fn or(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.xor()?;
+        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+            Punctuation::Or | Punctuation::Nor
+        ))) {
+            let rhs = self.xor()?;
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `xor -> and ( ("^" | "!^") and )* ;`
+    fn xor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.and()?;
+        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+            Punctuation::Xor | Punctuation::Xnor
+        ))) {
+            let rhs = self.and()?;
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `and -> equality ( ("&" | "!&") equality )* ;`
+    fn and(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.equality()?;
+        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+            Punctuation::And | Punctuation::Nand
+        ))) {
+            let rhs = self.equality()?;
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `equality -> comparison ( ("!=" | "==") comparison )* ;`
+    fn equality(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.comparison()?;
+        while let Some(op) = self
+            .tokens
+            .next_if(match_token!(Punctuation(Punctuation::Ne | Punctuation::Eq)))
+        {
+            let rhs = self.comparison()?;
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `comparison -> shift ( ( ">" | ">=" | "<" | "<=" ) shift )* ;`
+    fn comparison(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.shift()?;
+        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+            Punctuation::Gt | Punctuation::Ge | Punctuation::Lt | Punctuation::Le
+        ))) {
+            let rhs = self.shift()?;
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `shift -> term ( ( "<<" | ">>" | "[<<]" | "[>>]" ) term )* ;`
+    fn shift(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.term()?;
+        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+            Punctuation::Shl | Punctuation::Shr | Punctuation::Rotl | Punctuation::Rotr
+        ))) {
+            let rhs = self.term()?;
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `term -> factor ( ( "+" | "-" ) factor )* ;`
+    fn term(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.factor()?;
+        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+            Punctuation::Add | Punctuation::SubNeg
+        ))) {
+            let rhs = self.factor()?;
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `factor -> unary ( ( "*" | "/" | "%" ) unary )* ;`
+    fn factor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.unary()?;
+        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+            Punctuation::Mul | Punctuation::Div | Punctuation::Rem
+        ))) {
+            let rhs = self.unary()?;
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `unary -> ( ( "!" | "-" ) exponent )* ;`
+    fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        if let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+            Punctuation::Not | Punctuation::SubNeg
+        ))) {
+            let rhs = self.unary()?;
+            Ok(Expr::unary(Unary { op, rhs }))
+        } else {
+            self.exponent()
+        }
+    }
+
+    /// `exponent -> primary ( "**" primary )* ;`
+    fn exponent(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.primary()?;
+        while let Some(op) = self
+            .tokens
+            .next_if(match_token!(Punctuation(Punctuation::Pow)))
+        {
+            let rhs = self.primary()?;
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        self.literal().or_else(|_| self.group()).map_err(|mut e| {
+            if let ErrorType::MissingToken { expect } | ErrorType::UnexpectedToken { expect, .. } =
+                &mut e.err
+                && *expect == ExpectedToken::ParenExpr
+            {
+                *expect = ExpectedToken::Expr;
+            }
+            e
+        })
+    }
+
+    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | STRING ;`
+    fn literal(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        self.try_pull(
+            match_token!(
+                BoolLiteral(_)
+                    | Keyword(Keyword::None)
+                    | UIntLiteral(_)
+                    | SIntLiteral(_)
+                    | FracLiteral(_)
+                    | CharLiteral(_)
+                    | StringLiteral(_)
+            ),
+            ExpectedToken::Literal,
+        )
+        .map(Expr::literal)
     }
 
     fn group(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
@@ -487,18 +558,6 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
                 err => err,
             })
-        })
-    }
-
-    fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        self.literal().or_else(|_| self.group()).map_err(|mut e| {
-            if let ErrorType::MissingToken { expect } | ErrorType::UnexpectedToken { expect, .. } =
-                &mut e.err
-                && *expect == ExpectedToken::ParenExpr
-            {
-                *expect = ExpectedToken::Expr;
-            }
-            e
         })
     }
 
@@ -577,7 +636,7 @@ mod tests {
                     lhs: Expr::unary(Unary {
                         op: Token {
                             lex: "-",
-                            val: LexValue::Punctuation(Punctuation::Sub),
+                            val: LexValue::Punctuation(Punctuation::SubNeg),
                             mac: None
                         },
                         rhs: Expr::grouping(Grouping {

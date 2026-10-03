@@ -44,8 +44,6 @@
 )]
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
-#![allow(clippy::wildcard_imports, reason = "don't care")]
-#![allow(clippy::result_large_err)]
 
 use error::ContextError;
 use eval::evaluate;
