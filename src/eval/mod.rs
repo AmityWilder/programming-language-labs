@@ -11,6 +11,19 @@ use crate::{
 };
 use std::cmp::Ordering;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum OverflowKind {
+    UAdd { l: usize, r: usize },
+    SAdd { l: isize, r: isize },
+    USub { l: usize, r: usize },
+    SSub { l: isize, r: isize },
+    UMul { l: usize, r: usize },
+    SMul { l: isize, r: isize },
+    UPow { l: usize, r: usize },
+    SPow { l: isize, r: isize },
+    SNeg { r: isize },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum OpError {
     Incompatible(ValueType, ValueType),
@@ -20,8 +33,7 @@ enum OpError {
         value: IntValue,
         is_binary: bool,
     },
-    OverflowBinary(IntValue, IntValue),
-    OverflowUnary(IntValue),
+    Overflow(OverflowKind),
     UNeg,
     DivByZero,
 }
@@ -76,18 +88,63 @@ impl OpError {
                     zero: rhs.range(source),
                 },
             ),
-            OpError::OverflowBinary(l, r) => ContextError::token_error(
+            OpError::Overflow(e) => ContextError::token_error(
                 source,
                 Some(*op),
-                ErrorType::Overflow(OverflowError::Binary {
-                    l_range: lhs.range(source),
-                    r_range: rhs.range(source),
-                    l_value: l,
-                    r_value: r,
+                ErrorType::Overflow(match e {
+                    OverflowKind::UAdd { l, r } => OverflowError::UAdd {
+                        l_range: lhs.range(source),
+                        r_range: rhs.range(source),
+                        l_value: l,
+                        r_value: r,
+                    },
+                    OverflowKind::SAdd { l, r } => OverflowError::SAdd {
+                        l_range: lhs.range(source),
+                        r_range: rhs.range(source),
+                        l_value: l,
+                        r_value: r,
+                    },
+                    OverflowKind::USub { l, r } => OverflowError::USub {
+                        l_range: lhs.range(source),
+                        r_range: rhs.range(source),
+                        l_value: l,
+                        r_value: r,
+                    },
+                    OverflowKind::SSub { l, r } => OverflowError::SSub {
+                        l_range: lhs.range(source),
+                        r_range: rhs.range(source),
+                        l_value: l,
+                        r_value: r,
+                    },
+                    OverflowKind::UMul { l, r } => OverflowError::UMul {
+                        l_range: lhs.range(source),
+                        r_range: rhs.range(source),
+                        l_value: l,
+                        r_value: r,
+                    },
+                    OverflowKind::SMul { l, r } => OverflowError::SMul {
+                        l_range: lhs.range(source),
+                        r_range: rhs.range(source),
+                        l_value: l,
+                        r_value: r,
+                    },
+                    OverflowKind::UPow { l, r } => OverflowError::UPow {
+                        l_range: lhs.range(source),
+                        r_range: rhs.range(source),
+                        l_value: l,
+                        r_value: r,
+                    },
+                    OverflowKind::SPow { l, r } => OverflowError::SPow {
+                        l_range: lhs.range(source),
+                        r_range: rhs.range(source),
+                        l_value: l,
+                        r_value: r,
+                    },
+                    OverflowKind::SNeg { .. } => unimplemented!("not valid for binary"),
                 }),
             ),
 
-            OpError::Unsupported(_) | OpError::UNeg | OpError::OverflowUnary(_) => {
+            OpError::Unsupported(_) | OpError::UNeg => {
                 unimplemented!("not valid for binary")
             }
         }
@@ -133,17 +190,17 @@ impl OpError {
                         .expect("should not produce an error on infallible conversion"),
                 },
             ),
-            Self::OverflowUnary(r) => ContextError::token_error(
+            Self::Overflow(OverflowKind::SNeg { r }) => ContextError::token_error(
                 source,
                 Some(*op),
-                ErrorType::Overflow(OverflowError::Unary {
-                    r_value: r,
+                ErrorType::Overflow(OverflowError::SNeg {
                     r_range: rhs.range(source),
+                    r_value: r,
                 }),
             ),
             Self::UNeg => ContextError::token_error(source, Some(*op), ErrorType::UnsignedNeg),
 
-            Self::Incompatible(_, _) | Self::DivByZero | Self::OverflowBinary(_, _) => {
+            Self::Incompatible(_, _) | Self::DivByZero | Self::Overflow(_) => {
                 unimplemented!("not valid for unary")
             }
         }
@@ -286,22 +343,14 @@ impl RunValue {
     fn add(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l | r)),
-            (Self::UInt(l), Self::UInt(r)) => {
-                l.checked_add(r)
-                    .map(Self::UInt)
-                    .ok_or(OpError::OverflowBinary(
-                        IntValue::UInt(l),
-                        IntValue::UInt(r),
-                    ))
-            }
-            (Self::SInt(l), Self::SInt(r)) => {
-                l.checked_add(r)
-                    .map(Self::SInt)
-                    .ok_or(OpError::OverflowBinary(
-                        IntValue::SInt(l),
-                        IntValue::SInt(r),
-                    ))
-            }
+            (Self::UInt(l), Self::UInt(r)) => l
+                .checked_add(r)
+                .map(Self::UInt)
+                .ok_or(OpError::Overflow(OverflowKind::UAdd { l, r })),
+            (Self::SInt(l), Self::SInt(r)) => l
+                .checked_add(r)
+                .map(Self::SInt)
+                .ok_or(OpError::Overflow(OverflowKind::SAdd { l, r })),
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l + r)),
 
             (Self::Str(l), Self::Bool(r)) => Ok(Self::Str(format!("{l}{r}"))),
@@ -326,22 +375,14 @@ impl RunValue {
 
     fn sub(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
-            (Self::UInt(l), Self::UInt(r)) => {
-                l.checked_sub(r)
-                    .map(Self::UInt)
-                    .ok_or(OpError::OverflowBinary(
-                        IntValue::UInt(l),
-                        IntValue::UInt(r),
-                    ))
-            }
-            (Self::SInt(l), Self::SInt(r)) => {
-                l.checked_sub(r)
-                    .map(Self::SInt)
-                    .ok_or(OpError::OverflowBinary(
-                        IntValue::SInt(l),
-                        IntValue::SInt(r),
-                    ))
-            }
+            (Self::UInt(l), Self::UInt(r)) => l
+                .checked_sub(r)
+                .map(Self::UInt)
+                .ok_or(OpError::Overflow(OverflowKind::USub { l, r })),
+            (Self::SInt(l), Self::SInt(r)) => l
+                .checked_sub(r)
+                .map(Self::SInt)
+                .ok_or(OpError::Overflow(OverflowKind::SSub { l, r })),
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l - r)),
 
             // TODO: coersions?
@@ -353,22 +394,14 @@ impl RunValue {
     fn mul(self, other: Self) -> Result<Self, OpError> {
         match (self, other) {
             (Self::Bool(l), Self::Bool(r)) => Ok(Self::Bool(l & r)),
-            (Self::UInt(l), Self::UInt(r)) => {
-                l.checked_mul(r)
-                    .map(Self::UInt)
-                    .ok_or(OpError::OverflowBinary(
-                        IntValue::UInt(l),
-                        IntValue::UInt(r),
-                    ))
-            }
-            (Self::SInt(l), Self::SInt(r)) => {
-                l.checked_mul(r)
-                    .map(Self::SInt)
-                    .ok_or(OpError::OverflowBinary(
-                        IntValue::SInt(l),
-                        IntValue::SInt(r),
-                    ))
-            }
+            (Self::UInt(l), Self::UInt(r)) => l
+                .checked_mul(r)
+                .map(Self::UInt)
+                .ok_or(OpError::Overflow(OverflowKind::UMul { l, r })),
+            (Self::SInt(l), Self::SInt(r)) => l
+                .checked_mul(r)
+                .map(Self::SInt)
+                .ok_or(OpError::Overflow(OverflowKind::SMul { l, r })),
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l * r)),
 
             // TODO: coersions?
@@ -415,10 +448,7 @@ impl RunValue {
                     value: IntValue::UInt(r),
                 })?)
                 .map(Self::UInt)
-                .ok_or(OpError::OverflowBinary(
-                    IntValue::UInt(l),
-                    IntValue::UInt(r),
-                )),
+                .ok_or(OpError::Overflow(OverflowKind::UPow { l, r })),
             (Self::SInt(l), Self::SInt(r)) => l
                 .checked_pow(u32::try_from(r).map_err(|_| OpError::FailedConversion {
                     is_binary: true,
@@ -426,10 +456,7 @@ impl RunValue {
                     value: IntValue::SInt(r),
                 })?)
                 .map(Self::SInt)
-                .ok_or(OpError::OverflowBinary(
-                    IntValue::SInt(l),
-                    IntValue::SInt(r),
-                )),
+                .ok_or(OpError::Overflow(OverflowKind::SPow { l, r })),
             (Self::Frac(l), Self::UInt(r)) => {
                 Ok(Self::Frac(l.powi(i32::try_from(r).map_err(|_| {
                     OpError::FailedConversion {
@@ -613,7 +640,7 @@ impl RunValue {
             Self::SInt(r) => r
                 .checked_neg()
                 .map(Self::SInt)
-                .ok_or(OpError::OverflowUnary(IntValue::SInt(r))),
+                .ok_or(OpError::Overflow(OverflowKind::SNeg { r })),
 
             // TODO: other types
             r => Err(OpError::Unsupported(r.as_type())),
