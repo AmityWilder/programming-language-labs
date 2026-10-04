@@ -158,7 +158,7 @@ impl<const N: usize> SyntaxStyle<Style, [Style; N]> {
     }
 }
 
-impl<'brack> SyntaxStyle<Style, &'brack [Style]> {
+impl SyntaxStyle<Style, &[Style]> {
     /// Constructs an empty syntax style
     pub const fn new() -> Self {
         Self {
@@ -184,83 +184,154 @@ impl<'brack> SyntaxStyle<Style, &'brack [Style]> {
     }
 }
 
-impl<T: Copy, A> SyntaxStyle<T, A>
+impl<T, A> SyntaxStyle<T, A>
 where
     A: AsRef<[T]>,
 {
-    pub const fn normal(mut self, value: T) -> Self {
+    pub const fn normal(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.normal = value;
         self
     }
-    pub const fn comment(mut self, value: T) -> Self {
+
+    pub const fn comment(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.comment = value;
         self
     }
-    pub const fn dimmed(mut self, value: T) -> Self {
+
+    pub const fn dimmed(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.dimmed = value;
         self
     }
-    pub const fn number_literal(mut self, value: T) -> Self {
+
+    pub const fn number_literal(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.number_literal = value;
         self
     }
-    pub const fn char_literal(mut self, value: T) -> Self {
+
+    pub const fn char_literal(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.char_literal = value;
         self
     }
-    pub const fn string_literal(mut self, value: T) -> Self {
+
+    pub const fn string_literal(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.string_literal = value;
         self
     }
-    pub const fn escape_seq(mut self, value: T) -> Self {
+
+    pub const fn escape_seq(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.escape_seq = value;
         self
     }
-    pub const fn language_defined(mut self, value: T) -> Self {
+
+    pub const fn language_defined(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.language_defined = value;
         self
     }
-    pub const fn variable(mut self, value: T) -> Self {
+
+    pub const fn variable(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.variable = value;
         self
     }
-    pub const fn constant(mut self, value: T) -> Self {
+
+    pub const fn constant(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.constant = value;
         self
     }
-    pub const fn callable(mut self, value: T) -> Self {
+
+    pub const fn callable(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.callable = value;
         self
     }
-    pub const fn keyword(mut self, value: T) -> Self {
+
+    pub const fn keyword(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.keyword = value;
         self
     }
-    pub const fn ctrl_keyword(mut self, value: T) -> Self {
+
+    pub const fn ctrl_keyword(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.ctrl_keyword = value;
         self
     }
-    pub const fn typename(mut self, value: T) -> Self {
+
+    pub const fn typename(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.typename = value;
         self
     }
-    pub const fn macro_name(mut self, value: T) -> Self {
+
+    pub const fn macro_name(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.macro_name = value;
         self
     }
-    pub const fn macro_arg(mut self, value: T) -> Self {
+
+    pub const fn macro_arg(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.macro_arg = value;
         self
     }
+
     pub const fn bracket(mut self, value: A) -> Self
     where
         A: [const] Destruct + [const] AsRef<[T]>,
     {
-        assert!(!value.as_ref().is_empty());
+        assert!(
+            !value.as_ref().is_empty(),
+            "bracket list cannot be empty; it would cause an \"n % 0\" error"
+        );
         self.bracket = value;
         self
     }
-    pub const fn invalid(mut self, value: T) -> Self {
+
+    pub const fn invalid(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
         self.invalid = value;
         self
     }
@@ -356,18 +427,3 @@ macro_rules! syntax_style {
     }};
 }
 pub(crate) use syntax_style;
-
-fn foo() {
-    let style = syntax_style! {
-        comment: {
-            foreground: Blue,
-            background: Black,
-            bold: true
-        },
-        bracket: [
-            {
-                foreground: Blue
-            }
-        ]
-    };
-}

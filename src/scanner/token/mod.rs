@@ -36,7 +36,7 @@ macro_rules! define_token_eq {
             }
 
             /// Like [`Self::from_prefix`], but matches the full string
-            pub fn try_from_str(s: &str) -> Option<Self> {
+            pub const fn try_from_str(s: &str) -> Option<Self> {
                 match s {
                     $($(#[$valm])* $value => Some(Self::$Variant),)+
                     _ => None,

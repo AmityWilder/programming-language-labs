@@ -244,7 +244,7 @@ macro_rules! CtxErrType {{
         #[err($({$(..)? $( $err_s_ident:ident$(: $err_s_pat:pat)? ),* $(, ..)?},)?$(($( $err_t_pat:pat ),*),)? |$err_f:ident| $display:expr)]
         #[inlay($({$(..)? $( $inlay_s_ident:ident$(: $inlay_s_pat:pat)? ),* $(, ..)?},)?$(($( $inlay_t_pat:pat ),*),)? |$inlay_f:ident| $inlay:expr)]
         #[help($({$(..)? $( $help_s_ident:ident$(: $help_s_pat:pat)? ),* $(, ..)?},)?$(($( $help_t_pat:pat ),*),)? |$help_f:ident, $src:ident| $help:expr)]
-        $(#[info($({$(..)? $( $info_s_ident:ident$(: $info_s_pat:pat)? ),* $(, ..)?},)?$(($( $info_t_pat:pat ),*),)? |$info_f:ident| $info:expr)])?
+        $(#[info($({$(..)? $( $info_s_ident:ident$(: $info_s_pat:pat)? ),* $(, ..)?})?$(($( $info_t_pat:pat ),*))?, $info:expr)])?
         $Variant:ident$({$(
             $(#[$sfmeta:meta])*
             $sfield:ident: $SType:ty
@@ -265,14 +265,16 @@ macro_rules! CtxErrType {{
         ),*}
 
         impl<'src> ContextError<'src> {
-            fn info_line<'msg, A>(&'msg self, vec: &mut A)
+            fn info_line<'err, F>(&'err self, mut visit: F)
             where
-                'src: 'msg,
-                A: Extend<LineRef<'msg>>
+                'src: 'err,
+                F: FnMut(LineRef<'src, 'err>)
             {
                 match &self.err {
                     $($($Enum::$Variant$({$( $info_s_ident$(: $info_s_pat)?, )* ..})?$(($( $info_t_pat ),*))? => {
-                        vec.extend($info.into_iter().map(|(range, msg)| LineRef::new(self.source, RefStyleKind::Info, range, Box::new(msg))))
+                        for (range, msg) in $info {
+                            visit(LineRef::new(self.source, RefStyleKind::Info, range, msg.into()));
+                        }
                     },)?)*
                     _ => ()
                 }
@@ -525,7 +527,7 @@ pub enum ErrorType<'src> {
             actual.close(),
         )
     })]
-    #[info({ open_range }, |f| [(*open_range, "bracket type introduced here")])]
+    #[info({ open_range }, [(*open_range, "bracket type introduced here")])]
     IncorrectCloseBracket {
         /// The bracket type being expected based on the opening side
         open_range: Range<usize>,
@@ -552,7 +554,7 @@ pub enum ErrorType<'src> {
         expect.close(),
         expect.open(),
     ))]
-    #[info({ open_range }, |f| [(*open_range, "missing a partner")])]
+    #[info({ open_range }, [(*open_range, "missing a partner")])]
     MissingCloseBracket {
         open_range: Range<usize>,
         expect: Bracket,
@@ -590,7 +592,7 @@ pub enum ErrorType<'src> {
     #[err({ .. }, |f| write!(f, "divide by zero"))]
     #[inlay({ .. }, |f| write!(f, "dividing by 0"))]
     #[help({ .. }, |f, _src| write!(f, "ensure the right side cannot be 0"))]
-    #[info({ zero }, |f| [(*zero, "this expression evaluates to 0")])]
+    #[info({ zero }, [(*zero, "this expression evaluates to 0")])]
     DivByZero {
         /// The range of the expression evaluating to zero
         zero: Range<usize>,
@@ -616,7 +618,7 @@ pub enum ErrorType<'src> {
             _ => Ok(())
         }
     })]
-    #[info({ l_ty, l_range, r_ty, r_range, .. }, |f| [
+    #[info({ l_ty, l_range, r_ty, r_range, .. }, [
         (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: *l_ty }),
         (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty }),
     ])]
@@ -634,7 +636,7 @@ pub enum ErrorType<'src> {
     #[err({ op, r_ty, .. }, |f| write!(f, "`{op}` is not supported for {r_ty}"))]
     #[inlay({ op, r_ty, .. }, |f| write!(f, "{} is not supported for operands of this type", op.op_description(&[*r_ty])))]
     #[help({ .. }, |f, _src| write!(f, "try a different operator or convert the type"))]
-    #[info({ r_ty, r_range, .. }, |f| [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })])]
+    #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })])]
     Unsupported {
         /// The unary operator
         op: Punctuation,
@@ -655,7 +657,7 @@ pub enum ErrorType<'src> {
     #[err((_), |f| write!(f, "arithmetic overflow"))]
     #[inlay((_), |f| write!(f, "unhandled integer overflow"))]
     #[help((_), |f, _src| write!(f, "ensure the result will fit in an integer"))]
-    #[info((e), |f| *e)]
+    #[info((e), *e)]
     Overflow(OverflowError),
 
     /// Failed to convert between integer types
@@ -663,7 +665,7 @@ pub enum ErrorType<'src> {
     #[err({ failure, .. }, |f| write!(f, "failed conversion: {failure}"))]
     #[inlay({ .. }, |f| write!(f, "integer conversion failed"))]
     #[help({ .. }, |f, _src| write!(f, "ensure the expression fits in the target type"))]
-    #[info({ op, op_range, failure, is_binary }, |f| [
+    #[info({ op, op_range, failure, is_binary }, [
         (*op_range, FailedConversionMsg::new(*op, OpSide::Right, *failure, *is_binary)),
     ])]
     FailedConvert {
@@ -823,24 +825,6 @@ pub fn last_line_cols(s: &str) -> usize {
     s.rsplit_once('\n').map_or(s, |(_, tail)| tail).len()
 }
 
-/// The line of `position` within `s`
-#[expect(
-    dead_code,
-    reason = "optimized alternative to line_col for when only line part is needed"
-)]
-pub fn line_of(s: &str, position: usize) -> Option<usize> {
-    s.get(..position).map(last_line_cols)
-}
-
-/// The column of `position` within `s`
-#[expect(
-    dead_code,
-    reason = "optimized alternative to line_col for when only col part is needed"
-)]
-pub fn col_of(s: &str, position: usize) -> Option<usize> {
-    s.get(..position).map(last_line_cols)
-}
-
 /// The line and column of `position` within `s`
 ///
 /// It is slightly cheaper to call this function if you are doing both, since they use the same substring
@@ -960,41 +944,66 @@ impl RefStyleKind {
     }
 }
 
-struct LineRef<'msg> {
+#[derive(Debug, Clone, PartialEq)]
+enum LineRefMsg<'src, 'err> {
+    Text(&'static str),
+    InlineErr(InlineErrMsg<'src, 'err>),
+    TypeResolution(TypeResolutionMsg),
+    OverflowErrorInfo(OverflowErrorInfoMsg),
+    FailedConversion(FailedConversionMsg),
+}
+
+impl From<&'static str> for LineRefMsg<'_, '_> {
+    fn from(value: &'static str) -> Self {
+        Self::Text(value)
+    }
+}
+
+impl From<TypeResolutionMsg> for LineRefMsg<'_, '_> {
+    fn from(value: TypeResolutionMsg) -> Self {
+        Self::TypeResolution(value)
+    }
+}
+
+impl From<OverflowErrorInfoMsg> for LineRefMsg<'_, '_> {
+    fn from(value: OverflowErrorInfoMsg) -> Self {
+        Self::OverflowErrorInfo(value)
+    }
+}
+
+impl From<FailedConversionMsg> for LineRefMsg<'_, '_> {
+    fn from(value: FailedConversionMsg) -> Self {
+        Self::FailedConversion(value)
+    }
+}
+
+impl std::fmt::Display for LineRefMsg<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text(s) => f.write_str(s),
+            Self::InlineErr(e) => e.fmt(f),
+            Self::TypeResolution(e) => e.fmt(f),
+            Self::OverflowErrorInfo(e) => e.fmt(f),
+            Self::FailedConversion(e) => e.fmt(f),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct LineRef<'src, 'err> {
     pub style: RefStyleKind,
     pub range: Range<usize>,
     pub block: Range<usize>,
     pub span: Range<LineCol>,
-    pub msg: Box<dyn 'msg + std::fmt::Display>,
+    pub msg: LineRefMsg<'src, 'err>,
 }
 
-impl std::fmt::Debug for LineRef<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LineRef")
-            .field("style", &self.style)
-            .field("range", &self.range)
-            .field("block", &self.block)
-            .field("span", &self.span)
-            .field_with("msg", |f| write!(f, "{:?}", self.msg.to_string()))
-            .finish()
-    }
-}
-
-impl PartialEq for LineRef<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.style == other.style
-            && self.range == other.range
-            && std::ptr::eq(&raw const self.msg, &raw const other.msg)
-    }
-}
-impl Eq for LineRef<'_> {}
-
-impl<'msg> LineRef<'msg> {
+impl<'src, 'err> LineRef<'src, 'err> {
     fn new(
         source: &str,
         style: RefStyleKind,
         range: Range<usize>,
-        msg: Box<dyn 'msg + std::fmt::Display>,
+        msg: LineRefMsg<'src, 'err>,
     ) -> Self {
         Self {
             style,
@@ -1008,12 +1017,12 @@ impl<'msg> LineRef<'msg> {
 
 /// User must ensure slice is in order of range
 #[derive(Debug)]
-struct LineRefs<'src, 'arr, 'msg> {
+struct LineRefs<'src, 'arr, 'err> {
     pub source: &'src str,
-    pub items: &'arr [LineRef<'msg>],
+    pub items: &'arr [LineRef<'src, 'err>],
 }
 
-impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
+impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
     const EDGE_STYLE: Style = Style::new().foreground(Color::BrightBlue);
     /// Displayed in place of the line numbers between non-contiguous lines
     const ELLIPSES: &str = "...";
@@ -1023,7 +1032,7 @@ impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
     /// but messes up rendering if an error message has multiple lines.
     const SUPPORT_MULTILINE_MSG: bool = true;
 
-    const fn new(source: &'src str, items: &'arr [LineRef<'msg>]) -> Self {
+    const fn new(source: &'src str, items: &'arr [LineRef<'src, 'err>]) -> Self {
         Self { source, items }
     }
 
@@ -1056,8 +1065,12 @@ impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
 
     fn span_chunks(
         &self,
-    ) -> std::slice::ChunkBy<'arr, LineRef<'msg>, fn(&LineRef<'_>, &LineRef<'_>) -> bool> {
-        const fn p(a: &LineRef<'_>, b: &LineRef<'_>) -> bool {
+    ) -> std::slice::ChunkBy<
+        'arr,
+        LineRef<'src, 'err>,
+        fn(&LineRef<'src, 'err>, &LineRef<'src, 'err>) -> bool,
+    > {
+        const fn p(a: &LineRef<'_, '_>, b: &LineRef<'_, '_>) -> bool {
             a.span.start.line == b.span.start.line
                 && a.span.end.line == b.span.end.line
                 // overlapping items not supported - they go in separate chunks
@@ -1072,7 +1085,7 @@ impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
         end_line: usize,
         line_num_width: usize,
         block: &str,
-        line_items: &[LineRef<'_>],
+        line_items: &[LineRef],
     ) -> std::fmt::Result {
         // will only have multiple lines if there are multiple lines in a single line_item
         let lines = block
@@ -1122,8 +1135,8 @@ impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
         f: &mut std::fmt::Formatter<'_>,
         line_num_width: usize,
         n: usize,
-        line_items: &[LineRef<'_>],
-        item: &LineRef<'_>,
+        line_items: &[LineRef],
+        item: &LineRef,
         msg_line: &T,
     ) -> std::fmt::Result
     where
@@ -1148,7 +1161,7 @@ impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
 
     fn inline_messages(
         f: &mut std::fmt::Formatter<'_>,
-        line_items: &[LineRef<'_>],
+        line_items: &[LineRef],
         line_num_width: usize,
     ) -> std::fmt::Result {
         // this iterator is over the item whose name will be displayed next.
@@ -1188,7 +1201,7 @@ impl<'src, 'arr, 'msg> LineRefs<'src, 'arr, 'msg> {
                     !item.msg.to_string().contains('\n'),
                     "multiline inline messages not supported, implementor promised no inline error message would be multiple lines"
                 );
-                Self::print_message(f, line_num_width, n, line_items, item, &*item.msg)?;
+                Self::print_message(f, line_num_width, n, line_items, item, &item.msg)?;
             }
             writeln!(f)?;
         }
@@ -1572,35 +1585,116 @@ impl std::fmt::Display for FailedConversionMsg {
     }
 }
 
+use std::mem::MaybeUninit;
+
+/// Custom, minimal implementation of `ArrayVec` as to not include any libraries
+struct ArrayVec<T, const CAP: usize> {
+    buf: [MaybeUninit<T>; CAP],
+    /// The number of initialized elements in [`Self::buf`]
+    len: usize,
+}
+
+impl<T, const CAP: usize> Drop for ArrayVec<T, CAP> {
+    fn drop(&mut self) {
+        let buf = self
+            .buf
+            .get_mut(..self.len)
+            .expect("len should not exceed capacity");
+
+        // SAFETY: `len` is the number of initialized elements in `buf`
+        unsafe { buf.assume_init_drop() }
+    }
+}
+
+impl<T, const CAP: usize> std::ops::Deref for ArrayVec<T, CAP> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        let buf = self
+            .buf
+            .get(..self.len)
+            .expect("len should not exceed capacity");
+
+        // SAFETY: `len` is the number of initialized elements in `buf`
+        unsafe { buf.assume_init_ref() }
+    }
+}
+
+impl<T, const CAP: usize> std::ops::DerefMut for ArrayVec<T, CAP> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let buf = self
+            .buf
+            .get_mut(..self.len)
+            .expect("len should not exceed capacity");
+
+        // SAFETY: `len` is the number of initialized elements in `buf`
+        unsafe { buf.assume_init_mut() }
+    }
+}
+
+impl<T, const CAP: usize> Default for ArrayVec<T, CAP> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T, const CAP: usize> ArrayVec<T, CAP> {
+    const fn new() -> Self {
+        Self {
+            buf: [const { MaybeUninit::uninit() }; CAP],
+            len: 0,
+        }
+    }
+
+    /// Returns [`Err`] if out of capacity
+    const fn push_mut(&mut self, value: T) -> Result<&mut T, T> {
+        if let Some(new_len) = self.len.checked_add(1)
+            && new_len <= CAP
+        {
+            // SAFETY: Guarded by 'if' condition
+            let uninit = unsafe {
+                self.buf
+                    .get_unchecked_mut(std::mem::replace(&mut self.len, new_len))
+            };
+            Ok(uninit.write(value))
+        } else {
+            Err(value)
+        }
+    }
+}
+
 impl std::fmt::Display for RenderedContextError<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let err = InlineErrMsg(&self.0.err);
-        LineRefs::new(
+        const MAX_ERROR_REFS: usize = 1;
+        const MAX_MACRO_REFS: usize = 1;
+        const MAX_INFO_REFS: usize = 2;
+        let mut refs =
+            <ArrayVec<LineRef, { MAX_ERROR_REFS + MAX_MACRO_REFS + MAX_INFO_REFS }>>::new();
+
+        refs.push_mut(LineRef::new(
             self.0.source,
-            {
-                let mut refs = vec![LineRef::new(
-                    self.0.source,
-                    RefStyleKind::Error,
-                    self.0.range,
-                    Box::new(err),
-                )];
+            RefStyleKind::Error,
+            self.0.range,
+            LineRefMsg::InlineErr(InlineErrMsg(&self.0.err)),
+        )).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
 
-                if let Some(macro_range) = self.0.macro_range {
-                    refs.push(LineRef::new(
-                        self.0.source,
-                        RefStyleKind::Info,
-                        macro_range,
-                        Box::new("within this macro expansion"),
-                    ));
-                }
+        if let Some(macro_range) = self.0.macro_range {
+            refs.push_mut(LineRef::new(
+                self.0.source,
+                RefStyleKind::Info,
+                macro_range,
+                LineRefMsg::Text("within this macro expansion"),
+            )).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
+        }
 
-                self.0.info_line(&mut refs);
+        self.0.info_line(|item| {
+            refs.push_mut(item).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
+        });
 
-                refs.sort_by_key(|item| (item.span.start, item.span.end));
-                refs
-            }
-            .as_slice(),
-        )
-        .fmt(f)
+        refs.sort_by_key(|item| (item.span.start, item.span.end));
+
+        LineRefs::new(self.0.source, &refs).fmt(f)?;
+
+        Ok(())
     }
 }

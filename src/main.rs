@@ -3,6 +3,7 @@
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
+#![allow(unused_features)]
 #![feature(
     try_from_int_error_kind, // used in number literal error
     iter_next_chunk,
@@ -40,7 +41,13 @@
     pattern_type_range_trait,
     deref_pure_trait,
     macro_derive,
-    macro_attr
+    macro_attr,
+    impl_trait_in_assoc_type,
+    impl_trait_in_bindings,
+    impl_trait_in_fn_trait_return,
+    type_alias_impl_trait,
+    anonymous_lifetime_in_impl_trait,
+    associated_type_defaults,
 )]
 #![forbid(
     clippy::missing_safety_doc,
