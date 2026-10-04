@@ -93,7 +93,7 @@ pub enum Color {
 
 impl Color {
     /// Copied from [`std::mem::discriminant`](https://doc.rust-lang.org/std/mem/fn.discriminant.html#accessing-the-numeric-value-of-the-discriminant) example
-    fn discriminant(&self) -> u8 {
+    const fn discriminant(&self) -> u8 {
         // SAFETY: Because `Self` is marked `repr(u8)`, its layout is a `repr(C)` `union`
         // between `repr(C)` structs, each of which has the `u8` discriminant as its first
         // field, so we can read the discriminant without offsetting the pointer.
