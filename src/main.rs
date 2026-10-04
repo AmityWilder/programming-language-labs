@@ -87,7 +87,7 @@
 
 use error::ContextError;
 use eval::evaluate;
-use grammar::{Binary, Expr, Grouping, Lisp, Polish, Unary, parse};
+use grammar::{Binary, Expr, Grouping, Lisp, Unary, parse};
 use highlight::{
     highlight,
     style::{Style, StyleWrapper},
@@ -411,23 +411,32 @@ pub fn run_code(source: &str) {
     // eval
     println!();
     println!("evaluation:");
-    let eval_results = ast.iter().flatten().map(|expr| {
-        evaluate(source, expr).inspect(|x| {
-            print!("\x1b[90m{}:\x1b[0m ", Polish::new(expr));
-            match x {
+    let mut errors = Vec::new();
+    for (expr, res) in ast
+        .iter()
+        .flatten()
+        .map(|expr| (expr, evaluate(source, expr)))
+    {
+        print!("{:#}: ", Lisp::new(expr));
+        match res {
+            Ok(x) => match x {
                 eval::RunValue::Bool(x) => println!("{x:?}"),
                 eval::RunValue::UInt(x) => println!("{x:?}"),
                 eval::RunValue::SInt(x) => println!("{x:?}"),
                 eval::RunValue::Frac(x) => println!("{x:?}"),
                 eval::RunValue::Char(x) => println!("{x:?}"),
                 eval::RunValue::Str(x) => println!("{x:?}"),
+            },
+            Err(e) => {
+                println!("\x1b[91m[error]\x1b[0m");
+                errors.push(e);
             }
-        })
-    });
+        }
+    }
 
     // eval errors
     println!();
-    if list_errors(eval_results.filter_map(Result::err)) {
+    if list_errors(errors) {
         #[expect(
             clippy::needless_return,
             reason = "should return here if more items follow this in the future"

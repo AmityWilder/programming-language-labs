@@ -18,45 +18,58 @@ use std::range::Range;
 pub enum NumErrorKind {
     InvalidInt,
     InvalidFrac,
-    PosOverflow,
-    NegOverflow,
+    UPosOverflow,
+    SPosOverflow,
+    UNegOverflow,
+    SNegOverflow,
+    /// Negative sign with **explicit** unsigned suffix
     NegUnsigned,
+}
+
+impl NumErrorKind {
+    pub fn new(is_signed: bool, e: std::num::IntErrorKind) -> Self {
+        if is_signed {
+            Self::new_signed(e)
+        } else {
+            Self::new_unsigned(e)
+        }
+    }
+
+    pub fn new_signed(e: std::num::IntErrorKind) -> Self {
+        match e {
+            std::num::IntErrorKind::Empty => {
+                unreachable!("tokens can't be empty, this is the wrong error")
+            }
+            std::num::IntErrorKind::InvalidDigit => Self::InvalidInt,
+            std::num::IntErrorKind::PosOverflow => Self::SPosOverflow,
+            std::num::IntErrorKind::NegOverflow => Self::SNegOverflow,
+            _ => unimplemented!("not a real int error"),
+        }
+    }
+
+    pub fn new_unsigned(e: std::num::IntErrorKind) -> Self {
+        match e {
+            std::num::IntErrorKind::Empty => {
+                unreachable!("tokens can't be empty, this is the wrong error")
+            }
+            std::num::IntErrorKind::InvalidDigit => Self::InvalidInt,
+            std::num::IntErrorKind::PosOverflow => Self::UPosOverflow,
+            std::num::IntErrorKind::NegOverflow => Self::UNegOverflow,
+            _ => unimplemented!("not a real int error"),
+        }
+    }
 }
 
 impl std::fmt::Display for NumErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidInt | Self::InvalidFrac => "invalid digit found in source code",
-            Self::PosOverflow => "number too large to fit in target type",
-            Self::NegOverflow | Self::NegUnsigned => "number too small to fit in target type",
+            Self::UPosOverflow | Self::SPosOverflow => "number too large to fit in target type",
+            Self::UNegOverflow | Self::SNegOverflow | Self::NegUnsigned => {
+                "number too small to fit in target type"
+            }
         }
         .fmt(f)
-    }
-}
-
-impl From<std::num::IntErrorKind> for NumErrorKind {
-    fn from(value: std::num::IntErrorKind) -> Self {
-        match value {
-            std::num::IntErrorKind::Empty => {
-                unreachable!("tokens can't be empty, this is the wrong error")
-            }
-            std::num::IntErrorKind::InvalidDigit => Self::InvalidInt,
-            std::num::IntErrorKind::PosOverflow => Self::PosOverflow,
-            std::num::IntErrorKind::NegOverflow => Self::NegOverflow,
-            _ => unimplemented!("not a real int error"),
-        }
-    }
-}
-
-impl From<std::num::ParseIntError> for NumErrorKind {
-    fn from(value: std::num::ParseIntError) -> Self {
-        Self::from(*value.kind())
-    }
-}
-
-impl From<std::num::TryFromIntError> for NumErrorKind {
-    fn from(value: std::num::TryFromIntError) -> Self {
-        Self::from(*value.kind())
     }
 }
 
@@ -95,16 +108,69 @@ impl std::fmt::Display for OverflowErrorInfoMsg {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OverflowError {
-    Binary {
+    UAdd {
         l_range: Range<usize>,
         r_range: Range<usize>,
-        l_value: IntValue,
-        r_value: IntValue,
+        l_value: usize,
+        r_value: usize,
     },
-    Unary {
+    SAdd {
+        l_range: Range<usize>,
         r_range: Range<usize>,
-        r_value: IntValue,
+        l_value: isize,
+        r_value: isize,
     },
+    USub {
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: usize,
+        r_value: usize,
+    },
+    SSub {
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: isize,
+        r_value: isize,
+    },
+    UMul {
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: usize,
+        r_value: usize,
+    },
+    SMul {
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: isize,
+        r_value: isize,
+    },
+    UPow {
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: usize,
+        r_value: usize,
+    },
+    SPow {
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_value: isize,
+        r_value: isize,
+    },
+    SNeg {
+        r_range: Range<usize>,
+        r_value: isize,
+    },
+}
+
+impl OverflowError {
+    const fn op(&self) -> Punctuation {
+        match self {
+            Self::UAdd { .. } | Self::SAdd { .. } => Punctuation::Add,
+            Self::USub { .. } | Self::SSub { .. } | Self::SNeg { .. } => Punctuation::SubNeg,
+            Self::UMul { .. } | Self::SMul { .. } => Punctuation::Mul,
+            Self::UPow { .. } | Self::SPow { .. } => Punctuation::Pow,
+        }
+    }
 }
 
 impl IntoIterator for OverflowError {
@@ -113,20 +179,93 @@ impl IntoIterator for OverflowError {
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            OverflowError::Binary {
+            Self::SAdd {
+                l_range,
+                r_range,
+                l_value,
+                r_value,
+            }
+            | Self::SSub {
+                l_range,
+                r_range,
+                l_value,
+                r_value,
+            }
+            | Self::SMul {
+                l_range,
+                r_range,
+                l_value,
+                r_value,
+            }
+            | Self::SPow {
                 l_range,
                 r_range,
                 l_value,
                 r_value,
             } => [
-                (l_range, OverflowErrorInfoMsg { value: l_value }),
-                (r_range, OverflowErrorInfoMsg { value: r_value }),
+                (
+                    l_range,
+                    OverflowErrorInfoMsg {
+                        value: IntValue::SInt(l_value),
+                    },
+                ),
+                (
+                    r_range,
+                    OverflowErrorInfoMsg {
+                        value: IntValue::SInt(r_value),
+                    },
+                ),
             ]
             .into_iter(),
-            OverflowError::Unary { r_range, r_value } => {
+
+            Self::UAdd {
+                l_range,
+                r_range,
+                l_value,
+                r_value,
+            }
+            | Self::USub {
+                l_range,
+                r_range,
+                l_value,
+                r_value,
+            }
+            | Self::UMul {
+                l_range,
+                r_range,
+                l_value,
+                r_value,
+            }
+            | Self::UPow {
+                l_range,
+                r_range,
+                l_value,
+                r_value,
+            } => [
+                (
+                    l_range,
+                    OverflowErrorInfoMsg {
+                        value: IntValue::UInt(l_value),
+                    },
+                ),
+                (
+                    r_range,
+                    OverflowErrorInfoMsg {
+                        value: IntValue::UInt(r_value),
+                    },
+                ),
+            ]
+            .into_iter(),
+
+            OverflowError::SNeg { r_range, r_value } => {
                 let mut iter = [
                     Default::default(),
-                    (r_range, OverflowErrorInfoMsg { value: r_value }),
+                    (
+                        r_range,
+                        OverflowErrorInfoMsg {
+                            value: IntValue::SInt(r_value),
+                        },
+                    ),
                 ]
                 .into_iter();
                 _ = iter.next(); // skip first
@@ -481,9 +620,11 @@ pub enum ErrorType<'src> {
                 let (suffix, base_name) = invalid_num_suffix(src);
                 write!(f, "the suffix `{suffix}` is not valid for {base_name} unsigned integer literals")
             }
-            NumErrorKind::PosOverflow => write!(f, "the largest supported integer value is {}", usize::MAX),
-            NumErrorKind::NegOverflow => write!(f, "the smallest supported integer value is {}", isize::MIN),
-            NumErrorKind::NegUnsigned => write!(f, "the smallest supported unsigned integer value is {}", usize::MIN),
+            NumErrorKind::UPosOverflow => write!(f, "the largest supported unsigned integer value is {}", usize::MAX),
+            NumErrorKind::SPosOverflow => write!(f, "the largest supported signed integer value is {}", isize::MAX),
+            NumErrorKind::UNegOverflow => write!(f, "the smallest supported unsigned integer value is {}", usize::MIN),
+            NumErrorKind::SNegOverflow => write!(f, "the smallest supported signed integer value is {}", isize::MIN),
+            NumErrorKind::NegUnsigned => f.write_str("unsigned integers cannot be negative"),
             NumErrorKind::InvalidFrac => write!(f, "I'm not sure how to help with this yet"), // TODO: float literal guidance
         }
     })]
@@ -656,7 +797,68 @@ pub enum ErrorType<'src> {
     #[code(RUN, 45)]
     #[err((_), |f| write!(f, "arithmetic overflow"))]
     #[inlay((_), |f| write!(f, "unhandled integer overflow"))]
-    #[help((_), |f, _src| write!(f, "ensure the result will fit in an integer"))]
+    #[help((e), |f, _src| {
+        #[expect(clippy::as_conversions, reason = "if n is an integer, then n <= 2^n-1")]
+        const N: usize = usize::BITS as usize;
+        const K: usize = N - 1;
+
+        match e {
+            OverflowError::UAdd {..} |
+            OverflowError::USub {..} |
+            OverflowError::UMul {..} |
+            OverflowError::UPow {..} => writeln!(f, "uints must be between {} and {}.", usize::MIN, usize::MAX)?,
+
+            OverflowError::SAdd {..} |
+            OverflowError::SSub {..} |
+            OverflowError::SMul {..} |
+            OverflowError::SPow {..} |
+            OverflowError::SNeg {..} => writeln!(f, "sints must be between {} and {}.", isize::MIN, isize::MAX)?,
+        }
+        f.write_str("use conditions to ensure this expression's output can fit within the appropriate bounds for its type, or switch to using a frac.")?;
+
+        match e {
+            OverflowError::SNeg { r_value, .. } => {
+                assert_eq!(*r_value, isize::MIN, "when else can unary negation result in overflow?");
+                let (prefix_min, last_digit_min) = (isize::MIN / 10, isize::MIN % 10);
+                let (prefix_max, last_digit_max) = (isize::MAX / 10, isize::MAX % 10);
+                write!(f,
+                    "\n\nremember that a signed integer can be 1 magnitude greater in the negatives than the positives \
+                    (i.e. {prefix_min}\x1b[1m{}\x1b[22m vs {prefix_max}\x1b[1m{last_digit_max}\x1b[22m)",
+                    last_digit_min.unsigned_abs()
+                )
+            }
+
+            OverflowError::UPow { l_value, r_value, .. } if *r_value >= N => {
+                assert!(*l_value >= 2, "how did you overflow a uint from multiplying 0 or 1 by itself...");
+                write!(f,
+                    "\n\nuints are stored as {N} digits in base 2, so putting anything bigger than 1 to a power of at least {N} is certain to overflow.")?;
+                if *r_value == N {
+                    write!(f,
+                        "\n\nremember that 2**{N} can't be stored in {N} digits; the biggest number you can store in {N} bits is {N} consecutive 1s, \
+                        which is 1 value smaller than 2**{N}"
+                    )?;
+                }
+                Ok(())
+            }
+
+            OverflowError::SPow { l_value, r_value, .. } if let Ok(r_value) = usize::try_from(*r_value) && r_value >= K => {
+                assert!(!(0..2).contains(l_value), "how did you overflow a uint from multiplying 0 or 1 by itself...");
+                write!(f,
+                    "\n\nsints are stored as {N} digits in base 2 (using 2's complement to store negatives), \
+                    so putting anything bigger than 1 to a power of at least {K} is certain to overflow.")?;
+                if r_value == K {
+                    write!(f,
+                        "\n\nremember that 2**{K} can't be stored in {K} digits; the biggest number you can store in {K} bits is {K} consecutive 1s, \
+                        which is 1 value smaller than 2**{K}"
+                    )?;
+                }
+                Ok(())
+            }
+
+            // no additional notes
+            _ => Ok(())
+        }
+    })]
     #[info((e), *e)]
     Overflow(OverflowError),
 
@@ -1030,7 +1232,7 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
     /// If one does in the future, enable this.
     /// Having this disabled saves from allocating a string to iterate over its lines,
     /// but messes up rendering if an error message has multiple lines.
-    const SUPPORT_MULTILINE_MSG: bool = true;
+    const SUPPORT_MULTILINE_MSG: bool = false;
 
     const fn new(source: &'src str, items: &'arr [LineRef<'src, 'err>]) -> Self {
         Self { source, items }
@@ -1567,9 +1769,7 @@ impl std::fmt::Display for FailedConversionMsg {
         };
         write!(
             f,
-            "expression evaluated to {value:?}.\n\
-            {} requires {side} to be {target_ty}, which must be between {min} and {max}\n\
-            ({n} {} {broken_bound})",
+            "expression evaluated to {value:?}; {} requires {side} to be {target_ty}, which must be between {min} and {max} ({n} {} {broken_bound})",
             // HACK: not the actual value types, but correct quantity. should be fine as long as uint vs sint doesn't change the description
             op.op_description(if *is_binary {
                 [ValueType::SInt, ValueType::SInt].as_slice()

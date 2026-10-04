@@ -154,22 +154,30 @@ impl<'src> LexValue<'src> {
                 .map(Self::FracLiteral)
                 .map_err(|_| ErrorType::InvalidNumLiteral(NumErrorKind::InvalidFrac))
         } else {
-            let stripped = src.strip_prefix('-');
-            let is_negative = stripped.is_some();
-            let magnitude = stripped.unwrap_or(src);
-            let (magnitude, is_signed) = if let Some(pre) = magnitude.strip_suffix('i') {
-                (pre, true)
-            } else if let Some(pre) = magnitude.strip_suffix('u') {
-                if is_negative {
-                    return Err(ErrorType::InvalidNumLiteral(NumErrorKind::NegUnsigned));
-                }
-                (pre, false)
+            enum SignSuffix {
+                Signed,
+                Unsigned,
+            }
+            let (with_suffix, sign_suffix) = if let Some(pre) = src.strip_suffix('s') {
+                (pre, Some(SignSuffix::Signed))
+            } else if let Some(pre) = src.strip_suffix('u') {
+                (pre, Some(SignSuffix::Unsigned))
             } else {
-                // default to signed
-                // users should explicitly confirm they are doing unsigned math for safety reason (e.g. indexing).
-                // signed math shouldn't need to be filled with suffixes.
-                (magnitude, true)
+                (src, None)
             };
+            let stripped = with_suffix.strip_prefix('-');
+            let is_negative = stripped.is_some();
+            let magnitude = stripped.unwrap_or(with_suffix);
+
+            // default to signed
+            // users should explicitly confirm they are doing unsigned math for safety reason (e.g. indexing).
+            // signed math shouldn't need to be filled with suffixes.
+            let is_signed = matches!(sign_suffix, Some(SignSuffix::Signed) | None);
+
+            // cannot mix explicit unsigned with negative sign
+            if matches!(sign_suffix, Some(SignSuffix::Signed)) && is_negative {
+                return Err(ErrorType::InvalidNumLiteral(NumErrorKind::UNegOverflow));
+            }
 
             let (digits, radix) = if let Some(n) = magnitude.strip_prefix(HEX_PREFIX) {
                 (n, 16)
@@ -180,32 +188,44 @@ impl<'src> LexValue<'src> {
             } else {
                 (magnitude, 10)
             };
+
             if digits.is_empty() {
                 // for digits to be empty, we must have something like "0x".
                 // this is a valid prefix for a number, but without a number following it,
                 // we treat it like "0" with the suffix "x" (which isn't allowed).
                 return Err(ErrorType::InvalidNumLiteral(NumErrorKind::InvalidInt));
             }
-            usize::from_str_radix(digits, radix)
-                .map_err(|e| ErrorType::InvalidNumLiteral(e.into()))
-                .and_then(|value| {
-                    if is_signed {
-                        (isize::try_from(value)
-                            .map_err(|e| ErrorType::InvalidNumLiteral(e.into()))
-                            .and_then(|x| {
-                                if is_negative {
-                                    x.checked_neg().ok_or(ErrorType::InvalidNumLiteral(
-                                        NumErrorKind::NegOverflow,
-                                    ))
-                                } else {
-                                    Ok(x)
-                                }
-                            }))
-                        .map(Self::SIntLiteral)
-                    } else {
-                        Ok(Self::UIntLiteral(value))
-                    }
-                })
+
+            if is_signed {
+                // prefix with a hyphen
+                const ASCII_MINUS: u8 = b'-';
+                const ASCII_MINUS_LEN: usize = 1;
+                #[expect(clippy::as_conversions)]
+                let mut buf = [b'\0'; isize::MAX.ilog10() as usize + 2];
+
+                let digits = if is_negative {
+                    buf[0] = ASCII_MINUS;
+                    let buf_len = digits.len().checked_add(ASCII_MINUS_LEN);
+                    let (buf_len, digit_buf) = buf_len
+                        .and_then(|end| buf.get_mut(ASCII_MINUS_LEN..end).map(|slice| (end, slice)))
+                        .ok_or(ErrorType::InvalidNumLiteral(NumErrorKind::SNegOverflow))?;
+                    digit_buf.copy_from_slice(digits.as_bytes());
+                    std::str::from_utf8(buf.get(..buf_len).expect("should be able to get ??"))
+                        .expect("prepending a UTF-8-valid character (all ASCII is valid UTF-8) should not cause invalid UTF-8")
+                } else {
+                    digits
+                };
+
+                isize::from_str_radix(digits, radix)
+                    .map(Self::SIntLiteral)
+                    .map_err(|e| ErrorType::InvalidNumLiteral(NumErrorKind::new_signed(*e.kind())))
+            } else {
+                usize::from_str_radix(digits, radix)
+                    .map(Self::UIntLiteral)
+                    .map_err(|e| {
+                        ErrorType::InvalidNumLiteral(NumErrorKind::new_unsigned(*e.kind()))
+                    })
+            }
         }
     }
 
