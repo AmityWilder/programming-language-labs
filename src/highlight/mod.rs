@@ -3,19 +3,16 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     error::ContextError,
-    highlight::{
-        style::StyleWrapper,
-        syntax::{Syntax, syntax_of},
-    },
+    highlight::{style::StyleWrapper, syntax::Syntax},
     scanner::{
         symbols::{CHAR_DELIM, STR_DELIM},
         token::{
             Token,
-            value::{CharLiteral, Escapes, LexValue, StrLiteral, StringLiteral},
+            value::{CharLiteral, Escapes, LexValue, StrLiteral},
         },
     },
 };
-use std::range::Range;
+use std::{marker::PhantomData, range::Range};
 
 pub mod style;
 pub mod syntax;
@@ -179,27 +176,12 @@ where
 }
 
 /// An extension to [`StrLiteral`] defining helpers for syntax highlighting
-pub trait Highlighting<'src: 'arr, 'arr>: 'arr {
+pub trait Highlighting<'src> {
     /// The type returned by [`Self::escaped_str_literal`]
-    type Escaped: 'arr + Iterator<Item = (&'src str, Syntax)>;
+    type Escaped: Iterator<Item = (&'src str, Syntax)>;
 
     /// Returns a syntax iterator over subtokens of a char/string literal
-    fn escaped_str_literal(lex: &'src str, syn: Syntax, literal: &'arr Self) -> Self::Escaped;
-}
-
-impl<'src: 'arr, 'arr> Highlighting<'src, 'arr> for StringLiteral {
-    type Escaped = SubTokenSyntax<
-        'src,
-        EscapedRanges<std::iter::Copied<std::slice::Iter<'arr, Range<usize>>>>,
-    >;
-
-    fn escaped_str_literal(lex: &'src str, syn: Syntax, literal: &'arr Self) -> Self::Escaped {
-        SubTokenSyntax::new(
-            lex,
-            syn,
-            EscapedRanges::new(literal.escapes.iter().copied()),
-        )
-    }
+    fn escaped_str_literal(lex: &'src str, syn: Syntax, literal: Self) -> Self::Escaped;
 }
 
 /// Not related to [`EscapedRanges`], actually. Just adapts an [`Escapes`] iterator into its non-error ranges.
@@ -224,10 +206,10 @@ impl Iterator for EscapeRanges<'_> {
     }
 }
 
-impl<'src: 'arr, 'arr> Highlighting<'src, 'arr> for StrLiteral<'src> {
-    type Escaped = SubTokenSyntax<'src, EscapedRanges<EscapeRanges<'arr>>>;
+impl<'src> Highlighting<'src> for StrLiteral<'src> {
+    type Escaped = SubTokenSyntax<'src, EscapedRanges<EscapeRanges<'src>>>;
 
-    fn escaped_str_literal(lex: &'src str, syn: Syntax, literal: &'arr Self) -> Self::Escaped {
+    fn escaped_str_literal(lex: &'src str, syn: Syntax, literal: Self) -> Self::Escaped {
         SubTokenSyntax::new(
             lex,
             syn,
@@ -238,7 +220,7 @@ impl<'src: 'arr, 'arr> Highlighting<'src, 'arr> for StrLiteral<'src> {
 
 /// An iterator over the subtokens of any valid token, since each has its own method of iterating
 #[derive(Debug, Clone)]
-pub enum HighlightToken<'src: 'arr, 'arr, H: Highlighting<'src, 'arr>> {
+pub enum HighlightToken<'src, H: Highlighting<'src>> {
     /// Character literal containing escapes - the open delimiter, the escape sequence, then the close delimiter
     CharLiteral(std::array::IntoIter<(&'src str, Syntax), 3>),
     /// String literal containing escapes - interleaves the escape sequences between un-escaped chunks
@@ -247,7 +229,7 @@ pub enum HighlightToken<'src: 'arr, 'arr, H: Highlighting<'src, 'arr>> {
     Simple(std::iter::Once<(&'src str, Syntax)>),
 }
 
-impl<'src: 'arr, 'arr, H: Highlighting<'src, 'arr>> Iterator for HighlightToken<'src, 'arr, H> {
+impl<'src, H: Highlighting<'src>> Iterator for HighlightToken<'src, H> {
     type Item = (&'src str, Syntax);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -277,27 +259,31 @@ impl<'src: 'arr, 'arr, H: Highlighting<'src, 'arr>> Iterator for HighlightToken<
 
 /// An iterator over tokens, outputting their lexeme and [Syntax]
 #[derive(Debug, Clone)]
-pub struct HighlightIter<I> {
+pub struct HighlightIter<'src, I> {
     /// Iterator being adapted
     iter: I,
+    lt: PhantomData<&'src str>,
 }
 
-impl<I> HighlightIter<I> {
+impl<I> HighlightIter<'_, I> {
     /// Constructs a new [`HighlightIter`] iterator
     const fn new(iter: I) -> Self {
-        Self { iter }
+        Self {
+            iter,
+            lt: PhantomData,
+        }
     }
 }
 
-impl<'src: 'arr, 'arr, I> Iterator for HighlightIter<I>
+impl<'src, I> Iterator for HighlightIter<'src, I>
 where
-    I: Iterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
+    I: Iterator<Item: TokenHighlight<'src>>,
 {
-    type Item = HighlightToken<'src, 'arr, StrLiteral<'src>>;
+    type Item = HighlightToken<'src, StrLiteral<'src>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|res| {
-            let (lex, syn, val) = syntax_of(res);
+        self.iter.next().map(|item| {
+            let (lex, syn, val) = item.get_syntax();
             match val {
                 // char literal with escape - an iterator
                 LexValue::CharLiteral(CharLiteral {
@@ -316,12 +302,52 @@ where
     }
 }
 
+pub trait TokenHighlight<'src> {
+    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>);
+}
+
+impl<'src, T> TokenHighlight<'src> for &T
+where
+    T: ?Sized + TokenHighlight<'src>,
+{
+    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
+        (*self).get_syntax()
+    }
+}
+
+impl<'src> TokenHighlight<'src> for Token<'src> {
+    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
+        (self.lex, self.syntax(), self.val)
+    }
+}
+
+impl<'src> TokenHighlight<'src> for ContextError<'src> {
+    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
+        (
+            self.source
+                .get(self.range)
+                .expect("range should be a range of source"),
+            Syntax::Invalid,
+            const { LexValue::Comment },
+        )
+    }
+}
+
+impl<'src> TokenHighlight<'src> for Result<Token<'src>, ContextError<'src>> {
+    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
+        match self {
+            Ok(token) => token.get_syntax(),
+            Err(e) => e.get_syntax(),
+        }
+    }
+}
+
 /// An iterator over each lexeme and [`Syntax`] in the list
 ///
 /// TODO: allow this to accept values and not just references!!
-pub fn highlight<'src: 'arr, 'arr, I>(tokens: I) -> std::iter::Flatten<HighlightIter<I::IntoIter>>
+pub fn highlight<'src, I>(tokens: I) -> std::iter::Flatten<HighlightIter<'src, I::IntoIter>>
 where
-    I: IntoIterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
+    I: IntoIterator<Item: TokenHighlight<'src>>,
 {
     HighlightIter::new(tokens.into_iter()).flatten()
 }
@@ -329,14 +355,23 @@ where
 /// **Warning:** [`std::fmt::Display`] impl creates a [`Clone`] of `I`
 pub struct Highlighted<I>(pub I);
 
-impl<'src: 'arr, 'arr, I> std::fmt::Display for Highlighted<I>
+impl<'src, I> Highlighted<I>
 where
-    I: Clone + Iterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
+    I: IntoIterator<Item: TokenHighlight<'src>>,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (lexeme, syntax) in highlight(self.0.clone()) {
+    pub fn format_to(self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (lexeme, syntax) in highlight(self.0) {
             write!(f, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme))?;
         }
         f.write_str("\x1b[0m")
+    }
+}
+
+impl<'src, I> std::fmt::Display for Highlighted<I>
+where
+    I: Clone + IntoIterator<Item: TokenHighlight<'src>>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Self(self.0.clone()).format_to(f)
     }
 }

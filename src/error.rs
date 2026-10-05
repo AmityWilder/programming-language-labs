@@ -1340,9 +1340,9 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
                 line
             };
 
-            // TODO: make highlight() accept values so this doesn't need to allocate
-            let line_tokens: Vec<_> = scanner::tokenize(line_after_block_comment).collect();
-            writeln!(f, "{}", crate::highlight::Highlighted(line_tokens.iter()))?;
+            crate::highlight::Highlighted(scanner::tokenize(line_after_block_comment))
+                .format_to(f)?;
+            writeln!(f)?;
             // per-line
             Self::write_line_start(f, line_num_width, "")?;
             // assumes line items are in order

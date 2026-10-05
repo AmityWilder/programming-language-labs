@@ -273,7 +273,7 @@ impl LispDisplay for Expr<'_> {
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Literal(tkn @ Token { lex, .. }) => {
                 if f.alternate() {
-                    std::fmt::Display::fmt(&Highlighted(std::iter::once(&Ok(*tkn))), f)
+                    Highlighted(std::iter::once(&Ok(*tkn))).format_to(f)
                 } else {
                     f.write_str(lex)
                 }

@@ -85,6 +85,8 @@
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
+use highlight::TokenHighlight;
+
 use crate::{
     error::ContextError,
     eval::{RunValue, evaluate},
@@ -92,7 +94,7 @@ use crate::{
     highlight::{
         Highlighted, highlight,
         style::{Style, StyleWrapper},
-        syntax::{Syntax, SyntaxStyle, syntax_of, syntax_style},
+        syntax::{Syntax, SyntaxStyle, syntax_style},
     },
     preproc::preprocess,
     scanner::{
@@ -103,7 +105,7 @@ use crate::{
         tokenize,
     },
 };
-use std::{fmt::Write, range::Range};
+use std::range::Range;
 
 mod error;
 mod eval;
@@ -306,7 +308,7 @@ where
     let max_cols = source.lines().map(str::len).max().unwrap_or(0);
     let max_range_digits = max_cols.to_string().len().strict_mul(2);
     for item in tokens {
-        let (_, syn, _) = syntax_of(item);
+        let (_, syn, _) = item.get_syntax();
         let style = SYNTAX_STYLE_ANSI[syn];
         let range = match item {
             Ok(token) => token.lex_range(source),
@@ -341,11 +343,11 @@ pub fn last_ansi_seq(src: &str, pos: usize) -> &str {
         .unwrap_or("\x1b[0m")
 }
 
-fn print_highlighted<'src, 'arr, I>(tokens: I)
+fn print_highlighted<'src, I>(tokens: I)
 where
-    'src: 'arr,
-    I: IntoIterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
+    I: IntoIterator<Item: TokenHighlight<'src>>,
 {
+    use std::fmt::Write;
     let mut buf = String::new();
     for (lexeme, syntax) in highlight(tokens) {
         _ = write!(buf, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
@@ -512,13 +514,12 @@ pub fn run_code(source: &str) {
             mac: None,
         };
         println!("\nsemantic highlighting (EXPERIMENTAL):");
-        let ast_tokens: Vec<_> = ast
-            .iter()
-            .flatten()
-            .flat_map(|root| grammar::AstIter::new(root).chain(std::iter::once(&NEWLINE)))
-            .map(|token| Ok(*token))
-            .collect();
-        print_highlighted(&ast_tokens);
+        print_highlighted(
+            ast.iter()
+                .flatten()
+                .flat_map(|root| grammar::AstIter::new(root).chain(std::iter::once(&NEWLINE)))
+                .map(|token| Ok(*token)),
+        );
     }
     // ----------------------------------------------
 
@@ -535,9 +536,12 @@ pub fn run_code(source: &str) {
             errors.push(e.clone());
         }
         let mut buf = String::new();
-        let result_token = result_token(res, &mut buf);
 
-        println!("{}\n", Highlighted(std::iter::once(&result_token)));
+        // TODO: this clones the iterator
+        println!(
+            "{}\n",
+            Highlighted(std::iter::once(result_token(res, &mut buf)))
+        );
     }
 
     // eval errors
