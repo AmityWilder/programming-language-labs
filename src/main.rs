@@ -85,15 +85,12 @@
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
-use highlight::{GenericError, TokenHighlight};
-use scanner::token::keyword::Keyword;
-
 use crate::{
     error::ContextError,
     eval::{RunValue, evaluate},
     grammar::{Binary, Expr, Grouping, Lisp, Unary, parse},
     highlight::{
-        highlight,
+        GenericError, TokenHighlight, highlight,
         style::{Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle, syntax_style},
     },
@@ -101,6 +98,7 @@ use crate::{
     scanner::{
         token::{
             Token,
+            keyword::Keyword,
             value::{CharLiteral, LexValue, StrLiteral},
         },
         tokenize,
@@ -212,15 +210,15 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
         }
 
         Expr::Unary(inner) => {
-            let Unary { op, rhs } = &**inner;
+            let Unary { op, operand, side } = &**inner;
 
             header("Unary");
 
             field(" op", indent);
             println!("{}", SYNTAX_STYLE_ANSI[op.syntax()].style_dbg(op));
 
-            let field_indent = field("rhs", indent);
-            print_ast(rhs, field_indent, br_depth);
+            let field_indent = field(side.as_str(), indent);
+            print_ast(operand, field_indent, br_depth);
         }
 
         Expr::Literal(token) => {
@@ -381,7 +379,7 @@ where
 
 fn runtime_token(value: RunValue, buf: &mut String) -> Token<'_> {
     match value {
-        RunValue::None => Token {
+        RunValue::None | RunValue::CoalesceNone => Token {
             lex: "none",
             val: LexValue::Keyword(Keyword::None),
             mac: None,

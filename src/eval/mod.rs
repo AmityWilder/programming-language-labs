@@ -1,7 +1,9 @@
 //! Code execution
 
 use crate::{
-    error::{ContextError, ErrorType, IntConversionFailure, IntValue, OverflowError, TargetTy},
+    error::{
+        ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
+    },
     grammar::{Binary, Expr, Unary},
     scanner::token::{
         Token,
@@ -238,6 +240,8 @@ impl std::fmt::Display for ValueType {
 pub enum RunValue {
     #[default]
     None,
+    /// `none` that also outputs `none` as a result of every operation, instead of erroring
+    CoalesceNone,
     Bool(bool),
     UInt(usize),
     SInt(isize),
@@ -249,7 +253,7 @@ pub enum RunValue {
 impl RunValue {
     pub const fn as_type(&self) -> ValueType {
         match self {
-            Self::None => ValueType::None,
+            Self::None | Self::CoalesceNone => ValueType::None,
             Self::Bool(_) => ValueType::Bool,
             Self::UInt(_) => ValueType::UInt,
             Self::SInt(_) => ValueType::SInt,
@@ -667,15 +671,22 @@ impl RunValue {
 
 pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, ContextError<'src>> {
     use Punctuation::{
-        Add, And, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Pow, Rem, Rotl,
-        Rotr, Shl, Shr, SubNeg, Xnor, Xor,
+        Add, And, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Pow, QMark, Rem,
+        Rotl, Rotr, Shl, Shr, SubNeg, Xnor, Xor,
     };
-    // TODO: what about `none`?
     match ast {
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
             let l = evaluate(source, lhs)?;
             let r = evaluate(source, rhs)?;
+
+            if matches!(
+                (&l, &r),
+                (RunValue::CoalesceNone, _) | (_, RunValue::CoalesceNone)
+            ) {
+                return Ok(RunValue::CoalesceNone);
+            }
+
             let LexValue::Punctuation(punc) = op.val else {
                 unimplemented!();
             };
@@ -715,19 +726,28 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
         }
 
         Expr::Unary(inner) => {
-            let Unary { op, rhs } = &**inner;
-            let r = evaluate(source, rhs)?;
+            let Unary { op, operand, side } = &**inner;
+            let x = evaluate(source, operand)?;
+
+            if matches!(&x, RunValue::CoalesceNone) {
+                return Ok(RunValue::CoalesceNone);
+            }
+
             let LexValue::Punctuation(punc) = op.val else {
                 unimplemented!();
             };
-            match punc {
-                Not => r.not(),
-                SubNeg => r.neg(),
-                Exists => Ok(r.exists()),
+            match (punc, side) {
+                // prefix
+                (Not, OpSide::Right) => x.not(),
+                (SubNeg, OpSide::Right) => x.neg(),
+                (Exists, OpSide::Right) => Ok(x.exists()),
+
+                // postfix
+                (QMark, OpSide::Left) => return Ok(RunValue::CoalesceNone),
 
                 _ => unimplemented!(),
             }
-            .map_err(|e| e.unary(source, op, punc, rhs))
+            .map_err(|e| e.unary(source, op, punc, operand))
         }
 
         Expr::Literal(token) => match token.val {

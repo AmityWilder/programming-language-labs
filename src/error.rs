@@ -1659,19 +1659,27 @@ impl Punctuation {
     }
 }
 
+/// Which side of the operator the operand is on
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OpSide {
+    /// Postfix
     Left,
+    /// Prefix
     Right,
 }
 
-impl std::fmt::Display for OpSide {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl OpSide {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Left => "lhs",
             Self::Right => "rhs",
         }
-        .fmt(f)
+    }
+}
+
+impl std::fmt::Display for OpSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
     }
 }
 

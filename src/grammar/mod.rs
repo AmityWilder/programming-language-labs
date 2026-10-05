@@ -2,7 +2,7 @@
 
 use crate::{
     SYNTAX_STYLE_ANSI,
-    error::{ContextError, ErrorType, ExpectedToken},
+    error::{ContextError, ErrorType, ExpectedToken, OpSide},
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
     scanner::{
         BadBracketCombo, Bracket,
@@ -138,21 +138,30 @@ impl PolishDisplay for Binary<'_> {
 pub struct Unary<'src> {
     /// Promises to use [`Punctuation::Neg`] instead of [`Punctuation::Sub`]
     pub op: Token<'src>,
-    pub rhs: Expr<'src>,
+    pub operand: Expr<'src>,
+    pub side: OpSide,
 }
 
 impl<'src> Unary<'src> {
     fn range(&self, source: &'src str) -> Range<usize> {
-        Range {
-            start: self.op.lex_range(source).start,
-            end: self.rhs.range(source).end,
+        let op_range = self.op.lex_range(source);
+        let operand_range = self.operand.range(source);
+        match self.side {
+            OpSide::Left => Range {
+                start: operand_range.start,
+                end: op_range.end,
+            },
+            OpSide::Right => Range {
+                start: op_range.start,
+                end: operand_range.end,
+            },
         }
     }
 
     /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
     pub fn macro_range(&self, source: &'src str) -> Option<Range<usize>> {
         let op_mac = self.op.mac?;
-        let rhs_mac = self.rhs.macro_range(source)?;
+        let rhs_mac = self.operand.macro_range(source)?;
         (op_mac == rhs_mac).then_some(op_mac)
     }
 }
@@ -160,10 +169,14 @@ impl<'src> Unary<'src> {
 impl std::fmt::Display for Unary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self {
+            side,
             op: Token { lex: op, .. },
-            rhs,
+            operand,
         } = self;
-        write!(f, "{op}{rhs}")
+        match side {
+            OpSide::Left => write!(f, "{operand}{op}"),
+            OpSide::Right => write!(f, "{op}{operand}"),
+        }
     }
 }
 
@@ -174,10 +187,10 @@ impl LispDisplay for Unary<'_> {
                 f,
                 "({} {:#})",
                 crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(self.op.lex),
-                Lisp::new(&self.rhs)
+                Lisp::new(&self.operand)
             )
         } else {
-            write!(f, "({} {})", self.op.lex, Lisp::new(&self.rhs))
+            write!(f, "({} {})", self.op.lex, Lisp::new(&self.operand))
         }
     }
 }
@@ -189,7 +202,7 @@ impl PolishDisplay for Unary<'_> {
             LexValue::Punctuation(Punctuation::SubNeg) => "- 0",
             _ => self.op.lex,
         };
-        write!(f, "{op} {}", Polish::new(&self.rhs))
+        write!(f, "{op} {}", Polish::new(&self.operand))
     }
 }
 
@@ -489,25 +502,45 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `factor -> unary ( ( "*" | "/" | "%" ) unary )* ;`
+    /// `factor -> unary_postfix ( ( "*" | "/" | "%" ) unary_postfix )* ;`
     fn factor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.unary()?;
+        let mut expr = self.unary_postfix()?;
         while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
             Punctuation::Mul | Punctuation::Div | Punctuation::Rem
         ))) {
-            let rhs = self.unary()?;
+            let rhs = self.unary_postfix()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
         Ok(expr)
     }
 
-    /// `unary -> ( ( "!" | "!!" | "-" ) exponent )* ;`
-    fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+    /// `unary_postfix -> unary_prefix ( "?" )* ;`
+    fn unary_postfix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.unary_prefix()?;
+        while let Some(op) = self
+            .tokens
+            .next_if(match_token!(Punctuation(Punctuation::QMark)))
+        {
+            expr = Expr::unary(Unary {
+                operand: expr,
+                op,
+                side: OpSide::Left,
+            });
+        }
+        Ok(expr)
+    }
+
+    /// `unary_prefix -> ( ( "!" | "!!" | "-" ) exponent )* ;`
+    fn unary_prefix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         if let Some(op) = self.tokens.next_if(match_token!(Punctuation(
             Punctuation::Not | Punctuation::Exists | Punctuation::SubNeg
         ))) {
-            let rhs = self.unary()?;
-            Ok(Expr::unary(Unary { op, rhs }))
+            let operand = self.unary_prefix()?;
+            Ok(Expr::unary(Unary {
+                op,
+                operand,
+                side: OpSide::Right,
+            }))
         } else {
             self.exponent()
         }
@@ -644,9 +677,13 @@ pub enum ExprIter<'src, 'expr> {
         op: Option<&'expr Token<'src>>,
         rhs: Option<&'expr Expr<'src>>,
     },
-    Unary {
+    UnaryPre {
         op: Option<&'expr Token<'src>>,
         rhs: Option<&'expr Expr<'src>>,
+    },
+    UnaryPost {
+        lhs: Option<&'expr Expr<'src>>,
+        op: Option<&'expr Token<'src>>,
     },
     Literal {
         token: Option<&'expr Token<'src>>,
@@ -669,10 +706,15 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
                 .or_else(|| op.take().map(ExprOrToken::Token))
                 .or_else(|| rhs.take().map(ExprOrToken::Expr)),
 
-            ExprIter::Unary { op, rhs } => op
+            ExprIter::UnaryPre { op, rhs } => op
                 .take()
                 .map(ExprOrToken::Token)
                 .or_else(|| rhs.take().map(ExprOrToken::Expr)),
+
+            ExprIter::UnaryPost { lhs, op } => lhs
+                .take()
+                .map(ExprOrToken::Expr)
+                .or_else(|| op.take().map(ExprOrToken::Token)),
 
             ExprIter::Literal { token } => token.take().map(ExprOrToken::Token),
 
@@ -694,9 +736,15 @@ impl<'src> Expr<'src> {
                 rhs: Some(rhs),
             },
 
-            Expr::Unary(Unary { op, rhs }) => ExprIter::Unary {
-                op: Some(op),
-                rhs: Some(rhs),
+            Expr::Unary(Unary { op, operand, side }) => match side {
+                OpSide::Left => ExprIter::UnaryPost {
+                    lhs: Some(operand),
+                    op: Some(op),
+                },
+                OpSide::Right => ExprIter::UnaryPre {
+                    op: Some(op),
+                    rhs: Some(operand),
+                },
             },
 
             Expr::Literal(token) => ExprIter::Literal { token: Some(token) },
@@ -770,12 +818,13 @@ mod tests {
                 },
                 rhs: Expr::binary(Binary {
                     lhs: Expr::unary(Unary {
+                        side: OpSide::Right,
                         op: Token {
                             lex: "-",
                             val: LexValue::Punctuation(Punctuation::SubNeg),
                             mac: None
                         },
-                        rhs: Expr::grouping(Grouping {
+                        operand: Expr::grouping(Grouping {
                             open: Token {
                                 lex: "(",
                                 val: LexValue::Punctuation(Punctuation::LParen),
