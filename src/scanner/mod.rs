@@ -4,7 +4,7 @@ use crate::{
     error::{ContextError, ErrorType},
     scanner::symbols::{
         BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
-        MACRO_PARAM_PREFIX, MACRO_PREFIX, STR_DELIM,
+        MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM,
     },
 };
 use std::range::Range;
@@ -267,7 +267,7 @@ impl<'src> Scanner<'src> {
         self.source
             .chars()
             .next()
-            .filter(|ch| matches!(*ch, STR_DELIM | CHAR_DELIM))
+            .filter(|ch| matches!(*ch, TEXT_DELIM | CHAR_DELIM))
     }
 
     /// Split off a [`TokenType::Macro`] from the start of the source code
@@ -324,7 +324,7 @@ impl<'src> Scanner<'src> {
                     .split_off(len)
                     .expect("find and len should return safe positions to split at");
                 match open_delim {
-                    STR_DELIM => LexValue::string_literal(lex).map(|val| Token {
+                    TEXT_DELIM => LexValue::text_literal(lex).map(|val| Token {
                         lex,
                         val,
                         mac: None,
