@@ -112,7 +112,7 @@ impl std::fmt::Debug for Token<'_> {
             LexValue::SIntLiteral(x) => ("SIntLiteral", Some(x)),
             LexValue::FracLiteral(x) => ("FltLiteral", Some(x)),
             LexValue::CharLiteral(x) => ("CharLiteral", Some(x)),
-            LexValue::StringLiteral(x) => ("StringLiteral", Some(x)),
+            LexValue::TextLiteral(x) => ("StringLiteral", Some(x)),
             LexValue::BoolLiteral(x) => ("BoolLiteral", Some(x)),
             LexValue::Identifier | LexValue::Callable => ("Identifier", None),
             LexValue::Macro => ("Macro", None),

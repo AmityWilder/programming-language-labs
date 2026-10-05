@@ -2,7 +2,7 @@
 
 use crate::{
     error::{ContextError, ErrorType, ExpectedToken},
-    highlight::{style::StyleWrapper, syntax::Syntax},
+    highlight::{Highlighted, style::StyleWrapper, syntax::Syntax},
     scanner::{
         BadBracketCombo, Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
@@ -273,7 +273,7 @@ impl LispDisplay for Expr<'_> {
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Literal(tkn @ Token { lex, .. }) => {
                 if f.alternate() {
-                    std::fmt::Display::fmt(&crate::SYNTAX_STYLE_ANSI[tkn.syntax()].style(lex), f)
+                    std::fmt::Display::fmt(&Highlighted(std::iter::once(&Ok(*tkn))), f)
                 } else {
                     f.write_str(lex)
                 }
@@ -546,7 +546,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                     | SIntLiteral(_)
                     | FracLiteral(_)
                     | CharLiteral(_)
-                    | StringLiteral(_)
+                    | TextLiteral(_)
             ),
             ExpectedToken::Literal,
         )

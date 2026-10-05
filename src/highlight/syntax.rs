@@ -346,7 +346,7 @@ impl Token<'_> {
                 Syntax::NumberLiteral
             }
             LexValue::CharLiteral(_) => Syntax::CharLiteral,
-            LexValue::StringLiteral(_) => Syntax::StringLiteral,
+            LexValue::TextLiteral(_) => Syntax::StringLiteral,
             LexValue::BoolLiteral(_) => Syntax::LanguageDefined,
             LexValue::Identifier => {
                 // constants are all-caps
