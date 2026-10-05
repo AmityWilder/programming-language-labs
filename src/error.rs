@@ -102,7 +102,14 @@ pub struct OverflowErrorInfoMsg {
 impl std::fmt::Display for OverflowErrorInfoMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { value } = self;
-        write!(f, "this expression evaluated to {value}")
+        write!(
+            f,
+            "this expression evaluated to {value} ({})",
+            match value {
+                IntValue::UInt(_) => "uint",
+                IntValue::SInt(_) => "sint",
+            }
+        )
     }
 }
 
@@ -1896,5 +1903,57 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
         LineRefs::new(self.0.source, &refs).fmt(f)?;
 
         Ok(())
+    }
+}
+
+pub type ErrorIter<T, E, I> =
+    std::iter::Chain<std::iter::Once<E>, std::iter::FilterMap<I, fn(Result<T, E>) -> Option<E>>>;
+
+pub trait FromIteratorOrErrs<T, E>: Sized {
+    fn from_iter_or_errs<I: IntoIterator<Item = Result<T, E>>>(
+        iter: I,
+    ) -> Result<Self, ErrorIter<T, E, I::IntoIter>>;
+}
+
+impl<T, E, A> FromIteratorOrErrs<T, E> for A
+where
+    A: Default + Extend<T>,
+{
+    fn from_iter_or_errs<I: IntoIterator<Item = Result<T, E>>>(
+        iter: I,
+    ) -> Result<Self, ErrorIter<T, E, I::IntoIter>> {
+        let mut ok_buf = A::default();
+        let mut iter = iter.into_iter();
+        for res in &mut iter {
+            match res {
+                // TODO: can this be made to benefit from size_hint?
+                Ok(x) => ok_buf.extend(std::iter::once(x)),
+
+                Err(e) => {
+                    drop(ok_buf);
+                    #[expect(clippy::as_conversions, reason = "no other way to do this")]
+                    // TODO: is it?
+                    return Err(std::iter::once(e)
+                        .chain(iter.filter_map(Result::err as fn(Result<T, E>) -> Option<E>)));
+                }
+            }
+        }
+        Ok(ok_buf)
+    }
+}
+
+pub trait FromIteratorOrErrsEx<T, E>: IntoIterator<Item = Result<T, E>> {
+    fn collect_or_errs<A>(self) -> Result<A, ErrorIter<T, E, Self::IntoIter>>
+    where
+        A: FromIteratorOrErrs<T, E>;
+}
+
+impl<T, E, I: Iterator<Item = Result<T, E>>> FromIteratorOrErrsEx<T, E> for I {
+    #[inline]
+    fn collect_or_errs<A>(self) -> Result<A, ErrorIter<T, E, I>>
+    where
+        A: FromIteratorOrErrs<T, E>,
+    {
+        A::from_iter_or_errs(self)
     }
 }

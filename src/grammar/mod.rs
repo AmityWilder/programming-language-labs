@@ -10,7 +10,7 @@ use crate::{
 };
 use std::range::Range;
 
-// Means of displaying content with lisp style
+/// Means of displaying content with lisp style
 pub trait LispDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 }
@@ -33,7 +33,7 @@ impl<T: ?Sized + LispDisplay> std::fmt::Display for Lisp<T> {
     }
 }
 
-// Means of displaying content with Polish notation
+/// Means of displaying content with Polish notation
 pub trait PolishDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 }
