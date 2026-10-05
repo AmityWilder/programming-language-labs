@@ -176,7 +176,7 @@ impl<'src> LexValue<'src> {
 
             // cannot mix explicit unsigned with negative sign
             if matches!(sign_suffix, Some(SignSuffix::Signed)) && is_negative {
-                return Err(ErrorType::InvalidNumLiteral(NumErrorKind::UNegOverflow));
+                return Err(ErrorType::InvalidNumLiteral(NumErrorKind::NegUnsigned));
             }
 
             let (digits, radix) = if let Some(n) = magnitude.strip_prefix(HEX_PREFIX) {
