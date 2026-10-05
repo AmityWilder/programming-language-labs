@@ -90,12 +90,18 @@ use crate::{
     eval::{RunValue, evaluate},
     grammar::{Binary, Expr, Grouping, Lisp, Unary, parse},
     highlight::{
-        highlight,
+        Highlighted, highlight,
         style::{Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle, syntax_of, syntax_style},
     },
     preproc::preprocess,
-    scanner::{token::Token, tokenize},
+    scanner::{
+        token::{
+            Token,
+            value::{CharLiteral, LexValue, StrLiteral},
+        },
+        tokenize,
+    },
 };
 use std::{fmt::Write, range::Range};
 
@@ -171,7 +177,7 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
         foreground: Rgb(0x17, 0x9f, 0xff)
     }],
     invalid: {
-        foreground: Rgb(0xcc, 0x0e, 0x0e)
+        foreground: BrightRed
     }
 };
 
@@ -361,6 +367,85 @@ where
     println!("```");
 }
 
+fn result_token<'src, 'buf>(
+    res: Result<RunValue, ContextError<'src>>,
+    buf: &'buf mut String,
+) -> Result<Token<'buf>, ContextError<'src>> {
+    res.map(|x| match x {
+        RunValue::Bool(x) => Token {
+            lex: if x { "true" } else { "fals" },
+            val: LexValue::BoolLiteral(x),
+            mac: None,
+        },
+        RunValue::UInt(n) => Token {
+            lex: {
+                *buf = n.to_string();
+                buf
+            },
+            val: LexValue::UIntLiteral(n),
+            mac: None,
+        },
+        RunValue::SInt(n) => Token {
+            lex: {
+                *buf = n.to_string();
+                buf
+            },
+            val: LexValue::SIntLiteral(n),
+            mac: None,
+        },
+        RunValue::Frac(x) => Token {
+            lex: {
+                *buf = x.to_string();
+                buf
+            },
+            val: LexValue::FracLiteral(x),
+            mac: None,
+        },
+        RunValue::Char(ch) => {
+            let lex = {
+                use std::fmt::Write;
+                write!(buf, "{ch:?}").expect("infallible for String");
+                buf
+            };
+            Token {
+                lex,
+                val: LexValue::CharLiteral(CharLiteral {
+                    ch,
+                    is_escaped: lex.contains('\\'),
+                }),
+                mac: None,
+            }
+        }
+        RunValue::Str(s) => {
+            let lex = {
+                use std::fmt::Write;
+                write!(buf, "{s:?}").expect("infallible for String");
+                buf
+            };
+            Token {
+                lex,
+                val: LexValue::TextLiteral(StrLiteral {
+                    content: lex
+                        .strip_circumfix('\"', '\"')
+                        .expect("string debug should include delimiters"),
+                }),
+                mac: None,
+            }
+        }
+    })
+    .map_err(|mut e| {
+        const ERROR_PLACEHOLDER: &str = "[error]";
+        // HACK: normally we shouldn't EVER modify these fields,
+        // but in this situation we're creating a new token specifically to syntax-highlight it.
+        e.source = ERROR_PLACEHOLDER;
+        e.range = Range {
+            start: 0,
+            end: ERROR_PLACEHOLDER.len(),
+        };
+        e
+    })
+}
+
 /// # Panics
 /// This method can panic if [`scanner::Scanner`] isn't written correctly
 pub fn run_code(source: &str) {
@@ -441,21 +526,14 @@ pub fn run_code(source: &str) {
         .flatten()
         .map(|expr| (expr, evaluate(source, expr)))
     {
-        print!("{:#}: ", Lisp::new(expr));
-        match res {
-            Ok(x) => match x {
-                RunValue::Bool(x) => println!("{x:?}"),
-                RunValue::UInt(x) => println!("{x:?}"),
-                RunValue::SInt(x) => println!("{x:?}"),
-                RunValue::Frac(x) => println!("{x:?}"),
-                RunValue::Char(x) => println!("{x:?}"),
-                RunValue::Str(x) => println!("{x:?}"),
-            },
-            Err(e) => {
-                println!("\x1b[91m[error]\x1b[0m");
-                errors.push(e);
-            }
+        print!("{:#}\n  \x1b[90m=\x1b[0m ", Lisp::new(expr));
+        if let Err(ref e) = res {
+            errors.push(e.clone());
         }
+        let mut buf = String::new();
+        let result_token = result_token(res, &mut buf);
+
+        println!("{}\n", Highlighted(std::iter::once(&result_token)));
     }
 
     // eval errors

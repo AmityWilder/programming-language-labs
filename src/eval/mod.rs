@@ -718,7 +718,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
             LexValue::SIntLiteral(n) => Ok(RunValue::SInt(n)),
             LexValue::FracLiteral(x) => Ok(RunValue::Frac(x)),
             LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
-            LexValue::StringLiteral(s) => s
+            LexValue::TextLiteral(s) => s
                 .process()
                 .map(|s| RunValue::Str(s.text))
                 .map_err(|e| ContextError::token_error(source, Some(*token), e)),

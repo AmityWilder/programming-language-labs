@@ -9,6 +9,8 @@
 (2 ** 63)
 (2u ** 64u)
 
+2+2+2+2+2+2+2
+
 def \foo($x) { (/* from \foo */ $x+5) } // \foo definition
 def \bar($a, $b) { (/* from \bar */ 3*($a)**$b) } // \bar definition
 def \baz() { (/* from \baz */ 200) } // \baz definition

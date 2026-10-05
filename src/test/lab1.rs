@@ -578,7 +578,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: LexValue::StringLiteral(StrLiteral { content: "a" }),
+                    val: LexValue::TextLiteral(StrLiteral { content: "a" }),
                     mac: None
                 })]
             );
@@ -591,7 +591,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: LexValue::StringLiteral(StrLiteral { content: "aa" }),
+                    val: LexValue::TextLiteral(StrLiteral { content: "aa" }),
                     mac: None
                 })]
             );
@@ -604,7 +604,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: LexValue::StringLiteral(StrLiteral { content: "" }),
+                    val: LexValue::TextLiteral(StrLiteral { content: "" }),
                     mac: None
                 })]
             );
@@ -634,7 +634,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::StringLiteral(StrLiteral { content: "\\0" }),
+                        val: LexValue::TextLiteral(StrLiteral { content: "\\0" }),
                         mac: None
                     })]
                 );
@@ -647,7 +647,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::StringLiteral(StrLiteral { content: "\\x1b" }),
+                        val: LexValue::TextLiteral(StrLiteral { content: "\\x1b" }),
                         mac: None
                     })]
                 );
@@ -660,7 +660,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::StringLiteral(StrLiteral { content: "\\1b" }),
+                        val: LexValue::TextLiteral(StrLiteral { content: "\\1b" }),
                         mac: None
                     })]
                 );

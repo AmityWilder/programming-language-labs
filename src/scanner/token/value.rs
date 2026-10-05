@@ -123,7 +123,7 @@ pub enum LexValue<'src> {
     /// Character literal
     CharLiteral(CharLiteral),
     /// String literal
-    StringLiteral(StrLiteral<'src>),
+    TextLiteral(StrLiteral<'src>),
 
     // language builtin
     /// Boolean literal
@@ -282,7 +282,7 @@ impl<'src> LexValue<'src> {
         {
             Err(e)
         } else {
-            Ok(Self::StringLiteral(StrLiteral { content }))
+            Ok(Self::TextLiteral(StrLiteral { content }))
         }
     }
 }

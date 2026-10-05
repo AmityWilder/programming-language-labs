@@ -1,8 +1,12 @@
 //! Syntax (not semantic, yet) highlighting
 
 use crate::{
+    SYNTAX_STYLE_ANSI,
     error::ContextError,
-    highlight::syntax::{Syntax, syntax_of},
+    highlight::{
+        style::StyleWrapper,
+        syntax::{Syntax, syntax_of},
+    },
     scanner::{
         symbols::{CHAR_DELIM, STR_DELIM},
         token::{
@@ -301,7 +305,7 @@ where
                 }) => HighlightToken::CharLiteral(escaped_char_literal(lex, syn)),
 
                 // string literal with escapes or interpolated string with escapes and no expressions - an iterator
-                LexValue::StringLiteral(literal) if literal.has_escapes() => {
+                LexValue::TextLiteral(literal) if literal.has_escapes() => {
                     HighlightToken::StrLiteral(StrLiteral::escaped_str_literal(lex, syn, literal))
                 }
 
@@ -318,4 +322,18 @@ where
     I: IntoIterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
 {
     HighlightIter::new(tokens.into_iter()).flatten()
+}
+
+pub struct Highlighted<I>(pub I);
+
+impl<'src: 'arr, 'arr, I> std::fmt::Display for Highlighted<I>
+where
+    I: Clone + Iterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (lexeme, syntax) in highlight(self.0.clone()) {
+            write!(f, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme))?;
+        }
+        f.write_str("\x1b[0m")
+    }
 }
