@@ -45,8 +45,8 @@ fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, S
     // character (if it did, then it would not be valid UTF-8). Therefore, `lex.len()` must be the
     // position of a boundary between UTF-8 characters. It is also not out of bounds for `lex`,
     // because `start.len() <= lex.len()`, since `strip_suffix` does not add add characters.
-    // So, `start.len()` is AT MOST `lex.len()`, and `s[s.len()..]` for all `s: &str` is valid (it is an empty str
-    // at the end of `s`).
+    // So, `start.len()` is AT MOST `lex.len()`, and `s[s.len()..]` for all `s: &str` is valid
+    // (it is an empty str at the end of `s`).
     let post = unsafe { lex.get_unchecked(start.len()..) };
 
     let [pre, inner] = start
