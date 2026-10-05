@@ -11,7 +11,8 @@ use crate::{
     scanner::{
         self, BadBracketCombo, Bracket, rfind_block_comment,
         symbols::{
-            BIN_PREFIX, BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM,
+            BIN_PREFIX, BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, HEX_PREFIX,
+            OCT_PREFIX, STR_DELIM,
         },
         token::{Token, escape_char, punc::Punctuation},
     },
@@ -1296,6 +1297,16 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
             .lines()
             .enumerate()
             .map(|(n, line)| (n.strict_add(start_line), line));
+        // HACK: inferring that the error is an unterminated block comment sheerly by the fact that it IS a block comment
+        let is_unterminated_block_comment = line_items
+            .iter()
+            .find(|item| matches!(item.style, RefStyleKind::Error))
+            .is_some_and(|item| {
+                source
+                    .get(item.range)
+                    .expect("range should be a valid range in source")
+                    .starts_with(BLOCK_COMMENT_OPEN)
+            });
         for (i, line) in lines {
             // print the line content
             Self::write_line_start(f, line_num_width, i)?;
@@ -1315,6 +1326,15 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
             ) && block_comment_range.start < line_range.start
                 && block_comment_range.end >= line_range.start
             {
+                debug_assert!(
+                    block_comment_range.end
+                        < line_items
+                            .first()
+                            .expect("should have at least one item")
+                            .range
+                            .start,
+                    "error should not overlap block comment"
+                );
                 let overlapping_comment = source
                     .get(line_range.start..block_comment_range.end)
                     .expect("line range and block comment range should be guarded by if condition");
@@ -1330,11 +1350,26 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
                 line
             };
 
-            write_highlight(
-                scanner::tokenize(line_after_block_comment),
-                f,
-                &SYNTAX_STYLE_ANSI,
-            )?;
+            if is_unterminated_block_comment {
+                write_highlight(
+                    std::iter::once(ContextError {
+                        source,
+                        range: source
+                            .substr_range(line_after_block_comment)
+                            .expect("line_after_block_comment should be a substr of source"),
+                        macro_range: None,
+                        err: ErrorType::EndlessBlockComment,
+                    }),
+                    f,
+                    &SYNTAX_STYLE_ANSI,
+                )?;
+            } else {
+                write_highlight(
+                    scanner::tokenize(line_after_block_comment),
+                    f,
+                    &SYNTAX_STYLE_ANSI,
+                )?;
+            }
             writeln!(f)?;
             // per-line
             Self::write_line_start(f, line_num_width, "")?;
