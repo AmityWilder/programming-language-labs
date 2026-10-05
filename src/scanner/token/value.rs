@@ -216,7 +216,7 @@ impl<'src> LexValue<'src> {
                     .map(Self::SIntLiteral)
                     .map_err(|e| ErrorType::InvalidNumLiteral(NumErrorKind::new_signed(*e.kind())))
             } else {
-                // prefix with a hyphen, underscores stripped
+                // underscores stripped
                 #[expect(clippy::as_conversions)]
                 let mut buf = [b'\0'; usize::MAX.ilog2() as usize + 1];
 
