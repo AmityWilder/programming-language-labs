@@ -281,6 +281,10 @@ impl<'src> Scanner<'src> {
         let rest = self.source.strip_prefix(open_delim).expect(
             "should not call `scan_strlike_literal` if `starts_with_strlike_literal` is false",
         );
+        let line_end = rest.find('\n').unwrap_or(rest.len());
+        let rest = rest
+            .get(..line_end)
+            .expect("find and len should not be within a UTF-8 character");
         rest.find(unescaped(open_delim))
             .map(|n| {
                 const {
@@ -303,7 +307,7 @@ impl<'src> Scanner<'src> {
             })
             .ok_or_else(|| {
                 self.error_here(
-                    self.source.len(),
+                    line_end.strict_add(1),
                     // the fact there is a closing delimiter that didn't end the string shows it must be escaped
                     // (or else there wouldn't have been an error)
                     match (open_delim, rest.contains(open_delim)) {
