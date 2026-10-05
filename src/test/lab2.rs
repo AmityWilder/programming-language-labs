@@ -57,6 +57,7 @@
 //!   - [ ] `Xor`
 
 use crate::{
+    error::OpSide,
     grammar::{Binary, Expr, Grouping, Lisp, Polish, Unary},
     print_ast,
     scanner::token::{Token, punc::Punctuation, value::LexValue},
@@ -66,12 +67,13 @@ use crate::{
 fn test_ast_printer1() {
     let ast: Expr = Expr::binary(Binary {
         lhs: Expr::unary(Unary {
+            side: OpSide::Right,
             op: Token {
                 lex: "-",
                 val: LexValue::Punctuation(Punctuation::SubNeg),
                 mac: None,
             },
-            rhs: Expr::Literal(Token {
+            operand: Expr::Literal(Token {
                 lex: "123",
                 val: LexValue::SIntLiteral(123),
                 mac: None,
@@ -113,12 +115,13 @@ fn test_ast_printer1() {
 fn test_ast_printer2() {
     let ast: Expr = Expr::binary(Binary {
         lhs: Expr::unary(Unary {
+            side: OpSide::Right,
             op: Token {
                 lex: "-",
                 val: LexValue::Punctuation(Punctuation::SubNeg),
                 mac: None,
             },
-            rhs: Expr::Literal(Token {
+            operand: Expr::Literal(Token {
                 lex: "123",
                 val: LexValue::SIntLiteral(123),
                 mac: None,
@@ -158,12 +161,13 @@ fn test_ast_printer2() {
 fn test_ast_printer3() {
     let ast: Expr = Expr::binary(Binary {
         lhs: Expr::unary(Unary {
+            side: OpSide::Right,
             op: Token {
                 lex: "-",
                 val: LexValue::Punctuation(Punctuation::SubNeg),
                 mac: None,
             },
-            rhs: Expr::Literal(Token {
+            operand: Expr::Literal(Token {
                 lex: "123",
                 val: LexValue::SIntLiteral(123),
                 mac: None,

@@ -28,3 +28,5 @@ fals !| true
 "squeak " + !!none
 
 !(!5) != !!5
+
+5 + none?
