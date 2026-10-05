@@ -407,6 +407,7 @@ impl<'src> Scanner<'src> {
             let mut is_following_e = false;
             move |ch: char| {
                 let is_end = !(ch.is_alphanumeric()
+                    || ch == '_'
                     || ch == '.' && std::mem::take(&mut is_first_decimal) && !is_following_e
                     || ch == '-'
                         && (is_first_char || is_prev_e && std::mem::take(&mut is_first_e_neg)));
@@ -504,12 +505,6 @@ impl<'src> Scanner<'src> {
         .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
     }
 
-    /// The source code starts with [`TokenType::Macro`]
-    fn starts_with_punc(&self) -> bool {
-        self.source
-            .starts_with(|ch: char| ch.is_ascii_punctuation())
-    }
-
     /// Split off a [`TokenType::Macro`] from the start of the source code
     ///
     /// # Panics
@@ -544,7 +539,7 @@ impl<'src> Iterator for Scanner<'src> {
 
     fn next(&mut self) -> Option<Self::Item> {
         // if there are no characters remaining, this will return None and stop iterating.
-        self.source.chars().next().map(|ch| {
+        (!self.source.is_empty()).then(|| {
             // we check for the pattern of the token with "if/else" instead of "if { return }"
             // because once we have identified what type of token it should be, there must be an error if it isn't that.
             // if we continued going down the list of possible tokens until one succeeded, we would be doing
@@ -573,10 +568,8 @@ impl<'src> Iterator for Scanner<'src> {
                 Ok(self.scan_line_comment())
             } else if self.starts_with_block_comment() {
                 self.scan_block_comment()
-            } else if self.starts_with_punc() {
-                self.scan_punc()
             } else {
-                Err(self.error_here(ch.len_utf8(), ErrorType::UnknownToken))
+                self.scan_punc()
             }
             .inspect(|token| {
                 // non-whitespace, non-comment token

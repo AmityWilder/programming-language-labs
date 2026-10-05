@@ -197,29 +197,33 @@ impl<'src> LexValue<'src> {
             }
 
             if is_signed {
-                // prefix with a hyphen
-                const ASCII_MINUS: u8 = b'-';
-                const ASCII_MINUS_LEN: usize = 1;
+                // prefix with a hyphen, underscores stripped
                 #[expect(clippy::as_conversions)]
-                let mut buf = [b'\0'; isize::MAX.ilog10() as usize + 2];
+                let mut buf = [b'\0'; isize::MAX.ilog2() as usize + 2];
 
-                let digits = if is_negative {
-                    buf[0] = ASCII_MINUS;
-                    let buf_len = digits.len().checked_add(ASCII_MINUS_LEN);
-                    let (buf_len, digit_buf) = buf_len
-                        .and_then(|end| buf.get_mut(ASCII_MINUS_LEN..end).map(|slice| (end, slice)))
-                        .ok_or(ErrorType::InvalidNumLiteral(NumErrorKind::SNegOverflow))?;
-                    digit_buf.copy_from_slice(digits.as_bytes());
-                    std::str::from_utf8(buf.get(..buf_len).expect("should be able to get ??"))
-                        .expect("prepending a UTF-8-valid character (all ASCII is valid UTF-8) should not cause invalid UTF-8")
+                let digits = join_parts(
+                    &mut buf,
+                    std::iter::chain(is_negative.then_some("-"), digits.split('_')),
+                )
+                // excessive digits, probably too large of an integer
+                .ok_or(ErrorType::InvalidNumLiteral(if is_negative {
+                    NumErrorKind::SNegOverflow
                 } else {
-                    digits
-                };
+                    NumErrorKind::SPosOverflow
+                }))?;
 
                 isize::from_str_radix(digits, radix)
                     .map(Self::SIntLiteral)
                     .map_err(|e| ErrorType::InvalidNumLiteral(NumErrorKind::new_signed(*e.kind())))
             } else {
+                // prefix with a hyphen, underscores stripped
+                #[expect(clippy::as_conversions)]
+                let mut buf = [b'\0'; isize::MAX.ilog2() as usize + 2];
+
+                let digits = join_parts(&mut buf, digits.split('_'))
+                    // excessive digits, probably too large of an integer
+                    .ok_or(ErrorType::InvalidNumLiteral(NumErrorKind::UPosOverflow))?;
+
                 usize::from_str_radix(digits, radix)
                     .map(Self::UIntLiteral)
                     .map_err(|e| {
@@ -326,4 +330,24 @@ impl<'src> Iterator for Escapes<'src> {
                 escape_seq(self.source, self.offset)
             })
     }
+}
+
+/// Concatenates strings into a pre-allocated buffer
+fn join_parts<'buf, 'p, I>(buf: &'buf mut [u8], parts: I) -> Option<&'buf str>
+where
+    I: IntoIterator<Item = &'p str>,
+{
+    let mut rest = &mut *buf;
+    for part in parts {
+        rest.split_off_mut(..part.len())?
+            .copy_from_slice(part.as_bytes());
+    }
+    let leftover_len = rest.len();
+    #[expect(clippy::arithmetic_side_effects, reason = "rest is a subset of buf")]
+    let written_len = buf.len() - leftover_len;
+    Some(
+        #[expect(clippy::indexing_slicing, reason = "sum length of written segments")]
+        std::str::from_utf8(&buf[..written_len])
+            .expect("concatenation of valid UTF-8 segments should be valid UTF-8"),
+    )
 }
