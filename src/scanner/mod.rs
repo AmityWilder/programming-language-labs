@@ -594,3 +594,40 @@ impl std::iter::FusedIterator for Scanner<'_> {}
 pub const fn tokenize(source: &str) -> Scanner<'_> {
     Scanner::new(source)
 }
+
+/// Finds the last block comment in the string
+pub fn rfind_block_comment(s: &str) -> Option<Range<usize>> {
+    s.rfind(BLOCK_COMMENT_CLOSE).map(|end| {
+        let mut prev = '\0';
+        let mut depth: usize = 0;
+        #[expect(
+            clippy::string_slice,
+            reason = "rfind should not be within a UTF-8 character"
+        )]
+        let start = s[..end]
+            .rfind(|ch: char| {
+                match (ch, prev) {
+                    ('*', '/') => depth = depth.strict_add(1),
+                    ('/', '*') => {
+                        if let Some(n) = depth.checked_sub(1) {
+                            depth = n;
+                        } else {
+                            return true;
+                        }
+                    }
+                    _ => (),
+                }
+                prev = ch;
+                false
+            })
+            .unwrap_or(0);
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "this is the length of the substr found at the end"
+        )]
+        Range {
+            start,
+            end: end + BLOCK_COMMENT_CLOSE.len(),
+        }
+    })
+}
