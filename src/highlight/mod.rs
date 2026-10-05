@@ -317,6 +317,8 @@ where
 }
 
 /// An iterator over each lexeme and [`Syntax`] in the list
+///
+/// TODO: allow this to accept values and not just references!!
 pub fn highlight<'src: 'arr, 'arr, I>(tokens: I) -> std::iter::Flatten<HighlightIter<I::IntoIter>>
 where
     I: IntoIterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
@@ -324,6 +326,7 @@ where
     HighlightIter::new(tokens.into_iter()).flatten()
 }
 
+/// **Warning:** [`std::fmt::Display`] impl creates a [`Clone`] of `I`
 pub struct Highlighted<I>(pub I);
 
 impl<'src: 'arr, 'arr, I> std::fmt::Display for Highlighted<I>

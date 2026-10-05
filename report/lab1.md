@@ -227,6 +227,5 @@ I'm not sure how you expect me to test *every edge case*. That's quite a lot. Bu
 
 ## Known limitations/Failures
 
-- Error snippets do not display token styling (styling is applied using ANSI sequences not present in the source code, which interfere with lexeme ranges).
 - Sub-token (ex: escape sequences) errors are identified as errors for the entire token, not just the range of the eroneous subtoken.
 - The lexeme `/* /*/ */` treats has its `/*/` treated like an entire nested block comment despite having only one `*`. This does not occur outside of block comments.
