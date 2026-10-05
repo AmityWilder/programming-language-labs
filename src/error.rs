@@ -6,6 +6,7 @@ use crate::{
     highlight::{
         style::{Color, Style, StyleWrapper},
         syntax::Syntax,
+        write_highlight,
     },
     scanner::{
         self, BadBracketCombo, Bracket, rfind_block_comment,
@@ -171,17 +172,6 @@ pub enum OverflowError {
         r_range: Range<usize>,
         r_value: isize,
     },
-}
-
-impl OverflowError {
-    const fn op(&self) -> Punctuation {
-        match self {
-            Self::UAdd { .. } | Self::SAdd { .. } => Punctuation::Add,
-            Self::USub { .. } | Self::SSub { .. } | Self::SNeg { .. } => Punctuation::SubNeg,
-            Self::UMul { .. } | Self::SMul { .. } => Punctuation::Mul,
-            Self::UPow { .. } | Self::SPow { .. } => Punctuation::Pow,
-        }
-    }
 }
 
 impl IntoIterator for OverflowError {
@@ -1004,7 +994,7 @@ impl std::fmt::Debug for ContextError<'_> {
                 .expect("macro_range should be a range in source");
             write!(f, " in expansion of {src:?}")?;
         }
-        writeln!(f, "): {err:?}")
+        write!(f, "): {err:?}")
     }
 }
 
@@ -1340,8 +1330,11 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
                 line
             };
 
-            crate::highlight::Highlighted(scanner::tokenize(line_after_block_comment))
-                .format_to(f)?;
+            write_highlight(
+                scanner::tokenize(line_after_block_comment),
+                f,
+                &SYNTAX_STYLE_ANSI,
+            )?;
             writeln!(f)?;
             // per-line
             Self::write_line_start(f, line_num_width, "")?;
@@ -1949,57 +1942,5 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
         LineRefs::new(self.0.source, &refs).fmt(f)?;
 
         Ok(())
-    }
-}
-
-pub type ErrorIter<T, E, I> =
-    std::iter::Chain<std::iter::Once<E>, std::iter::FilterMap<I, fn(Result<T, E>) -> Option<E>>>;
-
-pub trait FromIteratorOrErrs<T, E>: Sized {
-    fn from_iter_or_errs<I: IntoIterator<Item = Result<T, E>>>(
-        iter: I,
-    ) -> Result<Self, ErrorIter<T, E, I::IntoIter>>;
-}
-
-impl<T, E, A> FromIteratorOrErrs<T, E> for A
-where
-    A: Default + Extend<T>,
-{
-    fn from_iter_or_errs<I: IntoIterator<Item = Result<T, E>>>(
-        iter: I,
-    ) -> Result<Self, ErrorIter<T, E, I::IntoIter>> {
-        let mut ok_buf = A::default();
-        let mut iter = iter.into_iter();
-        for res in &mut iter {
-            match res {
-                // TODO: can this be made to benefit from size_hint?
-                Ok(x) => ok_buf.extend(std::iter::once(x)),
-
-                Err(e) => {
-                    drop(ok_buf);
-                    #[expect(clippy::as_conversions, reason = "no other way to do this")]
-                    // TODO: is it?
-                    return Err(std::iter::once(e)
-                        .chain(iter.filter_map(Result::err as fn(Result<T, E>) -> Option<E>)));
-                }
-            }
-        }
-        Ok(ok_buf)
-    }
-}
-
-pub trait FromIteratorOrErrsEx<T, E>: IntoIterator<Item = Result<T, E>> {
-    fn collect_or_errs<A>(self) -> Result<A, ErrorIter<T, E, Self::IntoIter>>
-    where
-        A: FromIteratorOrErrs<T, E>;
-}
-
-impl<T, E, I: Iterator<Item = Result<T, E>>> FromIteratorOrErrsEx<T, E> for I {
-    #[inline]
-    fn collect_or_errs<A>(self) -> Result<A, ErrorIter<T, E, I>>
-    where
-        A: FromIteratorOrErrs<T, E>,
-    {
-        A::from_iter_or_errs(self)
     }
 }

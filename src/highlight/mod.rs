@@ -1,9 +1,11 @@
 //! Syntax (not semantic, yet) highlighting
 
 use crate::{
-    SYNTAX_STYLE_ANSI,
     error::ContextError,
-    highlight::{style::StyleWrapper, syntax::Syntax},
+    highlight::{
+        style::StyleWrapper,
+        syntax::{Syntax, SyntaxStyle},
+    },
     scanner::{
         symbols::{CHAR_DELIM, STR_DELIM},
         token::{
@@ -333,10 +335,23 @@ impl<'src> TokenHighlight<'src> for ContextError<'src> {
     }
 }
 
-impl<'src> TokenHighlight<'src> for Result<Token<'src>, ContextError<'src>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct GenericError;
+
+impl<'src> TokenHighlight<'src> for GenericError {
+    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
+        ("[error]", Syntax::Invalid, const { LexValue::Comment })
+    }
+}
+
+impl<'src, T, E> TokenHighlight<'src> for Result<T, E>
+where
+    T: TokenHighlight<'src>,
+    E: TokenHighlight<'src>,
+{
     fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
         match self {
-            Ok(token) => token.get_syntax(),
+            Ok(x) => x.get_syntax(),
             Err(e) => e.get_syntax(),
         }
     }
@@ -352,26 +367,19 @@ where
     HighlightIter::new(tokens.into_iter()).flatten()
 }
 
-/// **Warning:** [`std::fmt::Display`] impl creates a [`Clone`] of `I`
-pub struct Highlighted<I>(pub I);
-
-impl<'src, I> Highlighted<I>
+pub fn write_highlight<'src, I, T, A>(
+    iter: I,
+    f: &mut std::fmt::Formatter<'_>,
+    syntax_style: &SyntaxStyle<T, A>,
+) -> std::fmt::Result
 where
     I: IntoIterator<Item: TokenHighlight<'src>>,
+    T: StyleWrapper,
+    A: AsRef<[T]>,
 {
-    pub fn format_to(self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (lexeme, syntax) in highlight(self.0) {
-            write!(f, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme))?;
-        }
-        f.write_str("\x1b[0m")
+    use std::fmt::Display;
+    for (lexeme, syntax) in highlight(iter) {
+        syntax_style[syntax].style(lexeme).fmt(f)?;
     }
-}
-
-impl<'src, I> std::fmt::Display for Highlighted<I>
-where
-    I: Clone + IntoIterator<Item: TokenHighlight<'src>>,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Self(self.0.clone()).format_to(f)
-    }
+    f.write_str("\x1b[0m")
 }

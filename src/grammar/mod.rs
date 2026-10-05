@@ -1,8 +1,9 @@
 //! Context-free grammar
 
 use crate::{
+    SYNTAX_STYLE_ANSI,
     error::{ContextError, ErrorType, ExpectedToken},
-    highlight::{Highlighted, style::StyleWrapper, syntax::Syntax},
+    highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
     scanner::{
         BadBracketCombo, Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
@@ -34,6 +35,7 @@ impl<T: ?Sized + LispDisplay> std::fmt::Display for Lisp<T> {
 }
 
 /// Means of displaying content with Polish notation
+#[allow(dead_code, reason = "for bonus points")]
 pub trait PolishDisplay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 }
@@ -273,7 +275,7 @@ impl LispDisplay for Expr<'_> {
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Literal(tkn @ Token { lex, .. }) => {
                 if f.alternate() {
-                    Highlighted(std::iter::once(&Ok(*tkn))).format_to(f)
+                    write_highlight(std::iter::once(tkn), f, &SYNTAX_STYLE_ANSI)
                 } else {
                     f.write_str(lex)
                 }
