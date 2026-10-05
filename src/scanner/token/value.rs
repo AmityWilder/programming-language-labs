@@ -4,7 +4,7 @@ use crate::{
     error::{ErrorType, NumErrorKind},
     scanner::{
         symbols::{
-            BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX, STR_DELIM,
+            BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX, TEXT_DELIM,
             UNSIGNED_SUFFIX,
         },
         token::{escape_char, escape_seq, keyword::Keyword, punc::Punctuation},
@@ -267,9 +267,9 @@ impl<'src> LexValue<'src> {
     }
 
     /// Parses a string literal lexeme into its value, without allocating
-    pub fn string_literal(src: &'src str) -> Result<Self, ErrorType<'src>> {
+    pub fn text_literal(src: &'src str) -> Result<Self, ErrorType<'src>> {
         let content = src
-            .strip_circumfix(STR_DELIM, STR_DELIM)
+            .strip_circumfix(TEXT_DELIM, TEXT_DELIM)
             .expect("string literal tokens should include delimiters (`\"`)");
         let mut is_esc = false;
         if content.contains(ESCAPE)

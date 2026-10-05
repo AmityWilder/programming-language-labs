@@ -23,7 +23,7 @@ def \baz() { (/* from \baz */ 200) } // \baz definition
 
 fals !| true
 
-"i have " + (5 * 6) + " instances of what i would call an \"apple\""
+"i have " + (5 * 6) + " instances of what i would call an \"apple\"\n"
 
 "squeak " + !!none
 

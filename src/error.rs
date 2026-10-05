@@ -12,7 +12,7 @@ use crate::{
         self, BadBracketCombo, Bracket, rfind_block_comment,
         symbols::{
             BIN_PREFIX, BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, HEX_PREFIX,
-            OCT_PREFIX, STR_DELIM,
+            OCT_PREFIX, TEXT_DELIM,
         },
         token::{Token, escape_char, punc::Punctuation},
     },
@@ -494,7 +494,7 @@ pub enum ErrorType<'src> {
     #[code(LEX, 3)]
     #[err(|f| write!(f, "empty character literal"))]
     #[inlay(|f| write!(f, "empty"))]
-    #[help(|f, _src| write!(f, "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` with `{STR_DELIM}{STR_DELIM}` or insert a character"))]
+    #[help(|f, _src| write!(f, "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` with `{TEXT_DELIM}{TEXT_DELIM}` or insert a character"))]
     EmptyCharLiteral,
 
     /// A character literal with multiple codepoints
@@ -514,7 +514,7 @@ pub enum ErrorType<'src> {
                 .len_utf8(),
         });
         write!(f, "try removing the character(s) after `{first}` (remove trailing `{rest}`) \
-                    or change this to a string ({STR_DELIM}{inner}{STR_DELIM})")
+                    or change this to a string ({TEXT_DELIM}{inner}{TEXT_DELIM})")
     })]
     MultiCharLiteral,
 
@@ -550,7 +550,7 @@ pub enum ErrorType<'src> {
     #[code(LEX, 6)]
     #[err(|f| write!(f, "string literal opens (`\"`) but never closes (missing unescaped `\"`)"))]
     #[inlay(|f| write!(f, "never ends"))]
-    #[help(|f, _src| write!(f, "try adding a `{STR_DELIM}` to the end of the string"))]
+    #[help(|f, _src| write!(f, "try adding a `{TEXT_DELIM}` to the end of the string"))]
     EndlessStringLiteral,
 
     /// A string literal has no `"` to end it, but contains a `\"`
@@ -559,18 +559,18 @@ pub enum ErrorType<'src> {
     #[inlay(|f| write!(f, "never ends, unless you remove the `\\`"))]
     #[help(|f, src| {
         let substr = src
-            .strip_prefix(STR_DELIM)
+            .strip_prefix(TEXT_DELIM)
             .expect("string literal should include delimiter")
             .split_once("\\\"")
             .expect("should be EndlessStringLiteral if this is not present")
             .0;
         write!(
             f,
-            "there is a closing double-quote candidate, but it is escaped (`{ESCAPE}{STR_DELIM}`).\n\
+            "there is a closing double-quote candidate, but it is escaped (`{ESCAPE}{TEXT_DELIM}`).\n\
                 string literals cannot end with an unescaped backslash (`{ESCAPE}`), \
-                it is indistinguishable from an escaped double-quote (`{ESCAPE}{STR_DELIM}`).\n\
-                try adding a `{STR_DELIM}` to the end of the string or remove the `{ESCAPE}` from `{ESCAPE}{STR_DELIM}` \
-                to make the string `{STR_DELIM}{substr}{STR_DELIM}`"
+                it is indistinguishable from an escaped double-quote (`{ESCAPE}{TEXT_DELIM}`).\n\
+                try adding a `{TEXT_DELIM}` to the end of the string or remove the `{ESCAPE}` from `{ESCAPE}{TEXT_DELIM}` \
+                to make the string `{TEXT_DELIM}{substr}{TEXT_DELIM}`"
         )
     })]
     EscapedStringLiteralEnd,
