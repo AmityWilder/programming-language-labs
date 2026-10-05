@@ -285,8 +285,9 @@ impl<I> HighlightIter<I> {
     }
 }
 
-impl<'src: 'arr, 'arr, I: Iterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>> Iterator
-    for HighlightIter<I>
+impl<'src: 'arr, 'arr, I> Iterator for HighlightIter<I>
+where
+    I: Iterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
 {
     type Item = HighlightToken<'src, 'arr, StrLiteral<'src>>;
 

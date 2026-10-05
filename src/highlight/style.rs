@@ -19,6 +19,14 @@ pub trait StyleWrapper {
             inner: what,
         }
     }
+
+    /// Constructs a [`Styled`] for this type
+    fn style_dbg<T>(&self, what: T) -> StyledDebug<'_, T, Self> {
+        StyledDebug {
+            style: self,
+            inner: what,
+        }
+    }
 }
 
 /// Encloses `T` with the styling of `U`
@@ -38,6 +46,30 @@ impl<T: std::fmt::Display, U: StyleWrapper> std::fmt::Display for Styled<'_, T, 
         write!(
             f,
             "{}{}{}",
+            self.style.begin(),
+            self.inner,
+            self.style.end()
+        )
+    }
+}
+
+/// Encloses `T` with the styling of `U`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StyledDebug<'style, T, U>
+where
+    U: ?Sized + StyleWrapper,
+{
+    /// The style to wrap [`Self::inner`] with
+    style: &'style U,
+    /// The content being styled
+    inner: T,
+}
+
+impl<T: std::fmt::Debug, U: StyleWrapper> std::fmt::Display for StyledDebug<'_, T, U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{:?}{}",
             self.style.begin(),
             self.inner,
             self.style.end()

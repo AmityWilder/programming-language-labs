@@ -631,6 +631,114 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     }
 }
 
+pub enum ExprOrToken<'src, 'expr> {
+    Token(&'expr Token<'src>),
+    Expr(&'expr Expr<'src>),
+}
+
+pub enum ExprIter<'src, 'expr> {
+    Binary {
+        lhs: Option<&'expr Expr<'src>>,
+        op: Option<&'expr Token<'src>>,
+        rhs: Option<&'expr Expr<'src>>,
+    },
+    Unary {
+        op: Option<&'expr Token<'src>>,
+        rhs: Option<&'expr Expr<'src>>,
+    },
+    Literal {
+        token: Option<&'expr Token<'src>>,
+    },
+    Grouping {
+        open: Option<&'expr Token<'src>>,
+        expr: Option<&'expr Expr<'src>>,
+        close: Option<&'expr Token<'src>>,
+    },
+}
+
+impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
+    type Item = ExprOrToken<'src, 'expr>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            ExprIter::Binary { lhs, op, rhs } => lhs
+                .take()
+                .map(ExprOrToken::Expr)
+                .or_else(|| op.take().map(ExprOrToken::Token))
+                .or_else(|| rhs.take().map(ExprOrToken::Expr)),
+
+            ExprIter::Unary { op, rhs } => op
+                .take()
+                .map(ExprOrToken::Token)
+                .or_else(|| rhs.take().map(ExprOrToken::Expr)),
+
+            ExprIter::Literal { token } => token.take().map(ExprOrToken::Token),
+
+            ExprIter::Grouping { open, expr, close } => open
+                .take()
+                .map(ExprOrToken::Token)
+                .or_else(|| expr.take().map(ExprOrToken::Expr))
+                .or_else(|| close.take().map(ExprOrToken::Token)),
+        }
+    }
+}
+
+impl<'src> Expr<'src> {
+    fn iter(&self) -> ExprIter<'src, '_> {
+        match self {
+            Expr::Binary(Binary { lhs, op, rhs }) => ExprIter::Binary {
+                lhs: Some(lhs),
+                op: Some(op),
+                rhs: Some(rhs),
+            },
+
+            Expr::Unary(Unary { op, rhs }) => ExprIter::Unary {
+                op: Some(op),
+                rhs: Some(rhs),
+            },
+
+            Expr::Literal(token) => ExprIter::Literal { token: Some(token) },
+
+            Expr::Grouping(Grouping { open, expr, close }) => ExprIter::Grouping {
+                open: Some(open),
+                expr: Some(expr),
+                close: Some(close),
+            },
+        }
+    }
+}
+
+/// Traverse the AST using DFS
+pub struct AstIter<'src, 'expr> {
+    stack: Vec<ExprIter<'src, 'expr>>,
+}
+
+impl<'src, 'expr> AstIter<'src, 'expr> {
+    pub fn new(ast: &'expr Expr<'src>) -> Self {
+        Self {
+            stack: vec![ast.iter()],
+        }
+    }
+}
+
+impl<'src, 'expr> Iterator for AstIter<'src, 'expr> {
+    type Item = &'expr Token<'src>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(top) = self.stack.last_mut() {
+            if let Some(item) = top.next() {
+                match item {
+                    ExprOrToken::Token(token) => return Some(token),
+                    ExprOrToken::Expr(expr) => self.stack.push(expr.iter()),
+                }
+            } else {
+                self.stack.pop();
+            }
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -85,18 +85,19 @@
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
-use error::ContextError;
-use eval::evaluate;
-use grammar::{Binary, Expr, Grouping, Lisp, Unary, parse};
-use highlight::{
-    highlight,
-    style::{Style, StyleWrapper},
-    syntax::{Syntax, SyntaxStyle, syntax_of, syntax_style},
+use crate::{
+    error::ContextError,
+    eval::{RunValue, evaluate},
+    grammar::{Binary, Expr, Grouping, Lisp, Unary, parse},
+    highlight::{
+        highlight,
+        style::{Style, StyleWrapper},
+        syntax::{Syntax, SyntaxStyle, syntax_of, syntax_style},
+    },
+    preproc::preprocess,
+    scanner::{token::Token, tokenize},
 };
-use scanner::tokenize;
 use std::{fmt::Write, range::Range};
-
-use crate::{preproc::preprocess, scanner::token::Token};
 
 mod error;
 mod eval;
@@ -174,65 +175,66 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
     }
 };
 
-pub fn print_ast(node: &Expr<'_>, depth: usize, bracket_depth: usize) {
+pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
+    fn header(name: &str) {
+        println!("\x1b[94m{name}:\x1b[0m");
+    }
+
+    fn field(name: &str, indent: usize) -> usize {
+        const INDENT_BY: &str = "  ";
+        print!("{:>indent$}{INDENT_BY}\x1b[90m{name}:\x1b[0m ", "");
+        indent.strict_add(INDENT_BY.len())
+    }
+
     match node {
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
-            println!("\x1b[94mBinary:\x1b[0m");
-            print!("{:>depth$} \x1b[90mlhs:\x1b[0m ", "");
-            print_ast(lhs, depth.strict_add(2), bracket_depth);
-            let (_, syn, _) = syntax_of(&Ok(*op));
-            let style = SYNTAX_STYLE_ANSI[syn];
-            println!(
-                "{:>depth$} \x1b[90mop:\x1b[0m {}{op:?}{}",
-                "",
-                style.begin(),
-                style.end()
-            );
-            print!("{:>depth$} \x1b[90mrhs:\x1b[0m ", "");
-            print_ast(rhs, depth.strict_add(2), bracket_depth);
+
+            header("Binary");
+
+            let field_indent = field("lhs", indent);
+            print_ast(lhs, field_indent, br_depth);
+
+            field(" op", indent);
+            println!("{}", SYNTAX_STYLE_ANSI[op.syntax()].style_dbg(op));
+
+            let field_indent = field("rhs", indent);
+            print_ast(rhs, field_indent, br_depth);
         }
+
         Expr::Unary(inner) => {
             let Unary { op, rhs } = &**inner;
-            println!("\x1b[94mUnary:\x1b[0m");
-            let (_, syn, _) = syntax_of(&Ok(*op));
-            let style = SYNTAX_STYLE_ANSI[syn];
-            println!(
-                "{:>depth$} \x1b[90mop:\x1b[0m {}{op:?}{}",
-                "",
-                style.begin(),
-                style.end()
-            );
-            print!("{:>depth$} \x1b[90mrhs:\x1b[0m ", "");
-            print_ast(rhs, depth.strict_add(2), bracket_depth);
+
+            header("Unary");
+
+            field(" op", indent);
+            println!("{}", SYNTAX_STYLE_ANSI[op.syntax()].style_dbg(op));
+
+            let field_indent = field("rhs", indent);
+            print_ast(rhs, field_indent, br_depth);
         }
+
         Expr::Literal(token) => {
-            let (_, syn, _) = syntax_of(&Ok(*token));
-            let style = SYNTAX_STYLE_ANSI[syn];
-            println!(
-                "\x1b[94mLiteral:\x1b[0m {}{token:?}{}",
-                style.begin(),
-                style.end()
-            );
+            header("Literal");
+
+            field("token", indent);
+            println!("{}", SYNTAX_STYLE_ANSI[token.syntax()].style_dbg(token));
         }
+
         Expr::Grouping(inner) => {
             let Grouping { open, expr, close } = &**inner;
-            let style = SYNTAX_STYLE_ANSI[Syntax::Bracket(bracket_depth)];
-            println!("\x1b[94mGrouping:\x1b[0m");
-            println!(
-                "{:>depth$} \x1b[90mopen:\x1b[0m {}{open:?}{}",
-                "",
-                style.begin(),
-                style.end()
-            );
-            print!("{:>depth$} \x1b[90mexpr:\x1b[0m ", "");
-            print_ast(expr, depth.strict_add(2), bracket_depth.strict_add(1));
-            println!(
-                "{:>depth$} \x1b[90mclose:\x1b[0m {}{close:?}{}",
-                "",
-                style.begin(),
-                style.end()
-            );
+            let style = SYNTAX_STYLE_ANSI[Syntax::Bracket(br_depth)];
+
+            header("Grouping");
+
+            field(" open", indent);
+            println!("{}", style.style_dbg(open));
+
+            let field_indent = field(" expr", indent);
+            print_ast(expr, field_indent, br_depth.strict_add(1));
+
+            field("close", indent);
+            println!("{}", style.style_dbg(close));
         }
     }
 }
@@ -317,22 +319,13 @@ where
     }
 }
 
-/// # Panics
-/// This method can panic if [`scanner::Scanner`] isn't written correctly
-pub fn run_code(source: &str) {
-    // token debug
-    println!("source code:\n```\n{source}\n```");
-
-    println!();
-    println!("tokenizer:");
-    let tokens: Vec<_> = tokenize(source).collect();
-    print_tokens(source, &tokens);
-
-    // syntax highlighted
-    println!();
-    println!("syntax highlighting:");
+fn print_highlighted<'src, 'arr, I>(tokens: I)
+where
+    'src: 'arr,
+    I: IntoIterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
+{
     let mut buf = String::new();
-    for (lexeme, syntax) in highlight(&tokens) {
+    for (lexeme, syntax) in highlight(tokens) {
         _ = write!(buf, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
     }
     _ = write!(buf, "\x1b[0m");
@@ -366,6 +359,22 @@ pub fn run_code(source: &str) {
         );
     }
     println!("```");
+}
+
+/// # Panics
+/// This method can panic if [`scanner::Scanner`] isn't written correctly
+pub fn run_code(source: &str) {
+    // token debug
+    println!("source code:\n```\n{source}\n```");
+
+    // scanner
+    println!("\ntokenizer:");
+    let tokens: Vec<_> = tokenize(source).collect();
+    print_tokens(source, &tokens);
+
+    // syntax highlighted
+    println!("\nsyntax highlighting:");
+    print_highlighted(&tokens);
 
     // lex errors
     println!();
@@ -374,10 +383,12 @@ pub fn run_code(source: &str) {
     }
 
     // preprocessing
-    println!();
-    println!("preprocessor:");
+    println!("\npreprocessor:");
     let tokens: Vec<_> = preprocess(source, tokens).collect();
     print_tokens(source, &tokens);
+
+    // preprocessed + syntax highlighted
+    print_highlighted(&tokens);
 
     // preproc errors
     println!();
@@ -386,19 +397,12 @@ pub fn run_code(source: &str) {
     }
 
     // parse debug
-    println!();
-    println!("parser:");
+    println!("\nparser:");
     let ast: Vec<_> = parse(source, tokens.into_iter().flatten()).collect();
     for res in &ast {
         match res {
-            Ok(node) => {
-                println!("lisp: {}", Lisp::new(node));
-                print_ast(node, 0, 0);
-            }
-            Err(e) => {
-                let style = &SYNTAX_STYLE_ANSI.invalid;
-                println!("{}{e:?}{}", style.begin(), style.end());
-            }
+            Ok(node) => print_ast(node, 0, 0),
+            Err(e) => println!("{}", SYNTAX_STYLE_ANSI.invalid.style_dbg(e)),
         }
     }
 
@@ -408,9 +412,29 @@ pub fn run_code(source: &str) {
         return;
     }
 
+    // ----------------------------------------------
+    // TODO: YUCKY! too many allocations and copies!!
+    if false {
+        // TODO: instead of this, just do the regular highlighting
+        // but inject special highlighting over ranges from the AST data
+        const NEWLINE: Token = Token {
+            lex: "\n",
+            val: scanner::token::value::LexValue::Whitespace,
+            mac: None,
+        };
+        println!("\nsemantic highlighting (EXPERIMENTAL):");
+        let ast_tokens: Vec<_> = ast
+            .iter()
+            .flatten()
+            .flat_map(|root| grammar::AstIter::new(root).chain(std::iter::once(&NEWLINE)))
+            .map(|token| Ok(*token))
+            .collect();
+        print_highlighted(&ast_tokens);
+    }
+    // ----------------------------------------------
+
     // eval
-    println!();
-    println!("evaluation:");
+    println!("\nevaluation:");
     let mut errors = Vec::new();
     for (expr, res) in ast
         .iter()
@@ -420,12 +444,12 @@ pub fn run_code(source: &str) {
         print!("{:#}: ", Lisp::new(expr));
         match res {
             Ok(x) => match x {
-                eval::RunValue::Bool(x) => println!("{x:?}"),
-                eval::RunValue::UInt(x) => println!("{x:?}"),
-                eval::RunValue::SInt(x) => println!("{x:?}"),
-                eval::RunValue::Frac(x) => println!("{x:?}"),
-                eval::RunValue::Char(x) => println!("{x:?}"),
-                eval::RunValue::Str(x) => println!("{x:?}"),
+                RunValue::Bool(x) => println!("{x:?}"),
+                RunValue::UInt(x) => println!("{x:?}"),
+                RunValue::SInt(x) => println!("{x:?}"),
+                RunValue::Frac(x) => println!("{x:?}"),
+                RunValue::Char(x) => println!("{x:?}"),
+                RunValue::Str(x) => println!("{x:?}"),
             },
             Err(e) => {
                 println!("\x1b[91m[error]\x1b[0m");
