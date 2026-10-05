@@ -3,7 +3,6 @@
 use std::marker::Destruct;
 
 use crate::{
-    error::ContextError,
     highlight::style::Style,
     scanner::token::{Token, value::LexValue},
 };
@@ -374,29 +373,6 @@ impl Token<'_> {
             LexValue::MacroParam => Syntax::MacroParam,
             LexValue::Punctuation(_) => Syntax::Normal,
         }
-    }
-}
-
-/// Identifies the [`Syntax`] of a token.
-/// All [`Err`]s are [`Syntax::Invalid`].
-///
-/// # Panics
-/// This method may panic if `item` is an error with a malformed [`range`](crate::error::ContextError::range).
-pub fn syntax_of<'src, 'res>(
-    item: &'res Result<Token<'src>, ContextError<'src>>,
-) -> (&'src str, Syntax, &'res LexValue<'src>)
-where
-    'src: 'res,
-{
-    match item {
-        Ok(token) => (token.lex, token.syntax(), &token.val),
-        Err(e) => (
-            e.source
-                .get(e.range)
-                .expect("range should be a range of source"),
-            Syntax::Invalid,
-            &LexValue::Comment,
-        ),
     }
 }
 
