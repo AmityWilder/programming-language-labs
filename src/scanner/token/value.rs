@@ -218,7 +218,7 @@ impl<'src> LexValue<'src> {
             } else {
                 // prefix with a hyphen, underscores stripped
                 #[expect(clippy::as_conversions)]
-                let mut buf = [b'\0'; isize::MAX.ilog2() as usize + 2];
+                let mut buf = [b'\0'; usize::MAX.ilog2() as usize + 1];
 
                 let digits = join_parts(&mut buf, digits.split('_'))
                     // excessive digits, probably too large of an integer
