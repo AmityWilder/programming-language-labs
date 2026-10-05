@@ -85,14 +85,14 @@
 // #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
-use highlight::TokenHighlight;
+use highlight::{GenericError, TokenHighlight};
 
 use crate::{
     error::ContextError,
     eval::{RunValue, evaluate},
     grammar::{Binary, Expr, Grouping, Lisp, Unary, parse},
     highlight::{
-        Highlighted, highlight,
+        highlight,
         style::{Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle, syntax_style},
     },
@@ -317,20 +317,23 @@ where
         print!("\x1b[90m{range:>max_range_digits$?}:\x1b[0m ");
         match item {
             Ok(token) => {
-                println!("{}{token:?}{}", style.begin(), style.end());
+                println!("{}", style.style_dbg(token));
             }
             Err(e) => {
                 let style = &SYNTAX_STYLE_ANSI.invalid;
-                println!("{}{e:?}{}", style.begin(), style.end());
+                println!("{}", style.style_dbg(e));
             }
         }
     }
 }
 
+/// # Panics
+/// This function may panic if `pos` is not a valid index in `src`
+#[must_use]
 pub fn last_ansi_seq(src: &str, pos: usize) -> &str {
     let pre = src
         .get(..pos)
-        .expect("substr_range start should not be within a UTF-8 character");
+        .expect("pos should not be within a UTF-8 character");
     pre
         .rfind("\x1b[")
         .and_then(|pos| {
@@ -343,14 +346,16 @@ pub fn last_ansi_seq(src: &str, pos: usize) -> &str {
         .unwrap_or("\x1b[0m")
 }
 
-fn print_highlighted<'src, I>(tokens: I)
+fn print_highlighted<'src, I, T, A>(tokens: I, syntax_style: &SyntaxStyle<T, A>)
 where
     I: IntoIterator<Item: TokenHighlight<'src>>,
+    T: StyleWrapper,
+    A: AsRef<[T]>,
 {
     use std::fmt::Write;
     let mut buf = String::new();
     for (lexeme, syntax) in highlight(tokens) {
-        _ = write!(buf, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
+        _ = write!(buf, "{}", syntax_style[syntax].style(lexeme));
     }
     _ = write!(buf, "\x1b[0m");
     println!("```");
@@ -373,11 +378,8 @@ where
     println!("```");
 }
 
-fn result_token<'src, 'buf>(
-    res: Result<RunValue, ContextError<'src>>,
-    buf: &'buf mut String,
-) -> Result<Token<'buf>, ContextError<'src>> {
-    res.map(|x| match x {
+fn runtime_token(value: RunValue, buf: &mut String) -> Token<'_> {
+    match value {
         RunValue::Bool(x) => Token {
             lex: if x { "true" } else { "fals" },
             val: LexValue::BoolLiteral(x),
@@ -438,18 +440,7 @@ fn result_token<'src, 'buf>(
                 mac: None,
             }
         }
-    })
-    .map_err(|mut e| {
-        const ERROR_PLACEHOLDER: &str = "[error]";
-        // HACK: normally we shouldn't EVER modify these fields,
-        // but in this situation we're creating a new token specifically to syntax-highlight it.
-        e.source = ERROR_PLACEHOLDER;
-        e.range = Range {
-            start: 0,
-            end: ERROR_PLACEHOLDER.len(),
-        };
-        e
-    })
+    }
 }
 
 /// # Panics
@@ -465,7 +456,7 @@ pub fn run_code(source: &str) {
 
     // syntax highlighted
     println!("\nsyntax highlighting:");
-    print_highlighted(&tokens);
+    print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
 
     // lex errors
     println!();
@@ -479,7 +470,7 @@ pub fn run_code(source: &str) {
     print_tokens(source, &tokens);
 
     // preprocessed + syntax highlighted
-    print_highlighted(&tokens);
+    print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
 
     // preproc errors
     println!();
@@ -517,8 +508,8 @@ pub fn run_code(source: &str) {
         print_highlighted(
             ast.iter()
                 .flatten()
-                .flat_map(|root| grammar::AstIter::new(root).chain(std::iter::once(&NEWLINE)))
-                .map(|token| Ok(*token)),
+                .flat_map(|root| grammar::AstIter::new(root).chain(std::iter::once(&NEWLINE))),
+            &SYNTAX_STYLE_ANSI,
         );
     }
     // ----------------------------------------------
@@ -526,23 +517,31 @@ pub fn run_code(source: &str) {
     // eval
     println!("\nevaluation:");
     let mut errors = Vec::new();
+    let mut buf = String::new();
     for (expr, res) in ast
         .iter()
         .flatten()
         .map(|expr| (expr, evaluate(source, expr)))
     {
         print!("{:#}\n  \x1b[90m=\x1b[0m ", Lisp::new(expr));
-        if let Err(ref e) = res {
-            errors.push(e.clone());
-        }
-        let mut buf = String::new();
 
-        // TODO: this clones the iterator
-        println!(
-            "{}\n",
-            Highlighted(std::iter::once(result_token(res, &mut buf)))
-        );
+        let item = match res {
+            Ok(x) => {
+                buf.clear();
+                Ok(runtime_token(x, &mut buf))
+            }
+            Err(e) => {
+                errors.push(e);
+                Err(GenericError)
+            }
+        };
+
+        for (lexeme, syntax) in highlight(std::iter::once(item)) {
+            print!("{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
+        }
+        println!("\x1b[0m\n");
     }
+    drop(buf);
 
     // eval errors
     println!();

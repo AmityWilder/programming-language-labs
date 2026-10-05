@@ -105,7 +105,7 @@ pub struct Token<'src> {
 impl std::fmt::Debug for Token<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { lex, val, mac } = self;
-        let (name, val): (&str, Option<&dyn std::fmt::Debug>) = match val {
+        let (name, dbg_val): (&str, Option<&dyn std::fmt::Debug>) = match val {
             LexValue::Whitespace => ("Whitespace", None),
             LexValue::Comment => ("Comment", None),
             LexValue::UIntLiteral(x) => ("UIntLiteral", Some(x)),
@@ -125,8 +125,10 @@ impl std::fmt::Debug for Token<'_> {
             write!(f, " from {mac:?}")?;
         }
         write!(f, ")")?;
-        if let Some(val) = val {
-            write!(f, ": {val:?}")
+        if let Some(dbg_val) = dbg_val {
+            write!(f, ": {dbg_val:?}")
+        } else if !matches!(val, LexValue::Whitespace | LexValue::Comment) {
+            write!(f, ": {lex}") // token value is its lexeme
         } else {
             Ok(())
         }
