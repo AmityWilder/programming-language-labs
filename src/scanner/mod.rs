@@ -93,12 +93,12 @@ impl BadBracketCombo {
     #[must_use]
     pub const fn decompose(self) -> (Bracket, Bracket) {
         match self {
-            BadBracketCombo::BrackParen => (Bracket::Brack, Bracket::Paren),
-            BadBracketCombo::BrackBrace => (Bracket::Brack, Bracket::Brace),
-            BadBracketCombo::ParenBrack => (Bracket::Paren, Bracket::Brack),
-            BadBracketCombo::ParenBrace => (Bracket::Paren, Bracket::Brace),
-            BadBracketCombo::BraceParen => (Bracket::Brace, Bracket::Brack),
-            BadBracketCombo::BraceBrack => (Bracket::Brace, Bracket::Paren),
+            Self::BrackParen => (Bracket::Brack, Bracket::Paren),
+            Self::BrackBrace => (Bracket::Brack, Bracket::Brace),
+            Self::ParenBrack => (Bracket::Paren, Bracket::Brack),
+            Self::ParenBrace => (Bracket::Paren, Bracket::Brace),
+            Self::BraceParen => (Bracket::Brace, Bracket::Brack),
+            Self::BraceBrack => (Bracket::Brace, Bracket::Paren),
         }
     }
 }
@@ -306,18 +306,12 @@ impl<'src> Scanner<'src> {
                     self.source.len(),
                     // the fact there is a closing delimiter that didn't end the string shows it must be escaped
                     // (or else there wouldn't have been an error)
-                    if rest.contains(open_delim) {
-                        match open_delim {
-                            '\'' => ErrorType::EscapedCharLiteralEnd,
-                            '"' => ErrorType::EscapedStringLiteralEnd,
-                            _ => unimplemented!(),
-                        }
-                    } else {
-                        match open_delim {
-                            '\'' => ErrorType::EndlessCharLiteral,
-                            '"' => ErrorType::EndlessStringLiteral,
-                            _ => unimplemented!(),
-                        }
+                    match (open_delim, rest.contains(open_delim)) {
+                        ('\'', true) => ErrorType::EscapedCharLiteralEnd,
+                        ('\'', false) => ErrorType::EndlessCharLiteral,
+                        ('"', true) => ErrorType::EscapedStringLiteralEnd,
+                        ('"', false) => ErrorType::EndlessStringLiteral,
+                        _ => unimplemented!(),
                     },
                 )
             })

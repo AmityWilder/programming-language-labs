@@ -9,6 +9,18 @@
 (2 ** 63)
 (2u ** 64u)
 
+def \foo($x) { (/* from \foo */ $x+5) } // \foo definition
+def \bar($a, $b) { (/* from \bar */ 3*($a)**$b) } // \bar definition
+def \baz() { (/* from \baz */ 200) } // \baz definition
+
 (-(-9_223_372_036_854_775_808))
 0b1111_1111__1111_1111__1111_1111__1111_1111__1111_1111__1111_1111__1111_1111__1111_1111u
 0xFF_FF_FF_FF_FF_FF_FF_FFu + 0b1001_1100u
+
+\foo{\bar{\baz}{3}}
+
+fals !| true
+
+"i have " + (5 * 6) + " instances of what i would call an \"apple\""
+
+// TODO: none

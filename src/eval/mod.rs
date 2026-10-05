@@ -679,6 +679,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 Shr => l.shr(r),
                 Rotl => l.rotl(r),
                 Rotr => l.rotr(r),
+
                 Eq | Ne | Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
                     RunValue::Bool(match punc {
                         Ne => ord.is_none_or(Ordering::is_ne),
