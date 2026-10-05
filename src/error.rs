@@ -1,10 +1,14 @@
 //! Errors regarding code validity
 
 use crate::{
+    SYNTAX_STYLE_ANSI,
     eval::ValueType,
-    highlight::style::{Color, Style, StyleWrapper},
+    highlight::{
+        style::{Color, Style, StyleWrapper},
+        syntax::Syntax,
+    },
     scanner::{
-        self, BadBracketCombo, Bracket,
+        self, BadBracketCombo, Bracket, rfind_block_comment,
         symbols::{
             BIN_PREFIX, BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM,
         },
@@ -1305,20 +1309,40 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
         for (i, line) in lines {
             // print the line content
             Self::write_line_start(f, line_num_width, i)?;
-            // TODO: make highlight accept values so this doesn't need to allocate
-            let line_tokens: Vec<_> = scanner::tokenize(line).collect();
-            writeln!(
-                f,
-                "{}{}",
-                crate::last_ansi_seq(
-                    source,
-                    source
-                        .substr_range(line)
-                        .expect("line should be a substr of source")
-                        .start
-                ),
-                crate::highlight::Highlighted(line_tokens.iter())
-            )?;
+
+            // HACK: we trust that an error range will never be within a block comment,
+            // unless the entire comment is an error
+            let line_range = source
+                .substr_range(line)
+                .expect("line should be a subsr of source");
+            // the only token that can be multiline
+            let line_after_block_comment = if let Some(block_comment_range) = rfind_block_comment(
+                #[expect(
+                    clippy::string_slice,
+                    reason = "substr_range promises to be a valid range within the string"
+                )]
+                &source[..line_range.end],
+            ) && block_comment_range.start < line_range.start
+                && block_comment_range.end >= line_range.start
+            {
+                let overlapping_comment = source
+                    .get(line_range.start..block_comment_range.end)
+                    .expect("line range and block comment range should be guarded by if condition");
+                write!(
+                    f,
+                    "{}",
+                    SYNTAX_STYLE_ANSI[Syntax::Comment].style(overlapping_comment)
+                )?;
+                #[expect(clippy::arithmetic_side_effects, reason = "already checked")]
+                line.get(block_comment_range.end - line_range.start..)
+                    .expect("block comment should not end within a UTF-8 character")
+            } else {
+                line
+            };
+
+            // TODO: make highlight() accept values so this doesn't need to allocate
+            let line_tokens: Vec<_> = scanner::tokenize(line_after_block_comment).collect();
+            writeln!(f, "{}", crate::highlight::Highlighted(line_tokens.iter()))?;
             // per-line
             Self::write_line_start(f, line_num_width, "")?;
             // assumes line items are in order

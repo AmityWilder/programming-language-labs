@@ -28,4 +28,10 @@ fals !| true
 // TODO: none
 
 "eee
-ee \n" + ~
+ee \n' 9 + ~
+
+/* foo
+/* */ */ ~
+
+/*
+ */ /*
