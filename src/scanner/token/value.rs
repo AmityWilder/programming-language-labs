@@ -3,7 +3,10 @@
 use crate::{
     error::{ErrorType, NumErrorKind},
     scanner::{
-        symbols::{BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM},
+        symbols::{
+            BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX, STR_DELIM,
+            UNSIGNED_SUFFIX,
+        },
         token::{escape_char, escape_seq, keyword::Keyword, punc::Punctuation},
     },
 };
@@ -158,13 +161,15 @@ impl<'src> LexValue<'src> {
                 Signed,
                 Unsigned,
             }
-            let (with_suffix, sign_suffix) = if let Some(pre) = src.strip_suffix('s') {
-                (pre, Some(SignSuffix::Signed))
-            } else if let Some(pre) = src.strip_suffix('u') {
-                (pre, Some(SignSuffix::Unsigned))
-            } else {
-                (src, None)
-            };
+
+            let (with_suffix, sign_suffix) = [
+                (SIGNED_SUFFIX, SignSuffix::Signed),
+                (UNSIGNED_SUFFIX, SignSuffix::Unsigned),
+            ]
+            .into_iter()
+            .find_map(|(suf, sign)| src.strip_suffix(suf).map(|pre| (pre, Some(sign))))
+            .unwrap_or((src, None));
+
             let stripped = with_suffix.strip_prefix('-');
             let is_negative = stripped.is_some();
             let magnitude = stripped.unwrap_or(with_suffix);
@@ -179,15 +184,10 @@ impl<'src> LexValue<'src> {
                 return Err(ErrorType::InvalidNumLiteral(NumErrorKind::NegUnsigned));
             }
 
-            let (digits, radix) = if let Some(n) = magnitude.strip_prefix(HEX_PREFIX) {
-                (n, 16)
-            } else if let Some(n) = magnitude.strip_prefix(OCT_PREFIX) {
-                (n, 8)
-            } else if let Some(n) = magnitude.strip_prefix(BIN_PREFIX) {
-                (n, 2)
-            } else {
-                (magnitude, 10)
-            };
+            let (digits, radix) = [(HEX_PREFIX, 16), (OCT_PREFIX, 8), (BIN_PREFIX, 2)]
+                .into_iter()
+                .find_map(|(prefix, radix)| magnitude.strip_prefix(prefix).map(|n| (n, radix)))
+                .unwrap_or((magnitude, 10));
 
             if digits.is_empty() {
                 // for digits to be empty, we must have something like "0x".

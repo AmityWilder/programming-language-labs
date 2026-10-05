@@ -16,6 +16,10 @@ pub const HEX_PREFIX: &str = "0x";
 pub const OCT_PREFIX: &str = "0o";
 /// The prefix of a binary number literal
 pub const BIN_PREFIX: &str = "0b";
+/// The suffix of a signed integer literal
+pub const SIGNED_SUFFIX: &str = "s";
+/// The suffix of an unsigned integer literal
+pub const UNSIGNED_SUFFIX: &str = "u";
 /// The open delimiter of a block comment
 pub const BLOCK_COMMENT_OPEN: &str = "/*";
 /// The close delimiter of a block comment
