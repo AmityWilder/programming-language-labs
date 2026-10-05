@@ -1586,7 +1586,7 @@ impl Punctuation {
             (And, [ValueType::Bool, _] | [_, ValueType::Bool]) => "logical/bitwise 'and'",
             (And, [_, _]) => "bitwise 'and'",
             (Mul, [_, _]) => "multiplication",
-            (Add, [ValueType::Str, _] | [_, ValueType::Str]) => "string concatenation",
+            (Add, [ValueType::Text, _] | [_, ValueType::Text]) => "string concatenation",
             (Add, [_, _]) => "addition",
             (SubNeg, [_, _]) => "subtraction",
             (SubNeg, [_]) => "arithmetic negation",
