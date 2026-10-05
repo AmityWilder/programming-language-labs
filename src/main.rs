@@ -325,6 +325,22 @@ where
     }
 }
 
+pub fn last_ansi_seq(src: &str, pos: usize) -> &str {
+    let pre = src
+        .get(..pos)
+        .expect("substr_range start should not be within a UTF-8 character");
+    pre
+        .rfind("\x1b[")
+        .and_then(|pos| {
+            let s = src.get(pos..).expect(
+                "rfind should return a valid position within src. \
+                pre only shortens the end, not the start, so pos should still be a valid start position.",
+            );
+            s.split_inclusive('m').next()
+        })
+        .unwrap_or("\x1b[0m")
+}
+
 fn print_highlighted<'src, 'arr, I>(tokens: I)
 where
     'src: 'arr,
@@ -346,19 +362,7 @@ where
         let Range { start, .. } = buf
             .substr_range(line)
             .expect("lines should be substrings of buf");
-        let pre = buf
-            .get(..start)
-            .expect("substr_range start should not be within a UTF-8 character");
-        let last_ansi_seq = pre
-            .rfind("\x1b[")
-            .and_then(|pos| {
-                let s = buf.get(pos..).expect(
-                    "rfind should return a valid position within buf. \
-                    pre only shortens the end, not the start, so pos should still be a valid start position.",
-                );
-                s.split_inclusive('m').next()
-            })
-            .unwrap_or("\x1b[0m");
+        let last_ansi_seq = last_ansi_seq(&buf, start);
         println!(
             " \x1b[90m{:>line_num_width$}{last_ansi_seq}   {line}",
             i.strict_add(1)

@@ -4,7 +4,7 @@ use crate::{
     eval::ValueType,
     highlight::style::{Color, Style, StyleWrapper},
     scanner::{
-        BadBracketCombo, Bracket,
+        self, BadBracketCombo, Bracket,
         symbols::{
             BIN_PREFIX, BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, STR_DELIM,
         },
@@ -1290,6 +1290,7 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
 
     fn underlines(
         f: &mut std::fmt::Formatter<'_>,
+        source: &'src str,
         start_line: usize,
         end_line: usize,
         line_num_width: usize,
@@ -1304,7 +1305,20 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
         for (i, line) in lines {
             // print the line content
             Self::write_line_start(f, line_num_width, i)?;
-            writeln!(f, "{line}")?;
+            // TODO: make highlight accept values so this doesn't need to allocate
+            let line_tokens: Vec<_> = scanner::tokenize(line).collect();
+            writeln!(
+                f,
+                "{}{}",
+                crate::last_ansi_seq(
+                    source,
+                    source
+                        .substr_range(line)
+                        .expect("line should be a substr of source")
+                        .start
+                ),
+                crate::highlight::Highlighted(line_tokens.iter())
+            )?;
             // per-line
             Self::write_line_start(f, line_num_width, "")?;
             // assumes line items are in order
@@ -1489,7 +1503,15 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
             })?;
             writeln!(f)?;
             // draw the underlines
-            Self::underlines(f, start_line, end_line, line_num_width, block, line_items)?;
+            Self::underlines(
+                f,
+                self.source,
+                start_line,
+                end_line,
+                line_num_width,
+                block,
+                line_items,
+            )?;
             Self::inline_messages(f, line_items, line_num_width)?;
         }
         writeln!(f)
