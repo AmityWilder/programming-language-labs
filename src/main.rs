@@ -86,6 +86,7 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use highlight::{GenericError, TokenHighlight};
+use scanner::token::keyword::Keyword;
 
 use crate::{
     error::ContextError,
@@ -380,6 +381,11 @@ where
 
 fn runtime_token(value: RunValue, buf: &mut String) -> Token<'_> {
     match value {
+        RunValue::None => Token {
+            lex: "none",
+            val: LexValue::Keyword(Keyword::None),
+            mac: None,
+        },
         RunValue::Bool(x) => Token {
             lex: if x { "true" } else { "fals" },
             val: LexValue::BoolLiteral(x),
@@ -424,7 +430,7 @@ fn runtime_token(value: RunValue, buf: &mut String) -> Token<'_> {
                 mac: None,
             }
         }
-        RunValue::Str(s) => {
+        RunValue::Text(s) => {
             let lex = {
                 use std::fmt::Write;
                 write!(buf, "{s:?}").expect("infallible for String");

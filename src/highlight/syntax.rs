@@ -363,7 +363,8 @@ impl Token<'_> {
             LexValue::Keyword(kw) => {
                 if kw.is_flow() {
                     Syntax::CtrlKeyword
-                } else if kw.is_type() {
+                } else if kw.is_type() && /* TODO: differenciate type vs value in semantics */ !kw.is_value()
+                {
                     Syntax::Typename
                 } else {
                     Syntax::Keyword

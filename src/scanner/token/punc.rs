@@ -16,6 +16,8 @@ define_token_eq! {
     pub enum Punctuation = operator {
         /// Not - Logical negation (booleans) or bitflip (integers)
         Not = "!",
+        /// Exists - Logical double negation (coerce to boolean)
+        Exists = "!!",
         /// Stringify - Replace tokens with their lexemes in a macro
         MacroStringify = "#",
         /// Remainder - Find the remainder of `lhs / rhs`

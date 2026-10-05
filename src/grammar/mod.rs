@@ -501,10 +501,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `unary -> ( ( "!" | "-" ) exponent )* ;`
+    /// `unary -> ( ( "!" | "!!" | "-" ) exponent )* ;`
     fn unary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         if let Some(op) = self.tokens.next_if(match_token!(Punctuation(
-            Punctuation::Not | Punctuation::SubNeg
+            Punctuation::Not | Punctuation::Exists | Punctuation::SubNeg
         ))) {
             let rhs = self.unary()?;
             Ok(Expr::unary(Unary { op, rhs }))

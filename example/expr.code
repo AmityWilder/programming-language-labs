@@ -25,15 +25,6 @@ fals !| true
 
 "i have " + (5 * 6) + " instances of what i would call an \"apple\""
 
-// TODO: none
+"squeak " + !!none
 
-"eee
-ee \n' 9 + ~
-
-/* foo
-/* */ */ ~
-
-/*
- */ /*
- squeak
- aaa
+!(!5) != !!5

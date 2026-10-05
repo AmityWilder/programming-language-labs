@@ -5,6 +5,7 @@ use crate::{
     grammar::{Binary, Expr, Unary},
     scanner::token::{
         Token,
+        keyword::Keyword,
         punc::Punctuation,
         value::{CharLiteral, LexValue},
     },
@@ -207,48 +208,54 @@ impl OpError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ValueType {
+    #[default]
+    None,
     Bool,
     UInt,
     SInt,
     Frac,
     Char,
-    Str,
+    Text,
 }
 
 impl std::fmt::Display for ValueType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::None => "none",
             Self::Bool => "bool",
             Self::UInt => "uint",
             Self::SInt => "sint",
             Self::Frac => "frac",
             Self::Char => "char",
-            Self::Str => "str",
+            Self::Text => "text",
         })
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum RunValue {
+    #[default]
+    None,
     Bool(bool),
     UInt(usize),
     SInt(isize),
     Frac(f64),
     Char(char),
-    Str(String),
+    Text(String),
 }
 
 impl RunValue {
     pub const fn as_type(&self) -> ValueType {
         match self {
+            Self::None => ValueType::None,
             Self::Bool(_) => ValueType::Bool,
             Self::UInt(_) => ValueType::UInt,
             Self::SInt(_) => ValueType::SInt,
             Self::Frac(_) => ValueType::Frac,
             Self::Char(_) => ValueType::Char,
-            Self::Str(_) => ValueType::Str,
+            Self::Text(_) => ValueType::Text,
         }
     }
 
@@ -261,7 +268,7 @@ impl RunValue {
             (Self::SInt(l), Self::SInt(r)) => Ok(Some(l.cmp(r))),
             (Self::Frac(l), Self::Frac(r)) => Ok(l.partial_cmp(r)),
             (Self::Char(l), Self::Char(r)) => Ok(Some(l.cmp(r))),
-            (Self::Str(l), Self::Str(r)) => Ok(Some(l.cmp(r))),
+            (Self::Text(l), Self::Text(r)) => Ok(Some(l.cmp(r))),
 
             // TODO: coersions?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
@@ -353,19 +360,19 @@ impl RunValue {
                 .ok_or(OpError::Overflow(OverflowKind::SAdd { l, r })),
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l + r)),
 
-            (Self::Str(l), Self::Bool(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::Str(l), Self::UInt(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::Str(l), Self::SInt(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::Str(l), Self::Frac(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::Str(l), Self::Char(r)) => Ok(Self::Str(format!("{l}{r}"))),
+            (Self::Text(l), Self::Bool(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::Text(l), Self::UInt(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::Text(l), Self::SInt(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::Text(l), Self::Frac(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::Text(l), Self::Char(r)) => Ok(Self::Text(format!("{l}{r}"))),
 
-            (Self::Bool(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::UInt(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::SInt(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::Frac(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
-            (Self::Char(l), Self::Str(r)) => Ok(Self::Str(format!("{l}{r}"))),
+            (Self::Bool(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::UInt(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::SInt(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::Frac(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::Char(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
 
-            (Self::Str(l), Self::Str(r)) => Ok(Self::Str(l + &r)),
+            (Self::Text(l), Self::Text(r)) => Ok(Self::Text(l + &r)),
 
             // TODO: coersions?
             // TODO: char arithmetic?
@@ -635,7 +642,6 @@ impl RunValue {
 
     fn neg(self) -> Result<Self, OpError> {
         match self {
-            Self::Bool(r) => Ok(Self::Bool(!r)),
             Self::UInt(_) => Err(OpError::UNeg),
             Self::SInt(r) => r
                 .checked_neg()
@@ -646,12 +652,23 @@ impl RunValue {
             r => Err(OpError::Unsupported(r.as_type())),
         }
     }
+
+    fn exists(self) -> Self {
+        Self::Bool(match self {
+            Self::None => false,
+            Self::Bool(r) => r,
+            Self::Frac(r) => !r.is_nan(),
+            Self::Char(r) => r != '\0',
+            Self::Text(r) => !r.is_empty(),
+            _ => true,
+        })
+    }
 }
 
 pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, ContextError<'src>> {
     use Punctuation::{
-        Add, And, Div, Eq, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Pow, Rem, Rotl, Rotr, Shl,
-        Shr, SubNeg, Xnor, Xor,
+        Add, And, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Pow, Rem, Rotl,
+        Rotr, Shl, Shr, SubNeg, Xnor, Xor,
     };
     // TODO: what about `none`?
     match ast {
@@ -706,6 +723,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
             match punc {
                 Not => r.not(),
                 SubNeg => r.neg(),
+                Exists => Ok(r.exists()),
 
                 _ => unimplemented!(),
             }
@@ -720,8 +738,9 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
             LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
             LexValue::TextLiteral(s) => s
                 .process()
-                .map(|s| RunValue::Str(s.text))
+                .map(|s| RunValue::Text(s.text))
                 .map_err(|e| ContextError::token_error(source, Some(*token), e)),
+            LexValue::Keyword(Keyword::None) => Ok(RunValue::None),
 
             _ => unimplemented!(),
         },

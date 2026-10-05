@@ -492,6 +492,11 @@ impl Keyword {
         )
     }
 
+    /// Test if a keyword is a language defined value
+    pub const fn is_value(self) -> bool {
+        matches!(self, Self::None | Self::Nevr)
+    }
+
     /// Test if a keyword is a language defined type
     pub const fn is_type(self) -> bool {
         matches!(
@@ -504,6 +509,7 @@ impl Keyword {
                 | Self::Frac
                 | Self::Char
                 | Self::Text
+                | Self::Fail
         )
     }
 }
