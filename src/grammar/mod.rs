@@ -262,10 +262,12 @@ impl PolishDisplay for Grouping<'_> {
     }
 }
 
+/// A concrete type
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TypeExpr<'src> {
     pub name: Token<'src>,
-    // TODO: surely theres more to it than this
+    // TODO: namespace?
+    // TODO: generic arguments?
 }
 
 impl<'src> TypeExpr<'src> {
@@ -311,7 +313,7 @@ pub enum Expr<'src> {
     Unary(Box<Unary<'src>>),
     Literal(Token<'src>),
     Grouping(Box<Grouping<'src>>),
-    Type(Box<TypeExpr<'src>>),
+    Type(TypeExpr<'src>),
 }
 
 impl std::fmt::Display for Expr<'_> {
@@ -321,7 +323,7 @@ impl std::fmt::Display for Expr<'_> {
             Self::Unary(inner) => inner.fmt(f),
             Self::Literal(Token { lex, .. }) => lex.fmt(f),
             Self::Grouping(inner) => inner.fmt(f),
-            Self::Type(inner) => inner.fmt(f),
+            Self::Type(inner) => std::fmt::Display::fmt(inner, f),
         }
     }
 }
@@ -340,7 +342,7 @@ impl LispDisplay for Expr<'_> {
                 }
             }
             Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
-            Self::Type(inner) => LispDisplay::fmt(&**inner, f),
+            Self::Type(inner) => LispDisplay::fmt(inner, f),
         }
     }
 }
@@ -352,7 +354,7 @@ impl PolishDisplay for Expr<'_> {
             Self::Unary(inner) => PolishDisplay::fmt(&**inner, f),
             Self::Literal(Token { lex, .. }) => f.write_str(lex), // TODO: should this use val instead of lex?
             Self::Grouping(inner) => PolishDisplay::fmt(&**inner, f),
-            Self::Type(inner) => PolishDisplay::fmt(&**inner, f),
+            Self::Type(inner) => PolishDisplay::fmt(inner, f),
         }
     }
 }
@@ -396,8 +398,8 @@ impl<'src> Expr<'src> {
         Self::Grouping(Box::new(inner))
     }
 
-    pub fn type_expr(inner: TypeExpr<'src>) -> Self {
-        Self::Type(Box::new(inner))
+    pub const fn type_expr(inner: TypeExpr<'src>) -> Self {
+        Self::Type(inner)
     }
 }
 
