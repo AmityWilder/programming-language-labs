@@ -1297,6 +1297,72 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
         self.items.chunk_by(p)
     }
 
+    fn line_content(
+        f: &mut std::fmt::Formatter<'_>,
+        source: &'src str,
+        #[cfg(debug_assertions)] first_line_item_start: usize,
+        line: &str,
+        is_unterminated_block_comment: bool,
+    ) -> std::fmt::Result {
+        // HACK: we trust that an error range will never be within a block comment,
+        // unless the entire comment is an error
+        let line_range = source
+            .substr_range(line)
+            .expect("line should be a subsr of source");
+        // the only token that can be multiline
+        let line_after_block_comment = if let Some(block_comment_range) = rfind_block_comment(
+            #[expect(
+                clippy::string_slice,
+                reason = "substr_range promises to be a valid range within the string"
+            )]
+            &source[..line_range.end],
+        ) && block_comment_range.start < line_range.start
+            && block_comment_range.end >= line_range.start
+        {
+            debug_assert!(
+                block_comment_range.end < first_line_item_start,
+                "error should not overlap block comment"
+            );
+            let overlapping_comment = source
+                .get(line_range.start..block_comment_range.end)
+                .expect("line range and block comment range should be guarded by if condition");
+            write!(
+                f,
+                "{}",
+                SYNTAX_STYLE_ANSI[Syntax::Comment].style(overlapping_comment)
+            )?;
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "should be guarded by `block_comment_range.end >= line_range.start` condition"
+            )]
+            line.get(block_comment_range.end - line_range.start..)
+                .expect("block comment should not end within a UTF-8 character")
+        } else {
+            line
+        };
+
+        if is_unterminated_block_comment {
+            write_highlight(
+                std::iter::once(ContextError {
+                    source,
+                    range: source
+                        .substr_range(line_after_block_comment)
+                        .expect("line_after_block_comment should be a substr of source"),
+                    macro_range: None,
+                    err: ErrorType::EndlessBlockComment,
+                }),
+                f,
+                &SYNTAX_STYLE_ANSI,
+            )
+        } else {
+            write_highlight(
+                scanner::tokenize(line_after_block_comment),
+                f,
+                &SYNTAX_STYLE_ANSI,
+            )
+        }
+    }
+
     fn underlines(
         f: &mut std::fmt::Formatter<'_>,
         source: &'src str,
@@ -1324,70 +1390,20 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
         for (i, line) in lines {
             // print the line content
             Self::write_line_start(f, line_num_width, i)?;
-
-            // HACK: we trust that an error range will never be within a block comment,
-            // unless the entire comment is an error
-            let line_range = source
-                .substr_range(line)
-                .expect("line should be a subsr of source");
-            // the only token that can be multiline
-            let line_after_block_comment = if let Some(block_comment_range) = rfind_block_comment(
-                #[expect(
-                    clippy::string_slice,
-                    reason = "substr_range promises to be a valid range within the string"
-                )]
-                &source[..line_range.end],
-            ) && block_comment_range.start < line_range.start
-                && block_comment_range.end >= line_range.start
-            {
-                debug_assert!(
-                    block_comment_range.end
-                        < line_items
-                            .first()
-                            .expect("should have at least one item")
-                            .range
-                            .start,
-                    "error should not overlap block comment"
-                );
-                let overlapping_comment = source
-                    .get(line_range.start..block_comment_range.end)
-                    .expect("line range and block comment range should be guarded by if condition");
-                write!(
-                    f,
-                    "{}",
-                    SYNTAX_STYLE_ANSI[Syntax::Comment].style(overlapping_comment)
-                )?;
-                #[expect(
-                    clippy::arithmetic_side_effects,
-                    reason = "should be guarded by `block_comment_range.end >= line_range.start` condition"
-                )]
-                line.get(block_comment_range.end - line_range.start..)
-                    .expect("block comment should not end within a UTF-8 character")
-            } else {
-                line
-            };
-
-            if is_unterminated_block_comment {
-                write_highlight(
-                    std::iter::once(ContextError {
-                        source,
-                        range: source
-                            .substr_range(line_after_block_comment)
-                            .expect("line_after_block_comment should be a substr of source"),
-                        macro_range: None,
-                        err: ErrorType::EndlessBlockComment,
-                    }),
-                    f,
-                    &SYNTAX_STYLE_ANSI,
-                )?;
-            } else {
-                write_highlight(
-                    scanner::tokenize(line_after_block_comment),
-                    f,
-                    &SYNTAX_STYLE_ANSI,
-                )?;
-            }
+            Self::line_content(
+                f,
+                source,
+                #[cfg(debug_assertions)]
+                line_items
+                    .first()
+                    .expect("should have at least one item")
+                    .range
+                    .start,
+                line,
+                is_unterminated_block_comment,
+            )?;
             writeln!(f)?;
+
             // per-line
             Self::write_line_start(f, line_num_width, "")?;
             // assumes line items are in order
