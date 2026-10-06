@@ -83,7 +83,14 @@
     clippy::string_slice,
     reason = "be careful about edge-cases"
 )]
-#![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
+// #![warn(
+//     clippy::expect_used,
+//     clippy::panic,
+//     reason = "avoid using `expect` or `panic` where things ought to be guaranteed \
+//         (i.e. std library promises it). prefer builtin operators since their panics \
+//         can be optimized away in release builds. use expect/panic when correctness \
+//         depends on MYSELF writing it correctly."
+// )]
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
@@ -337,10 +344,9 @@ pub fn last_ansi_seq(src: &str, pos: usize) -> &str {
     pre
         .rfind("\x1b[")
         .and_then(|pos| {
-            let s = src.get(pos..).expect(
-                "rfind should return a valid position within src. \
-                pre only shortens the end, not the start, so pos should still be a valid start position.",
-            );
+            #[expect(clippy::string_slice, reason = "rfind should return a valid position within src. \
+                pre only shortens the end, not the start, so pos should still be a valid start position.")]
+            let s = &src[pos..];
             s.split_inclusive('m').next()
         })
         .unwrap_or("\x1b[0m")
@@ -417,7 +423,8 @@ fn runtime_token(value: RunValue, buf: &mut String) -> Token<'_> {
         RunValue::Char(ch) => {
             let lex = {
                 use std::fmt::Write;
-                write!(buf, "{ch:?}").expect("infallible for String");
+                // infallible for String
+                _ = write!(buf, "{ch:?}");
                 buf
             };
             Token {
@@ -432,7 +439,8 @@ fn runtime_token(value: RunValue, buf: &mut String) -> Token<'_> {
         RunValue::Text(s) => {
             let lex = {
                 use std::fmt::Write;
-                write!(buf, "{s:?}").expect("infallible for String");
+                // infallible for String
+                _ = write!(buf, "{s:?}");
                 buf
             };
             Token {

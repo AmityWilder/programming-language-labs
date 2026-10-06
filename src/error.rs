@@ -284,33 +284,41 @@ fn invalid_num_suffix(src: &str) -> (&str, &'static str) {
         let pos = digits
             .find(|ch: char| !ch.is_ascii_hexdigit())
             .expect("should contain an invalid digit");
-        let suffix = digits
-            .get(pos..)
-            .expect("find should not be within a UTF-8 character");
+        #[expect(
+            clippy::string_slice,
+            reason = "find should not be within a UTF-8 character"
+        )]
+        let suffix = &digits[pos..];
         (suffix, "hexadecimal")
     } else if let Some(digits) = src.strip_prefix(OCT_PREFIX) {
         let pos = digits
             .find(|ch: char| !ch.is_digit(8))
             .expect("should contain an invalid digit");
-        let suffix = digits
-            .get(pos..)
-            .expect("find should not be within a UTF-8 character");
+        #[expect(
+            clippy::string_slice,
+            reason = "find should not be within a UTF-8 character"
+        )]
+        let suffix = &digits[pos..];
         (suffix, "octal")
     } else if let Some(digits) = src.strip_prefix(BIN_PREFIX) {
         let pos = digits
             .find(|ch: char| !ch.is_digit(2))
             .expect("should contain an invalid digit");
-        let suffix = digits
-            .get(pos..)
-            .expect("find should not be within a UTF-8 character");
+        #[expect(
+            clippy::string_slice,
+            reason = "find should not be within a UTF-8 character"
+        )]
+        let suffix = &digits[pos..];
         (suffix, "binary")
     } else {
         let pos = src
             .find(|ch: char| !ch.is_ascii_digit())
             .expect("should contain an invalid digit");
-        let suffix = src
-            .get(pos..)
-            .expect("find should not be within a UTF-8 character");
+        #[expect(
+            clippy::string_slice,
+            reason = "find should not be within a UTF-8 character"
+        )]
+        let suffix = &src[pos..];
         (suffix, "decimal")
     }
 }
@@ -532,6 +540,7 @@ pub enum ErrorType<'src> {
     #[help(|f, src| {
         let substr = src.strip_prefix(CHAR_DELIM)
             .expect("string literal should include at least the open delimiter, in EscapedCharLiteralEnd")
+            // escaped delimiter
             .split_once("\\'")
             .expect("should be EscapedCharLiteralEnd if this is not present")
             .0;
@@ -561,6 +570,7 @@ pub enum ErrorType<'src> {
         let substr = src
             .strip_prefix(TEXT_DELIM)
             .expect("string literal should include delimiter")
+            // escaped delimiter
             .split_once("\\\"")
             .expect("should be EndlessStringLiteral if this is not present")
             .0;
@@ -580,19 +590,16 @@ pub enum ErrorType<'src> {
     #[err((esc), |f| write!(f, "unknown character escape: {esc:?}"))]
     #[inlay((_), |f| write!(f, "has an invalid escape sequence"))]
     #[help((esc), |f, _src| {
-        let mut iter = esc.chars();
-        iter.next()
-            .filter(|ch| *ch == ESCAPE)
-            .expect("InvalidEscape should include `\\`");
+        let mut iter = esc.strip_prefix(ESCAPE).expect("InvalidEscape should include `\\`").chars();
         let ch = iter.next().expect("should have at least 2 characters or else be an EscapedStringLiteralEnd");
 
         if ch == 'x' {
             let n = iter.take(2).filter(char::is_ascii_hexdigit).count();
-            assert!(n < 2, "why is this an error?");
+            assert_ne!(n, 2, "should be an error");
             write!(f, "`\\x` should be followed by 2 hexadecimal digits ([0-9a-fA-F]), this escape sequence has {n}")
         } else if ch == 'o' {
             let n = iter.take(3).filter(|ch| ch.is_digit(8)).count();
-            assert!(n < 3, "why is this an error?");
+            assert_ne!(n, 3, "should be an error");
             write!(f, "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}")
         } else if ch.is_alphabetic() {
             write!(
@@ -1350,7 +1357,10 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
                     "{}",
                     SYNTAX_STYLE_ANSI[Syntax::Comment].style(overlapping_comment)
                 )?;
-                #[expect(clippy::arithmetic_side_effects, reason = "already checked")]
+                #[expect(
+                    clippy::arithmetic_side_effects,
+                    reason = "should be guarded by `block_comment_range.end >= line_range.start` condition"
+                )]
                 line.get(block_comment_range.end - line_range.start..)
                     .expect("block comment should not end within a UTF-8 character")
             } else {
