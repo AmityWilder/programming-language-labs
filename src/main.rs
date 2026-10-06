@@ -120,6 +120,7 @@ mod eval;
 mod grammar;
 mod highlight;
 mod preproc;
+mod regex;
 mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
