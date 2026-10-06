@@ -266,6 +266,19 @@ mod scan {
             }
 
             #[test]
+            fn test_scan_number_pos_sci_notation() {
+                const SOURCE: &str = "5e+5";
+                assert_eq!(
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    &[Ok(Token {
+                        lex: SOURCE,
+                        val: LexValue::FracLiteral(5e+5),
+                        mac: None
+                    })]
+                );
+            }
+
+            #[test]
             fn test_scan_number_neg_sci_notation_multidigit_exp() {
                 const SOURCE: &str = "5e-50";
                 assert_eq!(
