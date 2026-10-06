@@ -50,7 +50,6 @@
     type_alias_impl_trait,
     anonymous_lifetime_in_impl_trait,
     associated_type_defaults,
-    trim_prefix_suffix,
 )]
 #![forbid(
     clippy::missing_safety_doc,
@@ -258,7 +257,7 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
         }
 
         Expr::Type(inner) => {
-            let TypeExpr { name } = &**inner;
+            let TypeExpr { name } = inner;
             header("Type");
 
             field("name", indent);

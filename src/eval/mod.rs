@@ -643,8 +643,9 @@ impl RunValue {
         }
     }
 
-    /// The equivalent of `into`/`try_into`
+    /// The equivalent of [`Into`]/[`TryInto`]
     fn convert(self, into_ty: ValueType) -> Result<Self, OpError> {
+        // TODO: some of these should return runtime errors (i.e. `none`/`fail`) instead of actually erroring
         match (self, into_ty) {
             (Self::Type(_), _) => unimplemented!("should be caught by grammar"),
             (_, ValueType::Type) => unimplemented!("`type` isn't a type"),
@@ -741,7 +742,7 @@ impl RunValue {
         }
     }
 
-    /// the equivalent of [`std::mem::transmute`]
+    /// The equivalent of [`std::mem::transmute`]
     fn transmute(self, into_ty: ValueType) -> Result<Self, OpError> {
         match (self, into_ty) {
             (Self::Type(_), _) => unimplemented!("should be caught by grammar"),
@@ -933,7 +934,32 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 Keyword::Text => ValueType::Text,
                 Keyword::Fail => ValueType::Fail,
 
-                _ => unreachable!("guarded by kw.is_type()"),
+                Keyword::SelfKw // TODO: should `self` be a type?
+                | Keyword::Rec
+                | Keyword::Sup
+                | Keyword::Cat
+                | Keyword::Alt
+                | Keyword::Sub
+                | Keyword::Def
+                | Keyword::Fn
+                | Keyword::Mem
+                | Keyword::Let
+                | Keyword::Uni
+                | Keyword::Pvt
+                | Keyword::Where
+                | Keyword::Has
+                | Keyword::If
+                | Keyword::Or
+                | Keyword::Match
+                | Keyword::Rep
+                | Keyword::For
+                | Keyword::In
+                | Keyword::Loop
+                | Keyword::Cord
+                | Keyword::Halt
+                | Keyword::Skip
+                | Keyword::Give
+                | Keyword::Emit => unimplemented!("not a typename"),
             })),
 
             LexValue::Identifier | LexValue::Callable => todo!("custom types"),
