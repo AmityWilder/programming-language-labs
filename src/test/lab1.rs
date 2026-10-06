@@ -183,6 +183,32 @@ mod scan {
             }
 
             #[test]
+            fn test_scan_number_underscored() {
+                const SOURCE: &str = "3_5";
+                assert_eq!(
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    &[Ok(Token {
+                        lex: SOURCE,
+                        val: LexValue::SIntLiteral(35),
+                        mac: None
+                    })]
+                );
+            }
+
+            #[test]
+            fn test_scan_number_multi_underscored() {
+                const SOURCE: &str = "3__5";
+                assert_eq!(
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    &[Ok(Token {
+                        lex: SOURCE,
+                        val: LexValue::SIntLiteral(35),
+                        mac: None
+                    })]
+                );
+            }
+
+            #[test]
             fn test_scan_number_negative() {
                 const SOURCE: &str = "-5";
                 assert_eq!(
@@ -233,6 +259,19 @@ mod scan {
                     })]
                 );
             }
+
+            #[test]
+            fn test_scan_number_underscored_negative() {
+                const SOURCE: &str = "2_5.2_5";
+                assert_eq!(
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    &[Ok(Token {
+                        lex: SOURCE,
+                        val: LexValue::FracLiteral(25.25),
+                        mac: None
+                    })]
+                );
+            }
         }
 
         /// Scientific notation (`-?\d+(\.\d+)?([eE]-?\d+)?`)
@@ -247,6 +286,19 @@ mod scan {
                     &[Ok(Token {
                         lex: SOURCE,
                         val: LexValue::FracLiteral(5e0),
+                        mac: None
+                    })]
+                );
+            }
+
+            #[test]
+            fn test_scan_number_sci_notation_underscored() {
+                const SOURCE: &str = "5_5e0";
+                assert_eq!(
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    &[Ok(Token {
+                        lex: SOURCE,
+                        val: LexValue::FracLiteral(55e0),
                         mac: None
                     })]
                 );
@@ -299,6 +351,19 @@ mod scan {
                     &[Ok(Token {
                         lex: SOURCE,
                         val: LexValue::FracLiteral(-5e-50),
+                        mac: None
+                    })]
+                );
+            }
+
+            #[test]
+            fn test_scan_number_neg_sci_notation_underscored_exp() {
+                const SOURCE: &str = "5e-5_0";
+                assert_eq!(
+                    tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
+                    &[Ok(Token {
+                        lex: SOURCE,
+                        val: LexValue::FracLiteral(5e-5_0),
                         mac: None
                     })]
                 );
