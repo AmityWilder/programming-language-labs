@@ -163,7 +163,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::UIntLiteral(5),
+                        val: LexValue::SIntLiteral(5),
                         mac: None
                     })]
                 );
@@ -176,7 +176,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::UIntLiteral(35),
+                        val: LexValue::SIntLiteral(35),
                         mac: None
                     })]
                 );
@@ -309,7 +309,7 @@ mod scan {
                         }),
                         Ok(Token {
                             lex: "3",
-                            val: LexValue::UIntLiteral(3),
+                            val: LexValue::SIntLiteral(3),
                             mac: None
                         })
                     ]
@@ -354,7 +354,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::UIntLiteral(0x9F),
+                        val: LexValue::SIntLiteral(0x9F),
                         mac: None
                     })]
                 );
@@ -386,7 +386,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::UIntLiteral(0o253),
+                        val: LexValue::SIntLiteral(0o253),
                         mac: None
                     })]
                 );
@@ -418,7 +418,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::UIntLiteral(0b1101_1011),
+                        val: LexValue::SIntLiteral(0b1101_1011),
                         mac: None
                     })]
                 );

@@ -808,7 +808,7 @@ mod tests {
             &[Expr::binary(Binary {
                 lhs: Expr::literal(Token {
                     lex: "5",
-                    val: LexValue::UIntLiteral(5),
+                    val: LexValue::SIntLiteral(5),
                     mac: None
                 }),
                 op: Token {
@@ -833,7 +833,7 @@ mod tests {
                             expr: Expr::binary(Binary {
                                 lhs: Expr::literal(Token {
                                     lex: "7",
-                                    val: LexValue::UIntLiteral(7),
+                                    val: LexValue::SIntLiteral(7),
                                     mac: None
                                 }),
                                 op: Token {
@@ -843,7 +843,7 @@ mod tests {
                                 },
                                 rhs: Expr::literal(Token {
                                     lex: "8",
-                                    val: LexValue::UIntLiteral(8),
+                                    val: LexValue::SIntLiteral(8),
                                     mac: None
                                 })
                             }),
@@ -861,7 +861,7 @@ mod tests {
                     },
                     rhs: Expr::Literal(Token {
                         lex: "3",
-                        val: LexValue::UIntLiteral(3),
+                        val: LexValue::SIntLiteral(3),
                         mac: None
                     })
                 })
