@@ -110,6 +110,62 @@ impl From<BadBracketCombo> for (Bracket, Bracket) {
     }
 }
 
+/// Returns [`None`] if this is not a number literal, and probably something else
+///
+/// Equivalent to regex: `-?\d\w*(?:\.\d\w*)?(?:[eE][-+]\d\w*)?`
+fn match_num_literal(src: &str, allow_negative: bool) -> Option<&str> {
+    let mut s = src;
+    if allow_negative {
+        s = s.trim_prefix('-'); // -?
+    }
+    // only instance of disqualification instead of shortening
+    s = s.strip_prefix(|ch: char| ch.is_numeric())?; // \d
+    s = s.trim_start_matches(|ch: char| ch.is_alphanumeric() || ch == '_'); // \w*
+    // (?:\.
+    s = s
+        .strip_prefix('.')
+        .and_then(|mut gs| {
+            // if the first character after the dot is a letter, it might instead be a method
+            gs = gs.strip_prefix(|ch: char| ch.is_numeric())?; // \d
+            gs = gs.trim_start_matches(|ch: char| ch.is_alphanumeric() || ch == '_'); // \w*
+            Some(gs)
+        })
+        .unwrap_or(s);
+    // )?
+    // (?:[eE]
+    s = src
+        // lookback at last letter
+        .get(
+            ..src
+                .substr_range(s)
+                .expect("s should be a substr of src")
+                .start,
+        )
+        .expect("substr_range should return a valid range")
+        .ends_with(['e', 'E'])
+        .then_some(s)
+        .and_then(|mut gs: &str| {
+            // this is required because otherwise there's no reason to make this special case.
+            // the rest of the pattern would have matched a fully alphanumeric exponent anyway.
+            gs = gs.strip_prefix(['-', '+'])?; // [-+]
+            // if the first character after the minus is a letter, it might instead be subtracting an identifier
+            gs = gs.strip_prefix(|ch: char| ch.is_numeric())?; // \d
+            gs = gs.trim_start_matches(|ch: char| ch.is_alphanumeric() || ch == '_'); // \w*
+            Some(gs)
+        })
+        .unwrap_or(s);
+    // )?
+    Some(
+        src.get(
+            ..src
+                .substr_range(s)
+                .expect("s should be a substr of src")
+                .start,
+        )
+        .expect("substr_range should return a valid range"),
+    )
+}
+
 /// An iterator that breaks down text into tokens
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scanner<'src> {
@@ -360,47 +416,7 @@ impl<'src> Scanner<'src> {
     ///
     /// Returns [`None`] if the next token is not a number literal
     fn scan_num_literal(&mut self) -> Option<Result<Token<'src>, ContextError<'src>>> {
-        if !self
-            .source
-            .strip_prefix('-')
-            .filter(|_| self.can_be_negative)
-            .unwrap_or(self.source)
-            .starts_with(char::is_numeric)
-        {
-            return None;
-        }
-        let number = self
-            .source
-            // TODO: make this into a state machine
-            .find({
-                let mut is_first_char = true;
-                let mut is_first_decimal = true; // at most one decimal
-                let mut is_first_e_neg = true; // at most one '-' following an 'e'
-                let mut is_prev_e = false;
-                let mut is_following_e = false;
-                move |ch: char| {
-                    let is_end = !(ch.is_alphanumeric()
-                        || ch == '_'
-                        || ch == '.' && std::mem::take(&mut is_first_decimal) && !is_following_e
-                        || ch == '-'
-                            && (is_first_char || is_prev_e && std::mem::take(&mut is_first_e_neg)));
-                    is_prev_e = matches!(ch, 'e' | 'E');
-                    is_following_e |= is_prev_e;
-                    is_first_char = false;
-                    is_end
-                }
-            })
-            .map_or(
-                self.source,
-                #[expect(
-                    clippy::string_slice,
-                    reason = "find should not be within a UTF-8 character"
-                )]
-                |pos| &self.source[..pos],
-            );
-        // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
-        // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
-        let len = number.trim_end_matches(['.', '-']).len();
+        let len = match_num_literal(self.source, self.can_be_negative)?.len();
         let lex = self
             .split_off(len)
             .expect("should be a safe position to split at");
