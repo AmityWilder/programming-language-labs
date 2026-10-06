@@ -1093,16 +1093,23 @@ pub struct ContextErrorHelp<'src, 'err>(&'err ContextError<'src>);
 /// [`None`] if `range` is out of bounds for `src`
 #[must_use]
 pub fn line_containing(src: &str, range: Range<usize>) -> Option<Range<usize>> {
-    let line_start = src.get(..range.start)?.rfind('\n').map_or(0, |pos| {
-        // SAFETY: `pos` is the position of the start of a 1-byte ASCII char ('\n'), therefore we can
-        // add the length of that char (1 byte) to get the end, which is at most src.len().
-        unsafe { pos.unchecked_add('\n'.len_utf8()) }
-    });
-    let line_end = src.get(range.end..)?.find('\n').map_or(src.len(), |n| {
-        // SAFETY: `n` is a position in `source[range.end..]`, therefore `range.end + n`
-        // is a position in `source[..]`, which must be in memory whose len therefore fits in usize.
-        unsafe { n.unchecked_add(range.end) }
-    });
+    let line_start = src.get(..range.start)?.rfind('\n').map_or(
+        0,
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "`pos` is the position of the start of a 1-byte ASCII char ('\n'), therefore we can \
+                      add the length of that char (1 byte) to get the end, which is at most src.len().",
+        )]
+        |pos| pos + '\n'.len_utf8(),
+    );
+    let line_end = src.get(range.end..)?.find('\n').map_or(src.len(),
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "`n` is a position in `source[range.end..]`, therefore `range.end + n` is a position in \
+                      `source[..]`, which must be in memory whose len therefore fits in usize.",
+        )]
+        |n| n + range.end
+    );
     Some((line_start..line_end).into())
 }
 
@@ -1883,6 +1890,7 @@ struct ArrayVec<T, const CAP: usize> {
     len: usize,
 }
 
+// this is the main reason why `ArrayVec` had to be a type instead of just doing this stuff in-place: it might fail to drop
 impl<T, const CAP: usize> Drop for ArrayVec<T, CAP> {
     fn drop(&mut self) {
         let buf = self
@@ -1937,14 +1945,12 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
 
     /// Returns [`Err`] if out of capacity
     const fn push_mut(&mut self, value: T) -> Result<&mut T, T> {
+        // if we can't even add 1 without overflowing, we're definitely out of capacity
         if let Some(new_len) = self.len.checked_add(1)
             && new_len <= CAP
         {
-            // SAFETY: Guarded by 'if' condition
-            let uninit = unsafe {
-                self.buf
-                    .get_unchecked_mut(std::mem::replace(&mut self.len, new_len))
-            };
+            #[expect(clippy::indexing_slicing, reason = "Guarded by 'if' condition")]
+            let uninit = &mut self.buf[std::mem::replace(&mut self.len, new_len)];
             Ok(uninit.write(value))
         } else {
             Err(value)

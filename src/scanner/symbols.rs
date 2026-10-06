@@ -3,7 +3,7 @@
 /// A character literal delimiter - both open and close are identical
 pub const CHAR_DELIM: char = '\'';
 /// A string literal delimiter - both open and close are identical
-pub const TEXT_DELIM: char = '\"';
+pub const TEXT_DELIM: char = '"';
 /// An escape character
 pub const ESCAPE: char = '\\';
 /// The prefix of a macro identifier

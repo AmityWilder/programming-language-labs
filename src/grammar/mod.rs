@@ -797,12 +797,12 @@ mod tests {
     #[test]
     fn test_parse0() {
         const SOURCE: &str = "5 + -(7 / 8) * 3";
-        let tokens = tokenize(SOURCE)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("should not have a token error");
-        let expr = parse(SOURCE, tokens)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("should be a valid expression");
+        let expr = parse(
+            SOURCE,
+            tokenize(SOURCE).map(|item| item.expect("this example should not have any lex errors")),
+        )
+        .collect::<Result<Vec<_>, _>>()
+        .expect("this example should be a valid expression");
         assert_eq!(
             expr.as_slice(),
             &[Expr::binary(Binary {
