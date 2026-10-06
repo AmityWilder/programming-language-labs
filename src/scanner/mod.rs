@@ -179,43 +179,30 @@ impl<'src> Scanner<'src> {
         self.error_prev(len, err)
     }
 
-    /// The source code starts with [`LexValue::Whitespace`]
-    fn starts_with_whitespace(&self) -> bool {
-        self.source.starts_with(char::is_whitespace)
-    }
-
     /// Split off a [`LexValue::Whitespace`] from the start of the source code
     ///
-    /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_whitespace`] would not have returned true
-    fn scan_whitespace(&mut self) -> Token<'src> {
+    /// Returns [`None`] if the next token is not whitespace
+    fn scan_whitespace(&mut self) -> Option<Token<'src>> {
         let len = self
             .source
             .find(|ch: char| !ch.is_whitespace())
             .unwrap_or(self.source.len());
-        Token {
+        (len != 0).then(|| Token {
             lex: self
                 .split_off(len)
                 .expect("find and len should return safe positions within source"),
             val: LexValue::Whitespace,
             mac: None,
-        }
-    }
-
-    /// The source code starts with [`LexValue::Macro`]
-    fn starts_with_macro(&self) -> bool {
-        self.source.starts_with(MACRO_PREFIX)
+        })
     }
 
     /// Split off a [`LexValue::Macro`] from the start of the source code
     ///
-    /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_macro(&mut self) -> Token<'src> {
+    /// Returns [`None`] if the next token is not a macro
+    fn scan_macro(&mut self) -> Option<Token<'src>> {
         let len = self
             .source
-            .strip_prefix(MACRO_PREFIX)
-            .expect("should not call `scan_macro` if `starts_with_macro` is false")
+            .strip_prefix(MACRO_PREFIX)?
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
             .map_or(self.source.len(), |n| {
                 n.checked_add(MACRO_PREFIX.len_utf8())
@@ -224,27 +211,20 @@ impl<'src> Scanner<'src> {
         let lex = self
             .split_off(len)
             .expect("find and len should return safe positions to split at");
-        Token {
+        Some(Token {
             lex,
             val: LexValue::Macro,
             mac: None,
-        }
+        })
     }
 
-    /// The source code starts with [`LexValue::Macro`]
-    fn starts_with_macro_param(&self) -> bool {
-        self.source.starts_with(MACRO_PARAM_PREFIX)
-    }
-
-    /// Split off a [`LexValue::Macro`] from the start of the source code
+    /// Split off a macro parameter from the start of the source code
     ///
-    /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_macro_param(&mut self) -> Token<'src> {
+    /// Returns [`None`] if the next token is not a macro parameter
+    fn scan_macro_param(&mut self) -> Option<Token<'src>> {
         let len = self
             .source
-            .strip_prefix(MACRO_PARAM_PREFIX)
-            .expect("should not call `scan_macro_param` if `starts_with_macro_param` is false")
+            .strip_prefix(MACRO_PARAM_PREFIX)?
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
             .map_or(self.source.len(), |n| {
                 n.checked_add(MACRO_PARAM_PREFIX.len_utf8())
@@ -253,31 +233,22 @@ impl<'src> Scanner<'src> {
         let lex = self
             .split_off(len)
             .expect("find and len should return safe positions to split at");
-        Token {
+        Some(Token {
             lex,
             val: LexValue::MacroParam,
             mac: None,
-        }
-    }
-
-    /// The source code starts with [`LexValue::TextLiteral`]/[`LexValue::CharLiteral`]
-    ///
-    /// Returns the delimiter
-    fn starts_with_strlike_literal(&self) -> Option<char> {
-        self.source
-            .chars()
-            .next()
-            .filter(|ch| matches!(*ch, TEXT_DELIM | CHAR_DELIM))
+        })
     }
 
     /// Split off a [`LexValue::TextLiteral`]/[`LexValue::CharLiteral`] from the start of the source code
     ///
-    /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_strlike_literal(
-        &mut self,
-        open_delim: char,
-    ) -> Result<Token<'src>, ContextError<'src>> {
+    /// Returns [`None`] if the next token is not a text/char literal
+    fn scan_strlike_literal(&mut self) -> Option<Result<Token<'src>, ContextError<'src>>> {
+        let open_delim = self
+            .source
+            .chars()
+            .next()
+            .filter(|ch| matches!(*ch, TEXT_DELIM | CHAR_DELIM))?;
         let rest = self.source.strip_prefix(open_delim).expect(
             "should not call `scan_strlike_literal` if `starts_with_strlike_literal` is false",
         );
@@ -285,7 +256,7 @@ impl<'src> Scanner<'src> {
         let rest = rest
             .get(..line_end)
             .expect("find and len should not be within a UTF-8 character");
-        rest.find(unescaped(open_delim))
+        Some(rest.find(unescaped(open_delim))
             .map(|n| {
                 const {
                     assert!(
@@ -341,20 +312,19 @@ impl<'src> Scanner<'src> {
                     _ => unreachable!("should be guarded by if condition"),
                 }
                 .map_err(|err| self.error_prev(len, err))
-            })
+            }))
     }
 
-    /// The source code starts with [`LexValue::Macro`]
-    fn starts_with_ident(&self) -> bool {
-        self.source
-            .starts_with(|ch: char| ch.is_alphabetic() || ch == '_')
-    }
-
-    /// Split off a [`LexValue::Macro`] from the start of the source code
+    /// Split off a [`LexValue::Identifier`] from the start of the source code
     ///
-    /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
-    fn scan_ident(&mut self) -> Token<'src> {
+    /// Returns [`None`] if the next token is not an identifier
+    fn scan_ident(&mut self) -> Option<Token<'src>> {
+        if !self
+            .source
+            .starts_with(|ch: char| ch.is_alphabetic() || ch == '_')
+        {
+            return None;
+        }
         let len = self
             .source
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
@@ -379,102 +349,103 @@ impl<'src> Scanner<'src> {
                 }
             }
         };
-        Token {
+        Some(Token {
             lex,
             val,
             mac: None,
-        }
-    }
-
-    /// The source code starts with number literal
-    fn starts_with_num_literal(&self) -> bool {
-        self.source
-            .strip_prefix('-')
-            .filter(|_| self.can_be_negative)
-            .unwrap_or(self.source)
-            .starts_with(char::is_numeric)
+        })
     }
 
     /// Split off a number literal from the start of the source code
     ///
-    /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_num_literal`] would not have returned true
-    fn scan_num_literal(&mut self) -> Result<Token<'src>, ContextError<'src>> {
-        let number_end = {
-            let mut is_first_char = true;
-            let mut is_first_decimal = true; // at most one decimal
-            let mut is_first_e_neg = true; // at most one '-' following an 'e'
-            let mut is_prev_e = false;
-            let mut is_following_e = false;
-            move |ch: char| {
-                let is_end = !(ch.is_alphanumeric()
-                    || ch == '_'
-                    || ch == '.' && std::mem::take(&mut is_first_decimal) && !is_following_e
-                    || ch == '-'
-                        && (is_first_char || is_prev_e && std::mem::take(&mut is_first_e_neg)));
-                is_prev_e = matches!(ch, 'e' | 'E');
-                is_following_e |= is_prev_e;
-                is_first_char = false;
-                is_end
-            }
-        };
-        let number = self.source.find(number_end).map_or(self.source, |pos| {
-            self.source
-                .get(..pos)
-                .expect("find should not be within a UTF-8 character")
-        });
+    /// Returns [`None`] if the next token is not a number literal
+    fn scan_num_literal(&mut self) -> Option<Result<Token<'src>, ContextError<'src>>> {
+        if !self
+            .source
+            .strip_prefix('-')
+            .filter(|_| self.can_be_negative)
+            .unwrap_or(self.source)
+            .starts_with(char::is_numeric)
+        {
+            return None;
+        }
+        let number = self
+            .source
+            // TODO: make this into a state machine
+            .find({
+                let mut is_first_char = true;
+                let mut is_first_decimal = true; // at most one decimal
+                let mut is_first_e_neg = true; // at most one '-' following an 'e'
+                let mut is_prev_e = false;
+                let mut is_following_e = false;
+                move |ch: char| {
+                    let is_end = !(ch.is_alphanumeric()
+                        || ch == '_'
+                        || ch == '.' && std::mem::take(&mut is_first_decimal) && !is_following_e
+                        || ch == '-'
+                            && (is_first_char || is_prev_e && std::mem::take(&mut is_first_e_neg)));
+                    is_prev_e = matches!(ch, 'e' | 'E');
+                    is_following_e |= is_prev_e;
+                    is_first_char = false;
+                    is_end
+                }
+            })
+            .map_or(
+                self.source,
+                #[expect(
+                    clippy::string_slice,
+                    reason = "find should not be within a UTF-8 character"
+                )]
+                |pos| &self.source[..pos],
+            );
         // skip trailing decimal or hyphen; decimal could be a method, hyphen could be subtraction operator.
         // trailing 'e' is kept since it should be an error, rather than being left in for the next token.
         let len = number.trim_end_matches(['.', '-']).len();
         let lex = self
             .split_off(len)
             .expect("should be a safe position to split at");
-        LexValue::number_literal(lex)
-            .map(|val| Token {
-                lex,
-                val,
-                mac: None,
-            })
-            .map_err(|err| self.error_prev(len, err))
-    }
-
-    /// The source code starts with a line comment
-    fn starts_with_line_comment(&self) -> bool {
-        self.source.starts_with(LINE_COMMENT_OPEN)
+        Some(
+            LexValue::number_literal(lex)
+                .map(|val| Token {
+                    lex,
+                    val,
+                    mac: None,
+                })
+                .map_err(|err| self.error_prev(len, err)),
+        )
     }
 
     /// Split off a line comment from the start of the source code
     ///
-    /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_line_comment`] would not have returned true
-    fn scan_line_comment(&mut self) -> Token<'src> {
+    /// Returns [`None`] if the next token is not a line comment
+    fn scan_line_comment(&mut self) -> Option<Token<'src>> {
+        if !self.source.starts_with(LINE_COMMENT_OPEN) {
+            return None;
+        }
         let len = self
             .source
             .lines()
             .next() // take the first line (excluding newline/return)
             .expect("the existence of characters should imply the existence of a line")
             .len();
-        Token {
+        Some(Token {
             lex: self
                 .split_off(len)
                 .expect("should be a safe position to split at"),
             val: LexValue::Comment,
             mac: None,
-        }
-    }
-
-    /// The source code starts with a block comment
-    fn starts_with_block_comment(&self) -> bool {
-        self.source.starts_with(BLOCK_COMMENT_OPEN)
+        })
     }
 
     /// Split off a block comment from the start of the source code
     ///
-    /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_block_comment`] would not have returned true
-    fn scan_block_comment(&mut self) -> Result<Token<'src>, ContextError<'src>> {
+    /// Returns [`None`] if the next token is not a block comment
+    fn scan_block_comment(&mut self) -> Option<Result<Token<'src>, ContextError<'src>>> {
         const BLOCK_COMMENT_CIRCUMFIX_LEN: usize =
             BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len();
+        if !self.source.starts_with(BLOCK_COMMENT_OPEN) {
+            return None;
+        }
         let mut prev_char = None;
         let mut depth: usize = 0;
         let len = self.source.strip_prefix(BLOCK_COMMENT_OPEN)
@@ -496,39 +467,32 @@ impl<'src> Scanner<'src> {
             })
             .map(|n| n.checked_add(BLOCK_COMMENT_CIRCUMFIX_LEN)
                 .expect("n should describe the non-block-comment-circumfix subset of a string in memory"));
-        len.map(|len| Token {
-            lex: self
-                .split_off(len)
-                .expect("should be a safe position to split at"),
-            val: LexValue::Comment,
-            mac: None,
-        })
-        .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
+        Some(
+            len.map(|len| Token {
+                lex: self
+                    .split_off(len)
+                    .expect("should be a safe position to split at"),
+                val: LexValue::Comment,
+                mac: None,
+            })
+            .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment)),
+        )
     }
 
     /// Split off a [`LexValue::Punctuation`] from the start of the source code
-    fn scan_punc(&mut self) -> Result<Token<'src>, ContextError<'src>> {
-        Punctuation::from_prefix(self.source)
-            .map(|punc| {
-                let lex = self
-                    .split_off(punc.as_str().len())
-                    .expect("should be a safe position to split at");
-                Token {
-                    lex,
-                    val: LexValue::Punctuation(punc),
-                    mac: None,
-                }
-            })
-            .ok_or_else(|| {
-                self.error_here(
-                    self.source
-                        .chars()
-                        .next()
-                        .expect("source should have at least one char to start with punctuation")
-                        .len_utf8(),
-                    ErrorType::UnknownToken,
-                )
-            })
+    ///
+    /// Returns [`None`] if the next token is not valid punctuation
+    fn scan_punc(&mut self) -> Option<Token<'src>> {
+        Punctuation::from_prefix(self.source).map(|punc| {
+            let lex = self
+                .split_off(punc.as_str().len())
+                .expect("should be a safe position to split at");
+            Token {
+                lex,
+                val: LexValue::Punctuation(punc),
+                mac: None,
+            }
+        })
     }
 }
 
@@ -550,35 +514,34 @@ impl<'src> Iterator for Scanner<'src> {
             //    a complex condition on tokens that don't satisfy them, when they might have satisfied a less expensive
             //    condition for a different branch.
 
-            if self.starts_with_whitespace() {
-                Ok(self.scan_whitespace())
-            } else if self.starts_with_macro() {
-                Ok(self.scan_macro())
-            } else if self.starts_with_macro_param() {
-                Ok(self.scan_macro_param())
-            } else if let Some(open_delim) = self.starts_with_strlike_literal() {
-                self.scan_strlike_literal(open_delim)
-            } else if self.starts_with_ident() {
-                Ok(self.scan_ident())
-            } else if self.starts_with_num_literal() {
-                self.scan_num_literal()
-            } else if self.starts_with_line_comment() {
-                Ok(self.scan_line_comment())
-            } else if self.starts_with_block_comment() {
-                self.scan_block_comment()
-            } else {
-                self.scan_punc()
-            }
-            .inspect(|token| {
-                // non-whitespace, non-comment token
-                if !matches!(token.val, LexValue::Whitespace | LexValue::Comment) {
-                    self.is_following_fn = matches!(token.val, LexValue::Keyword(Keyword::Fn));
+            None // <- exists only so the first item can also be in an `or_else`, for cleaner formatting
+                .or_else(|| self.scan_whitespace().map(Ok))
+                .or_else(|| self.scan_macro().map(Ok))
+                .or_else(|| self.scan_macro_param().map(Ok))
+                .or_else(|| self.scan_strlike_literal())
+                .or_else(|| self.scan_ident().map(Ok))
+                .or_else(|| self.scan_num_literal())
+                .or_else(|| self.scan_line_comment().map(Ok))
+                .or_else(|| self.scan_block_comment())
+                .or_else(|| self.scan_punc().map(Ok))
+                .unwrap_or_else(|| Err(self.error_here(
+                    self.source
+                        .chars()
+                        .next()
+                        .expect("source should have at least one character if it is not empty")
+                        .len_utf8(),
+                    ErrorType::UnknownToken,
+                )))
+                .inspect(|token| {
+                    // non-whitespace, non-comment token
+                    if !matches!(token.val, LexValue::Whitespace | LexValue::Comment) {
+                        self.is_following_fn = matches!(token.val, LexValue::Keyword(Keyword::Fn));
 
-                    // punctuation except for close bracket
-                    self.can_be_negative = matches!(token.val, LexValue::Punctuation(punc) if
-                        !matches!(punc, Punctuation::RParen | Punctuation::RBrack | Punctuation::RBrace));
-                }
-            })
+                        // punctuation except for close bracket
+                        self.can_be_negative = matches!(token.val, LexValue::Punctuation(punc) if
+                            !matches!(punc, Punctuation::RParen | Punctuation::RBrack | Punctuation::RBrace));
+                    }
+                })
         })
     }
 
