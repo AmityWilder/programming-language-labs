@@ -5,6 +5,7 @@
 
 #![allow(unused_features)]
 #![feature(
+    ascii_char,
     try_from_int_error_kind, // used in number literal error
     iter_next_chunk,
     deque_extend_front,
@@ -82,7 +83,7 @@
     clippy::string_slice,
     reason = "be careful about edge-cases"
 )]
-// #![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
+#![warn(clippy::expect_used, clippy::panic)] // not actually a problem, just be aware
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{

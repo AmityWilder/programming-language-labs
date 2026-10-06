@@ -120,7 +120,7 @@ pub struct Scanner<'src> {
     /// The next token will always be at the start of this string.
     source: &'src str,
 
-    /// The most recent non-whitespace, non-comment token was either the start of the source code or [`TokenType::Punctuation`]
+    /// The most recent non-whitespace, non-comment token was either the start of the source code or [`LexValue::Punctuation`]
     /// **and not** `)`, `]`, or `}`.
     can_be_negative: bool,
 
@@ -179,12 +179,12 @@ impl<'src> Scanner<'src> {
         self.error_prev(len, err)
     }
 
-    /// The source code starts with [`TokenType::Whitespace`]
+    /// The source code starts with [`LexValue::Whitespace`]
     fn starts_with_whitespace(&self) -> bool {
         self.source.starts_with(char::is_whitespace)
     }
 
-    /// Split off a [`TokenType::Whitespace`] from the start of the source code
+    /// Split off a [`LexValue::Whitespace`] from the start of the source code
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_whitespace`] would not have returned true
@@ -202,12 +202,12 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    /// The source code starts with [`TokenType::Macro`]
+    /// The source code starts with [`LexValue::Macro`]
     fn starts_with_macro(&self) -> bool {
         self.source.starts_with(MACRO_PREFIX)
     }
 
-    /// Split off a [`TokenType::Macro`] from the start of the source code
+    /// Split off a [`LexValue::Macro`] from the start of the source code
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
@@ -231,12 +231,12 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    /// The source code starts with [`TokenType::Macro`]
+    /// The source code starts with [`LexValue::Macro`]
     fn starts_with_macro_param(&self) -> bool {
         self.source.starts_with(MACRO_PARAM_PREFIX)
     }
 
-    /// Split off a [`TokenType::Macro`] from the start of the source code
+    /// Split off a [`LexValue::Macro`] from the start of the source code
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
@@ -260,7 +260,7 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    /// The source code starts with [`TokenType::Macro`]
+    /// The source code starts with [`LexValue::TextLiteral`]/[`LexValue::CharLiteral`]
     ///
     /// Returns the delimiter
     fn starts_with_strlike_literal(&self) -> Option<char> {
@@ -270,7 +270,7 @@ impl<'src> Scanner<'src> {
             .filter(|ch| matches!(*ch, TEXT_DELIM | CHAR_DELIM))
     }
 
-    /// Split off a [`TokenType::Macro`] from the start of the source code
+    /// Split off a [`LexValue::TextLiteral`]/[`LexValue::CharLiteral`] from the start of the source code
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
@@ -293,11 +293,14 @@ impl<'src> Scanner<'src> {
                         "proof. char::MAX_LEN_UTF8 * 2 fits in usize"
                     );
                 }
-                // SAFETY: As shown above, `char::MAX_LEN_UTF8 * 2` fits in usize.
-                // By definition of `char::MAX_LEN_UTF8`, `c.len_utf8()` is at most `char::MAX_LEN_UTF8` for all `c: char`.
-                // Therefore, `c.len_utf8() * 2` fits in usize for all `c: char`.
-                (unsafe { open_delim.len_utf8().unchecked_mul(2) })
-                    // why 2x? first for open delimiter, second for close delimiter (both are the same character)
+                #[expect(
+                    clippy::arithmetic_side_effects,
+                    reason = "As shown above, `char::MAX_LEN_UTF8 * 2` fits in usize. \
+                              By definition of `char::MAX_LEN_UTF8`, `c.len_utf8()` is at most `char::MAX_LEN_UTF8` for all `c: char`. \
+                              Therefore, `c.len_utf8() * 2` fits in usize for all `c: char`.",
+                )]
+                // why 2x? first for open delimiter, second for close delimiter (both are the same character)
+                (open_delim.len_utf8() * 2)
                     .checked_add(n)
                     .expect(
                         "stringlike literal should include both open and close delimiters, \
@@ -311,10 +314,10 @@ impl<'src> Scanner<'src> {
                     // the fact there is a closing delimiter that didn't end the string shows it must be escaped
                     // (or else there wouldn't have been an error)
                     match (open_delim, rest.contains(open_delim)) {
-                        ('\'', true) => ErrorType::EscapedCharLiteralEnd,
-                        ('\'', false) => ErrorType::EndlessCharLiteral,
-                        ('"', true) => ErrorType::EscapedStringLiteralEnd,
-                        ('"', false) => ErrorType::EndlessStringLiteral,
+                        (CHAR_DELIM, true) => ErrorType::EscapedCharLiteralEnd,
+                        (CHAR_DELIM, false) => ErrorType::EndlessCharLiteral,
+                        (TEXT_DELIM, true) => ErrorType::EscapedStringLiteralEnd,
+                        (TEXT_DELIM, false) => ErrorType::EndlessStringLiteral,
                         _ => unimplemented!(),
                     },
                 )
@@ -341,13 +344,13 @@ impl<'src> Scanner<'src> {
             })
     }
 
-    /// The source code starts with [`TokenType::Macro`]
+    /// The source code starts with [`LexValue::Macro`]
     fn starts_with_ident(&self) -> bool {
         self.source
             .starts_with(|ch: char| ch.is_alphabetic() || ch == '_')
     }
 
-    /// Split off a [`TokenType::Macro`] from the start of the source code
+    /// Split off a [`LexValue::Macro`] from the start of the source code
     ///
     /// # Panics
     /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
@@ -383,7 +386,7 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    /// The source code starts with [`TokenType::Macro`]
+    /// The source code starts with number literal
     fn starts_with_num_literal(&self) -> bool {
         self.source
             .strip_prefix('-')
@@ -392,10 +395,10 @@ impl<'src> Scanner<'src> {
             .starts_with(char::is_numeric)
     }
 
-    /// Split off a [`TokenType::Macro`] from the start of the source code
+    /// Split off a number literal from the start of the source code
     ///
     /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
+    /// This method is allowed to panic if [`Self::starts_with_num_literal`] would not have returned true
     fn scan_num_literal(&mut self) -> Result<Token<'src>, ContextError<'src>> {
         let number_end = {
             let mut is_first_char = true;
@@ -435,15 +438,15 @@ impl<'src> Scanner<'src> {
             .map_err(|err| self.error_prev(len, err))
     }
 
-    /// The source code starts with [`TokenType::Macro`]
+    /// The source code starts with a line comment
     fn starts_with_line_comment(&self) -> bool {
         self.source.starts_with(LINE_COMMENT_OPEN)
     }
 
-    /// Split off a [`TokenType::Macro`] from the start of the source code
+    /// Split off a line comment from the start of the source code
     ///
     /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
+    /// This method is allowed to panic if [`Self::starts_with_line_comment`] would not have returned true
     fn scan_line_comment(&mut self) -> Token<'src> {
         let len = self
             .source
@@ -460,15 +463,15 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    /// The source code starts with [`TokenType::Macro`]
+    /// The source code starts with a block comment
     fn starts_with_block_comment(&self) -> bool {
         self.source.starts_with(BLOCK_COMMENT_OPEN)
     }
 
-    /// Split off a [`TokenType::Macro`] from the start of the source code
+    /// Split off a block comment from the start of the source code
     ///
     /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
+    /// This method is allowed to panic if [`Self::starts_with_block_comment`] would not have returned true
     fn scan_block_comment(&mut self) -> Result<Token<'src>, ContextError<'src>> {
         const BLOCK_COMMENT_CIRCUMFIX_LEN: usize =
             BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len();
@@ -503,10 +506,7 @@ impl<'src> Scanner<'src> {
         .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment))
     }
 
-    /// Split off a [`TokenType::Macro`] from the start of the source code
-    ///
-    /// # Panics
-    /// This method is allowed to panic if [`Self::starts_with_macro`] would not have returned true
+    /// Split off a [`LexValue::Punctuation`] from the start of the source code
     fn scan_punc(&mut self) -> Result<Token<'src>, ContextError<'src>> {
         Punctuation::from_prefix(self.source)
             .map(|punc| {

@@ -36,22 +36,19 @@ const fn remap_subtoken_range(Range { start, end }: Range<usize>) -> Range<usize
 
 /// Returns an iterator over char subtokens (assumes the character is escaped)
 fn escaped_char_literal(lex: &str, syn: Syntax) -> std::array::IntoIter<(&str, Syntax), 3> {
-    let start = lex
-        .strip_suffix(CHAR_DELIM)
-        .expect("char literal should include delimiters");
+    assert!(
+        lex.starts_with(CHAR_DELIM) && lex.ends_with(CHAR_DELIM),
+        "char literal should include delimiters"
+    );
 
-    // SAFETY: `start` is a prefix substr `&str` of `lex` (because the suffix was stripped off).
-    // By definition, `str` must be valid UTF-8, therefore it will not end partway through a UTF-8
-    // character (if it did, then it would not be valid UTF-8). Therefore, `lex.len()` must be the
-    // position of a boundary between UTF-8 characters. It is also not out of bounds for `lex`,
-    // because `start.len() <= lex.len()`, since `strip_suffix` does not add add characters.
-    // So, `start.len()` is AT MOST `lex.len()`, and `s[s.len()..]` for all `s: &str` is valid
-    // (it is an empty str at the end of `s`).
-    let post = unsafe { lex.get_unchecked(start.len()..) };
-
-    let [pre, inner] = start
-        .split_inclusive(CHAR_DELIM)
-        .next_chunk::<2>()
+    let (pre, inner, post) = lex
+        .len()
+        .checked_sub(CHAR_DELIM.len_utf8())
+        .and_then(|mid| lex.split_at_checked(mid))
+        .and_then(|(pre, post)| {
+            pre.split_at_checked(CHAR_DELIM.len_utf8())
+                .map(|(pre, inner)| (pre, inner, post))
+        })
         .expect("char literal should include delimiters");
 
     [(pre, syn), (inner, Syntax::EscapeSeq), (post, syn)].into_iter()
@@ -124,7 +121,8 @@ where
         };
         self.prev_end = end;
 
-        let lex = self.lex.get(range).expect("range should be a range in lex");
+        #[expect(clippy::string_slice, reason = "range should be a range in lex")]
+        let lex = &self.lex[range];
         Some((lex, syn))
     }
 
@@ -304,10 +302,9 @@ impl<'src> TokenHighlight<'src> for Token<'src> {
 
 impl<'src> TokenHighlight<'src> for ContextError<'src> {
     fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
+        #[expect(clippy::string_slice, reason = "range should be a range of source")]
         (
-            self.source
-                .get(self.range)
-                .expect("range should be a range of source"),
+            &self.source[self.range],
             Syntax::Invalid,
             const { LexValue::Comment },
         )

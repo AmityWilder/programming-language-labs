@@ -161,10 +161,14 @@ pub fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
                     "proof. 2 UTF8 characters are guaranteed not to exceed usize::MAX"
                 );
             }
-            // SAFETY: As shown above, `char::MAX_LEN_UTF8 * 2` fits in usize.
-            // By definition of `char::MAX_LEN_UTF8`, `c.len_utf8()` is at most `char::MAX_LEN_UTF8` for all `c: char`.
-            // Therefore, `c.len_utf8() + d.len_utf8()` fits in usize for all `c,d: char`.
-            let base_len = unsafe { ESCAPE.len_utf8().unchecked_add(ch.len_utf8()) };
+
+            #[expect(
+                clippy::arithmetic_side_effects,
+                reason = "As shown above, `char::MAX_LEN_UTF8 * 2` fits in usize. \
+                          By definition of `char::MAX_LEN_UTF8`, `c.len_utf8()` is at most `char::MAX_LEN_UTF8` for all `c: char`. \
+                          Therefore, `c.len_utf8() + d.len_utf8()` fits in usize for all `c,d: char`.",
+            )]
+            let base_len = ESCAPE.len_utf8() + ch.len_utf8();
             match ch {
                 '0'..='9' => Ok((base_len, char::from((u8::try_from(ch).expect("0-9 are ASCII and therefore 1 byte")).checked_sub(b'0').expect("0-9 are guaranteed to be within u8")))),
 
