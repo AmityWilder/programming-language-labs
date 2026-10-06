@@ -152,8 +152,9 @@ impl<'src> LexValue<'src> {
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.
         // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
         if !src.starts_with(HEX_PREFIX) && src.contains(['e', 'E']) || src.contains('.') {
-            assert_ne!(src, "", "scanner should not emit empty tokens");
-            src.parse() // turns out parse already handles the "e" syntax on its own
+            debug_assert_ne!(src, "", "scanner should not emit empty tokens"); // also guarded by condition
+            src.replace('_', "") // TODO: this allocates :c
+                .parse() // turns out parse already handles the "e" syntax on its own
                 .map(Self::FracLiteral)
                 .map_err(|_| ErrorType::InvalidNumLiteral(NumErrorKind::InvalidFrac))
         } else {

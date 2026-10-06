@@ -126,7 +126,7 @@ fn match_num_literal(src: &str, allow_negative: bool) -> Option<&str> {
         .opt_group(|re| {
             re
                 .exactly('.')? // \.
-                // if the first character after the dot is a letter, it might instead be a method
+                // if the first character after the dot is a letter, it might instead be a method or range expression
                 .exactly(digit_char)? // \d
                 .repeat(word_char) // \w*
                 .end()
@@ -135,12 +135,15 @@ fn match_num_literal(src: &str, allow_negative: bool) -> Option<&str> {
         // (?:
         .opt_group(|re| {
             re
+                // uses lookbehind because [`FauxRegex`] is EXTRA greedy and will munch characters
+                // even if the next part of the pattern could match it
                 .lookbehind(['e', 'E'])? // [eE]
                 // this is required because otherwise there's no reason to make this special case.
                 // the rest of the pattern would have matched a fully alphanumeric exponent anyway.
                 .exactly(['-', '+'])? // [-+]
                 // if the first character after the minus is a letter, it might instead be subtracting an identifier
                 .exactly(digit_char)? // \d
+                // not just digits in case there's a suffix
                 .repeat(word_char) // \w*
                 .end()
         })
