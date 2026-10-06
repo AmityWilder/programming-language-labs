@@ -41,7 +41,7 @@ impl<'a> FauxRegex<'a> {
             .expect("matched_len should be within haystack and not within a UTF-8 character")
     }
 
-    #[allow(clippy::unnecessary_wraps, reason = "for convenience")]
+    #[expect(clippy::unnecessary_wraps, reason = "for convenience")]
     pub const fn end(&mut self) -> Option<&mut Self> {
         Some(self)
     }
@@ -96,6 +96,7 @@ impl<'a> FauxRegex<'a> {
     /// `{at_least, at_most}`
     ///
     /// TIP: prefer [`Self::repeat`] if calling with `at_least=0` and `at_most=None`
+    #[expect(dead_code, reason = "available for future use")]
     pub fn repeat_n<P>(
         &mut self,
         pat: P,

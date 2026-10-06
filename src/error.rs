@@ -361,6 +361,7 @@ expected_token! {
         ParenExpr = "a parenthesized expression",
         ExprOrRParen = "an expression or `)`",
         Expr = "an expression",
+        TypeExpr = "a type expression",
     }
 }
 
@@ -1646,10 +1647,47 @@ impl Punctuation {
             (Shr, [_, _]) => "right bitshift",
             (Rotl, [_, _]) => "left bitwise rotate",
             (Rotr, [_, _]) => "right bitwise rotate",
+            (Exists, [_]) => "existence",
+            (Coalesce, [_]) => "coalescence",
+            (Convert, [_, _]) => "conversion",
+            (Transmute, [_, _]) => "reinterpret casting",
 
             (Ne | Eq, [_, _]) => "equality",
 
             (Lt | Gt | Le | Ge, [_, _]) => "comparison",
+
+            (Not
+            | MacroStringify
+            | Rem
+            | And
+            | Mul
+            | Add
+            | SubNeg
+            | Div
+            | Ref
+            | Xor
+            | Or
+            | Nand
+            | Nor
+            | Xnor
+            | MacroConcat
+            | Pow
+            | Shl
+            | Shr
+            | Rotl
+            | Rotr
+            | Ne
+            | Eq
+            | Lt
+            | Gt
+            | Le
+            | Ge
+            | Coalesce
+            | Exists
+            | Convert
+            | Transmute, _) => {
+                unimplemented!("invalid combination of operands")
+            }
 
             (LParen
             | RParen
@@ -1658,7 +1696,6 @@ impl Punctuation {
             | Colon
             | Semi
             | Assign
-            | QMark // TODO: will this be an operation?
             | LBrack
             | RBrack
             | LBrace
@@ -1686,8 +1723,6 @@ impl Punctuation {
             | RotrAssign, _) => {
                 unimplemented!("not an operator")
             }
-
-            _ => unimplemented!("invalid combination of operands"),
         }
     }
 }
@@ -1810,13 +1845,13 @@ impl TargetTy {
         }
     }
 
-    #[allow(clippy::as_conversions)]
-    const fn bounds(self) -> (u32, i128, i128) {
+    const fn bounds(self) -> (i128, i128) {
+        #[expect(clippy::as_conversions)]
         match self {
-            Self::UInt => (usize::BITS, usize::MIN as i128, usize::MAX as i128),
-            Self::SInt => (isize::BITS, isize::MIN as i128, isize::MAX as i128),
-            Self::U32 => (u32::BITS, u32::MIN as i128, u32::MAX as i128),
-            Self::S32 => (i32::BITS, i32::MIN as i128, i32::MAX as i128),
+            Self::UInt => (usize::MIN as i128, usize::MAX as i128),
+            Self::SInt => (isize::MIN as i128, isize::MAX as i128),
+            Self::U32 => (u32::MIN as i128, u32::MAX as i128),
+            Self::S32 => (i32::MIN as i128, i32::MAX as i128),
         }
     }
 }
@@ -1853,7 +1888,6 @@ impl FailedConversionMsg {
 
 impl std::fmt::Display for FailedConversionMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::cmp::Ordering;
         let Self {
             op,
             side,
@@ -1861,48 +1895,41 @@ impl std::fmt::Display for FailedConversionMsg {
             is_binary,
         } = self;
         let target_ty = failure.target_ty();
-        let (_bits, min, max) = target_ty.bounds();
+        let (min, max) = target_ty.bounds();
         let value = failure.value();
         #[expect(
             clippy::as_conversions,
-            reason = "i128 can fit any usize/isize with 64 bits or fewer, but doesn't implement From<usize>/From<isize>"
+            reason = "usize/isize dont implement Into for their equivalent integer types"
         )]
         let n = match value {
-            IntValue::UInt(val) => cfg_select! {
-                any(
-                    target_pointer_width = "16",
-                    target_pointer_width = "32",
-                    target_pointer_width = "64"
-                ) => val as i128,
-            },
-            IntValue::SInt(val) => cfg_select! {
-                any(
-                    target_pointer_width = "16",
-                    target_pointer_width = "32",
-                    target_pointer_width = "64"
-                ) => val as i128,
-            },
+            IntValue::UInt(val) => i128::from(cfg_select! {
+                target_pointer_width = "16" => val as u16,
+                target_pointer_width = "32" => val as u32,
+                target_pointer_width = "64" => val as u64,
+            }),
+            IntValue::SInt(val) => i128::from(cfg_select! {
+                target_pointer_width = "16" => val as i16,
+                target_pointer_width = "32" => val as i32,
+                target_pointer_width = "64" => val as i64,
+            }),
         };
-        let (broken_bound, ord) = if n < min {
-            (min, Ordering::Less)
+        let (ord, broken_bound) = if n < min {
+            ('<', min)
         } else {
             debug_assert!(n > max, "conversion should not have failed");
-            (max, Ordering::Greater)
+            ('>', max)
         };
+        // HACK: not the actual value types, but correct quantity.
+        // should be fine as long as signedness doesn't change the description.
+        let op_desc = op.op_description(if *is_binary {
+            [ValueType::SInt, ValueType::SInt].as_slice()
+        } else {
+            [ValueType::SInt].as_slice()
+        });
         write!(
             f,
-            "expression evaluated to {value:?}; {} requires {side} to be {target_ty}, which must be between {min} and {max} ({n} {} {broken_bound})",
-            // HACK: not the actual value types, but correct quantity. should be fine as long as uint vs sint doesn't change the description
-            op.op_description(if *is_binary {
-                [ValueType::SInt, ValueType::SInt].as_slice()
-            } else {
-                [ValueType::SInt].as_slice()
-            }),
-            match ord {
-                Ordering::Less => '<',
-                Ordering::Greater => '>',
-                Ordering::Equal => unreachable!(),
-            }
+            "expression evaluated to {value:?}; {op_desc} requires {side} to be {target_ty}, \
+             which must be between {min} and {max} ({n} {ord} {broken_bound})",
         )
     }
 }

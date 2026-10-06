@@ -5,6 +5,7 @@
 
 #![allow(unused_features)]
 #![feature(
+    char_to_u32,
     ascii_char,
     try_from_int_error_kind, // used in number literal error
     iter_next_chunk,
@@ -93,6 +94,8 @@
 //         depends on MYSELF writing it correctly."
 // )]
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
+
+use grammar::TypeExpr;
 
 use crate::{
     error::ContextError,
@@ -252,6 +255,14 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
 
             field("close", indent);
             println!("{}", style.style_dbg(close));
+        }
+
+        Expr::Type(inner) => {
+            let TypeExpr { name } = &**inner;
+            header("Type");
+
+            field("name", indent);
+            println!("{}", SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name));
         }
     }
 }
@@ -455,6 +466,19 @@ fn runtime_token(value: RunValue, buf: &mut String) -> Token<'_> {
                 mac: None,
             }
         }
+        RunValue::Type(t) => {
+            let lex = {
+                use std::fmt::Write;
+                // infallible for String
+                _ = write!(buf, "{t:?}");
+                buf
+            };
+            Token {
+                lex,
+                val: todo!("what is the value of a type?"),
+                mac: None,
+            }
+        }
     }
 }
 
@@ -508,26 +532,6 @@ pub fn run_code(source: &str) {
     if list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err)) {
         return;
     }
-
-    // ----------------------------------------------
-    // TODO: YUCKY! too many allocations and copies!!
-    if false {
-        // TODO: instead of this, just do the regular highlighting
-        // but inject special highlighting over ranges from the AST data
-        const NEWLINE: Token = Token {
-            lex: "\n",
-            val: scanner::token::value::LexValue::Whitespace,
-            mac: None,
-        };
-        println!("\nsemantic highlighting (EXPERIMENTAL):");
-        print_highlighted(
-            ast.iter()
-                .flatten()
-                .flat_map(|root| grammar::AstIter::new(root).chain(std::iter::once(&NEWLINE))),
-            &SYNTAX_STYLE_ANSI,
-        );
-    }
-    // ----------------------------------------------
 
     // eval
     println!("\nevaluation:");

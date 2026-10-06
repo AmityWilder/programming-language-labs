@@ -12,7 +12,7 @@ use crate::{
         value::{CharLiteral, LexValue},
     },
 };
-use std::cmp::Ordering;
+use std::{borrow::Cow, cmp::Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum OverflowKind {
@@ -210,28 +210,36 @@ impl OpError {
     }
 }
 
+// TODO: add a `byte` type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ValueType {
     #[default]
     None,
+    Nevr,
     Bool,
     UInt,
     SInt,
     Frac,
     Char,
     Text,
+    Fail,
+    Type,
 }
 
 impl std::fmt::Display for ValueType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::None => "none",
+            Self::Nevr => "nevr",
             Self::Bool => "bool",
             Self::UInt => "uint",
             Self::SInt => "sint",
             Self::Frac => "frac",
             Self::Char => "char",
             Self::Text => "text",
+            Self::Fail => "fail",
+            // TODO: where does this appear?
+            Self::Type => "typename",
         })
     }
 }
@@ -247,7 +255,8 @@ pub enum RunValue {
     SInt(isize),
     Frac(f64),
     Char(char),
-    Text(String),
+    Text(Cow<'static, str>),
+    Type(ValueType),
 }
 
 impl RunValue {
@@ -260,6 +269,7 @@ impl RunValue {
             Self::Frac(_) => ValueType::Frac,
             Self::Char(_) => ValueType::Char,
             Self::Text(_) => ValueType::Text,
+            Self::Type(t) => *t,
         }
     }
 
@@ -364,19 +374,19 @@ impl RunValue {
                 .ok_or(OpError::Overflow(OverflowKind::SAdd { l, r })),
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l + r)),
 
-            (Self::Text(l), Self::Bool(r)) => Ok(Self::Text(format!("{l}{r}"))),
-            (Self::Text(l), Self::UInt(r)) => Ok(Self::Text(format!("{l}{r}"))),
-            (Self::Text(l), Self::SInt(r)) => Ok(Self::Text(format!("{l}{r}"))),
-            (Self::Text(l), Self::Frac(r)) => Ok(Self::Text(format!("{l}{r}"))),
-            (Self::Text(l), Self::Char(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::Text(l), Self::Bool(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+            (Self::Text(l), Self::UInt(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+            (Self::Text(l), Self::SInt(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+            (Self::Text(l), Self::Frac(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+            (Self::Text(l), Self::Char(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 
-            (Self::Bool(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
-            (Self::UInt(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
-            (Self::SInt(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
-            (Self::Frac(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
-            (Self::Char(l), Self::Text(r)) => Ok(Self::Text(format!("{l}{r}"))),
+            (Self::Bool(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+            (Self::UInt(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+            (Self::SInt(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+            (Self::Frac(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+            (Self::Char(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 
-            (Self::Text(l), Self::Text(r)) => Ok(Self::Text(l + &r)),
+            (Self::Text(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(l.into_owned() + &r))),
 
             // TODO: coersions?
             // TODO: char arithmetic?
@@ -633,6 +643,148 @@ impl RunValue {
         }
     }
 
+    /// The equivalent of `into`/`try_into`
+    fn convert(self, into_ty: ValueType) -> Result<Self, OpError> {
+        match (self, into_ty) {
+            (Self::Type(_), _) => unimplemented!("should be caught by grammar"),
+            (_, ValueType::Type) => unimplemented!("`type` isn't a type"),
+
+            // TODO: add a warning about converting into self(?)
+            // TODO: what is the value of `nevr`?
+            (x @ (Self::None | Self::CoalesceNone), ValueType::None | ValueType::Nevr)
+            | (x @ Self::Bool(_), ValueType::Bool)
+            | (x @ Self::UInt(_), ValueType::UInt)
+            | (x @ Self::SInt(_), ValueType::SInt)
+            | (x @ Self::Frac(_), ValueType::Frac)
+            | (x @ Self::Char(_), ValueType::Char)
+            | (x @ Self::Text(_), ValueType::Text) => Ok(x),
+
+            // TODO: should everything be allowed to convert into these? should anything?
+            (_, ValueType::None | ValueType::Nevr | ValueType::Fail) => todo!(),
+
+            // essentially creates a default; but does that even make sense?
+            (Self::None | Self::CoalesceNone, ValueType::UInt) => Ok(Self::UInt(0)),
+            (Self::None | Self::CoalesceNone, ValueType::SInt) => Ok(Self::SInt(0)),
+            (Self::None | Self::CoalesceNone, ValueType::Frac) => Ok(Self::Frac(0.0)),
+            (Self::None | Self::CoalesceNone, ValueType::Char) => Ok(Self::Char('\0')),
+
+            // should this make a default, or stringify?
+            (Self::None | Self::CoalesceNone, ValueType::Text) => Ok(Self::Text(Cow::Borrowed(""))),
+
+            // stringify value
+            (Self::Bool(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
+            (Self::UInt(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
+            (Self::SInt(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
+            (Self::Frac(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
+            (Self::Char(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
+
+            // parse string
+            (Self::Text(s), ValueType::Bool) => s.parse().map(Self::Bool).map_err(|e| todo!("{e}")),
+            (Self::Text(s), ValueType::UInt) => s.parse().map(Self::UInt).map_err(|e| todo!("{e}")),
+            (Self::Text(s), ValueType::SInt) => s.parse().map(Self::SInt).map_err(|e| todo!("{e}")),
+            (Self::Text(s), ValueType::Frac) => s.parse().map(Self::Frac).map_err(|e| todo!("{e}")),
+            (Self::Text(s), ValueType::Char) => s.parse().map(Self::Char).map_err(|e| todo!("{e}")),
+
+            // TODO: is this even a good idea?
+            (x, ValueType::Bool) => Ok(x.exists()),
+
+            (Self::Bool(x), ValueType::UInt) => Ok(Self::UInt(x.into())),
+            (Self::Bool(x), ValueType::SInt) => Ok(Self::SInt(x.into())),
+            (Self::Bool(x), ValueType::Frac) => Ok(Self::Frac(x.into())),
+            (Self::Bool(x), ValueType::Char) => Ok(Self::Char(if x { '1' } else { '0' })), // TODO: perhaps top/bot?
+
+            (Self::UInt(x), ValueType::SInt) => {
+                x.try_into()
+                    .map(Self::SInt)
+                    .map_err(|_| OpError::FailedConversion {
+                        target_ty: TargetTy::SInt,
+                        value: IntValue::UInt(x),
+                        is_binary: true,
+                    })
+            }
+            (Self::SInt(x), ValueType::UInt) => {
+                x.try_into()
+                    .map(Self::UInt)
+                    .map_err(|_| OpError::FailedConversion {
+                        target_ty: TargetTy::UInt,
+                        value: IntValue::SInt(x),
+                        is_binary: true,
+                    })
+            }
+
+            // TODO: need more `FailedConversion` errors for things besides integers!
+            (Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TODO: need an error (or warning?) for loss of data
+            (Self::UInt(x), ValueType::Char) => u8::try_from(x) // TODO: what about unicode?
+                .map(|x| Self::Char(char::from(x)))
+                .map_err(|e| todo!("{e}")),
+            (Self::SInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TODO: need an error (or warning?) for loss of data
+            (Self::SInt(x), ValueType::Char) => u8::try_from(x) // TODO: what about unicode?
+                .map(|x| Self::Char(char::from(x)))
+                .map_err(|e| todo!("{e}")),
+            (Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x as usize)), // TODO: should truncation be an error/warning?
+            (Self::Frac(x), ValueType::SInt) => Ok(Self::SInt(x as isize)), // TODO: should truncation be an error/warning?
+
+            #[cfg(not(target_pointer_width = "16"))]
+            #[expect(
+                clippy::as_conversions,
+                reason = "usize has no into impl even if wide enough to store the value"
+            )]
+            (Self::Char(ch), ValueType::UInt) => Ok(Self::UInt(ch.to_u32() as usize)),
+
+            (l @ Self::Char(_), ValueType::SInt) => {
+                // TODO: this might screw up error messages
+                l.convert(ValueType::UInt)?.convert(ValueType::SInt)
+            }
+
+            // TODO: give this its own error
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r)),
+        }
+    }
+
+    /// the equivalent of [`std::mem::transmute`]
+    fn transmute(self, into_ty: ValueType) -> Result<Self, OpError> {
+        match (self, into_ty) {
+            (Self::Type(_), _) => unimplemented!("should be caught by grammar"),
+            (_, ValueType::Type) => unimplemented!("`type` isn't a type"),
+
+            // TODO: add a warning about transmuting into self(?)
+            (x @ (Self::None | Self::CoalesceNone), ValueType::None | ValueType::Nevr)
+            | (x @ Self::Bool(_), ValueType::Bool)
+            | (x @ Self::UInt(_), ValueType::UInt)
+            | (x @ Self::SInt(_), ValueType::SInt)
+            | (x @ Self::Frac(_), ValueType::Frac)
+            | (x @ Self::Char(_), ValueType::Char)
+            | (x @ Self::Text(_), ValueType::Text) => Ok(x),
+
+            // TODO: what about custom types?
+            (Self::None | Self::CoalesceNone, _)
+            | (_, ValueType::None | ValueType::Nevr | ValueType::Fail) => {
+                todo!("'transmute involving none/nevr/fail' error")
+            }
+
+            (Self::UInt(x), ValueType::SInt) => Ok(Self::SInt(x.cast_signed())),
+            (Self::SInt(x), ValueType::UInt) => Ok(Self::UInt(x.cast_unsigned())),
+
+            // TODO: specialize for pointer widths
+            (Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(f64::from_bits(x as u64))),
+            (Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x.to_bits() as usize)),
+
+            (x @ Self::SInt(_), ValueType::Frac) => {
+                // TODO: this might screw up error messages
+                x.transmute(ValueType::UInt)?.transmute(ValueType::Frac)
+            }
+            (x @ Self::Frac(_), ValueType::SInt) => {
+                // TODO: this might screw up error messages
+                x.transmute(ValueType::UInt)?.transmute(ValueType::SInt)
+            }
+
+            (Self::Text(_), ValueType::UInt) => todo!("text pointer?"),
+
+            // TODO: what about custom types? how will we measure their sizes?
+            _ => todo!("incompatible layout error"),
+        }
+    }
+
     fn not(self) -> Result<Self, OpError> {
         match self {
             Self::Bool(r) => Ok(Self::Bool(!r)),
@@ -671,8 +823,8 @@ impl RunValue {
 
 pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, ContextError<'src>> {
     use Punctuation::{
-        Add, And, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Pow, QMark, Rem,
-        Rotl, Rotr, Shl, Shr, SubNeg, Xnor, Xor,
+        Add, And, Coalesce, Convert, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or,
+        Pow, Rem, Rotl, Rotr, Shl, Shr, SubNeg, Transmute, Xnor, Xor,
     };
     match ast {
         Expr::Binary(inner) => {
@@ -707,6 +859,8 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 Shr => l.shr(r),
                 Rotl => l.rotl(r),
                 Rotr => l.rotr(r),
+                Convert if let RunValue::Type(r) = r => l.convert(r),
+                Transmute if let RunValue::Type(r) = r => l.transmute(r),
 
                 Eq | Ne | Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
                     RunValue::Bool(match punc {
@@ -743,7 +897,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 (Exists, OpSide::Right) => Ok(x.exists()),
 
                 // postfix
-                (QMark, OpSide::Left) => return Ok(RunValue::CoalesceNone),
+                (Coalesce, OpSide::Left) => return Ok(RunValue::CoalesceNone),
 
                 _ => unimplemented!(),
             }
@@ -758,7 +912,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
             LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
             LexValue::TextLiteral(s) => s
                 .process()
-                .map(|s| RunValue::Text(s.text))
+                .map(|s| RunValue::Text(Cow::Owned(s.text)))
                 .map_err(|e| ContextError::token_error(source, Some(*token), e)),
             LexValue::Keyword(Keyword::None) => Ok(RunValue::None),
 
@@ -766,5 +920,25 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
         },
 
         Expr::Grouping(group) => evaluate(source, &group.expr),
+
+        Expr::Type(inner) => match inner.name.val {
+            LexValue::Keyword(kw) if kw.is_type() => Ok(RunValue::Type(match kw {
+                Keyword::None => ValueType::None,
+                Keyword::Nevr => ValueType::Nevr,
+                Keyword::Bool => ValueType::Bool,
+                Keyword::Uint => ValueType::UInt,
+                Keyword::Sint => ValueType::SInt,
+                Keyword::Frac => ValueType::Frac,
+                Keyword::Char => ValueType::Char,
+                Keyword::Text => ValueType::Text,
+                Keyword::Fail => ValueType::Fail,
+
+                _ => unreachable!("guarded by kw.is_type()"),
+            })),
+
+            LexValue::Identifier | LexValue::Callable => todo!("custom types"),
+
+            _ => unimplemented!(),
+        },
     }
 }

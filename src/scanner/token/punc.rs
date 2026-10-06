@@ -51,7 +51,7 @@ define_token_eq! {
         /// Greater than - Test if `lhs` is strictly higher value compared to `rhs`
         Gt = ">",
         /// Question mark - TBD
-        QMark = "?",
+        Coalesce = "?",
         /// Reference - Create a pointer/reference to a value (like to `&` in other languages)
         Ref = "@",
         /// Left bracket
@@ -68,6 +68,13 @@ define_token_eq! {
         RBrace = "}",
         /// Not equal - Equivalent to `!(lhs == rhs)`
         Ne = "!=",
+        /// Convert - Takes an expression on the left side and a type on the right side, and
+        /// converts the expression into the type. Implementation can be fallible or infallible,
+        /// depending on the overload
+        Convert = "-:>",
+        /// Transmute - Like [`Self::Convert`], but performs a bitwise reinterpretation as the
+        /// output type. Only valid if the input and output types have the exact same data layout.
+        Transmute = "=:>",
         /// Nand - Equivalent to `!(lhs & rhs)`
         Nand = "!&",
         /// Nor - Equivalent to `!(lhs | rhs)`
