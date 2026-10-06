@@ -262,12 +262,56 @@ impl PolishDisplay for Grouping<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TypeExpr<'src> {
+    pub name: Token<'src>,
+    // TODO: surely theres more to it than this
+}
+
+impl<'src> TypeExpr<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        self.name.lex_range(source)
+    }
+
+    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
+    pub const fn macro_range(&self, _: &'src str) -> Option<Range<usize>> {
+        self.name.mac
+    }
+}
+
+impl std::fmt::Display for TypeExpr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name } = self;
+        f.write_str(name.lex)
+    }
+}
+
+impl LispDisplay for TypeExpr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name } = self;
+        if f.alternate() {
+            let ty = crate::SYNTAX_STYLE_ANSI[Syntax::Typename];
+            std::fmt::Display::fmt(&ty.style(name.lex), f)
+        } else {
+            f.write_str(name.lex)
+        }
+    }
+}
+
+impl PolishDisplay for TypeExpr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name } = self;
+        f.write_str(name.lex)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'src> {
     Binary(Box<Binary<'src>>),
     Unary(Box<Unary<'src>>),
     Literal(Token<'src>),
     Grouping(Box<Grouping<'src>>),
+    Type(Box<TypeExpr<'src>>),
 }
 
 impl std::fmt::Display for Expr<'_> {
@@ -277,6 +321,7 @@ impl std::fmt::Display for Expr<'_> {
             Self::Unary(inner) => inner.fmt(f),
             Self::Literal(Token { lex, .. }) => lex.fmt(f),
             Self::Grouping(inner) => inner.fmt(f),
+            Self::Type(inner) => inner.fmt(f),
         }
     }
 }
@@ -286,14 +331,16 @@ impl LispDisplay for Expr<'_> {
         match self {
             Self::Binary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
+            // TODO: should this use val instead of lex?
             Self::Literal(tkn @ Token { lex, .. }) => {
                 if f.alternate() {
                     write_highlight(std::iter::once(tkn), f, &SYNTAX_STYLE_ANSI)
                 } else {
                     f.write_str(lex)
                 }
-            } // TODO: should this use val instead of lex?
+            }
             Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
+            Self::Type(inner) => LispDisplay::fmt(&**inner, f),
         }
     }
 }
@@ -305,6 +352,7 @@ impl PolishDisplay for Expr<'_> {
             Self::Unary(inner) => PolishDisplay::fmt(&**inner, f),
             Self::Literal(Token { lex, .. }) => f.write_str(lex), // TODO: should this use val instead of lex?
             Self::Grouping(inner) => PolishDisplay::fmt(&**inner, f),
+            Self::Type(inner) => PolishDisplay::fmt(&**inner, f),
         }
     }
 }
@@ -316,6 +364,7 @@ impl<'src> Expr<'src> {
             Self::Unary(unary) => unary.range(source),
             Self::Literal(token) => token.lex_range(source),
             Self::Grouping(group) => group.range(source),
+            Self::Type(ty) => ty.range(source),
         }
     }
 
@@ -327,6 +376,7 @@ impl<'src> Expr<'src> {
             Expr::Unary(unary) => unary.macro_range(source),
             Expr::Literal(token) => token.mac,
             Expr::Grouping(grouping) => grouping.macro_range(source),
+            Expr::Type(ty) => ty.macro_range(source),
         }
     }
 
@@ -344,6 +394,10 @@ impl<'src> Expr<'src> {
 
     pub fn grouping(inner: Grouping<'src>) -> Self {
         Self::Grouping(Box::new(inner))
+    }
+
+    pub fn type_expr(inner: TypeExpr<'src>) -> Self {
+        Self::Type(Box::new(inner))
     }
 }
 
@@ -519,7 +573,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         let mut expr = self.unary_prefix()?;
         while let Some(op) = self
             .tokens
-            .next_if(match_token!(Punctuation(Punctuation::QMark)))
+            .next_if(match_token!(Punctuation(Punctuation::Coalesce)))
         {
             expr = Expr::unary(Unary {
                 operand: expr,
@@ -546,19 +600,32 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         }
     }
 
-    /// `exponent -> primary ( "**" primary )* ;`
+    /// `exponent -> conversion ( "**" conversion )* ;`
     fn exponent(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.primary()?;
+        let mut expr = self.conversion()?;
         while let Some(op) = self
             .tokens
             .next_if(match_token!(Punctuation(Punctuation::Pow)))
         {
-            let rhs = self.primary()?;
+            let rhs = self.conversion()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
         Ok(expr)
     }
 
+    /// `conversion -> primary ( "-:>" | "=:>" ) type_expression ;`
+    fn conversion(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.primary()?;
+        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+            Punctuation::Convert | Punctuation::Transmute
+        ))) {
+            let rhs = Expr::type_expr(self.type_expression()?);
+            expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `primary -> literal | group ;`
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.literal().or_else(|_| self.group()).map_err(|mut e| {
             if let ErrorType::MissingToken { expect } | ErrorType::UnexpectedToken { expect, .. } =
@@ -571,7 +638,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | STRING ;`
+    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | TEXT ;`
     fn literal(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.try_pull(
             match_token!(
@@ -588,6 +655,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         .map(Expr::literal)
     }
 
+    /// `group -> "(" expression ")" ;`
     fn group(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let open = self.try_pull(
             match_token!(Punctuation(Punctuation::LParen)),
@@ -620,6 +688,20 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 err => err,
             })
         })
+    }
+
+    /// `type_expression -> "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ;`
+    fn type_expression(&mut self) -> Result<TypeExpr<'src>, ContextError<'src>> {
+        self.try_pull(
+            |token| match token.val {
+                LexValue::Identifier => true,
+                LexValue::Keyword(kw) => kw.is_type(),
+                _ => false,
+            },
+            ExpectedToken::TypeExpr,
+        )
+        .map(|name| TypeExpr { name })
+        // TODO: surely there's more to it than this
     }
 
     fn synchronize(&mut self) {
@@ -663,129 +745,6 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 break;
             }
         }
-    }
-}
-
-pub enum ExprOrToken<'src, 'expr> {
-    Token(&'expr Token<'src>),
-    Expr(&'expr Expr<'src>),
-}
-
-pub enum ExprIter<'src, 'expr> {
-    Binary {
-        lhs: Option<&'expr Expr<'src>>,
-        op: Option<&'expr Token<'src>>,
-        rhs: Option<&'expr Expr<'src>>,
-    },
-    UnaryPre {
-        op: Option<&'expr Token<'src>>,
-        rhs: Option<&'expr Expr<'src>>,
-    },
-    UnaryPost {
-        lhs: Option<&'expr Expr<'src>>,
-        op: Option<&'expr Token<'src>>,
-    },
-    Literal {
-        token: Option<&'expr Token<'src>>,
-    },
-    Grouping {
-        open: Option<&'expr Token<'src>>,
-        expr: Option<&'expr Expr<'src>>,
-        close: Option<&'expr Token<'src>>,
-    },
-}
-
-impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
-    type Item = ExprOrToken<'src, 'expr>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            ExprIter::Binary { lhs, op, rhs } => lhs
-                .take()
-                .map(ExprOrToken::Expr)
-                .or_else(|| op.take().map(ExprOrToken::Token))
-                .or_else(|| rhs.take().map(ExprOrToken::Expr)),
-
-            ExprIter::UnaryPre { op, rhs } => op
-                .take()
-                .map(ExprOrToken::Token)
-                .or_else(|| rhs.take().map(ExprOrToken::Expr)),
-
-            ExprIter::UnaryPost { lhs, op } => lhs
-                .take()
-                .map(ExprOrToken::Expr)
-                .or_else(|| op.take().map(ExprOrToken::Token)),
-
-            ExprIter::Literal { token } => token.take().map(ExprOrToken::Token),
-
-            ExprIter::Grouping { open, expr, close } => open
-                .take()
-                .map(ExprOrToken::Token)
-                .or_else(|| expr.take().map(ExprOrToken::Expr))
-                .or_else(|| close.take().map(ExprOrToken::Token)),
-        }
-    }
-}
-
-impl<'src> Expr<'src> {
-    fn iter(&self) -> ExprIter<'src, '_> {
-        match self {
-            Expr::Binary(Binary { lhs, op, rhs }) => ExprIter::Binary {
-                lhs: Some(lhs),
-                op: Some(op),
-                rhs: Some(rhs),
-            },
-
-            Expr::Unary(Unary { op, operand, side }) => match side {
-                OpSide::Left => ExprIter::UnaryPost {
-                    lhs: Some(operand),
-                    op: Some(op),
-                },
-                OpSide::Right => ExprIter::UnaryPre {
-                    op: Some(op),
-                    rhs: Some(operand),
-                },
-            },
-
-            Expr::Literal(token) => ExprIter::Literal { token: Some(token) },
-
-            Expr::Grouping(Grouping { open, expr, close }) => ExprIter::Grouping {
-                open: Some(open),
-                expr: Some(expr),
-                close: Some(close),
-            },
-        }
-    }
-}
-
-/// Traverse the AST using DFS
-pub struct AstIter<'src, 'expr> {
-    stack: Vec<ExprIter<'src, 'expr>>,
-}
-
-impl<'src, 'expr> AstIter<'src, 'expr> {
-    pub fn new(ast: &'expr Expr<'src>) -> Self {
-        Self {
-            stack: vec![ast.iter()],
-        }
-    }
-}
-
-impl<'src, 'expr> Iterator for AstIter<'src, 'expr> {
-    type Item = &'expr Token<'src>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(top) = self.stack.last_mut() {
-            if let Some(item) = top.next() {
-                match item {
-                    ExprOrToken::Token(token) => return Some(token),
-                    ExprOrToken::Expr(expr) => self.stack.push(expr.iter()),
-                }
-            } else {
-                self.stack.pop();
-            }
-        }
-        None
     }
 }
 

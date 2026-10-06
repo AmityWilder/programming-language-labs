@@ -80,7 +80,6 @@ impl<T: std::fmt::Debug, U: StyleWrapper> std::fmt::Display for StyledDebug<'_, 
 /// An ANSI color
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
-#[allow(dead_code, reason = "flexibility")]
 pub enum Color {
     /// 3-bit black
     Black = 0,
@@ -166,7 +165,6 @@ impl Style {
 
     /// Make this style bold
     #[must_use]
-    #[allow(dead_code, reason = "flexibility")]
     pub const fn bold(mut self, value: bool) -> Self {
         if value {
             self.flags |= Self::BOLD_FLAG;
@@ -178,7 +176,6 @@ impl Style {
 
     /// Make this style italic
     #[must_use]
-    #[allow(dead_code, reason = "flexibility")]
     pub const fn italic(mut self, value: bool) -> Self {
         if value {
             self.flags |= Self::ITALIC_FLAG;
@@ -190,7 +187,6 @@ impl Style {
 
     /// Make this style underline
     #[must_use]
-    #[allow(dead_code, reason = "flexibility")]
     pub const fn underline(mut self, value: bool) -> Self {
         if value {
             self.flags |= Self::UNDERLINE_FLAG;
@@ -202,7 +198,6 @@ impl Style {
 
     /// Make this style strikethrough
     #[must_use]
-    #[allow(dead_code, reason = "flexibility")]
     pub const fn strikethrough(mut self, value: bool) -> Self {
         if value {
             self.flags |= Self::STRIKETHROUGH_FLAG;
@@ -214,7 +209,6 @@ impl Style {
 
     /// Set the foreground color for this style
     #[must_use]
-    #[allow(dead_code, reason = "flexibility")]
     pub const fn foreground(mut self, value: Color) -> Self {
         self.color = Some(value);
         self
@@ -222,7 +216,6 @@ impl Style {
 
     /// Set the background color for this style
     #[must_use]
-    #[allow(dead_code, reason = "flexibility")]
     pub const fn background(mut self, value: Color) -> Self {
         self.background = Some(value);
         self
