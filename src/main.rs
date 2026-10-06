@@ -49,6 +49,7 @@
     type_alias_impl_trait,
     anonymous_lifetime_in_impl_trait,
     associated_type_defaults,
+    trim_prefix_suffix,
 )]
 #![forbid(
     clippy::missing_safety_doc,
