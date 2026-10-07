@@ -172,12 +172,21 @@ pub struct Scanner<'src> {
 
 impl<'src> Scanner<'src> {
     /// Construct a new [`Scanner`] for `source`
-    const fn new(source: &'src str) -> Self {
+    pub const fn new(source: &'src str) -> Self {
         Self {
             original: source,
             source,
             // start off true because we are at the start of the source code
             can_be_negative: true,
+            is_following_fn: false,
+        }
+    }
+
+    pub const fn new_subset(original: &'src str, source: &'src str, can_be_negative: bool) -> Self {
+        Self {
+            original,
+            source,
+            can_be_negative,
             is_following_fn: false,
         }
     }
