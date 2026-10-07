@@ -514,61 +514,109 @@ fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
     }
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "no, you're wrong. they're flags."
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+struct CliFlags {
+    echo_src: bool,
+
+    scanner_tokens: bool,
+    scanner_highlight: bool,
+
+    preproc_tokens: bool,
+    preproc_highlight: bool,
+
+    parser_ast: bool,
+    parser_highlight: bool,
+
+    eval_echo: bool,
+
+    print_errors: bool,
+}
+
 /// # Panics
 /// This method can panic if [`scanner::Scanner`] isn't written correctly
-pub fn run_code(source: &str) {
+fn run_code(source: &str, flags: CliFlags) {
     // token debug
-    println!("source code:\n```\n{source}\n```");
+    if flags.echo_src {
+        println!("source code:\n```\n{source}\n```");
+    }
 
     // scanner
-    println!("\ntokenizer:");
     let tokens: Vec<_> = tokenize(source).collect();
-    print_tokens(source, &tokens);
+    if flags.scanner_tokens {
+        println!("\ntokenizer:");
+        print_tokens(source, &tokens);
+    }
 
     // syntax highlighted
-    println!("\nsyntax highlighting:");
-    print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
+    if flags.scanner_highlight {
+        println!("\nsyntax highlighting:");
+        print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
+    }
 
     // lex errors
     println!();
-    if list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err)) {
+    if if flags.print_errors {
+        list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err))
+    } else {
+        tokens.iter().any(Result::is_err)
+    } {
         return;
     }
 
     // preprocessing
-    println!("\npreprocessor:");
     let tokens: Vec<_> = preprocess(source, tokens).collect();
-    print_tokens(source, &tokens);
+    if flags.preproc_tokens {
+        println!("\npreprocessor:");
+        print_tokens(source, &tokens);
+    }
 
     // preprocessed + syntax highlighted
-    print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
+    if flags.preproc_highlight {
+        print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
+    }
 
     // preproc errors
     println!();
-    if list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err)) {
+    if if flags.print_errors {
+        list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err))
+    } else {
+        tokens.iter().any(Result::is_err)
+    } {
         return;
     }
 
     // parse debug
-    println!("\nparser:");
     let ast: Vec<_> = parse(source, tokens.into_iter().flatten()).collect();
-    for res in &ast {
-        match res {
-            Ok(node) => print_ast(node, 0, 0),
-            Err(e) => println!("{}", SYNTAX_STYLE_ANSI.invalid.style_dbg(e)),
+    if flags.parser_ast {
+        println!("\nparser:");
+        for res in &ast {
+            match res {
+                Ok(node) => print_ast(node, 0, 0),
+                Err(e) => println!("{}", SYNTAX_STYLE_ANSI.invalid.style_dbg(e)),
+            }
         }
     }
 
     // parse errors
     println!();
-    if list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err)) {
+    if if flags.print_errors {
+        list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err))
+    } else {
+        ast.iter().any(Result::is_err)
+    } {
         return;
     }
 
     // semantic highlighting
     // TODO: need to find a way to have this take Result instead of flattening
-    println!("\nsemantic highlighting:");
-    print_highlighted(semantic(source, ast.iter().flatten()), &SYNTAX_STYLE_ANSI);
+    if flags.parser_highlight {
+        println!("\nsemantic highlighting:");
+        print_highlighted(semantic(source, ast.iter().flatten()), &SYNTAX_STYLE_ANSI);
+    }
 
     // eval
     println!("\nevaluation:");
@@ -579,29 +627,37 @@ pub fn run_code(source: &str) {
         .flatten()
         .map(|expr| (expr, evaluate(source, expr)))
     {
-        print!("{:#}\n  \x1b[90m=\x1b[0m ", Lisp::new(expr));
+        if flags.eval_echo {
+            print!("{:#}\n  \x1b[90m=\x1b[0m ", Lisp::new(expr));
+        }
 
+        buf.clear();
         let item = match res {
-            Ok(x) => {
-                buf.clear();
-                Ok(runtime_token(x, &mut buf))
-            }
+            Ok(x) => Ok(runtime_token(x, &mut buf)),
             Err(e) => {
+                buf = format!("<{}>", e.code());
                 errors.push(e);
-                Err(GenericError)
+                Err(GenericError(&buf))
             }
         };
 
         for (lexeme, syntax) in highlight(std::iter::once(item)) {
             print!("{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
         }
-        println!("\x1b[0m\n");
+        println!("\x1b[0m");
+        if flags.eval_echo {
+            println!();
+        }
     }
     drop(buf);
 
     // eval errors
     println!();
-    if list_errors(errors) {
+    if if flags.print_errors {
+        list_errors(errors)
+    } else {
+        !errors.is_empty()
+    } {
         #[expect(
             clippy::needless_return,
             reason = "should return here if more items follow this in the future"
@@ -611,10 +667,29 @@ pub fn run_code(source: &str) {
 }
 
 fn main() {
-    let mut args = std::env::args_os();
+    let mut args = std::env::args_os().peekable();
     let prgm = args
         .next()
         .expect("must have a program argument to be running");
+    let mut flags = CliFlags::default();
+    while args
+        .next_if(|arg| {
+            match arg.to_str() {
+                Some("--echo-src") => flags.echo_src = true,
+                Some("--scanner-tokens") => flags.scanner_tokens = true,
+                Some("--scanner-highlight") => flags.scanner_highlight = true,
+                Some("--preproc-tokens") => flags.preproc_tokens = true,
+                Some("--preproc-highlight") => flags.preproc_highlight = true,
+                Some("--parser-ast") => flags.parser_ast = true,
+                Some("--parser-highlight") => flags.parser_highlight = true,
+                Some("--eval-echo") => flags.eval_echo = true,
+                Some("--print-errors") => flags.print_errors = true,
+                _ => return false,
+            }
+            true
+        })
+        .is_some()
+    {}
     match args.next() {
         // interactive
         None => {
@@ -633,7 +708,7 @@ fn main() {
                 if matches!(input.trim(), "exit" | "quit") {
                     break; // finish
                 }
-                run_code(&input);
+                run_code(&input, flags);
             }
         }
 
@@ -651,7 +726,7 @@ fn main() {
                 if args.next().is_some() {
                     eprintln!("usage: {} [script]", prgm.display());
                 } else {
-                    run_code(&source);
+                    run_code(&source, flags);
                 }
             }
         },

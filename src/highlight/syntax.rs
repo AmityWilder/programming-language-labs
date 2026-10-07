@@ -1,11 +1,10 @@
 //! Syntax used for highlighting
 
-use std::marker::Destruct;
-
 use crate::{
     highlight::style::Style,
     scanner::token::{Token, value::LexValue},
 };
+use std::marker::Destruct;
 
 /// Syntactic element category for highlighting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
