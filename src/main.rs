@@ -94,7 +94,7 @@
 // )]
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
-use grammar::OrType;
+use grammar::{OrType, semantic};
 
 use crate::{
     error::ContextError,
@@ -380,6 +380,14 @@ where
     A: AsRef<[T]>,
 {
     use std::fmt::Write;
+    if false {
+        // ---- DEBUG -----
+        for (lexeme, syntax) in highlight(tokens) {
+            print!("{}", syntax_style[syntax].style(lexeme));
+        }
+        // ----------------
+        return;
+    }
     let mut buf = String::new();
     for (lexeme, syntax) in highlight(tokens) {
         _ = write!(buf, "{}", syntax_style[syntax].style(lexeme));
@@ -556,6 +564,11 @@ pub fn run_code(source: &str) {
     if list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err)) {
         return;
     }
+
+    // semantic highlighting
+    // TODO: need to find a way to have this take Result instead of flattening
+    println!("\nsemantic highlighting:");
+    print_highlighted(semantic(source, ast.iter().flatten()), &SYNTAX_STYLE_ANSI);
 
     // eval
     println!("\nevaluation:");
