@@ -731,7 +731,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                             | Keyword::Pvt
                             | Keyword::If
                             | Keyword::Or
-                            | Keyword::Match
+                            | Keyword::Pick
                             | Keyword::Rep
                             | Keyword::For
                             | Keyword::Loop

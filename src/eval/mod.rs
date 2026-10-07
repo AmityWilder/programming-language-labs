@@ -946,11 +946,10 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 | Keyword::Let
                 | Keyword::Uni
                 | Keyword::Pvt
-                | Keyword::Where
                 | Keyword::Has
                 | Keyword::If
                 | Keyword::Or
-                | Keyword::Match
+                | Keyword::Pick
                 | Keyword::Rep
                 | Keyword::For
                 | Keyword::In
