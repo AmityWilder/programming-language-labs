@@ -363,6 +363,7 @@ expected_token! {
         ExprOrRParen = "an expression or `)`",
         Expr = "an expression",
         TypeExpr = "a type expression",
+        OrType = "the alternative type (`fail`, `none`, or `nevr`)",
     }
 }
 

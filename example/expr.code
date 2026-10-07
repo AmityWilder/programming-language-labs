@@ -34,7 +34,10 @@ fals !| true
 // `-:>` is conversion, `=:>` is reinterpretation
 
 5u -:> sint - 7s
-(-5 -:> uint + 3u)
+(-5 -:> uint + 3u) // error
+(5 -:> uint + 3u)  // error - COULD fail
+(-5 -:> uint | fail + 3u) // fallible
+(5 -:> uint | fail + 3u)  // fallible
 
 true -:> text   // stringify
 "true" -:> bool // parse
