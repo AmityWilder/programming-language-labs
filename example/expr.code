@@ -11,9 +11,9 @@
 
 2+2+2+2+2+2+2
 
-// def \foo($x) { (/* from \foo */ $x+5) } // \foo definition
-// def \bar($a, $b) { (/* from \bar */ 3*($a)**$b) } // \bar definition
-// def \baz() { (/* from \baz */ 200) } // \baz definition
+def \foo($x) { (/* from \foo */ $x+5) } // \foo definition
+def \bar($a, $b) { (/* from \bar */ 3*($a)**$b) } // \bar definition
+def \baz() { (/* from \baz */ 200) } // \baz definition
 
 (-(-9_223_372_036_854_775_808))
 0b1111_1111__1111_1111__1111_1111__1111_1111__1111_1111__1111_1111__1111_1111__1111_1111u

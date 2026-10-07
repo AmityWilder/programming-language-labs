@@ -1,8 +1,11 @@
 use crate::{
-    error::OpSide,
+    error::{ContextError, OpSide},
     grammar::{Binary, Expr, Grouping, OrType, TypeExpr, Unary},
     highlight::{TokenHighlight, syntax::Syntax},
-    scanner::token::{Token, punc::Punctuation, value::LexValue},
+    scanner::{
+        Scanner,
+        token::{Token, punc::Punctuation, value::LexValue},
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -254,56 +257,82 @@ impl<'src, I: Iterator<Item = SemanticToken<'src>>> SemanticIter<'src, I> {
     }
 }
 
+pub type SemanticScanner<'src> = std::iter::Map<
+    Scanner<'src>,
+    fn(Result<Token<'src>, ContextError<'src>>) -> SemanticToken<'src>,
+>;
+
+#[derive(Debug, Clone)]
+pub enum SemanticIterInner<'src> {
+    Lex(SemanticScanner<'src>),
+    Sem(std::iter::Once<SemanticToken<'src>>),
+}
+
+impl<'src> Iterator for SemanticIterInner<'src> {
+    type Item = SemanticToken<'src>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Lex(iter) => iter.next(),
+            Self::Sem(iter) => iter.next(),
+        }
+    }
+}
+
 // TODO: this is the second instance of an alternating prev_end iterator... can this be generalized?
 impl<'src, I> Iterator for SemanticIter<'src, I>
 where
     I: Iterator<Item = SemanticToken<'src>>,
 {
-    type Item = SemanticToken<'src>;
+    type Item = SemanticIterInner<'src>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // TODO: macros influence ranges, and aren't present in the expanded token stream!!
         self.iter
             .next_if(|item| item.token.lex_range(self.source).start == self.prev_end)
+            .map(|x| {
+                self.prev_end = x.token.lex_range(self.source).end;
+                SemanticIterInner::Sem(std::iter::once(x))
+            })
             .or_else(|| {
                 (self.prev_end != self.source.len()).then(|| {
                     let next_start = self.iter.peek().map_or(self.source.len(), |item| {
                         item.token.lex_range(self.source).start
                     });
-                    SemanticToken {
-                        token: Token {
-                            lex: self
-                                .source
-                                .get(self.prev_end..next_start)
-                                .unwrap_or_else(|| {
-                                    panic!(
-                                        "prev_end..next_start should be a valid substr range\n \
-                                        prev_end: {}\n \
-                                        next_start: {}\n \
-                                        source.len(): {}",
-                                        self.prev_end,
-                                        next_start,
-                                        self.source.len()
-                                    );
-                                }),
-                            // HACK: whitespace doesn't mind being colored like comments
-                            val: LexValue::Comment,
-                            mac: None,
-                        },
-                        sem: None,
-                    }
+                    let lex = self
+                        .source
+                        .get(self.prev_end..next_start)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "prev_end..next_start should be a valid substr range\n \
+                                    prev_end: {}\n \
+                                    next_start: {}\n \
+                                    source.len(): {}",
+                                self.prev_end,
+                                next_start,
+                                self.source.len()
+                            );
+                        });
+                    self.prev_end = next_start;
+                    SemanticIterInner::Lex(Scanner::new_subset(self.source, lex, true).map(|res| {
+                        SemanticToken {
+                            token: res.expect("should not have any lex errors if an AST exists"),
+                            sem: None,
+                        }
+                    }))
                 })
             })
-            .inspect(|item| self.prev_end = item.token.lex_range(self.source).end)
     }
 }
 
-pub type Semantics<'src, 'expr, I> = SemanticIter<
-    'src,
-    std::iter::FlatMap<
-        <I as IntoIterator>::IntoIter,
-        AstIter<'src, 'expr>,
-        fn(&'expr Expr<'src>) -> AstIter<'src, 'expr>,
+pub type Semantics<'src, 'expr, I> = std::iter::Flatten<
+    SemanticIter<
+        'src,
+        std::iter::FlatMap<
+            <I as IntoIterator>::IntoIter,
+            AstIter<'src, 'expr>,
+            fn(&'expr Expr<'src>) -> AstIter<'src, 'expr>,
+        >,
     >,
 >;
 
@@ -311,5 +340,11 @@ pub fn semantic<'src, 'expr, I>(source: &'src str, ast: I) -> Semantics<'src, 'e
 where
     I: IntoIterator<Item = &'expr Expr<'src>>,
 {
-    SemanticIter::new(source, ast.into_iter().flat_map(AstIter::new))
+    SemanticIter::new(
+        source,
+        #[expect(clippy::as_conversions)]
+        ast.into_iter()
+            .flat_map(AstIter::new as fn(&'expr Expr<'src>) -> AstIter<'src, 'expr>),
+    )
+    .flatten()
 }
