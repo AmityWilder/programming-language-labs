@@ -561,8 +561,8 @@ fn run_code(source: &str, flags: CliFlags) {
     }
 
     // lex errors
-    println!();
     if if flags.print_errors {
+        println!();
         list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err))
     } else {
         tokens.iter().any(Result::is_err)
@@ -583,8 +583,8 @@ fn run_code(source: &str, flags: CliFlags) {
     }
 
     // preproc errors
-    println!();
     if if flags.print_errors {
+        println!();
         list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err))
     } else {
         tokens.iter().any(Result::is_err)
@@ -605,8 +605,8 @@ fn run_code(source: &str, flags: CliFlags) {
     }
 
     // parse errors
-    println!();
     if if flags.print_errors {
+        println!();
         list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err))
     } else {
         ast.iter().any(Result::is_err)
@@ -655,8 +655,8 @@ fn run_code(source: &str, flags: CliFlags) {
     drop(buf);
 
     // eval errors
-    println!();
     if if flags.print_errors {
+        println!();
         list_errors(errors)
     } else {
         !errors.is_empty()
