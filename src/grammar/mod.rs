@@ -2,7 +2,6 @@
 
 use crate::{
     SYNTAX_STYLE_ANSI,
-    arrayvec::ArrayVec,
     error::{ContextError, ErrorType, ExpectedToken, OpSide},
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
     scanner::{
@@ -263,19 +262,19 @@ impl PolishDisplay for Grouping<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OrType<'src> {
+    // `|`
+    pub pipe: Token<'src>,
+    // `none`, `fail`, or `nevr`
+    pub ty: Token<'src>,
+}
+
 /// A concrete type
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TypeExpr<'src> {
     pub name: Token<'src>,
-    pub or_types: ArrayVec<
-        (
-            // `|`
-            Token<'src>,
-            // `none`, `fail`, or `nevr`
-            Token<'src>,
-        ),
-        3,
-    >,
+    pub or_ty: Option<OrType<'src>>,
     // TODO: namespace?
     // TODO: generic arguments?
 }
@@ -293,27 +292,56 @@ impl<'src> TypeExpr<'src> {
 
 impl std::fmt::Display for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { name, or_types } = self;
-        f.write_str(name.lex)
+        let Self {
+            name: Token { lex: name, .. },
+            or_ty,
+        } = self;
+        if let Some(OrType {
+            pipe: Token { lex: pipe, .. },
+            ty: Token { lex: ty, .. },
+        }) = or_ty
+        {
+            write!(f, "{name} {pipe} {ty}")
+        } else {
+            write!(f, "{name}")
+        }
     }
 }
 
 impl LispDisplay for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { name, or_types } = self;
+        let Self { name, or_ty } = self;
         if f.alternate() {
-            let ty = crate::SYNTAX_STYLE_ANSI[Syntax::Typename];
-            std::fmt::Display::fmt(&ty.style(name.lex), f)
+            if let Some(OrType { pipe, ty }) = or_ty {
+                write!(
+                    f,
+                    "({} {} {})",
+                    crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(pipe.lex),
+                    crate::SYNTAX_STYLE_ANSI[Syntax::Typename].style(name.lex),
+                    crate::SYNTAX_STYLE_ANSI[Syntax::Typename].style(ty.lex)
+                )
+            } else {
+                let ty = crate::SYNTAX_STYLE_ANSI[Syntax::Typename];
+                std::fmt::Display::fmt(&ty.style(name.lex), f)
+            }
         } else {
-            f.write_str(name.lex)
+            if let Some(OrType { pipe, ty }) = or_ty {
+                write!(f, "({} {} {})", pipe.lex, name.lex, ty.lex)
+            } else {
+                f.write_str(name.lex)
+            }
         }
     }
 }
 
 impl PolishDisplay for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { name, or_types } = self;
-        f.write_str(name.lex)
+        let Self { name, or_ty } = self;
+        if let Some(OrType { pipe, ty }) = or_ty {
+            write!(f, "{} {} {}", pipe.lex, name.lex, ty.lex)
+        } else {
+            f.write_str(name.lex)
+        }
     }
 }
 
@@ -702,19 +730,31 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `type_expression -> "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ;`
+    /// `type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" "fail" )?;`
     fn type_expression(&mut self) -> Result<TypeExpr<'src>, ContextError<'src>> {
-        self.try_pull(
+        let name = self.try_pull(
             |token| match token.val {
                 LexValue::Identifier => true,
                 LexValue::Keyword(kw) => kw.is_type(),
                 _ => false,
             },
             ExpectedToken::TypeExpr,
-        )
-        .map(|name| TypeExpr {
+        )?;
+        let or_ty = self
+            .tokens
+            .next_if(match_token!(Punctuation(Punctuation::Or)))
+            .map(|pipe| {
+                Ok(OrType {
+                    pipe,
+                    ty: self.try_pull(
+                        match_token!(Keyword(Keyword::Fail | Keyword::None | Keyword::Nevr)),
+                        ExpectedToken::OrType,
+                    )?,
+                })
+            });
+        Ok(TypeExpr {
             name,
-            or_types: ArrayVec::new(), // TODO: actually extract the tokens
+            or_ty: or_ty.transpose()?,
         })
     }
 

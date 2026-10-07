@@ -94,6 +94,8 @@
 // )]
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
+use grammar::OrType;
+
 use crate::{
     error::ContextError,
     eval::{RunValue, evaluate},
@@ -255,21 +257,20 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
         }
 
         Expr::Type(inner) => {
-            let TypeExpr { name, or_types } = inner;
+            let TypeExpr { name, or_ty } = inner;
             header("Type");
 
             field("name", indent);
-            println!("{}", SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name));
-
-            field("or_types", indent);
-            for (pipe, ty) in or_types {
-                print!(
-                    "{} {}",
+            if let Some(OrType { pipe, ty }) = or_ty {
+                println!(
+                    "{} {} {}",
+                    SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name),
                     SYNTAX_STYLE_ANSI[pipe.syntax()].style_dbg(pipe),
                     SYNTAX_STYLE_ANSI[ty.syntax()].style_dbg(ty)
                 );
+            } else {
+                println!("{}", SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name));
             }
-            println!();
         }
     }
 }
