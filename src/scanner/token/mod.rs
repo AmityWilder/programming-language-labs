@@ -99,8 +99,7 @@ pub mod keyword;
 pub mod punc;
 pub mod value;
 
-/// A single token - its lexeme ([`Self::src`]) and type ([`Self::ty`]).
-/// Does not contain the token's value, but can have the value obtained with [`Self::value_noalloc`].
+/// A single token - its lexeme ([`Self::lex`]) and value ([`Self::val`]).
 #[derive(Clone, Copy, PartialEq, Default)]
 pub struct Token<'src> {
     /// Because this is a pointer into the original source string, we can use pointer arithmetic to find its location.

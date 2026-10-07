@@ -311,6 +311,21 @@ where
                             Scanner::new_subset(self.source, lex, true).map(scanner_to_semantic),
                         ))
                     } else if macro_range.end <= self.prev_end {
+                        // TODO: can this be used for semantics within macros?
+                        if false {
+                            let token_range = item.token.lex_range(self.source);
+                            let is_from_argument = macro_range.start <= token_range.start
+                                && token_range.end <= macro_range.end;
+                            println!(
+                                "{macro_range:?} ({token_range:?}): {:?} - {}",
+                                item.token,
+                                if is_from_argument {
+                                    "from argument"
+                                } else {
+                                    "from definition"
+                                }
+                            );
+                        }
                         // we are within the same macro
                         Ok(SemanticIterInner::Skipped)
                     } else {
