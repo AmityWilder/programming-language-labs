@@ -22,7 +22,7 @@ pub enum Syntax {
     /// A character literal (excluding escape sequences)
     CharLiteral,
     /// A string literal (excluding escape sequences)
-    StringLiteral,
+    TextLiteral,
     /// The escape sequence of either a character or string literal
     EscapeSeq,
     /// A language-defined constant like true/false
@@ -105,7 +105,7 @@ where
             Syntax::Comment => &self.comment,
             Syntax::NumberLiteral => &self.number_literal,
             Syntax::CharLiteral => &self.char_literal,
-            Syntax::StringLiteral => &self.string_literal,
+            Syntax::TextLiteral => &self.string_literal,
             Syntax::EscapeSeq => &self.escape_seq,
             Syntax::LanguageDefined => &self.language_defined,
             Syntax::Variable => &self.variable,
@@ -345,7 +345,7 @@ impl Token<'_> {
                 Syntax::NumberLiteral
             }
             LexValue::CharLiteral(_) => Syntax::CharLiteral,
-            LexValue::TextLiteral(_) => Syntax::StringLiteral,
+            LexValue::TextLiteral(_) => Syntax::TextLiteral,
             LexValue::BoolLiteral(_) => Syntax::LanguageDefined,
             LexValue::Identifier => {
                 // constants are all-caps

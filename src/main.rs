@@ -94,12 +94,10 @@
 // )]
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
-use grammar::TypeExpr;
-
 use crate::{
     error::ContextError,
     eval::{RunValue, evaluate},
-    grammar::{Binary, Expr, Grouping, Lisp, Unary, parse},
+    grammar::{Binary, Expr, Grouping, Lisp, TypeExpr, Unary, parse},
     highlight::{
         GenericError, TokenHighlight, highlight,
         style::{Style, StyleWrapper},
@@ -109,7 +107,6 @@ use crate::{
     scanner::{
         token::{
             Token,
-            keyword::Keyword,
             value::{CharLiteral, LexValue, StrLiteral},
         },
         tokenize,
@@ -396,86 +393,104 @@ where
     println!("```");
 }
 
-fn runtime_token(value: RunValue, buf: &mut String) -> Token<'_> {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RunSyntax<'src> {
+    Mono(Syntax),
+    Char(CharLiteral),
+    Text(StrLiteral<'src>),
+}
+
+impl Default for RunSyntax<'_> {
+    fn default() -> Self {
+        Self::Mono(Syntax::default())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct RunToken<'src> {
+    lex: &'src str,
+    // TODO: Subtokens
+    syn: RunSyntax<'src>,
+}
+
+impl<'src> TokenHighlight<'src> for RunToken<'src> {
+    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
+        match self.syn {
+            // HACK: assumes highlighting ignores LexValue except for char and text
+            RunSyntax::Mono(syn) => (self.lex, syn, LexValue::Whitespace),
+            RunSyntax::Char(val) => (self.lex, Syntax::CharLiteral, LexValue::CharLiteral(val)),
+            RunSyntax::Text(val) => (self.lex, Syntax::TextLiteral, LexValue::TextLiteral(val)),
+        }
+    }
+}
+
+fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
     match value {
-        RunValue::None | RunValue::CoalesceNone => Token {
+        RunValue::None | RunValue::CoalesceNone => RunToken {
             lex: "none",
-            val: LexValue::Keyword(Keyword::None),
-            mac: None,
+            syn: RunSyntax::Mono(Syntax::LanguageDefined),
         },
-        RunValue::Bool(x) => Token {
+        RunValue::Fail => RunToken {
+            lex: "fail",
+            syn: RunSyntax::Mono(Syntax::LanguageDefined),
+        },
+        RunValue::Bool(x) => RunToken {
             lex: if x { "true" } else { "fals" },
-            val: LexValue::BoolLiteral(x),
-            mac: None,
+            syn: RunSyntax::Mono(Syntax::LanguageDefined),
         },
-        RunValue::UInt(n) => Token {
+        RunValue::UInt(n) => RunToken {
             lex: {
                 *buf = n.to_string();
                 buf
             },
-            val: LexValue::UIntLiteral(n),
-            mac: None,
+            syn: RunSyntax::Mono(Syntax::NumberLiteral),
         },
-        RunValue::SInt(n) => Token {
+        RunValue::SInt(n) => RunToken {
             lex: {
                 *buf = n.to_string();
                 buf
             },
-            val: LexValue::SIntLiteral(n),
-            mac: None,
+            syn: RunSyntax::Mono(Syntax::NumberLiteral),
         },
-        RunValue::Frac(x) => Token {
+        RunValue::Frac(x) => RunToken {
             lex: {
                 *buf = x.to_string();
                 buf
             },
-            val: LexValue::FracLiteral(x),
-            mac: None,
+            syn: RunSyntax::Mono(Syntax::NumberLiteral),
         },
         RunValue::Char(ch) => {
-            let lex = {
-                use std::fmt::Write;
-                // infallible for String
-                _ = write!(buf, "{ch:?}");
-                buf
-            };
-            Token {
-                lex,
-                val: LexValue::CharLiteral(CharLiteral {
+            use std::fmt::Write;
+            // infallible for String
+            _ = write!(buf, "{ch:?}");
+            RunToken {
+                lex: buf,
+                syn: RunSyntax::Char(CharLiteral {
                     ch,
-                    is_escaped: lex.contains('\\'),
+                    is_escaped: buf.contains('\\'),
                 }),
-                mac: None,
             }
         }
         RunValue::Text(s) => {
-            let lex = {
-                use std::fmt::Write;
-                // infallible for String
-                _ = write!(buf, "{s:?}");
-                buf
-            };
-            Token {
-                lex,
-                val: LexValue::TextLiteral(StrLiteral {
-                    content: lex
+            use std::fmt::Write;
+            // infallible for String
+            _ = write!(buf, "{s:?}");
+            RunToken {
+                lex: buf,
+                syn: RunSyntax::Text(StrLiteral {
+                    content: buf
                         .strip_circumfix('\"', '\"')
                         .expect("string debug should include delimiters"),
                 }),
-                mac: None,
             }
         }
         RunValue::Type(t) => {
-            let lex = {
-                use std::fmt::Write;
-                // infallible for String
-                _ = write!(buf, "{t:?}");
-                buf
-            };
-            Token {
-                lex,
-                val: todo!("what is the value of a type?"),
-                mac: None,
+            use std::fmt::Write;
+            // infallible for String
+            _ = write!(buf, "{t:?}");
+            RunToken {
+                lex: buf,
+                syn: RunSyntax::Mono(Syntax::Typename),
             }
         }
     }

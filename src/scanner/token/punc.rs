@@ -62,7 +62,7 @@ define_token_eq! {
         /// Greater than - Test if `lhs` is strictly higher value compared to `rhs`
         #[op_desc([_, _] => "comparison")]
         Gt = ">",
-        /// Question mark - TBD
+        /// Question mark - Causes the entire expression to output `none` if its operand is `none`
         #[op_desc([_] => "coalescence")]
         Coalesce = "?",
         /// Reference - Create a pointer/reference to a value (like to `&` in other languages)

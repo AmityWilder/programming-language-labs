@@ -147,16 +147,16 @@ mod subtoken_syn_tests {
         let lex = r#""apple \n orange""#;
         let list = SubTokenSyntax::new(
             lex,
-            Syntax::StringLiteral,
+            Syntax::TextLiteral,
             [(Range::from(7..9), Syntax::EscapeSeq)].into_iter(),
         )
         .collect::<Vec<_>>();
         assert_eq!(
             list.as_slice(),
             &[
-                ("\"apple ", Syntax::StringLiteral),
+                ("\"apple ", Syntax::TextLiteral),
                 ("\\n", Syntax::EscapeSeq),
-                (" orange\"", Syntax::StringLiteral)
+                (" orange\"", Syntax::TextLiteral)
             ]
         );
     }
@@ -334,8 +334,6 @@ where
 }
 
 /// An iterator over each lexeme and [`Syntax`] in the list
-///
-/// TODO: allow this to accept values and not just references!!
 pub fn highlight<'src, I>(tokens: I) -> HighlightIter<'src, I::IntoIter>
 where
     I: IntoIterator<Item: TokenHighlight<'src>>,
