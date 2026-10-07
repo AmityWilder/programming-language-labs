@@ -20,9 +20,7 @@ define_token_eq! {
         /// ## As a type
         /// Absence of a result (return type of an empty-bodied function)
         None = "none",
-        /// ## As a value
-        /// Unreachable (crash if accessed)
-        /// ## As a type
+        /// Cannot be constructed (coerces from `fail`).
         /// Unreachable (return type of `stop`less `loop {}`)
         Nevr = "nevr",
         /// Boolean type
@@ -98,20 +96,20 @@ define_token_eq! {
         Alt = "alt",
         /// Define a subset type. A subset type can fit into any slot where its original type fits,
         /// but its original type cannot fit into a subset type slot without proving the value fits.
-        /// Use `only` to give a whitelist, `xcpt` to give a blacklist, or `where` to provide a
-        /// attern applied to each item. If no item satisfies the `where` clause, the subset type
+        /// Use `&` to give a whitelist, `-` to give a blacklist, or `<=>` to provide a
+        /// attern applied to each item. If no item satisfies the `<=>` clause, the subset type
         /// will be incidentally equivalent (not through enforcement) to `nevr`/`none`.
         /// ### Syntax
         /// ```rs
-        /// sub /* name */ of /* cat/union */ only {
+        /// sub /* name */ of /* rec/cat/sup */ & {
         ///     /* items */
         /// }
         /// // or
-        /// sub /* name */ of /* cat/union */ xcpt {
+        /// sub /* name */ of /* rec/cat/sup */ - {
         ///     /* items */
         /// }
         /// // or
-        /// sub /* name */ of /* cat/union */ where /* requirements */;
+        /// sub /* name */ of /* rec/cat/sup */ <=> /* requirements */;
         /// ```
         /// **Example:**
         /// ```rs
@@ -185,66 +183,12 @@ define_token_eq! {
         // Interface
         // ----------------------------
 
-        /// ## In function definition
-        /// Supplies requirements for function parameters.
-        /// ### Syntax
-        /// ```rs
-        /// fn foo(v, fun) -> text
-        /// where
-        ///     v.x: frac,
-        ///     v.y: frac,
-        ///     fn mag of v: (self) -> frac,
-        ///     fn fun: (frac) -> text,
-        /// {
-        ///     // ...
-        /// }
-        /// ```
-        /// When a `where` clause is present, any errors that might have been emitted at
-        /// the function definition but have been specified in the `where` clause, will
-        /// instead be attributed to the caller.
-        /// **Example:**
-        /// ```rs
-        /// fn foo(v) {
-        ///     return v.x // ERROR: parameter `v` is not guaranteed to have a field `x`;
-        ///                // try adding a `where` clause or prove `v` has such a field
-        /// }
-        /// fn bar(v)
-        /// where
-        ///     v has x, // INFO: requirement introduced here
-        /// {
-        ///     return v.x
-        /// }
-        /// fn main() {
-        ///     foo(5);
-        ///     bar(5); // ERROR: argument `v` of `bar` is expected to have a field `x`,
-        ///             // but `5` (uint) has no such field
-        /// }
-        /// ```
-        ///
-        /// ## In for loops
-        /// Filters an iterator.
-        /// ### Syntax
-        /// ```rs
-        /// for /* binding */ in /* iterable */ where /* condition */ {
-        ///     // statement
-        /// }
-        /// ```
-        /// #### Equivalent to
-        /// ```rs
-        /// for /* binding */ in /* iterable */ {
-        ///     if /* condition */ {
-        ///         skip;
-        ///     }
-        ///     // statement
-        /// }
-        /// ```
-        Where = "where",
-        /// Used in a `where` clause to specify that a parameter must possess some field/method,
+        /// Used in a function's `<=>` clause to specify that a parameter must possess some field/method,
         /// without specifying its format.
         /// ### Syntax
         /// ```rs
         /// fn foo(v)
-        /// where
+        /// <=>
         ///     v has x, // `v.x` is defined
         ///     v has y, // `v.y` is defined
         /// {
@@ -255,13 +199,14 @@ define_token_eq! {
         /// **Example:**
         /// ```rs
         /// fn foo(v)
-        /// where
+        /// <=>
         ///     v has x: uint, // `v.x` is defined as a uint
         ///     v has fn f: (self) -> frac, // `v.y` is defined as a frac-returning method
         /// {
         ///     // ...
         /// }
         /// ```
+        #[op_desc([_, _] => "membership")]
         Has = "has",
 
         // ----------------------------
@@ -282,6 +227,7 @@ define_token_eq! {
         ///     # statement
         /// after:
         /// ```
+        #[op_desc([_, _] => "conditional")]
         If = "if",
         /// When following an `if` statement, only performs the statement if the condition does not hold.
         /// ### Syntax
@@ -309,16 +255,18 @@ define_token_eq! {
         ///     // statement
         /// }
         /// ```
+        #[op_desc([_, _] => "null replacement")]
         Or = "or",
         /// Choose a branch based on pattern.
         /// ### Syntax
         /// ```rs
-        /// match /* expression */ {
+        /// pick /* expression */ {
         ///     /* pattern */ => /* statement or expression */,
         ///     // ...
         /// }
         /// ```
-        Match = "match",
+        #[op_desc(_ => "pattern matching")]
+        Pick = "pick",
 
         // ----------------------------
         // Loop
@@ -365,6 +313,7 @@ define_token_eq! {
         ///     // ...
         /// }
         /// ```
+        #[op_desc([_, _] => "iteration")]
         In = "in",
         /// Repeat forever (or until a `stop`/`give`/`fail`).
         /// ### Syntax
@@ -451,13 +400,13 @@ define_token_eq! {
         /// Builtin error type produced by `fail`
         /// ## As a keyword
         /// Return with a failure, like an exception. Accessing the return of a `fail`ed function
-        /// will immediately `fail` the accessing function, unless handled with `match`ed.
+        /// will immediately `fail` the accessing function, unless caught with `pick`.
         /// ### Syntax
         /// ```rs
         /// fail /* error */;
         /// ```
         Fail = "fail",
-        /// Return the value within a loop without ending the function, to allow for iterable functions.
+        /// Return the value within a loop without ending the function, to allow for iterable functions (like "yeild").
         /// Turns the function into a mutable closure.
         /// ### Syntax
         /// ```rs
@@ -478,7 +427,7 @@ impl Keyword {
             self,
             Self::If
                 | Self::Or
-                | Self::Match
+                | Self::Pick
                 | Self::Rep
                 | Self::For
                 | Self::In
@@ -494,7 +443,7 @@ impl Keyword {
 
     /// Test if a keyword is a language defined value
     pub const fn is_value(self) -> bool {
-        matches!(self, Self::None | Self::Nevr)
+        matches!(self, Self::None | Self::Fail)
     }
 
     /// Test if a keyword is a language defined type
@@ -503,13 +452,13 @@ impl Keyword {
             self,
             Self::None
                 | Self::Nevr
+                | Self::Fail
                 | Self::Bool
                 | Self::Uint
                 | Self::Sint
                 | Self::Frac
                 | Self::Char
                 | Self::Text
-                | Self::Fail
         )
     }
 }

@@ -13,14 +13,15 @@ macro_rules! define_token_eq {
     (
         $(#[$em:meta])*
         $vis:vis enum $Enum:ident = $name:ident {$(
-            $(#[$vm:meta])*
-            $Variant:ident = $(#[$valm:meta])* $value:literal
+            $(#[doc = $doc:expr])*
+            $(#[op_desc($($operands_pat:pat => $op_desc:expr),+ $(,)?)])?
+            $Variant:ident = $value:literal
         ),+ $(,)?}
     ) => {
         $(#[$em])*
         $vis enum $Enum {$(
             #[doc = concat!("`", $value, "`\n")]
-            $(#[$vm])*
+            $(#[doc = $doc])*
             $Variant,
         )+}
 
@@ -38,7 +39,7 @@ macro_rules! define_token_eq {
             /// Like [`Self::from_prefix`], but matches the full string
             pub const fn try_from_str(s: &str) -> Option<Self> {
                 match s {
-                    $($(#[$valm])* $value => Some(Self::$Variant),)+
+                    $($value => Some(Self::$Variant),)+
                     _ => None,
                 }
             }
@@ -47,6 +48,18 @@ macro_rules! define_token_eq {
             pub const fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$Variant => $value),+
+                }
+            }
+
+            #[allow(unused)]
+            pub fn op_description(self, operands: &[$crate::eval::ValueType]) -> &'static str {
+                use $crate::eval::ValueType::*;
+                match self {
+                    $($(Self::$Variant => match operands {
+                        $($operands_pat => $op_desc,)*
+                        _ => unimplemented!("invalid combination of operands"),
+                    },)?)*
+                    _ =>unimplemented!("not an operator"),
                 }
             }
         }
