@@ -45,3 +45,6 @@ none -:> uint   // error
 
 (-5 -:> uint) // fails at runtime
 (-5 =:> uint) // succeeds, but changes representation
+
+def \convert($op, $ty) { (5 $op $ty) }
+\convert{-:>}{fail}
