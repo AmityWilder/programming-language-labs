@@ -246,14 +246,15 @@ impl std::fmt::Display for ValueType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Default)]
 pub enum RunValue {
     #[default]
     None,
     /// `none` that also outputs `none` as a result of every operation, instead of erroring
-    // TBD: is this a good way of handling this?
+    // TBD: is a variant a good way of handling this?
     CoalesceNone,
-    Fail,
+    // TODO: would love if this could use a ContexError (for nicer display) and not just any error
+    Fail(Box<dyn std::error::Error>),
     Bool(bool),
     UInt(usize),
     SInt(isize),
@@ -267,7 +268,7 @@ impl RunValue {
     pub const fn as_type(&self) -> ValueType {
         match self {
             Self::None | Self::CoalesceNone => ValueType::None,
-            Self::Fail => ValueType::Fail,
+            Self::Fail(_) => ValueType::Fail,
             Self::Bool(_) => ValueType::Bool,
             Self::UInt(_) => ValueType::UInt,
             Self::SInt(_) => ValueType::SInt,
@@ -640,7 +641,6 @@ impl RunValue {
 
     /// The equivalent of [`Into`]/[`TryInto`]
     fn convert(self, into_ty: ValueType) -> Result<Self, OpError> {
-        // TODO: some of these should return runtime errors (i.e. `none`/`fail`) instead of actually erroring
         match (self, into_ty) {
             (Self::Type(_), _) => unimplemented!("should be caught by grammar"),
             (_, ValueType::Type) => unimplemented!("`type` isn't a type"),
@@ -655,32 +655,45 @@ impl RunValue {
             | (x @ Self::Char(_), ValueType::Char)
             | (x @ Self::Text(_), ValueType::Text) => Ok(x),
 
-            (_, ValueType::None | ValueType::Nevr | ValueType::Fail) => {
-                todo!("error: cannot convert to this type")
+            (x, t @ (ValueType::None | ValueType::Nevr | ValueType::Fail))
+            | (x @ (Self::None | Self::CoalesceNone), t) => {
+                Err(OpError::Incompatible(x.as_type(), t))
             }
 
-            // essentially creates a default; but does that even make sense?
-            (Self::None | Self::CoalesceNone, ValueType::UInt) => Ok(Self::UInt(0)),
-            (Self::None | Self::CoalesceNone, ValueType::SInt) => Ok(Self::SInt(0)),
-            (Self::None | Self::CoalesceNone, ValueType::Frac) => Ok(Self::Frac(0.0)),
-            (Self::None | Self::CoalesceNone, ValueType::Char) => Ok(Self::Char('\0')),
-
-            // should this make a default, or stringify?
-            (Self::None | Self::CoalesceNone, ValueType::Text) => Ok(Self::Text(Cow::Borrowed(""))),
-
             // stringify value
-            (Self::Bool(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
-            (Self::UInt(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
-            (Self::SInt(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
-            (Self::Frac(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
-            (Self::Char(x), ValueType::Text) => Ok(Self::Text(Cow::Owned(x.to_string()))),
+            (
+                x @ (Self::Bool(_) | Self::UInt(_) | Self::SInt(_) | Self::Frac(_) | Self::Char(_)),
+                ValueType::Text,
+            ) => Ok(Self::Text(Cow::Owned(match &x {
+                Self::Bool(x) => x.to_string(),
+                Self::UInt(x) => x.to_string(),
+                Self::SInt(x) => x.to_string(),
+                Self::Frac(x) => x.to_string(),
+                Self::Char(x) => x.to_string(),
+                _ => unreachable!("guarded by match arm"),
+            }))),
 
             // parse string
-            (Self::Text(s), ValueType::Bool) => s.parse().map(Self::Bool).map_err(|e| todo!("{e}")),
-            (Self::Text(s), ValueType::UInt) => s.parse().map(Self::UInt).map_err(|e| todo!("{e}")),
-            (Self::Text(s), ValueType::SInt) => s.parse().map(Self::SInt).map_err(|e| todo!("{e}")),
-            (Self::Text(s), ValueType::Frac) => s.parse().map(Self::Frac).map_err(|e| todo!("{e}")),
-            (Self::Text(s), ValueType::Char) => s.parse().map(Self::Char).map_err(|e| todo!("{e}")),
+            (Self::Text(s), ValueType::Bool) => Ok(match s.parse() {
+                Ok(x) => Self::Bool(x),
+                Err(e) => Self::Fail(Box::new(e)),
+            }),
+            (Self::Text(s), ValueType::UInt) => Ok(match s.parse() {
+                Ok(x) => Self::UInt(x),
+                Err(e) => Self::Fail(Box::new(e)),
+            }),
+            (Self::Text(s), ValueType::SInt) => Ok(match s.parse() {
+                Ok(x) => Self::SInt(x),
+                Err(e) => Self::Fail(Box::new(e)),
+            }),
+            (Self::Text(s), ValueType::Frac) => Ok(match s.parse() {
+                Ok(x) => Self::Frac(x),
+                Err(e) => Self::Fail(Box::new(e)),
+            }),
+            (Self::Text(s), ValueType::Char) => Ok(match s.parse() {
+                Ok(x) => Self::Char(x),
+                Err(e) => Self::Fail(Box::new(e)),
+            }),
 
             // TBD: is this even a good idea?
             (x, ValueType::Bool) => Ok(x.exists()),
@@ -690,34 +703,28 @@ impl RunValue {
             (Self::Bool(x), ValueType::Frac) => Ok(Self::Frac(x.into())),
             (Self::Bool(x), ValueType::Char) => Ok(Self::Char(if x { '1' } else { '0' })), // TBD: perhaps top/bot?
 
-            (Self::UInt(x), ValueType::SInt) => {
-                x.try_into()
-                    .map(Self::SInt)
-                    .map_err(|_| OpError::FailedConversion {
-                        target_ty: TargetTy::SInt,
-                        value: IntValue::UInt(x),
-                        is_binary: true,
-                    })
-            }
-            (Self::SInt(x), ValueType::UInt) => {
-                x.try_into()
-                    .map(Self::UInt)
-                    .map_err(|_| OpError::FailedConversion {
-                        target_ty: TargetTy::UInt,
-                        value: IntValue::SInt(x),
-                        is_binary: true,
-                    })
-            }
+            (Self::UInt(x), ValueType::SInt) => Ok(match x.try_into() {
+                Ok(x) => Self::SInt(x),
+                Err(e) => Self::Fail(Box::new(e)),
+            }),
+            (Self::SInt(x), ValueType::UInt) => Ok(match x.try_into() {
+                Ok(x) => Self::UInt(x),
+                Err(e) => Self::Fail(Box::new(e)),
+            }),
 
             // TODO: need more `FailedConversion` errors for things besides integers!
-            (Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TODO: need an error (or warning?) for loss of data
-            (Self::UInt(x), ValueType::Char) => u8::try_from(x) // TODO: what about unicode?
-                .map(|x| Self::Char(char::from(x)))
-                .map_err(|e| todo!("{e}")),
-            (Self::SInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TODO: need an error (or warning?) for loss of data
-            (Self::SInt(x), ValueType::Char) => u8::try_from(x) // TODO: what about unicode?
-                .map(|x| Self::Char(char::from(x)))
-                .map_err(|e| todo!("{e}")),
+            (Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TBD: error (or warning) for loss of data?
+            (Self::UInt(x), ValueType::Char) => Ok(match u8::try_from(x) {
+                // TODO: what about unicode?
+                Ok(x) => Self::Char(char::from(x)),
+                Err(e) => Self::Fail(Box::new(e)),
+            }),
+            (Self::SInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TBD: error (or warning) for loss of data?
+            (Self::SInt(x), ValueType::Char) => Ok(match u8::try_from(x) {
+                // TODO: what about unicode?
+                Ok(x) => Self::Char(char::from(x)),
+                Err(e) => Self::Fail(Box::new(e)),
+            }),
             (Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x as usize)), // TBD: should truncation be an error/warning?
             (Self::Frac(x), ValueType::SInt) => Ok(Self::SInt(x as isize)), // TBD: should truncation be an error/warning?
 

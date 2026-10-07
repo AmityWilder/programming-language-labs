@@ -114,6 +114,7 @@ use crate::{
 };
 use std::range::Range;
 
+mod arrayvec;
 mod error;
 mod eval;
 mod grammar;
@@ -254,11 +255,21 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
         }
 
         Expr::Type(inner) => {
-            let TypeExpr { name } = inner;
+            let TypeExpr { name, or_types } = inner;
             header("Type");
 
             field("name", indent);
             println!("{}", SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name));
+
+            field("or_types", indent);
+            for (pipe, ty) in or_types {
+                print!(
+                    "{} {}",
+                    SYNTAX_STYLE_ANSI[pipe.syntax()].style_dbg(pipe),
+                    SYNTAX_STYLE_ANSI[ty.syntax()].style_dbg(ty)
+                );
+            }
+            println!();
         }
     }
 }
@@ -425,14 +436,18 @@ impl<'src> TokenHighlight<'src> for RunToken<'src> {
 }
 
 fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
+    use std::fmt::Write;
     match value {
         RunValue::None | RunValue::CoalesceNone => RunToken {
             lex: "none",
             syn: RunSyntax::Mono(Syntax::LanguageDefined),
         },
-        RunValue::Fail => RunToken {
-            lex: "fail",
-            syn: RunSyntax::Mono(Syntax::LanguageDefined),
+        RunValue::Fail(e) => RunToken {
+            lex: {
+                _ = write!(buf, "failed: {e}"); // infallible for String
+                buf
+            },
+            syn: RunSyntax::Mono(Syntax::Invalid),
         },
         RunValue::Bool(x) => RunToken {
             lex: if x { "true" } else { "fals" },
@@ -460,9 +475,7 @@ fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
             syn: RunSyntax::Mono(Syntax::NumberLiteral),
         },
         RunValue::Char(ch) => {
-            use std::fmt::Write;
-            // infallible for String
-            _ = write!(buf, "{ch:?}");
+            _ = write!(buf, "{ch:?}"); // infallible for String
             RunToken {
                 lex: buf,
                 syn: RunSyntax::Char(CharLiteral {
@@ -472,9 +485,7 @@ fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
             }
         }
         RunValue::Text(s) => {
-            use std::fmt::Write;
-            // infallible for String
-            _ = write!(buf, "{s:?}");
+            _ = write!(buf, "{s:?}"); // infallible for String
             RunToken {
                 lex: buf,
                 syn: RunSyntax::Text(StrLiteral {
@@ -485,9 +496,7 @@ fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
             }
         }
         RunValue::Type(t) => {
-            use std::fmt::Write;
-            // infallible for String
-            _ = write!(buf, "{t:?}");
+            _ = write!(buf, "{t:?}"); // infallible for String
             RunToken {
                 lex: buf,
                 syn: RunSyntax::Mono(Syntax::Typename),
