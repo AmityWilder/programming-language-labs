@@ -94,12 +94,15 @@
 // )]
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
-use grammar::{OrType, semantic};
-
 use crate::{
     error::ContextError,
     eval::{RunValue, evaluate},
-    grammar::{Binary, Expr, Grouping, Lisp, TypeExpr, Unary, parse},
+    grammar::{
+        ast::{Binary, Expr, Grouping, OrType, TypeExpr, Unary},
+        ast_iter::semantic,
+        fmt::Lisp,
+        parse,
+    },
     highlight::{
         GenericError, TokenHighlight, highlight,
         style::{Style, StyleWrapper},

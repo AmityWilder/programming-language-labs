@@ -1,0 +1,285 @@
+use crate::{
+    error::OpSide,
+    grammar::{Binary, Expr, Grouping, OrType, TypeExpr, Unary},
+    highlight::{TokenHighlight, syntax::Syntax},
+    scanner::token::{Token, punc::Punctuation, value::LexValue},
+};
+
+#[derive(Debug, Clone)]
+pub enum ExprOrToken<'src, 'expr> {
+    Token(&'expr Token<'src>),
+    Semantic(&'expr Token<'src>, Syntax),
+    Bracket(&'expr Token<'src>, usize),
+    Expr(&'expr Expr<'src>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ExprIter<'src, 'expr> {
+    Binary {
+        lhs: Option<&'expr Expr<'src>>,
+        op: Option<&'expr Token<'src>>,
+        rhs: Option<&'expr Expr<'src>>,
+    },
+    UnaryPre {
+        op: Option<&'expr Token<'src>>,
+        rhs: Option<&'expr Expr<'src>>,
+    },
+    UnaryPost {
+        lhs: Option<&'expr Expr<'src>>,
+        op: Option<&'expr Token<'src>>,
+    },
+    Literal {
+        token: Option<&'expr Token<'src>>,
+    },
+    Grouping {
+        open: Option<&'expr Token<'src>>,
+        expr: Option<&'expr Expr<'src>>,
+        close: Option<&'expr Token<'src>>,
+    },
+    Type {
+        name: Option<&'expr Token<'src>>,
+        pipe: Option<&'expr Token<'src>>,
+        or_ty: Option<&'expr Token<'src>>,
+    },
+}
+
+impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
+    type Item = ExprOrToken<'src, 'expr>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Binary { lhs, op, rhs } => lhs
+                .take()
+                .map(ExprOrToken::Expr)
+                .or_else(|| {
+                    op.take().map(|token| match token.val {
+                        LexValue::Punctuation(Punctuation::Convert | Punctuation::Transmute) => {
+                            ExprOrToken::Semantic(token, Syntax::Keyword)
+                        }
+                        _ => ExprOrToken::Token(token),
+                    })
+                })
+                .or_else(|| rhs.take().map(ExprOrToken::Expr)),
+
+            Self::UnaryPre { op, rhs } => op
+                .take()
+                .map(ExprOrToken::Token)
+                .or_else(|| rhs.take().map(ExprOrToken::Expr)),
+
+            Self::UnaryPost { lhs, op } => lhs.take().map(ExprOrToken::Expr).or_else(|| {
+                op.take().map(|token| match token.val {
+                    LexValue::Punctuation(Punctuation::Coalesce) => {
+                        ExprOrToken::Semantic(token, Syntax::CtrlKeyword)
+                    }
+                    _ => ExprOrToken::Token(token),
+                })
+            }),
+
+            Self::Literal { token } => token.take().map(ExprOrToken::Token),
+
+            Self::Grouping { open, expr, close } => open
+                .take()
+                // TODO: where do we get the depth from?
+                .map(|x| ExprOrToken::Bracket(x, 0))
+                .or_else(|| expr.take().map(ExprOrToken::Expr))
+                // TODO: where do we get the depth from?
+                .or_else(|| close.take().map(|x| ExprOrToken::Bracket(x, 0))),
+
+            Self::Type { name, pipe, or_ty } => name
+                .take()
+                .map(|x| ExprOrToken::Semantic(x, Syntax::Typename))
+                .or_else(|| {
+                    pipe.take()
+                        .map(|x| ExprOrToken::Semantic(x, Syntax::Keyword))
+                })
+                .or_else(|| {
+                    or_ty
+                        .take()
+                        .map(|x| ExprOrToken::Semantic(x, Syntax::Typename))
+                }),
+        }
+    }
+}
+
+impl<'src> Expr<'src> {
+    fn iter(&self) -> ExprIter<'src, '_> {
+        match self {
+            Expr::Binary(Binary { lhs, op, rhs }) => ExprIter::Binary {
+                lhs: Some(lhs),
+                op: Some(op),
+                rhs: Some(rhs),
+            },
+
+            Expr::Unary(Unary { op, operand, side }) => match side {
+                OpSide::Left => ExprIter::UnaryPost {
+                    lhs: Some(operand),
+                    op: Some(op),
+                },
+                OpSide::Right => ExprIter::UnaryPre {
+                    op: Some(op),
+                    rhs: Some(operand),
+                },
+            },
+
+            Expr::Literal(token) => ExprIter::Literal { token: Some(token) },
+
+            Expr::Grouping(Grouping { open, expr, close }) => ExprIter::Grouping {
+                open: Some(open),
+                expr: Some(expr),
+                close: Some(close),
+            },
+
+            Expr::Type(TypeExpr { name, or_ty }) => ExprIter::Type {
+                name: Some(name),
+                pipe: or_ty.as_ref().map(|OrType { pipe, .. }| pipe),
+                or_ty: or_ty.as_ref().map(|OrType { ty, .. }| ty),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TokenSemantics {
+    Override(Syntax),
+    Bracket(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SemanticToken<'src> {
+    token: Token<'src>,
+    sem: Option<TokenSemantics>,
+}
+
+impl<'src> TokenHighlight<'src> for SemanticToken<'src> {
+    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
+        let Token { lex, val, .. } = self.token;
+        let syn = match self.sem {
+            Some(TokenSemantics::Override(syn)) => syn,
+            Some(TokenSemantics::Bracket(depth)) => Syntax::Bracket(depth),
+            None => self.token.syntax(),
+        };
+        (lex, syn, val)
+    }
+}
+
+/// Traverse the AST using DFS
+#[derive(Debug, Clone)]
+pub struct AstIter<'src, 'expr> {
+    // TODO: can the stack be eliminated somehow?
+    stack: Vec<ExprIter<'src, 'expr>>,
+}
+
+impl<'src, 'expr> AstIter<'src, 'expr> {
+    pub fn new(ast: &'expr Expr<'src>) -> Self {
+        Self {
+            stack: vec![ast.iter()],
+        }
+    }
+}
+
+impl<'src> Iterator for AstIter<'src, '_> {
+    type Item = SemanticToken<'src>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(top) = self.stack.last_mut() {
+            if let Some(item) = top.next() {
+                match item {
+                    ExprOrToken::Token(&token) => return Some(SemanticToken { token, sem: None }),
+                    ExprOrToken::Semantic(&token, syn) => {
+                        return Some(SemanticToken {
+                            token,
+                            sem: Some(TokenSemantics::Override(syn)),
+                        });
+                    }
+                    ExprOrToken::Bracket(&token, depth) => {
+                        return Some(SemanticToken {
+                            token,
+                            sem: Some(TokenSemantics::Bracket(depth)),
+                        });
+                    }
+                    ExprOrToken::Expr(expr) => self.stack.push(expr.iter()),
+                }
+            } else {
+                self.stack.pop();
+            }
+        }
+        None
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticIter<'src, I: Iterator<Item = SemanticToken<'src>>> {
+    source: &'src str,
+    prev_end: usize,
+    iter: std::iter::Peekable<I>,
+}
+
+impl<'src, I: Iterator<Item = SemanticToken<'src>>> SemanticIter<'src, I> {
+    fn new(source: &'src str, iter: I) -> Self {
+        Self {
+            source,
+            prev_end: 0,
+            iter: iter.peekable(),
+        }
+    }
+}
+
+// TODO: this is the second instance of an alternating prev_end iterator... can this be generalized?
+impl<'src, I> Iterator for SemanticIter<'src, I>
+where
+    I: Iterator<Item = SemanticToken<'src>>,
+{
+    type Item = SemanticToken<'src>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // TODO: macros influence ranges, and aren't present in the expanded token stream!!
+        self.iter
+            .next_if(|item| item.token.lex_range(self.source).start == self.prev_end)
+            .or_else(|| {
+                (self.prev_end != self.source.len()).then(|| {
+                    let next_start = self.iter.peek().map_or(self.source.len(), |item| {
+                        item.token.lex_range(self.source).start
+                    });
+                    SemanticToken {
+                        token: Token {
+                            lex: self
+                                .source
+                                .get(self.prev_end..next_start)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "prev_end..next_start should be a valid substr range\n \
+                                        prev_end: {}\n \
+                                        next_start: {}\n \
+                                        source.len(): {}",
+                                        self.prev_end,
+                                        next_start,
+                                        self.source.len()
+                                    );
+                                }),
+                            // HACK: whitespace doesn't mind being colored like comments
+                            val: LexValue::Comment,
+                            mac: None,
+                        },
+                        sem: None,
+                    }
+                })
+            })
+            .inspect(|item| self.prev_end = item.token.lex_range(self.source).end)
+    }
+}
+
+pub type Semantics<'src, 'expr, I> = SemanticIter<
+    'src,
+    std::iter::FlatMap<
+        <I as IntoIterator>::IntoIter,
+        AstIter<'src, 'expr>,
+        fn(&'expr Expr<'src>) -> AstIter<'src, 'expr>,
+    >,
+>;
+
+pub fn semantic<'src, 'expr, I>(source: &'src str, ast: I) -> Semantics<'src, 'expr, I>
+where
+    I: IntoIterator<Item = &'expr Expr<'src>>,
+{
+    SemanticIter::new(source, ast.into_iter().flat_map(AstIter::new))
+}

@@ -4,7 +4,7 @@ use crate::{
     error::{
         ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
     },
-    grammar::{Binary, Expr, Unary},
+    grammar::ast::{Binary, Expr, Unary},
     scanner::token::{
         Token,
         keyword::Keyword,
@@ -701,7 +701,7 @@ impl RunValue {
             (Self::Bool(x), ValueType::UInt) => Ok(Self::UInt(x.into())),
             (Self::Bool(x), ValueType::SInt) => Ok(Self::SInt(x.into())),
             (Self::Bool(x), ValueType::Frac) => Ok(Self::Frac(x.into())),
-            (Self::Bool(x), ValueType::Char) => Ok(Self::Char(if x { '1' } else { '0' })), // TBD: perhaps top/bot?
+            (Self::Bool(x), ValueType::Char) => Ok(Self::Char(if x { '1' } else { '0' })),
 
             (Self::UInt(x), ValueType::SInt) => Ok(match x.try_into() {
                 Ok(x) => Self::SInt(x),
