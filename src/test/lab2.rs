@@ -58,7 +58,10 @@
 
 use crate::{
     error::OpSide,
-    grammar::{Binary, Expr, Grouping, Lisp, Polish, Unary},
+    grammar::{
+        ast::{Binary, Expr, Grouping, Unary},
+        fmt::{Lisp, Polish},
+    },
     print_ast,
     scanner::token::{Token, punc::Punctuation, value::LexValue},
 };
