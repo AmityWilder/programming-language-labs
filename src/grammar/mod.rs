@@ -2,6 +2,7 @@
 
 use crate::{
     SYNTAX_STYLE_ANSI,
+    arrayvec::ArrayVec,
     error::{ContextError, ErrorType, ExpectedToken, OpSide},
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
     scanner::{
@@ -263,9 +264,18 @@ impl PolishDisplay for Grouping<'_> {
 }
 
 /// A concrete type
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TypeExpr<'src> {
     pub name: Token<'src>,
+    pub or_types: ArrayVec<
+        (
+            // `|`
+            Token<'src>,
+            // `none`, `fail`, or `nevr`
+            Token<'src>,
+        ),
+        3,
+    >,
     // TODO: namespace?
     // TODO: generic arguments?
 }
@@ -283,14 +293,14 @@ impl<'src> TypeExpr<'src> {
 
 impl std::fmt::Display for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { name } = self;
+        let Self { name, or_types } = self;
         f.write_str(name.lex)
     }
 }
 
 impl LispDisplay for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { name } = self;
+        let Self { name, or_types } = self;
         if f.alternate() {
             let ty = crate::SYNTAX_STYLE_ANSI[Syntax::Typename];
             std::fmt::Display::fmt(&ty.style(name.lex), f)
@@ -302,7 +312,7 @@ impl LispDisplay for TypeExpr<'_> {
 
 impl PolishDisplay for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { name } = self;
+        let Self { name, or_types } = self;
         f.write_str(name.lex)
     }
 }
@@ -702,7 +712,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             },
             ExpectedToken::TypeExpr,
         )
-        .map(|name| TypeExpr { name })
+        .map(|name| TypeExpr {
+            name,
+            or_types: ArrayVec::new(), // TODO: actually extract the tokens
+        })
     }
 
     fn synchronize(&mut self) {

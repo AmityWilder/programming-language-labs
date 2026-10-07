@@ -34,10 +34,11 @@ fals !| true
 // `-:>` is conversion, `=:>` is reinterpretation
 
 5u -:> sint - 7s
+(-5 -:> uint + 3u)
 
 true -:> text   // stringify
 "true" -:> bool // parse
-none -:> uint   // default(?)
+none -:> uint   // error
 
-(-5 -:> uint) // fails
+(-5 -:> uint) // fails at runtime
 (-5 =:> uint) // succeeds, but changes representation
