@@ -88,11 +88,11 @@ define_token_eq! {
         /// Convert - Takes an expression on the left side and a type on the right side, and
         /// converts the expression into the type. Implementation can be fallible or infallible,
         /// depending on the overload
-        #[op_desc([_, Type] => "conversion")]
+        #[op_desc([_, _] => "conversion")]
         Convert = "-:>",
         /// Transmute - Like [`Self::Convert`], but performs a bitwise reinterpretation as the
         /// output type. Only valid if the input and output types have the exact same data layout.
-        #[op_desc([_, Type] => "reinterpretation")]
+        #[op_desc([_, _] => "reinterpretation")]
         Transmute = "=:>",
         /// Nand - Equivalent to `!(lhs & rhs)`
         #[op_desc([Bool, Bool] => "logical NAND", [_, _] => "bitwise NAND")]
