@@ -848,7 +848,14 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
             Self::Binary { lhs, op, rhs } => lhs
                 .take()
                 .map(ExprOrToken::Expr)
-                .or_else(|| op.take().map(ExprOrToken::Token))
+                .or_else(|| {
+                    op.take().map(|token| match token.val {
+                        LexValue::Punctuation(Punctuation::Convert | Punctuation::Transmute) => {
+                            ExprOrToken::Semantic(token, Syntax::Keyword)
+                        }
+                        _ => ExprOrToken::Token(token),
+                    })
+                })
                 .or_else(|| rhs.take().map(ExprOrToken::Expr)),
 
             Self::UnaryPre { op, rhs } => op
@@ -856,10 +863,14 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
                 .map(ExprOrToken::Token)
                 .or_else(|| rhs.take().map(ExprOrToken::Expr)),
 
-            Self::UnaryPost { lhs, op } => lhs
-                .take()
-                .map(ExprOrToken::Expr)
-                .or_else(|| op.take().map(ExprOrToken::Token)),
+            Self::UnaryPost { lhs, op } => lhs.take().map(ExprOrToken::Expr).or_else(|| {
+                op.take().map(|token| match token.val {
+                    LexValue::Punctuation(Punctuation::Coalesce) => {
+                        ExprOrToken::Semantic(token, Syntax::CtrlKeyword)
+                    }
+                    _ => ExprOrToken::Token(token),
+                })
+            }),
 
             Self::Literal { token } => token.take().map(ExprOrToken::Token),
 
@@ -964,7 +975,6 @@ impl<'src, 'expr> AstIter<'src, 'expr> {
 }
 
 impl<'src> Iterator for AstIter<'src, '_> {
-    // TODO: this should probably be an enum instead
     type Item = SemanticToken<'src>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -994,20 +1004,11 @@ impl<'src> Iterator for AstIter<'src, '_> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct SemanticIter<'src, I: Iterator<Item = SemanticToken<'src>>> {
     source: &'src str,
     prev_end: usize,
     iter: std::iter::Peekable<I>,
-}
-
-impl<'src, I: Clone + Iterator<Item = SemanticToken<'src>>> Clone for SemanticIter<'src, I> {
-    fn clone(&self) -> Self {
-        Self {
-            source: self.source,
-            prev_end: self.prev_end,
-            iter: self.iter.clone(),
-        }
-    }
 }
 
 impl<'src, I: Iterator<Item = SemanticToken<'src>>> SemanticIter<'src, I> {

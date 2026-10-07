@@ -312,11 +312,11 @@ impl<'src> TokenHighlight<'src> for ContextError<'src> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct GenericError;
+pub struct GenericError<'a>(pub &'a str);
 
-impl<'src> TokenHighlight<'src> for GenericError {
+impl<'src> TokenHighlight<'src> for GenericError<'src> {
     fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
-        ("[error]", Syntax::Invalid, const { LexValue::Comment })
+        (self.0, Syntax::Invalid, const { LexValue::Comment })
     }
 }
 
