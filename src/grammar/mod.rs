@@ -3,7 +3,7 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     error::{ContextError, ErrorType, ExpectedToken, OpSide},
-    highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
+    highlight::{TokenHighlight, style::StyleWrapper, syntax::Syntax, write_highlight},
     scanner::{
         BadBracketCombo, Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
@@ -805,6 +805,8 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 #[derive(Debug, Clone)]
 pub enum ExprOrToken<'src, 'expr> {
     Token(&'expr Token<'src>),
+    Semantic(&'expr Token<'src>, Syntax),
+    Bracket(&'expr Token<'src>, usize),
     Expr(&'expr Expr<'src>),
 }
 
@@ -863,15 +865,24 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
 
             Self::Grouping { open, expr, close } => open
                 .take()
-                .map(ExprOrToken::Token)
+                // TODO: where do we get the depth from?
+                .map(|x| ExprOrToken::Bracket(x, 0))
                 .or_else(|| expr.take().map(ExprOrToken::Expr))
-                .or_else(|| close.take().map(ExprOrToken::Token)),
+                // TODO: where do we get the depth from?
+                .or_else(|| close.take().map(|x| ExprOrToken::Bracket(x, 0))),
 
             Self::Type { name, pipe, or_ty } => name
                 .take()
-                .map(ExprOrToken::Token)
-                .or_else(|| pipe.take().map(ExprOrToken::Token))
-                .or_else(|| or_ty.take().map(ExprOrToken::Token)),
+                .map(|x| ExprOrToken::Semantic(x, Syntax::Typename))
+                .or_else(|| {
+                    pipe.take()
+                        .map(|x| ExprOrToken::Semantic(x, Syntax::Keyword))
+                })
+                .or_else(|| {
+                    or_ty
+                        .take()
+                        .map(|x| ExprOrToken::Semantic(x, Syntax::Typename))
+                }),
         }
     }
 }
@@ -913,6 +924,30 @@ impl<'src> Expr<'src> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TokenSemantics {
+    Override(Syntax),
+    Bracket(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SemanticToken<'src> {
+    token: Token<'src>,
+    sem: Option<TokenSemantics>,
+}
+
+impl<'src> TokenHighlight<'src> for SemanticToken<'src> {
+    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
+        let Token { lex, val, .. } = self.token;
+        let syn = match self.sem {
+            Some(TokenSemantics::Override(syn)) => syn,
+            Some(TokenSemantics::Bracket(depth)) => Syntax::Bracket(depth),
+            None => self.token.syntax(),
+        };
+        (lex, syn, val)
+    }
+}
+
 /// Traverse the AST using DFS
 #[derive(Debug, Clone)]
 pub struct AstIter<'src, 'expr> {
@@ -928,14 +963,27 @@ impl<'src, 'expr> AstIter<'src, 'expr> {
     }
 }
 
-impl<'src, 'expr> Iterator for AstIter<'src, 'expr> {
-    type Item = &'expr Token<'src>;
+impl<'src> Iterator for AstIter<'src, '_> {
+    // TODO: this should probably be an enum instead
+    type Item = SemanticToken<'src>;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(top) = self.stack.last_mut() {
             if let Some(item) = top.next() {
                 match item {
-                    ExprOrToken::Token(token) => return Some(token),
+                    ExprOrToken::Token(&token) => return Some(SemanticToken { token, sem: None }),
+                    ExprOrToken::Semantic(&token, syn) => {
+                        return Some(SemanticToken {
+                            token,
+                            sem: Some(TokenSemantics::Override(syn)),
+                        });
+                    }
+                    ExprOrToken::Bracket(&token, depth) => {
+                        return Some(SemanticToken {
+                            token,
+                            sem: Some(TokenSemantics::Bracket(depth)),
+                        });
+                    }
                     ExprOrToken::Expr(expr) => self.stack.push(expr.iter()),
                 }
             } else {
@@ -946,13 +994,13 @@ impl<'src, 'expr> Iterator for AstIter<'src, 'expr> {
     }
 }
 
-pub struct SemanticIter<'src, I: Iterator> {
+pub struct SemanticIter<'src, I: Iterator<Item = SemanticToken<'src>>> {
     source: &'src str,
     prev_end: usize,
     iter: std::iter::Peekable<I>,
 }
 
-impl<I: Clone + Iterator<Item: Clone>> Clone for SemanticIter<'_, I> {
+impl<'src, I: Clone + Iterator<Item = SemanticToken<'src>>> Clone for SemanticIter<'src, I> {
     fn clone(&self) -> Self {
         Self {
             source: self.source,
@@ -962,7 +1010,7 @@ impl<I: Clone + Iterator<Item: Clone>> Clone for SemanticIter<'_, I> {
     }
 }
 
-impl<'src, I: Iterator> SemanticIter<'src, I> {
+impl<'src, I: Iterator<Item = SemanticToken<'src>>> SemanticIter<'src, I> {
     fn new(source: &'src str, iter: I) -> Self {
         Self {
             source,
@@ -973,45 +1021,46 @@ impl<'src, I: Iterator> SemanticIter<'src, I> {
 }
 
 // TODO: this is the second instance of an alternating prev_end iterator... can this be generalized?
-impl<'src, 'expr, I> Iterator for SemanticIter<'src, I>
+impl<'src, I> Iterator for SemanticIter<'src, I>
 where
-    'src: 'expr,
-    I: Iterator<Item = &'expr Token<'src>>,
+    I: Iterator<Item = SemanticToken<'src>>,
 {
-    type Item = Token<'src>;
+    type Item = SemanticToken<'src>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // TODO: macros influence ranges, and aren't present in the expanded token stream!!
         self.iter
-            .next_if(|token| token.lex_range(self.source).start == self.prev_end)
-            .copied()
+            .next_if(|item| item.token.lex_range(self.source).start == self.prev_end)
             .or_else(|| {
                 (self.prev_end != self.source.len()).then(|| {
-                    let next_start = self.iter.peek().map_or(self.source.len(), |token| {
-                        token.lex_range(self.source).start
+                    let next_start = self.iter.peek().map_or(self.source.len(), |item| {
+                        item.token.lex_range(self.source).start
                     });
-                    Token {
-                        lex: self
-                            .source
-                            .get(self.prev_end..next_start)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "prev_end..next_start should be a valid substr range\n \
+                    SemanticToken {
+                        token: Token {
+                            lex: self
+                                .source
+                                .get(self.prev_end..next_start)
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "prev_end..next_start should be a valid substr range\n \
                                         prev_end: {}\n \
                                         next_start: {}\n \
                                         source.len(): {}",
-                                    self.prev_end,
-                                    next_start,
-                                    self.source.len()
-                                );
-                            }),
-                        // HACK: whitespace doesn't mind being colored like comments
-                        val: LexValue::Comment,
-                        mac: None,
+                                        self.prev_end,
+                                        next_start,
+                                        self.source.len()
+                                    );
+                                }),
+                            // HACK: whitespace doesn't mind being colored like comments
+                            val: LexValue::Comment,
+                            mac: None,
+                        },
+                        sem: None,
                     }
                 })
             })
-            .inspect(|token| self.prev_end = token.lex_range(self.source).end)
+            .inspect(|item| self.prev_end = item.token.lex_range(self.source).end)
     }
 }
 
