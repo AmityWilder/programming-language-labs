@@ -10,11 +10,11 @@ pub enum ExprOrToken<'src, 'expr> {
     Token(&'expr Token<'src>),
     Semantic(&'expr Token<'src>, Syntax),
     Bracket(&'expr Token<'src>, usize),
-    Expr(&'expr Expr<'src>),
+    Expr(&'expr Expr<'src>, usize),
 }
 
 #[derive(Debug, Clone)]
-pub enum ExprIter<'src, 'expr> {
+pub enum ExprIterKind<'src, 'expr> {
     Binary {
         lhs: Option<&'expr Expr<'src>>,
         op: Option<&'expr Token<'src>>,
@@ -43,14 +43,20 @@ pub enum ExprIter<'src, 'expr> {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct ExprIter<'src, 'expr> {
+    pub kind: ExprIterKind<'src, 'expr>,
+    pub depth: usize,
+}
+
 impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
     type Item = ExprOrToken<'src, 'expr>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Binary { lhs, op, rhs } => lhs
+        match &mut self.kind {
+            ExprIterKind::Binary { lhs, op, rhs } => lhs
                 .take()
-                .map(ExprOrToken::Expr)
+                .map(|x| ExprOrToken::Expr(x, self.depth))
                 .or_else(|| {
                     op.take().map(|token| match token.val {
                         LexValue::Punctuation(Punctuation::Convert | Punctuation::Transmute) => {
@@ -59,33 +65,39 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
                         _ => ExprOrToken::Token(token),
                     })
                 })
-                .or_else(|| rhs.take().map(ExprOrToken::Expr)),
+                .or_else(|| rhs.take().map(|x| ExprOrToken::Expr(x, self.depth))),
 
-            Self::UnaryPre { op, rhs } => op
+            ExprIterKind::UnaryPre { op, rhs } => op
                 .take()
                 .map(ExprOrToken::Token)
-                .or_else(|| rhs.take().map(ExprOrToken::Expr)),
+                .or_else(|| rhs.take().map(|x| ExprOrToken::Expr(x, self.depth))),
 
-            Self::UnaryPost { lhs, op } => lhs.take().map(ExprOrToken::Expr).or_else(|| {
-                op.take().map(|token| match token.val {
-                    LexValue::Punctuation(Punctuation::Coalesce) => {
-                        ExprOrToken::Semantic(token, Syntax::CtrlKeyword)
-                    }
-                    _ => ExprOrToken::Token(token),
-                })
-            }),
+            ExprIterKind::UnaryPost { lhs, op } => lhs
+                .take()
+                .map(|x| ExprOrToken::Expr(x, self.depth))
+                .or_else(|| {
+                    op.take().map(|token| match token.val {
+                        LexValue::Punctuation(Punctuation::Coalesce) => {
+                            ExprOrToken::Semantic(token, Syntax::CtrlKeyword)
+                        }
+                        _ => ExprOrToken::Token(token),
+                    })
+                }),
 
-            Self::Literal { token } => token.take().map(ExprOrToken::Token),
+            ExprIterKind::Literal { token } => token.take().map(ExprOrToken::Token),
 
-            Self::Grouping { open, expr, close } => open
+            ExprIterKind::Grouping { open, expr, close } => open
                 .take()
                 // TODO: where do we get the depth from?
-                .map(|x| ExprOrToken::Bracket(x, 0))
-                .or_else(|| expr.take().map(ExprOrToken::Expr))
+                .map(|x| ExprOrToken::Bracket(x, self.depth))
+                .or_else(|| {
+                    expr.take()
+                        .map(|x| ExprOrToken::Expr(x, self.depth.strict_add(1)))
+                })
                 // TODO: where do we get the depth from?
-                .or_else(|| close.take().map(|x| ExprOrToken::Bracket(x, 0))),
+                .or_else(|| close.take().map(|x| ExprOrToken::Bracket(x, self.depth))),
 
-            Self::Type { name, pipe, or_ty } => name
+            ExprIterKind::Type { name, pipe, or_ty } => name
                 .take()
                 .map(|x| ExprOrToken::Semantic(x, Syntax::Typename))
                 .or_else(|| {
@@ -102,37 +114,55 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
 }
 
 impl<'src> Expr<'src> {
-    fn iter(&self) -> ExprIter<'src, '_> {
+    fn iter(&self, depth: usize) -> ExprIter<'src, '_> {
         match self {
-            Expr::Binary(Binary { lhs, op, rhs }) => ExprIter::Binary {
-                lhs: Some(lhs),
-                op: Some(op),
-                rhs: Some(rhs),
+            Expr::Binary(Binary { lhs, op, rhs }) => ExprIter {
+                kind: ExprIterKind::Binary {
+                    lhs: Some(lhs),
+                    op: Some(op),
+                    rhs: Some(rhs),
+                },
+                depth,
             },
 
             Expr::Unary(Unary { op, operand, side }) => match side {
-                OpSide::Left => ExprIter::UnaryPost {
-                    lhs: Some(operand),
-                    op: Some(op),
+                OpSide::Left => ExprIter {
+                    kind: ExprIterKind::UnaryPost {
+                        lhs: Some(operand),
+                        op: Some(op),
+                    },
+                    depth,
                 },
-                OpSide::Right => ExprIter::UnaryPre {
-                    op: Some(op),
-                    rhs: Some(operand),
+                OpSide::Right => ExprIter {
+                    kind: ExprIterKind::UnaryPre {
+                        op: Some(op),
+                        rhs: Some(operand),
+                    },
+                    depth,
                 },
             },
 
-            Expr::Literal(token) => ExprIter::Literal { token: Some(token) },
-
-            Expr::Grouping(Grouping { open, expr, close }) => ExprIter::Grouping {
-                open: Some(open),
-                expr: Some(expr),
-                close: Some(close),
+            Expr::Literal(token) => ExprIter {
+                kind: ExprIterKind::Literal { token: Some(token) },
+                depth,
             },
 
-            Expr::Type(TypeExpr { name, or_ty }) => ExprIter::Type {
-                name: Some(name),
-                pipe: or_ty.as_ref().map(|OrType { pipe, .. }| pipe),
-                or_ty: or_ty.as_ref().map(|OrType { ty, .. }| ty),
+            Expr::Grouping(Grouping { open, expr, close }) => ExprIter {
+                kind: ExprIterKind::Grouping {
+                    open: Some(open),
+                    expr: Some(expr),
+                    close: Some(close),
+                },
+                depth,
+            },
+
+            Expr::Type(TypeExpr { name, or_ty }) => ExprIter {
+                kind: ExprIterKind::Type {
+                    name: Some(name),
+                    pipe: or_ty.as_ref().map(|OrType { pipe, .. }| pipe),
+                    or_ty: or_ty.as_ref().map(|OrType { ty, .. }| ty),
+                },
+                depth,
             },
         }
     }
@@ -172,7 +202,7 @@ pub struct AstIter<'src, 'expr> {
 impl<'src, 'expr> AstIter<'src, 'expr> {
     pub fn new(ast: &'expr Expr<'src>) -> Self {
         Self {
-            stack: vec![ast.iter()],
+            stack: vec![ast.iter(0)],
         }
     }
 }
@@ -197,7 +227,7 @@ impl<'src> Iterator for AstIter<'src, '_> {
                             sem: Some(TokenSemantics::Bracket(depth)),
                         });
                     }
-                    ExprOrToken::Expr(expr) => self.stack.push(expr.iter()),
+                    ExprOrToken::Expr(expr, depth) => self.stack.push(expr.iter(depth)),
                 }
             } else {
                 self.stack.pop();
