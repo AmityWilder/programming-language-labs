@@ -198,7 +198,7 @@ impl LispDisplay for Unary<'_> {
 impl PolishDisplay for Unary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let op = match self.op.val {
-            // TODO: how does polish notation represent unary negative?
+            // TBD: how does polish notation represent unary negative?
             LexValue::Punctuation(Punctuation::SubNeg) => "- 0",
             _ => self.op.lex,
         };
@@ -333,7 +333,7 @@ impl LispDisplay for Expr<'_> {
         match self {
             Self::Binary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
-            // TODO: should this use val instead of lex?
+            // TBD: should this use val instead of lex?
             Self::Literal(tkn @ Token { lex, .. }) => {
                 if f.alternate() {
                     write_highlight(std::iter::once(tkn), f, &SYNTAX_STYLE_ANSI)
@@ -352,7 +352,7 @@ impl PolishDisplay for Expr<'_> {
         match self {
             Self::Binary(inner) => PolishDisplay::fmt(&**inner, f),
             Self::Unary(inner) => PolishDisplay::fmt(&**inner, f),
-            Self::Literal(Token { lex, .. }) => f.write_str(lex), // TODO: should this use val instead of lex?
+            Self::Literal(Token { lex, .. }) => f.write_str(lex), // TBD: should this use val instead of lex?
             Self::Grouping(inner) => PolishDisplay::fmt(&**inner, f),
             Self::Type(inner) => PolishDisplay::fmt(inner, f),
         }
@@ -371,7 +371,7 @@ impl<'src> Expr<'src> {
     }
 
     /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    // TODO: what if part of it is from a nested macro?
+    // TBD: what if part of it is from a nested macro?
     pub fn macro_range(&self, source: &'src str) -> Option<Range<usize>> {
         match self {
             Expr::Binary(binary) => binary.macro_range(source),
@@ -703,7 +703,6 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             ExpectedToken::TypeExpr,
         )
         .map(|name| TypeExpr { name })
-        // TODO: surely there's more to it than this
     }
 
     fn synchronize(&mut self) {

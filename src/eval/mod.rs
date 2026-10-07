@@ -215,6 +215,8 @@ impl OpError {
 pub enum ValueType {
     #[default]
     None,
+    /// Not constructable
+    // TBD: does this make sense to be a value type?
     Nevr,
     Bool,
     UInt,
@@ -238,7 +240,7 @@ impl std::fmt::Display for ValueType {
             Self::Char => "char",
             Self::Text => "text",
             Self::Fail => "fail",
-            // TODO: where does this appear?
+            // TBD: where does this appear?
             Self::Type => "typename",
         })
     }
@@ -249,7 +251,9 @@ pub enum RunValue {
     #[default]
     None,
     /// `none` that also outputs `none` as a result of every operation, instead of erroring
+    // TBD: is this a good way of handling this?
     CoalesceNone,
+    Fail,
     Bool(bool),
     UInt(usize),
     SInt(isize),
@@ -263,15 +267,19 @@ impl RunValue {
     pub const fn as_type(&self) -> ValueType {
         match self {
             Self::None | Self::CoalesceNone => ValueType::None,
+            Self::Fail => ValueType::Fail,
             Self::Bool(_) => ValueType::Bool,
             Self::UInt(_) => ValueType::UInt,
             Self::SInt(_) => ValueType::SInt,
             Self::Frac(_) => ValueType::Frac,
             Self::Char(_) => ValueType::Char,
             Self::Text(_) => ValueType::Text,
+            // TBD: is this a good idea?
             Self::Type(t) => *t,
         }
     }
+
+    // Binary
 
     /// Returns [`None`] if compatible but incomparable
     /// (i.e. a non-existent `NotEqual` variant of [`std::cmp::Ordering`]).
@@ -284,7 +292,6 @@ impl RunValue {
             (Self::Char(l), Self::Char(r)) => Ok(Some(l.cmp(r))),
             (Self::Text(l), Self::Text(r)) => Ok(Some(l.cmp(r))),
 
-            // TODO: coersions?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -295,7 +302,6 @@ impl RunValue {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l & r)),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l & r)),
 
-            // TODO: coersions?
             // TODO: char arithmetic?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
@@ -307,7 +313,6 @@ impl RunValue {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l | r)),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l | r)),
 
-            // TODO: coersions?
             // TODO: char arithmetic?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
@@ -319,7 +324,6 @@ impl RunValue {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l ^ r)),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l ^ r)),
 
-            // TODO: coersions?
             // TODO: char arithmetic?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
@@ -331,7 +335,6 @@ impl RunValue {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l & r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l & r))),
 
-            // TODO: coersions?
             // TODO: char arithmetic?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
@@ -343,7 +346,6 @@ impl RunValue {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l | r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l | r))),
 
-            // TODO: coersions?
             // TODO: char arithmetic?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
@@ -355,7 +357,6 @@ impl RunValue {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l ^ r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l ^ r))),
 
-            // TODO: coersions?
             // TODO: char arithmetic?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
@@ -386,9 +387,8 @@ impl RunValue {
             (Self::Frac(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
             (Self::Char(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 
-            (Self::Text(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(l.into_owned() + &r))),
+            (Self::Text(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(l.into_owned() + &*r))),
 
-            // TODO: coersions?
             // TODO: char arithmetic?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
@@ -406,7 +406,6 @@ impl RunValue {
                 .ok_or(OpError::Overflow(OverflowKind::SSub { l, r })),
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l - r)),
 
-            // TODO: coersions?
             // TODO: char arithmetic?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
@@ -425,7 +424,6 @@ impl RunValue {
                 .ok_or(OpError::Overflow(OverflowKind::SMul { l, r })),
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l * r)),
 
-            // TODO: coersions?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -440,7 +438,6 @@ impl RunValue {
             }
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l / r)),
 
-            // TODO: coersions?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -455,7 +452,6 @@ impl RunValue {
             }
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l / r)),
 
-            // TODO: coersions?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -498,7 +494,6 @@ impl RunValue {
             }
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l.powf(r))),
 
-            // TODO: coersions?
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -651,8 +646,8 @@ impl RunValue {
             (_, ValueType::Type) => unimplemented!("`type` isn't a type"),
 
             // TODO: add a warning about converting into self(?)
-            // TODO: what is the value of `nevr`?
-            (x @ (Self::None | Self::CoalesceNone), ValueType::None | ValueType::Nevr)
+            // TBD: what is the value of `nevr`?
+            (x @ (Self::None | Self::CoalesceNone), ValueType::None)
             | (x @ Self::Bool(_), ValueType::Bool)
             | (x @ Self::UInt(_), ValueType::UInt)
             | (x @ Self::SInt(_), ValueType::SInt)
@@ -660,8 +655,9 @@ impl RunValue {
             | (x @ Self::Char(_), ValueType::Char)
             | (x @ Self::Text(_), ValueType::Text) => Ok(x),
 
-            // TODO: should everything be allowed to convert into these? should anything?
-            (_, ValueType::None | ValueType::Nevr | ValueType::Fail) => todo!(),
+            (_, ValueType::None | ValueType::Nevr | ValueType::Fail) => {
+                todo!("error: cannot convert to this type")
+            }
 
             // essentially creates a default; but does that even make sense?
             (Self::None | Self::CoalesceNone, ValueType::UInt) => Ok(Self::UInt(0)),
@@ -686,13 +682,13 @@ impl RunValue {
             (Self::Text(s), ValueType::Frac) => s.parse().map(Self::Frac).map_err(|e| todo!("{e}")),
             (Self::Text(s), ValueType::Char) => s.parse().map(Self::Char).map_err(|e| todo!("{e}")),
 
-            // TODO: is this even a good idea?
+            // TBD: is this even a good idea?
             (x, ValueType::Bool) => Ok(x.exists()),
 
             (Self::Bool(x), ValueType::UInt) => Ok(Self::UInt(x.into())),
             (Self::Bool(x), ValueType::SInt) => Ok(Self::SInt(x.into())),
             (Self::Bool(x), ValueType::Frac) => Ok(Self::Frac(x.into())),
-            (Self::Bool(x), ValueType::Char) => Ok(Self::Char(if x { '1' } else { '0' })), // TODO: perhaps top/bot?
+            (Self::Bool(x), ValueType::Char) => Ok(Self::Char(if x { '1' } else { '0' })), // TBD: perhaps top/bot?
 
             (Self::UInt(x), ValueType::SInt) => {
                 x.try_into()
@@ -722,8 +718,8 @@ impl RunValue {
             (Self::SInt(x), ValueType::Char) => u8::try_from(x) // TODO: what about unicode?
                 .map(|x| Self::Char(char::from(x)))
                 .map_err(|e| todo!("{e}")),
-            (Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x as usize)), // TODO: should truncation be an error/warning?
-            (Self::Frac(x), ValueType::SInt) => Ok(Self::SInt(x as isize)), // TODO: should truncation be an error/warning?
+            (Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x as usize)), // TBD: should truncation be an error/warning?
+            (Self::Frac(x), ValueType::SInt) => Ok(Self::SInt(x as isize)), // TBD: should truncation be an error/warning?
 
             #[cfg(not(target_pointer_width = "16"))]
             #[expect(
@@ -733,7 +729,7 @@ impl RunValue {
             (Self::Char(ch), ValueType::UInt) => Ok(Self::UInt(ch.to_u32() as usize)),
 
             (l @ Self::Char(_), ValueType::SInt) => {
-                // TODO: this might screw up error messages
+                // HACK: this might screw up error messages
                 l.convert(ValueType::UInt)?.convert(ValueType::SInt)
             }
 
@@ -757,7 +753,7 @@ impl RunValue {
             | (x @ Self::Char(_), ValueType::Char)
             | (x @ Self::Text(_), ValueType::Text) => Ok(x),
 
-            // TODO: what about custom types?
+            // TBD: what about custom types?
             (Self::None | Self::CoalesceNone, _)
             | (_, ValueType::None | ValueType::Nevr | ValueType::Fail) => {
                 todo!("'transmute involving none/nevr/fail' error")
@@ -771,20 +767,22 @@ impl RunValue {
             (Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x.to_bits() as usize)),
 
             (x @ Self::SInt(_), ValueType::Frac) => {
-                // TODO: this might screw up error messages
+                // HACK: this might screw up error messages
                 x.transmute(ValueType::UInt)?.transmute(ValueType::Frac)
             }
             (x @ Self::Frac(_), ValueType::SInt) => {
-                // TODO: this might screw up error messages
+                // HACK: this might screw up error messages
                 x.transmute(ValueType::UInt)?.transmute(ValueType::SInt)
             }
 
             (Self::Text(_), ValueType::UInt) => todo!("text pointer?"),
 
-            // TODO: what about custom types? how will we measure their sizes?
+            // TBD: what about custom types? how will we measure their sizes?
             _ => todo!("incompatible layout error"),
         }
     }
+
+    // Unary
 
     fn not(self) -> Result<Self, OpError> {
         match self {
@@ -792,7 +790,6 @@ impl RunValue {
             Self::UInt(r) => Ok(Self::UInt(!r)),
             Self::SInt(r) => Ok(Self::SInt(!r)),
 
-            // TODO: other types
             r => Err(OpError::Unsupported(r.as_type())),
         }
     }
@@ -805,7 +802,6 @@ impl RunValue {
                 .map(Self::SInt)
                 .ok_or(OpError::Overflow(OverflowKind::SNeg { r })),
 
-            // TODO: other types
             r => Err(OpError::Unsupported(r.as_type())),
         }
     }
@@ -934,7 +930,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 Keyword::Text => ValueType::Text,
                 Keyword::Fail => ValueType::Fail,
 
-                Keyword::SelfKw // TODO: should `self` be a type?
+                Keyword::SelfKw // TBD: should `self` be a type?
                 | Keyword::Rec
                 | Keyword::Sup
                 | Keyword::Cat

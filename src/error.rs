@@ -1018,7 +1018,7 @@ pub struct LineCol {
     /// The position within the row
     ///
     /// 0-based index
-    // TODO: why are they different? would it make sense for both to be 1-based?
+    // TBD: why are they different? would it make sense for both to be 1-based?
     pub col: usize,
 }
 
