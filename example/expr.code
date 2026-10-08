@@ -56,3 +56,7 @@ def \foo($x) { $x }
 
 def \foo($x, $y) { $x*$x+$y }
 \foo{5*5*6}{3}
+
+def \foo($x, $y) { -5 $x $y }
+def \bar($x, $y) { $x | $y }
+\foo{-:>}{\bar{uint}{none}}
