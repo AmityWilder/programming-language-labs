@@ -117,7 +117,7 @@ use crate::{
         tokenize,
     },
 };
-use std::range::Range;
+use std::{path::PathBuf, range::Range};
 
 mod arrayvec;
 mod error;
@@ -517,51 +517,198 @@ fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
     }
 }
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "no, you're wrong. they're flags."
-)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-struct CliFlags {
-    echo_src: bool,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CliError {
+    UnknownOption {
+        prgm: PathBuf,
+        option: std::ffi::OsString,
+    },
+    TooManyArgs {
+        prgm: PathBuf,
+        unexpected: std::ffi::OsString,
+    },
+}
 
-    scanner_tokens: bool,
-    scanner_highlight: bool,
+impl std::fmt::Display for CliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownOption { prgm, option } => {
+                writeln!(f, "unknown option {:?}", option.display())?;
+                writeln!(f)?;
+                Cli::usage(&prgm.display(), f)
+            }
+            Self::TooManyArgs { prgm, unexpected } => {
+                writeln!(f, "unexpected argument {:?}", unexpected.display())?;
+                writeln!(f)?;
+                Cli::usage(&prgm.display(), f)
+            }
+        }
+    }
+}
 
-    preproc_tokens: bool,
-    preproc_highlight: bool,
+impl std::error::Error for CliError {}
 
-    parser_ast: bool,
-    parser_highlight: bool,
+macro_rules! CliParser {
+    (
+        $(#[$sm:meta])*
+        $vis:vis struct $Struct:ident {$(
+            $(#[doc = $fdoc:expr])* // fun fact: comments CAN affect execution!
+            $(#[option($name:expr)])?
+            $fvis:vis $field:ident: $Type:ty
+        ),* $(,)?}
+    ) => {
+        $(#[$sm])*
+        $vis struct $Struct {$(
+            $(#[doc = $fdoc])*
+            $fvis $field: $Type
+        ),*}
 
-    eval_echo: bool,
+        static HELP: std::sync::LazyLock<[(&str, &str); [$(concat!($($fdoc),*)),*].len()]> = std::sync::LazyLock::new(|| [$(
+            (stringify!($field), concat!($($fdoc, " "),*).trim())
+        ),*]);
 
-    print_errors: bool,
+        static OPTIONS: std::sync::LazyLock<[(&str, &str); [$($($name,)?)*].len()]> = std::sync::LazyLock::new(|| [$($(
+            (concat!("--", $name), stringify!($field)),
+        )?)*]);
+
+        impl $Struct {
+            const fn get_option_mut(&mut self, name: &str) -> Option<&mut bool> {
+                match name {
+                    $($(concat!("--", $name) => Some(&mut self.$field),)?)*
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+CliParser! {
+    // #[expect(
+    //     clippy::struct_excessive_bools,
+    //     reason = "no, you're wrong. they're flags."
+    // )]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+    struct Cli {
+        prgm: PathBuf,
+
+        /// Echo the source code
+        #[option("echo-src")]
+        echo_src: bool,
+
+        /// Display a list of initial scanner tokens and their ranges
+        #[option("scanner-tokens")]
+        scanner_tokens: bool,
+        /// Echo the source code with basic syntax highlighting
+        #[option("scanner-highlight")]
+        scanner_highlight: bool,
+
+        /// Display a list of preprocessed tokens and their ranges
+        #[option("preproc-tokens")]
+        preproc_tokens: bool,
+        /// Echo the preprocessed source code with basic syntax highlighting
+        #[option("preproc-highlight")]
+        preproc_highlight: bool,
+
+        /// Display the abstract syntax tree
+        #[option("dbg-ast")]
+        dbg_ast: bool,
+        /// Echo the original source code with semantic highlighting from the AST
+        #[option("semantic-highlight")]
+        semantic_highlight: bool,
+
+        /// Perform evaluation of the code
+        #[option("do-eval")]
+        do_eval: bool,
+        /// Echo the expression being evaluated before outputting its result (requires `do_eval` to have any effect)
+        #[option("echo-exprs")]
+        echo_exprs: bool,
+
+        /// Print errors instead of just ending
+        #[option("print-errors")]
+        print_errors: bool,
+
+        source_path: Option<PathBuf>,
+    }
+}
+
+impl Cli {
+    pub fn usage<S>(prgm: &S, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+    where
+        S: ?Sized + std::fmt::Display,
+    {
+        writeln!(f, "usage: {prgm} [OPTIONS ...] [PATH]\n\noptions:")?;
+        let widest = OPTIONS
+            .iter()
+            .map(|item| item.0.len())
+            .max()
+            .expect("should have at least one option");
+        for (opt, field) in &*OPTIONS {
+            let help = HELP
+                .iter()
+                .find(|(hfield, _)| hfield == field)
+                .map(|(_, help)| *help)
+                .unwrap_or_default();
+            writeln!(f, "  {opt:<widest$}  {help}")?;
+        }
+        Ok(())
+    }
+
+    pub fn parse_from_env() -> Result<Self, CliError> {
+        let mut args = std::env::args_os().peekable();
+        let mut config = Self {
+            prgm: PathBuf::from(
+                args.next()
+                    .expect("must have a program argument to be running"),
+            ),
+            ..Default::default()
+        };
+        while let Some(arg) = args.next_if(|arg| arg.to_str().is_some_and(|s| s.starts_with("--")))
+        {
+            if let Some(option) = config.get_option_mut(arg.to_str().expect("guarded by next_if")) {
+                *option = true;
+            } else {
+                return Err(CliError::UnknownOption {
+                    prgm: config.prgm,
+                    option: arg,
+                });
+            }
+        }
+        config.source_path = args.next().map(PathBuf::from);
+        if config.source_path.is_some()
+            && let Some(unexpected) = args.next()
+        {
+            return Err(CliError::TooManyArgs {
+                prgm: config.prgm,
+                unexpected,
+            });
+        }
+        Ok(config)
+    }
 }
 
 /// # Panics
 /// This method can panic if [`scanner::Scanner`] isn't written correctly
-fn run_code(source: &str, flags: CliFlags) {
+fn run_code(source: &str, config: &Cli) {
     // token debug
-    if flags.echo_src {
+    if config.echo_src {
         println!("source code:\n```\n{source}\n```");
     }
 
     // scanner
     let tokens: Vec<_> = tokenize(source).collect();
-    if flags.scanner_tokens {
+    if config.scanner_tokens {
         println!("\ntokenizer:");
         print_tokens(source, &tokens);
     }
 
     // syntax highlighted
-    if flags.scanner_highlight {
+    if config.scanner_highlight {
         println!("\nsyntax highlighting:");
         print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
     }
 
     // lex errors
-    if if flags.print_errors {
+    if if config.print_errors {
         println!();
         list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err))
     } else {
@@ -572,18 +719,18 @@ fn run_code(source: &str, flags: CliFlags) {
 
     // preprocessing
     let tokens: Vec<_> = preprocess(source, tokens).collect();
-    if flags.preproc_tokens {
+    if config.preproc_tokens {
         println!("\npreprocessor:");
         print_tokens(source, &tokens);
     }
 
     // preprocessed + syntax highlighted
-    if flags.preproc_highlight {
+    if config.preproc_highlight {
         print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
     }
 
     // preproc errors
-    if if flags.print_errors {
+    if if config.print_errors {
         println!();
         list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err))
     } else {
@@ -594,7 +741,7 @@ fn run_code(source: &str, flags: CliFlags) {
 
     // parse debug
     let ast: Vec<_> = parse(source, tokens.into_iter().flatten()).collect();
-    if flags.parser_ast {
+    if config.dbg_ast {
         println!("\nparser:");
         for res in &ast {
             match res {
@@ -605,7 +752,7 @@ fn run_code(source: &str, flags: CliFlags) {
     }
 
     // parse errors
-    if if flags.print_errors {
+    if if config.print_errors {
         println!();
         list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err))
     } else {
@@ -616,84 +763,80 @@ fn run_code(source: &str, flags: CliFlags) {
 
     // semantic highlighting
     // TODO: need to find a way to have this take Result instead of flattening
-    if flags.parser_highlight {
+    if config.semantic_highlight {
         println!("\nsemantic highlighting:");
         print_highlighted(semantic(source, ast.iter().flatten()), &SYNTAX_STYLE_ANSI);
     }
 
     // eval
-    println!("\nevaluation:");
-    let mut errors = Vec::new();
-    let mut buf = String::new();
-    for (expr, res) in ast
-        .iter()
-        .flatten()
-        .map(|expr| (expr, evaluate(source, expr)))
-    {
-        if flags.eval_echo {
-            print!("{:#}\n  \x1b[90m=\x1b[0m ", Lisp::new(expr));
-        }
+    if config.do_eval {
+        println!("\nevaluation:");
+        let mut errors = Vec::new();
+        {
+            let mut buf = String::new();
+            for (expr, res) in ast
+                .iter()
+                .flatten()
+                .map(|expr| (expr, evaluate(source, expr)))
+            {
+                if config.echo_exprs {
+                    print!("{:#}\n  \x1b[90m=\x1b[0m ", Lisp::new(expr));
+                }
 
-        buf.clear();
-        let item = match res {
-            Ok(x) => Ok(runtime_token(x, &mut buf)),
-            Err(e) => {
-                buf = format!("<{}>", e.code());
-                errors.push(e);
-                Err(GenericError(&buf))
+                buf.clear();
+                let item = match res {
+                    Ok(x) => Ok(runtime_token(x, &mut buf)),
+                    Err(e) => {
+                        buf = format!("<{}>", e.code());
+                        errors.push(e);
+                        Err(GenericError(&buf))
+                    }
+                };
+
+                for (lexeme, syntax) in highlight(std::iter::once(item)) {
+                    print!("{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
+                }
+                println!("\x1b[0m");
+                if config.echo_exprs {
+                    println!();
+                }
             }
-        };
-
-        for (lexeme, syntax) in highlight(std::iter::once(item)) {
-            print!("{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
         }
-        println!("\x1b[0m");
-        if flags.eval_echo {
+
+        // eval errors
+        if if config.print_errors {
             println!();
+            list_errors(errors)
+        } else {
+            !errors.is_empty()
+        } {
+            #[expect(
+                clippy::needless_return,
+                reason = "should return here if more items follow this in the future"
+            )]
+            return;
         }
     }
-    drop(buf);
+}
 
-    // eval errors
-    if if flags.print_errors {
-        println!();
-        list_errors(errors)
-    } else {
-        !errors.is_empty()
-    } {
-        #[expect(
-            clippy::needless_return,
-            reason = "should return here if more items follow this in the future"
-        )]
-        return;
+fn pop_trailing_newline(s: &mut String) {
+    if s.ends_with('\n') {
+        s.pop();
+        if s.ends_with('\r') {
+            s.pop();
+        }
     }
 }
 
 fn main() {
-    let mut args = std::env::args_os().peekable();
-    let prgm = args
-        .next()
-        .expect("must have a program argument to be running");
-    let mut flags = CliFlags::default();
-    while args
-        .next_if(|arg| {
-            match arg.to_str() {
-                Some("--echo-src") => flags.echo_src = true,
-                Some("--scanner-tokens") => flags.scanner_tokens = true,
-                Some("--scanner-highlight") => flags.scanner_highlight = true,
-                Some("--preproc-tokens") => flags.preproc_tokens = true,
-                Some("--preproc-highlight") => flags.preproc_highlight = true,
-                Some("--parser-ast") => flags.parser_ast = true,
-                Some("--parser-highlight") => flags.parser_highlight = true,
-                Some("--eval-echo") => flags.eval_echo = true,
-                Some("--print-errors") => flags.print_errors = true,
-                _ => return false,
-            }
-            true
-        })
-        .is_some()
-    {}
-    match args.next() {
+    let config = match Cli::parse_from_env() {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return;
+        }
+    };
+    match &config.source_path {
         // interactive
         None => {
             let mut input = String::new();
@@ -702,35 +845,21 @@ fn main() {
                 std::io::stdin()
                     .read_line(&mut input)
                     .expect("failed to obtain input");
-                if input.ends_with('\n') {
-                    input.pop();
-                    if input.ends_with('\r') {
-                        input.pop();
-                    }
-                }
+                pop_trailing_newline(&mut input);
                 if matches!(input.trim(), "exit" | "quit") {
                     break; // finish
                 }
-                run_code(&input, flags);
+                run_code(&input, &config);
             }
         }
 
         // from file
-        Some(source_path) => match std::fs::read_to_string(std::path::Path::new(&source_path)) {
+        Some(source_path) => match std::fs::read_to_string(source_path) {
             Err(e) => eprintln!("failed to read source code file: {e}"),
 
             Ok(mut source) => {
-                if source.ends_with('\n') {
-                    source.pop();
-                    if source.ends_with('\r') {
-                        source.pop();
-                    }
-                }
-                if args.next().is_some() {
-                    eprintln!("usage: {} [script]", prgm.display());
-                } else {
-                    run_code(&source, flags);
-                }
+                pop_trailing_newline(&mut source);
+                run_code(&source, &config);
             }
         },
     }
