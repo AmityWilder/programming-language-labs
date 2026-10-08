@@ -47,4 +47,12 @@ none -:> uint   // error
 (-5 =:> uint) // succeeds, but changes representation
 
 def \convert($op, $ty) { (5 $op $ty) }
+\convert{-:>}{uint | fail}
 \convert{-:>}{fail}
+
+def \foo($x) { $x }
+5 -:> uint | \foo{none}
+\foo{none}?
+
+def \foo($x, $y) { $x*$x+$y }
+\foo{5*5*6}{3}

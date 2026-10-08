@@ -99,6 +99,15 @@ pub mod keyword;
 pub mod punc;
 pub mod value;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct ExpansionData<'src> {
+    /// The range of the macro expansion this token was injected into
+    pub range: Range<usize>,
+
+    /// The argument the token is from (if it was expanded)
+    pub arg: Option<(usize, &'src str)>,
+}
+
 /// A single token - its lexeme ([`Self::lex`]) and value ([`Self::val`]).
 #[derive(Clone, Copy, PartialEq, Default)]
 pub struct Token<'src> {
@@ -111,7 +120,7 @@ pub struct Token<'src> {
     pub val: LexValue<'src>,
 
     /// The range of the macro this token expanded from
-    pub mac: Option<Range<usize>>,
+    pub mac: Option<ExpansionData<'src>>,
 }
 
 impl std::fmt::Debug for Token<'_> {
@@ -133,8 +142,17 @@ impl std::fmt::Debug for Token<'_> {
             LexValue::Punctuation(x) => ("Punctuation", Some(x)),
         };
         write!(f, "{name}({lex:?}")?;
-        if let Some(mac) = mac {
-            write!(f, " from {mac:?}")?;
+        if let Some(ExpansionData {
+            range: macro_range,
+            arg: argument,
+        }) = mac
+        {
+            write!(f, " expanded at {macro_range:?}")?;
+            if let Some((index, name)) = argument {
+                write!(f, " from argument {name} (index {index})")?;
+            } else {
+                write!(f, " from definition")?;
+            }
         }
         write!(f, ")")?;
         if let Some(dbg_val) = dbg_val {
