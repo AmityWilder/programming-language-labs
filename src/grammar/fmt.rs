@@ -1,8 +1,11 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    grammar::{Binary, Expr, Grouping, OrType, TypeExpr, Unary},
+    grammar::{
+        Binary, Expr, Grouping, OrType, TypeExpr, Unary,
+        ast::{ArgList, ArgList1, FnCall, FnSource},
+    },
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
-    scanner::token::{Token, punc::Punctuation, value::LexValue},
+    scanner::token::Token,
 };
 
 /// Means of displaying content with lisp style
@@ -28,143 +31,88 @@ impl<T: ?Sized + LispDisplay> std::fmt::Display for Lisp<T> {
     }
 }
 
-/// Means of displaying content with Polish notation
-#[allow(dead_code, reason = "for bonus points")]
-pub trait PolishDisplay {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
-}
-
-/// Adapter to display contents as Polish
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct Polish<T: ?Sized + PolishDisplay>(T);
-
-impl<T: ?Sized + PolishDisplay> Polish<T> {
-    pub const fn new(value: &T) -> &Self {
-        // SAFETY: Math is a transparent wrapper for `T`.
-        unsafe { std::mem::transmute(value) }
-    }
-}
-
-impl<T: ?Sized + PolishDisplay> std::fmt::Display for Polish<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        PolishDisplay::fmt(&self.0, f) // calls MathDisplay::fmt, since T isn't proven to implement any other fmt
-    }
+macro_rules! parenthesize {
+    ($f:expr, $kw:expr $(, $args:expr)* $(,)?) => {{
+        $f.write_str("(")?;
+        if $f.alternate() {
+            std::fmt::Display::fmt(&crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style($kw), $f)?;
+        } else {
+            std::fmt::Display::fmt(&$kw, $f)?;
+        }
+        $(
+            $f.write_str(" ")?;
+            std::fmt::Display::fmt(&$args, $f)?;
+        )*
+        $f.write_str(")")
+    }};
 }
 
 impl LispDisplay for Binary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if f.alternate() {
-            write!(
-                f,
-                "({} {:#} {:#})",
-                crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(self.op.lex),
-                Lisp::new(&self.lhs),
-                Lisp::new(&self.rhs)
-            )
-        } else {
-            write!(
-                f,
-                "({} {} {})",
-                self.op.lex,
-                Lisp::new(&self.lhs),
-                Lisp::new(&self.rhs)
-            )
-        }
-    }
-}
-
-impl PolishDisplay for Binary<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} {} {}",
-            self.op.lex,
-            Polish::new(&self.lhs),
-            Polish::new(&self.rhs)
-        )
+        parenthesize!(f, self.op.lex, Lisp::new(&self.lhs), Lisp::new(&self.rhs))
     }
 }
 
 impl LispDisplay for Unary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if f.alternate() {
-            write!(
-                f,
-                "({} {:#})",
-                crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(self.op.lex),
-                Lisp::new(&self.operand)
-            )
-        } else {
-            write!(f, "({} {})", self.op.lex, Lisp::new(&self.operand))
-        }
-    }
-}
-
-impl PolishDisplay for Unary<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let op = match self.op.val {
-            // TBD: how does polish notation represent unary negative?
-            LexValue::Punctuation(Punctuation::SubNeg) => "- 0",
-            _ => self.op.lex,
-        };
-        write!(f, "{op} {}", Polish::new(&self.operand))
+        parenthesize!(f, self.op.lex, Lisp::new(&self.operand))
     }
 }
 
 impl LispDisplay for Grouping<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { expr, .. } = self;
-        if f.alternate() {
-            let kw = crate::SYNTAX_STYLE_ANSI[Syntax::Keyword];
-            write!(f, "({}group{} {:#})", kw.begin(), kw.end(), Lisp::new(expr))
-        } else {
-            write!(f, "(group {})", Lisp::new(expr))
-        }
-    }
-}
-
-impl PolishDisplay for Grouping<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { expr, .. } = self;
-        write!(f, "{}", Polish::new(expr))
+        parenthesize!(f, "group", Lisp::new(&self.expr))
     }
 }
 
 impl LispDisplay for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { name, or_ty } = self;
-        if f.alternate() {
-            if let Some(OrType { pipe, ty }) = or_ty {
-                write!(
-                    f,
-                    "({} {} {})",
-                    crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(pipe.lex),
-                    crate::SYNTAX_STYLE_ANSI[Syntax::Typename].style(name.lex),
-                    crate::SYNTAX_STYLE_ANSI[Syntax::Typename].style(ty.lex)
-                )
-            } else {
-                let ty = crate::SYNTAX_STYLE_ANSI[Syntax::Typename];
-                std::fmt::Display::fmt(&ty.style(name.lex), f)
-            }
+        if let Some(OrType { pipe, ty }) = or_ty {
+            parenthesize!(
+                f,
+                pipe.lex,
+                crate::SYNTAX_STYLE_ANSI[Syntax::Typename].style(name.lex),
+                crate::SYNTAX_STYLE_ANSI[Syntax::Typename].style(ty.lex)
+            )
         } else {
-            if let Some(OrType { pipe, ty }) = or_ty {
-                write!(f, "({} {} {})", pipe.lex, name.lex, ty.lex)
-            } else {
-                f.write_str(name.lex)
-            }
+            let ty = crate::SYNTAX_STYLE_ANSI[Syntax::Typename];
+            std::fmt::Display::fmt(&ty.style(name.lex), f)
         }
     }
 }
 
-impl PolishDisplay for TypeExpr<'_> {
+impl LispDisplay for FnCall<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { name, or_ty } = self;
-        if let Some(OrType { pipe, ty }) = or_ty {
-            write!(f, "{} {} {}", pipe.lex, name.lex, ty.lex)
-        } else {
-            f.write_str(name.lex)
+        let Self { func, args, .. } = self;
+        f.write_str("(")?;
+        match func {
+            FnSource::Ident(name) => {
+                if f.alternate() {
+                    std::fmt::Display::fmt(
+                        &crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(name.lex),
+                        f,
+                    )?;
+                } else {
+                    f.write_str(name.lex)?;
+                }
+            }
+            FnSource::Group(grouping) => LispDisplay::fmt(grouping, f)?,
         }
+        if let Some(ArgList { first, rest, .. }) = args {
+            f.write_str(" ")?;
+            LispDisplay::fmt(first, f)?;
+            let mut rest = rest.as_ref();
+            while let Some(ArgList1 {
+                arg, rest: next, ..
+            }) = rest
+            {
+                f.write_str(" ")?;
+                LispDisplay::fmt(arg, f)?;
+                rest = next.as_deref();
+            }
+        }
+        f.write_str(")")
     }
 }
 
@@ -182,19 +130,8 @@ impl LispDisplay for Expr<'_> {
                 }
             }
             Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
-            Self::Type(inner) => LispDisplay::fmt(inner, f),
-        }
-    }
-}
-
-impl PolishDisplay for Expr<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Binary(inner) => PolishDisplay::fmt(&**inner, f),
-            Self::Unary(inner) => PolishDisplay::fmt(&**inner, f),
-            Self::Literal(Token { lex, .. }) => f.write_str(lex), // TBD: should this use val instead of lex?
-            Self::Grouping(inner) => PolishDisplay::fmt(&**inner, f),
-            Self::Type(inner) => PolishDisplay::fmt(inner, f),
+            Self::Type(inner) => LispDisplay::fmt(&**inner, f),
+            Self::FnCall(inner) => LispDisplay::fmt(&**inner, f),
         }
     }
 }

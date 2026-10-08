@@ -364,6 +364,7 @@ expected_token! {
         Expr = "an expression",
         TypeExpr = "a type expression",
         OrType = "the alternative type (`fail`, `none`, or `nevr`)",
+        FnSource = "a function name or parenthesized function object expression",
     }
 }
 
@@ -902,7 +903,7 @@ pub struct ContextError<'src> {
     pub range: Range<usize>,
     /// The range in [`Self::source`] of the macro call site that expanded to the erroneous code.
     /// [`None`] if the error did not occur in a macro expansion.
-    pub mac: Option<(Range<usize>, Option<&'src str>)>,
+    pub mac: Option<Range<usize>>,
     /// The exact error that was found
     pub err: ErrorType<'src>,
 }
@@ -925,13 +926,7 @@ impl<'src> ContextError<'src> {
                 },
             },
             mac: match mac {
-                Some(ExpansionData { range, arg }) => Some((
-                    range,
-                    match arg {
-                        Some((_, name)) => Some(name),
-                        None => None,
-                    },
-                )),
+                Some(ExpansionData { range, .. }) => Some(range),
                 None => None,
             },
             err,
@@ -1008,14 +1003,11 @@ impl std::fmt::Debug for ContextError<'_> {
             .get(*range)
             .expect("range should be a range in source");
         write!(f, "ContextError({src:?}")?;
-        if let Some((range, arg)) = mac {
+        if let Some(range) = mac {
             let src = source
                 .get(*range)
                 .expect("macro_range should be a range in source");
             write!(f, " in expansion of {src:?}")?;
-            if let Some(name) = arg {
-                write!(f, " for the argument {name}")?;
-            }
         }
         write!(f, "): {err:?}")
     }
@@ -1843,7 +1835,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
             LineRefMsg::InlineErr(InlineErrMsg(&self.0.err)),
         )).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
 
-        if let Some((macro_range, _)) = self.0.mac {
+        if let Some(macro_range) = self.0.mac {
             refs.push_mut(LineRef::new(
                 self.0.source,
                 RefStyleKind::Info,

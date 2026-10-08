@@ -4,7 +4,7 @@ use crate::{
     error::{
         ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
     },
-    grammar::ast::{Binary, Expr, Unary},
+    grammar::ast::{AstNode, Binary, Expr, Unary},
     scanner::token::{
         Token,
         keyword::Keyword,
@@ -968,5 +968,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
 
             _ => unimplemented!(),
         },
+
+        Expr::FnCall(_) => todo!(),
     }
 }
