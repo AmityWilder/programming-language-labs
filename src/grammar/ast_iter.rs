@@ -321,15 +321,13 @@ where
                 }
             })
         });
+
         let mut args = Vec::new();
         for (item, mac) in macro_ast_tokens {
             if let Some((idx, _)) = mac.arg {
                 if let Some(arg) = args.get_mut(idx) {
                     let arg: &mut Vec<SemanticToken<'src>> = arg;
-                    if !arg
-                        .iter()
-                        .any(|x| std::ptr::eq(x.token.lex, item.token.lex))
-                    {
+                    if !arg.iter().any(|x| x.token.lex_eq(&item.token)) {
                         arg.push(item);
                     }
                 } else {
@@ -338,52 +336,21 @@ where
                 }
             }
         }
-        let macro_name_range = Range {
-            start: macro_range.start,
-            end: args
-                .first()
-                .and_then(|arg| {
-                    arg.first().map(|item| {
-                        item.token
-                            .lex_range(self.source)
-                            .start
-                            .saturating_sub('{'.len_utf8()) // HACK
-                    })
-                })
-                .unwrap_or(macro_range.end),
-        };
-        // HACK
-        std::iter::once(SemanticToken {
-            token: Token {
-                lex: self
-                    .source
-                    .get(macro_name_range)
-                    .expect("macro_name_range should be a valid range in source"),
-                val: LexValue::Macro,
-                mac: None,
-            },
-            sem: None,
+
+        Scanner::new_subset(
+            self.source,
+            self.source
+                .get(macro_range)
+                .expect("macro_range should be a valid range in source"),
+            true, // TODO
+        )
+        .map(|res| res.expect("no lex errors should be present if we are in the parsing stage"))
+        .map(|token| {
+            // TODO: does this need to copy, can we move somehow?
+            args.iter()
+                .find_map(|arg| arg.iter().find(|item| token.lex_eq(&item.token)).copied())
+                .unwrap_or(SemanticToken { token, sem: None })
         })
-        .chain(args.into_iter().flat_map(|arr| {
-            // HACK
-            std::iter::once(SemanticToken {
-                token: Token {
-                    lex: "{",
-                    val: LexValue::Punctuation(Punctuation::LBrace),
-                    mac: None,
-                },
-                sem: None,
-            })
-            .chain(arr)
-            .chain(std::iter::once(SemanticToken {
-                token: Token {
-                    lex: "}",
-                    val: LexValue::Punctuation(Punctuation::RBrace),
-                    mac: None,
-                },
-                sem: None,
-            }))
-        }))
         .collect()
     }
 

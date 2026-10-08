@@ -174,6 +174,12 @@ impl<'src> Token<'src> {
             .substr_range(self.lex)
             .expect("every lexeme should be a substr of the source code")
     }
+
+    /// Returns a boolean representing whether the lexeme is the exact same position in source,
+    /// without needing to lookup within the source
+    pub fn lex_eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.lex, other.lex)
+    }
 }
 
 /// Returns [`None`] if `src` does not start with `\`
