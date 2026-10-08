@@ -15,7 +15,7 @@ use crate::{
             BIN_PREFIX, BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, HEX_PREFIX,
             OCT_PREFIX, TEXT_DELIM,
         },
-        token::{Token, escape_char, punc::Punctuation},
+        token::{ExpansionData, Token, escape_char, punc::Punctuation},
     },
 };
 use std::range::Range;
@@ -902,7 +902,7 @@ pub struct ContextError<'src> {
     pub range: Range<usize>,
     /// The range in [`Self::source`] of the macro call site that expanded to the erroneous code.
     /// [`None`] if the error did not occur in a macro expansion.
-    pub macro_range: Option<Range<usize>>,
+    pub mac: Option<(Range<usize>, Option<&'src str>)>,
     /// The exact error that was found
     pub err: ErrorType<'src>,
 }
@@ -912,7 +912,7 @@ impl<'src> ContextError<'src> {
     pub const fn error(
         source: &'src str,
         range: Option<Range<usize>>,
-        macro_range: Option<Range<usize>>,
+        mac: Option<ExpansionData<'src>>,
         err: ErrorType<'src>,
     ) -> Self {
         Self {
@@ -924,7 +924,16 @@ impl<'src> ContextError<'src> {
                     end: source.len(),
                 },
             },
-            macro_range,
+            mac: match mac {
+                Some(ExpansionData { range, arg }) => Some((
+                    range,
+                    match arg {
+                        Some((_, name)) => Some(name),
+                        None => None,
+                    },
+                )),
+                None => None,
+            },
             err,
         }
     }
@@ -992,18 +1001,21 @@ impl std::fmt::Debug for ContextError<'_> {
         let Self {
             source,
             range,
-            macro_range,
+            mac,
             err,
         } = self;
         let src = source
             .get(*range)
             .expect("range should be a range in source");
         write!(f, "ContextError({src:?}")?;
-        if let Some(macro_range) = macro_range {
+        if let Some((range, arg)) = mac {
             let src = source
-                .get(*macro_range)
+                .get(*range)
                 .expect("macro_range should be a range in source");
             write!(f, " in expansion of {src:?}")?;
+            if let Some(name) = arg {
+                write!(f, " for the argument {name}")?;
+            }
         }
         write!(f, "): {err:?}")
     }
@@ -1351,7 +1363,7 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
                     range: source
                         .substr_range(line_after_block_comment)
                         .expect("line_after_block_comment should be a substr of source"),
-                    macro_range: None,
+                    mac: None,
                     err: ErrorType::EndlessBlockComment,
                 }),
                 f,
@@ -1831,7 +1843,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
             LineRefMsg::InlineErr(InlineErrMsg(&self.0.err)),
         )).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
 
-        if let Some(macro_range) = self.0.macro_range {
+        if let Some((macro_range, _)) = self.0.mac {
             refs.push_mut(LineRef::new(
                 self.0.source,
                 RefStyleKind::Info,

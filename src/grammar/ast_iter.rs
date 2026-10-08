@@ -1,10 +1,12 @@
+use std::range::Range;
+
 use crate::{
     error::{ContextError, OpSide},
     grammar::{Binary, Expr, Grouping, OrType, TypeExpr, Unary},
     highlight::{TokenHighlight, syntax::Syntax},
     scanner::{
         Scanner,
-        token::{Token, punc::Punctuation, value::LexValue},
+        token::{ExpansionData, Token, punc::Punctuation, value::LexValue},
     },
 };
 
@@ -249,23 +251,6 @@ impl<'src> Iterator for AstIter<'src, '_> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SemanticIter<'src, I: Iterator<Item = SemanticToken<'src>>> {
-    source: &'src str,
-    prev_end: usize,
-    iter: std::iter::Peekable<I>,
-}
-
-impl<'src, I: Iterator<Item = SemanticToken<'src>>> SemanticIter<'src, I> {
-    fn new(source: &'src str, iter: I) -> Self {
-        Self {
-            source,
-            prev_end: 0,
-            iter: iter.peekable(),
-        }
-    }
-}
-
 pub type SemanticScanner<'src> = std::iter::Map<
     Scanner<'src>,
     fn(Result<Token<'src>, ContextError<'src>>) -> SemanticToken<'src>,
@@ -273,7 +258,7 @@ pub type SemanticScanner<'src> = std::iter::Map<
 
 #[derive(Debug, Clone)]
 pub enum SemanticIterInner<'src> {
-    Skipped,
+    Mac(std::vec::IntoIter<SemanticToken<'src>>),
     Lex(SemanticScanner<'src>),
     Sem(std::iter::Once<SemanticToken<'src>>),
 }
@@ -284,10 +269,187 @@ impl<'src> Iterator for SemanticIterInner<'src> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             // HACK
-            Self::Skipped => None,
+            Self::Mac(iter) => iter.next(),
             Self::Lex(iter) => iter.next(),
             Self::Sem(iter) => iter.next(),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticIter<'src, I>
+where
+    I: Iterator<Item = SemanticToken<'src>>,
+{
+    source: &'src str,
+    prev_end: usize,
+    iter: std::iter::Peekable<I>,
+}
+
+fn scanner_to_semantic<'src>(res: Result<Token<'src>, ContextError<'src>>) -> SemanticToken<'src> {
+    SemanticToken {
+        token: res.expect("should not have any lex errors if an AST exists"),
+        sem: None,
+    }
+}
+
+const fn range_contains(outer: Range<usize>, inner: Range<usize>) -> bool {
+    outer.start <= inner.start && inner.end <= outer.end
+}
+
+impl<'src, I> SemanticIter<'src, I>
+where
+    I: Iterator<Item = SemanticToken<'src>>,
+{
+    fn new(source: &'src str, iter: I) -> Self {
+        Self {
+            source,
+            prev_end: 0,
+            iter: iter.peekable(),
+        }
+    }
+
+    fn macro_arg_vec(&mut self, macro_range: Range<usize>) -> Vec<SemanticToken<'src>> {
+        let macro_ast_tokens = std::iter::from_fn(|| {
+            self.iter.next_if_map(|item| {
+                if let Some(mac) = item.token.mac
+                    && range_contains(macro_range, mac.range)
+                {
+                    Ok((item, mac))
+                } else {
+                    Err(item)
+                }
+            })
+        });
+        let mut args = Vec::new();
+        for (item, mac) in macro_ast_tokens {
+            if let Some((idx, _)) = mac.arg {
+                if let Some(arg) = args.get_mut(idx) {
+                    let arg: &mut Vec<SemanticToken<'src>> = arg;
+                    if !arg
+                        .iter()
+                        .any(|x| std::ptr::eq(x.token.lex, item.token.lex))
+                    {
+                        arg.push(item);
+                    }
+                } else {
+                    args.resize_with(idx, Vec::new);
+                    args.push(vec![item]);
+                }
+            }
+        }
+        let macro_name_range = Range {
+            start: macro_range.start,
+            end: args
+                .first()
+                .and_then(|arg| {
+                    arg.first().map(|item| {
+                        item.token
+                            .lex_range(self.source)
+                            .start
+                            .saturating_sub('{'.len_utf8()) // HACK
+                    })
+                })
+                .unwrap_or(macro_range.end),
+        };
+        // HACK
+        std::iter::once(SemanticToken {
+            token: Token {
+                lex: self
+                    .source
+                    .get(macro_name_range)
+                    .expect("macro_name_range should be a valid range in source"),
+                val: LexValue::Macro,
+                mac: None,
+            },
+            sem: None,
+        })
+        .chain(args.into_iter().flat_map(|arr| {
+            // HACK
+            std::iter::once(SemanticToken {
+                token: Token {
+                    lex: "{",
+                    val: LexValue::Punctuation(Punctuation::LBrace),
+                    mac: None,
+                },
+                sem: None,
+            })
+            .chain(arr)
+            .chain(std::iter::once(SemanticToken {
+                token: Token {
+                    lex: "}",
+                    val: LexValue::Punctuation(Punctuation::RBrace),
+                    mac: None,
+                },
+                sem: None,
+            }))
+        }))
+        .collect()
+    }
+
+    /// The next normal item within the AST
+    fn next_in_ast(&mut self) -> Option<SemanticIterInner<'src>> {
+        if let Some(item) = self.iter.peek()
+            && let Some(ExpansionData {
+                range: macro_range, ..
+            }) = item.token.mac
+            && macro_range.start == self.prev_end
+        {
+            self.prev_end = macro_range.end;
+            Some(SemanticIterInner::Mac(
+                self.macro_arg_vec(macro_range).into_iter(),
+            ))
+        } else {
+            self.iter.next_if_map(|item| {
+                if item.token.lex_range(self.source).start == self.prev_end {
+                    self.prev_end = item.token.lex_range(self.source).end;
+                    Ok(SemanticIterInner::Sem(std::iter::once(item)))
+                } else {
+                    Err(item)
+                }
+            })
+        }
+    }
+
+    /// The next token segment between `prev_end` and the next token in the iterator
+    fn lexical(&mut self) -> SemanticIterInner<'src> {
+        let next = self.iter.peek();
+        let next_start = next.map_or(self.source.len(), |item| {
+            item.token
+                .mac
+                .map_or_else(|| item.token.lex_range(self.source), |mac| mac.range)
+                .start
+        });
+        let lex = self
+            .source
+            .get(self.prev_end..next_start)
+            .unwrap_or_else(|| {
+                let prev_end_line = self
+                    .source
+                    .get(..self.prev_end)
+                    .expect("prev_end should be within source and not within a UTF-8 character")
+                    .lines()
+                    .next_back()
+                    .unwrap_or_default();
+                let next_start_line = self
+                    .source
+                    .get(next_start..)
+                    .expect("next_start should be within source and not within a UTF-8 character")
+                    .lines()
+                    .next()
+                    .unwrap_or_default();
+                panic!(
+                    "prev_end..next_start should be a valid substr range\n \
+                        prev_end: {}  ...{prev_end_line:?}\n \
+                        next_start: {next_start}  {next_start_line:?}...\n \
+                        source.len(): {}\n \
+                        next token: {next:?}",
+                    self.prev_end,
+                    self.source.len(),
+                );
+            });
+        self.prev_end = next_start;
+        SemanticIterInner::Lex(Scanner::new_subset(self.source, lex, true).map(scanner_to_semantic))
     }
 }
 
@@ -297,90 +459,57 @@ where
 {
     type Item = SemanticIterInner<'src>;
 
+    /// The AST may contain tokens from a different part of the original source code,
+    /// if they were expanded from a macro.
+    ///
+    /// Source code:
+    /// ```not_code
+    /// def \foo($x) { $x(3) }
+    /// ---------------------- lexical
+    ///
+    /// \foo{ my_fun }
+    /// -----^^^^^^^^- lexical
+    /// |    |
+    /// |    semantic
+    /// |
+    /// lexical
+    /// ```
+    ///
+    /// What the iterator sees:
+    /// ```not_code
+    ///  my_fun (3)
+    /// ^^^^^^^^--- from macro - token range is from an earlier point in the code
+    /// |
+    /// from expansion - token range is within `token.mac`
+    /// ```
+    ///
+    /// We need to insert the `def \foo($x) { $x(3) }` and `\foo{`, `}` lexically,
+    /// as they are not within in the AST. The `my_fun`, however, **is** in the AST,
+    /// and we would like it to be semantically highlighted according to the whatever
+    /// the macro *expanded* to.
+    ///
+    /// TODO: What happens if a macro's arguments aren't in the order they were in the parameter list?
+    /// ```not_code
+    /// def \foo($a, $b) { $b + $a }
+    /// \foo{5}{6}
+    /// ```
+    /// This results in the preprocessed token order
+    /// ```not_code
+    /// 6 + 5
+    /// ```
+    /// Which the iterator wants to print as
+    /// ```not_code
+    /// \foo{6}{5}
+    /// ```
+    /// But that isn't the order they were written in the original source code...
+    ///
+    /// TODO: What happens if a macro parameter is repeated with different semantics
+    /// ```not_code
+    /// def \foo($x) { $x(3 + $x) }
+    /// ```
     fn next(&mut self) -> Option<Self::Item> {
-        fn scanner_to_semantic<'src>(
-            res: Result<Token<'src>, ContextError<'src>>,
-        ) -> SemanticToken<'src> {
-            SemanticToken {
-                token: res.expect("should not have any lex errors if an AST exists"),
-                sem: None,
-            }
-        }
-
-        self.iter
-            .next_if_map(|item| {
-                if let Some(macro_range) = item.token.mac {
-                    if macro_range.start == self.prev_end {
-                        self.prev_end = macro_range.end;
-                        let lex = self
-                            .source
-                            .get(macro_range)
-                            .expect("macro_range should be a valid range in source");
-                        Ok(SemanticIterInner::Lex(
-                            Scanner::new_subset(self.source, lex, true).map(scanner_to_semantic),
-                        ))
-                    } else if macro_range.end <= self.prev_end {
-                        // TODO: can this be used for semantics within macros?
-                        if false {
-                            let token_range = item.token.lex_range(self.source);
-                            let is_from_argument = macro_range.start <= token_range.start
-                                && token_range.end <= macro_range.end;
-                            println!(
-                                "{macro_range:?} ({token_range:?}): {:?} - {}",
-                                item.token,
-                                if is_from_argument {
-                                    "from argument"
-                                } else {
-                                    "from definition"
-                                }
-                            );
-                        }
-                        // we are within the same macro
-                        Ok(SemanticIterInner::Skipped)
-                    } else {
-                        Err(item)
-                    }
-                } else if item.token.lex_range(self.source).start == self.prev_end {
-                    self.prev_end = item.token.lex_range(self.source).end;
-                    Ok(SemanticIterInner::Sem(std::iter::once(item)))
-                } else {
-                    Err(item)
-                }
-            })
-            .or_else(|| {
-                (self.prev_end != self.source.len()).then(|| {
-                    let next = self.iter.peek();
-                    let next_start = next.map_or(self.source.len(), |item| {
-                        item.token
-                            .mac
-                            .unwrap_or_else(|| item.token.lex_range(self.source))
-                            .start
-                    });
-                    let lex = self
-                        .source
-                        .get(self.prev_end..next_start)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "prev_end..next_start should be a valid substr range\n \
-                                    prev_end: {} ({:?})\n \
-                                    next_start: {} ({:?})\n \
-                                    source.len(): {}\n \
-                                    next token: {next:?}",
-                                self.prev_end,
-                                self.source
-                                    .get(..self.prev_end)
-                                    .and_then(|s| s.lines().next_back()),
-                                next_start,
-                                self.source.get(next_start..).and_then(|s| s.lines().next()),
-                                self.source.len(),
-                            );
-                        });
-                    self.prev_end = next_start;
-                    SemanticIterInner::Lex(
-                        Scanner::new_subset(self.source, lex, true).map(scanner_to_semantic),
-                    )
-                })
-            })
+        self.next_in_ast()
+            .or_else(|| (self.prev_end != self.source.len()).then(|| self.lexical()))
     }
 }
 

@@ -5,7 +5,7 @@ use crate::{
     grammar::match_token,
     scanner::{
         Bracket,
-        token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
+        token::{ExpansionData, Token, keyword::Keyword, punc::Punctuation, value::LexValue},
     },
 };
 use std::collections::{HashMap, VecDeque};
@@ -14,29 +14,34 @@ use std::collections::{HashMap, VecDeque};
 #[derive(Debug, Clone)]
 struct MacroSub<'src, I> {
     /// Mapping of the parameter names to the related argument tokens
-    arg_map: HashMap<&'src str, Vec<Token<'src>>>,
+    arg_map: Vec<(&'src str, Vec<Token<'src>>)>,
     /// The tokens of the macro definition
     tokens: I,
     /// For flattening - the tokens of the argument currently being substituted
-    curr: std::vec::IntoIter<Token<'src>>,
+    curr: ((usize, &'src str), std::vec::IntoIter<Token<'src>>),
 }
 
 impl<'src, I> Iterator for MacroSub<'src, I>
 where
     I: Iterator<Item = Token<'src>>,
 {
-    type Item = Token<'src>;
+    type Item = (Option<(usize, &'src str)>, Token<'src>);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let item @ Some(_) = self.curr.next() {
-                break item;
+            if let Some(token) = self.curr.1.next() {
+                break Some((Some(self.curr.0), token));
             } else if let Some(token) = self.tokens.next() {
-                match token.val {
-                    LexValue::MacroParam if let Some(arg) = self.arg_map.get(&token.lex) => {
-                        self.curr = arg.clone().into_iter();
-                    }
-                    _ => break Some(token),
+                if token.val == LexValue::MacroParam
+                    && let Some((pos, (name, arg))) = self
+                        .arg_map
+                        .iter()
+                        .enumerate()
+                        .find(|(_, (name, _))| name == &token.lex)
+                {
+                    self.curr = ((pos, name), arg.clone().into_iter());
+                } else {
+                    break Some((None, token));
                 }
             } else {
                 break None;
@@ -65,12 +70,12 @@ impl<'src> MacroDef<'src> {
     {
         let args = args.into_iter();
         assert_eq!(args.len(), self.params.len(), "should be handled by caller");
-        let arg_map = HashMap::from_iter(self.params.iter().copied().zip(args));
-
+        let arg_map = self.params.iter().copied().zip(args).collect::<Vec<_>>();
         MacroSub {
             arg_map,
             tokens: self.tokens.iter().copied(),
-            curr: Vec::new().into_iter(),
+            // HACK: this isn't a substr of source!
+            curr: ((0, ""), Vec::new().into_iter()),
         }
     }
 }
@@ -229,11 +234,17 @@ impl<'src> Preprocessor<'src> {
         let param_count = self
             .macros
             .get(&macro_name.lex)
-            .ok_or_else(|| ContextError {
-                source: self.source,
-                range: macro_name.lex_range(self.source),
-                macro_range: Some(macro_range),
-                err: ErrorType::MacroUndefined,
+            .ok_or_else(|| {
+                ContextError::error(
+                    self.source,
+                    // TODO: why is this being duplicated?
+                    Some(macro_name.lex_range(self.source)),
+                    Some(ExpansionData {
+                        range: macro_range,
+                        arg: None, // TODO
+                    }),
+                    ErrorType::MacroUndefined,
+                )
             })?
             .params
             .len();
@@ -251,7 +262,10 @@ impl<'src> Preprocessor<'src> {
                     ContextError::error(
                         self.source,
                         None,
-                        Some(macro_range),
+                        Some(ExpansionData {
+                            range: macro_range,
+                            arg: None, // TODO
+                        }),
                         ErrorType::MissingCloseBracket {
                             open_range: open_brace.lex_range(self.source),
                             expect: Bracket::Brace,
@@ -282,8 +296,11 @@ impl<'src> Preprocessor<'src> {
 
         self.tokens.prepend(
             def.substitute(args)
-                .map(|mut token| {
-                    token.mac = Some(macro_range);
+                .map(|(argument, mut token)| {
+                    token.mac = Some(ExpansionData {
+                        range: macro_range,
+                        arg: argument,
+                    });
                     Ok(token)
                 })
                 .collect::<Vec<_>>()

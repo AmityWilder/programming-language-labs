@@ -1,5 +1,7 @@
 //! Syntax (not semantic, yet) highlighting
 
+// TODO: add unit tests for syntax parsing
+
 use crate::{
     error::{ContextError, ErrorType},
     highlight::{

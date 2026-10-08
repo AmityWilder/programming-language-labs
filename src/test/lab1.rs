@@ -21,7 +21,7 @@ mod scan {
             &[Err(ContextError {
                 source: SOURCE,
                 range: (0..SOURCE.len()).into(),
-                macro_range: None,
+                mac: None,
                 err: ErrorType::UnknownToken,
             })]
         );
@@ -446,7 +446,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: _,
-                        macro_range: None,
+                        mac: None,
                         err: ErrorType::InvalidNumLiteral(_)
                     })]
                 );
@@ -478,7 +478,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: _,
-                        macro_range: None,
+                        mac: None,
                         err: ErrorType::InvalidNumLiteral(_)
                     })]
                 );
@@ -510,7 +510,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: _,
-                        macro_range: None,
+                        mac: None,
                         err: ErrorType::InvalidNumLiteral(_)
                     })]
                 );
@@ -546,7 +546,7 @@ mod scan {
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
-                    macro_range: None,
+                    mac: None,
                     err: ErrorType::MultiCharLiteral,
                 })]
             );
@@ -560,7 +560,7 @@ mod scan {
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
-                    macro_range: None,
+                    mac: None,
                     err: ErrorType::EmptyCharLiteral,
                 })]
             );
@@ -574,7 +574,7 @@ mod scan {
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
-                    macro_range: None,
+                    mac: None,
                     err: ErrorType::EndlessCharLiteral,
                 })]
             );
@@ -623,7 +623,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: (0..SOURCE.len()).into(),
-                        macro_range: None,
+                        mac: None,
                         err: ErrorType::MultiCharLiteral,
                     })]
                 );
@@ -637,7 +637,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: (0..SOURCE.len()).into(),
-                        macro_range: None,
+                        mac: None,
                         err: ErrorType::EscapedCharLiteralEnd,
                     })]
                 );
@@ -696,7 +696,7 @@ mod scan {
                 &[Err(ContextError {
                     source: SOURCE,
                     range: (0..SOURCE.len()).into(),
-                    macro_range: None,
+                    mac: None,
                     err: ErrorType::EndlessStringLiteral,
                 })]
             );
@@ -752,7 +752,7 @@ mod scan {
                     &[Err(ContextError {
                         source: SOURCE,
                         range: (0..SOURCE.len()).into(),
-                        macro_range: None,
+                        mac: None,
                         err: ErrorType::EscapedStringLiteralEnd,
                     })]
                 );

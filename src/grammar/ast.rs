@@ -1,4 +1,7 @@
-use crate::{error::OpSide, scanner::token::Token};
+use crate::{
+    error::OpSide,
+    scanner::token::{ExpansionData, Token},
+};
 use std::range::Range;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -17,10 +20,10 @@ impl<'src> Binary<'src> {
     }
 
     /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    pub fn macro_range(&self, source: &'src str) -> Option<Range<usize>> {
-        let lhs_mac = self.lhs.macro_range(source)?;
+    pub fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        let lhs_mac = self.lhs.expansion(source)?;
         // don't need to check op because it's between them, so it must be in the same expansion if the other two are
-        let rhs_mac = self.rhs.macro_range(source)?;
+        let rhs_mac = self.rhs.expansion(source)?;
         (lhs_mac == rhs_mac).then_some(lhs_mac)
     }
 }
@@ -61,10 +64,20 @@ impl<'src> Unary<'src> {
     }
 
     /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    pub fn macro_range(&self, source: &'src str) -> Option<Range<usize>> {
+    pub fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         let op_mac = self.op.mac?;
-        let rhs_mac = self.operand.macro_range(source)?;
-        (op_mac == rhs_mac).then_some(op_mac)
+        let rhs_mac = self.operand.expansion(source)?;
+        (op_mac.range == rhs_mac.range).then(|| {
+            // same argument too
+            if op_mac == rhs_mac {
+                op_mac
+            } else {
+                ExpansionData {
+                    range: op_mac.range,
+                    arg: None,
+                }
+            }
+        })
     }
 }
 
@@ -98,13 +111,23 @@ impl<'src> Grouping<'src> {
     }
 
     /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    pub fn macro_range(&self, _: &'src str) -> Option<Range<usize>> {
+    pub fn expansion(&self, _: &'src str) -> Option<ExpansionData<'src>> {
         let open_mac = self.open.mac?;
         // don't need to check expr because it's between open and close,
         // and therefore must be in the same expansion if the other two are.
         // this is also cheaper, since now we don't have to recursively check the inner expressions :)
         let close_mac = self.close.mac?;
-        (open_mac == close_mac).then_some(open_mac)
+        (open_mac.range == close_mac.range).then(|| {
+            // same argument too
+            if open_mac == close_mac {
+                open_mac
+            } else {
+                ExpansionData {
+                    range: open_mac.range,
+                    arg: None,
+                }
+            }
+        })
     }
 }
 
@@ -119,7 +142,7 @@ impl std::fmt::Display for Grouping<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct OrType<'src> {
     // `|`
     pub pipe: Token<'src>,
@@ -127,8 +150,34 @@ pub struct OrType<'src> {
     pub ty: Token<'src>,
 }
 
+impl<'src> OrType<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        Range {
+            start: self.pipe.lex_range(source).start,
+            end: self.ty.lex_range(source).end,
+        }
+    }
+
+    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
+    pub fn expansion(&self, _: &'src str) -> Option<ExpansionData<'src>> {
+        let pipe_mac = self.pipe.mac?;
+        let ty_mac = self.ty.mac?;
+        (pipe_mac.range == ty_mac.range).then(|| {
+            // same argument too
+            if pipe_mac == ty_mac {
+                pipe_mac
+            } else {
+                ExpansionData {
+                    range: pipe_mac.range,
+                    arg: None,
+                }
+            }
+        })
+    }
+}
+
 /// A concrete type
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TypeExpr<'src> {
     pub name: Token<'src>,
     pub or_ty: Option<OrType<'src>>,
@@ -138,12 +187,33 @@ pub struct TypeExpr<'src> {
 
 impl<'src> TypeExpr<'src> {
     fn range(&self, source: &'src str) -> Range<usize> {
-        self.name.lex_range(source)
+        let name_range = self.name.lex_range(source);
+        self.or_ty.as_ref().map_or(name_range, |or_ty| Range {
+            start: name_range.start,
+            end: or_ty.range(source).end,
+        })
     }
 
     /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    pub const fn macro_range(&self, _: &'src str) -> Option<Range<usize>> {
-        self.name.mac
+    pub fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        if let Some(or_ty) = &self.or_ty {
+            let name_mac = self.name.mac?;
+            let or_ty_mac = or_ty.expansion(source)?;
+            // TODO: clearly this is being repeated a lot
+            (name_mac.range == or_ty_mac.range).then(|| {
+                // same argument too
+                if name_mac == or_ty_mac {
+                    name_mac
+                } else {
+                    ExpansionData {
+                        range: name_mac.range,
+                        arg: None,
+                    }
+                }
+            })
+        } else {
+            self.name.mac
+        }
     }
 }
 
@@ -199,13 +269,13 @@ impl<'src> Expr<'src> {
 
     /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
     // TBD: what if part of it is from a nested macro?
-    pub fn macro_range(&self, source: &'src str) -> Option<Range<usize>> {
+    pub fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         match self {
-            Expr::Binary(binary) => binary.macro_range(source),
-            Expr::Unary(unary) => unary.macro_range(source),
+            Expr::Binary(binary) => binary.expansion(source),
+            Expr::Unary(unary) => unary.expansion(source),
             Expr::Literal(token) => token.mac,
-            Expr::Grouping(grouping) => grouping.macro_range(source),
-            Expr::Type(ty) => ty.macro_range(source),
+            Expr::Grouping(grouping) => grouping.expansion(source),
+            Expr::Type(ty) => ty.expansion(source),
         }
     }
 

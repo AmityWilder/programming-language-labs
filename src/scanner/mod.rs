@@ -209,17 +209,17 @@ impl<'src> Scanner<'src> {
             .substr_range(self.source)
             .expect("source should be a substring of original")
             .start;
-        ContextError {
-            source: self.original,
-            range: Range {
+        ContextError::error(
+            self.original,
+            Some(Range {
                 start: end.checked_sub(len).expect(
                     "len should be the size of a token that was split off from the source string",
                 ),
                 end,
-            },
-            macro_range: None,
+            }),
+            None,
             err,
-        }
+        )
     }
 
     /// Generate an error starting at the current (incomplete) token

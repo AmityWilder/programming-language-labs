@@ -72,7 +72,7 @@ impl OpError {
             } => ContextError::error(
                 source,
                 Some(rhs.range(source)),
-                rhs.macro_range(source),
+                rhs.expansion(source),
                 ErrorType::FailedConvert {
                     op: match op.val {
                         LexValue::Punctuation(punc) => punc,
@@ -178,7 +178,7 @@ impl OpError {
             } => ContextError::error(
                 source,
                 Some(rhs.range(source)),
-                rhs.macro_range(source),
+                rhs.expansion(source),
                 ErrorType::FailedConvert {
                     op: match op.val {
                         LexValue::Punctuation(Punctuation::SubNeg) => {
