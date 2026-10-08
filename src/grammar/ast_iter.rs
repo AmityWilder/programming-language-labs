@@ -119,45 +119,54 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
 impl<'src> Expr<'src> {
     fn iter(&self, depth: usize) -> ExprIter<'src, '_> {
         match self {
-            Expr::Binary(Binary { lhs, op, rhs }) => ExprIter {
-                kind: ExprIterKind::Binary {
-                    lhs: Some(lhs),
-                    op: Some(op),
-                    rhs: Some(rhs),
-                },
-                depth,
-            },
+            Expr::Binary(inner) => {
+                let Binary { lhs, op, rhs } = &**inner;
+                ExprIter {
+                    kind: ExprIterKind::Binary {
+                        lhs: Some(lhs),
+                        op: Some(op),
+                        rhs: Some(rhs),
+                    },
+                    depth,
+                }
+            }
 
-            Expr::Unary(Unary { op, operand, side }) => match side {
-                OpSide::Left => ExprIter {
-                    kind: ExprIterKind::UnaryPost {
-                        lhs: Some(operand),
-                        op: Some(op),
+            Expr::Unary(inner) => {
+                let Unary { op, operand, side } = &**inner;
+                match side {
+                    OpSide::Left => ExprIter {
+                        kind: ExprIterKind::UnaryPost {
+                            lhs: Some(operand),
+                            op: Some(op),
+                        },
+                        depth,
                     },
-                    depth,
-                },
-                OpSide::Right => ExprIter {
-                    kind: ExprIterKind::UnaryPre {
-                        op: Some(op),
-                        rhs: Some(operand),
+                    OpSide::Right => ExprIter {
+                        kind: ExprIterKind::UnaryPre {
+                            op: Some(op),
+                            rhs: Some(operand),
+                        },
+                        depth,
                     },
-                    depth,
-                },
-            },
+                }
+            }
 
             Expr::Literal(token) => ExprIter {
                 kind: ExprIterKind::Literal { token: Some(token) },
                 depth,
             },
 
-            Expr::Grouping(Grouping { open, expr, close }) => ExprIter {
-                kind: ExprIterKind::Grouping {
-                    open: Some(open),
-                    expr: Some(expr),
-                    close: Some(close),
-                },
-                depth,
-            },
+            Expr::Grouping(inner) => {
+                let Grouping { open, expr, close } = &**inner;
+                ExprIter {
+                    kind: ExprIterKind::Grouping {
+                        open: Some(open),
+                        expr: Some(expr),
+                        close: Some(close),
+                    },
+                    depth,
+                }
+            }
 
             Expr::Type(TypeExpr { name, or_ty }) => ExprIter {
                 kind: ExprIterKind::Type {
