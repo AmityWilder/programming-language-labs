@@ -2,6 +2,7 @@
 
 use crate::{
     error::{ContextError, ErrorType, ExpectedToken, OpSide},
+    grammar::ast::{ArgList, ArgList1, FnCall, FnSource},
     scanner::{
         BadBracketCombo, Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
@@ -65,6 +66,7 @@ where
 }
 
 impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
+    /// Optional token
     fn pull_if<P>(&mut self, p: P) -> Option<Token<'src>>
     where
         P: FnOnce(&Token<'src>) -> bool,
@@ -72,6 +74,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.tokens.next_if(p)
     }
 
+    /// Required token
     fn try_pull<P>(
         &mut self,
         p: P,
@@ -85,15 +88,15 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `expression -> or ;`
+    /// `expression -> or`
     fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.or()
     }
 
-    /// `or -> xor ( ("|" | "!|") xor )* ;`
+    /// `or -> xor ( ("|" | "!|") xor )*`
     fn or(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.xor()?;
-        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+        while let Some(op) = self.pull_if(match_token!(Punctuation(
             Punctuation::Or | Punctuation::Nor
         ))) {
             let rhs = self.xor()?;
@@ -102,10 +105,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `xor -> and ( ("^" | "!^") and )* ;`
+    /// `xor -> and ( ("^" | "!^") and )*`
     fn xor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.and()?;
-        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+        while let Some(op) = self.pull_if(match_token!(Punctuation(
             Punctuation::Xor | Punctuation::Xnor
         ))) {
             let rhs = self.and()?;
@@ -114,10 +117,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `and -> equality ( ("&" | "!&") equality )* ;`
+    /// `and -> equality ( ("&" | "!&") equality )*`
     fn and(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.equality()?;
-        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+        while let Some(op) = self.pull_if(match_token!(Punctuation(
             Punctuation::And | Punctuation::Nand
         ))) {
             let rhs = self.equality()?;
@@ -126,12 +129,11 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `equality -> comparison ( ("!=" | "==") comparison )* ;`
+    /// `equality -> comparison ( ("!=" | "==") comparison )*`
     fn equality(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.comparison()?;
-        while let Some(op) = self
-            .tokens
-            .next_if(match_token!(Punctuation(Punctuation::Ne | Punctuation::Eq)))
+        while let Some(op) =
+            self.pull_if(match_token!(Punctuation(Punctuation::Ne | Punctuation::Eq)))
         {
             let rhs = self.comparison()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
@@ -139,10 +141,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `comparison -> shift ( ( ">" | ">=" | "<" | "<=" ) shift )* ;`
+    /// `comparison -> shift ( ( ">" | ">=" | "<" | "<=" ) shift )*`
     fn comparison(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.shift()?;
-        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+        while let Some(op) = self.pull_if(match_token!(Punctuation(
             Punctuation::Gt | Punctuation::Ge | Punctuation::Lt | Punctuation::Le
         ))) {
             let rhs = self.shift()?;
@@ -151,10 +153,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `shift -> term ( ( "<<" | ">>" | "[<<]" | "[>>]" ) term )* ;`
+    /// `shift -> term ( ( "<<" | ">>" | "[<<]" | "[>>]" ) term )*`
     fn shift(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.term()?;
-        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+        while let Some(op) = self.pull_if(match_token!(Punctuation(
             Punctuation::Shl | Punctuation::Shr | Punctuation::Rotl | Punctuation::Rotr
         ))) {
             let rhs = self.term()?;
@@ -163,10 +165,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `term -> factor ( ( "+" | "-" ) factor )* ;`
+    /// `term -> factor ( ( "+" | "-" ) factor )*`
     fn term(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.factor()?;
-        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+        while let Some(op) = self.pull_if(match_token!(Punctuation(
             Punctuation::Add | Punctuation::SubNeg
         ))) {
             let rhs = self.factor()?;
@@ -175,10 +177,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `factor -> unary_postfix ( ( "*" | "/" | "%" ) unary_postfix )* ;`
+    /// `factor -> unary_postfix ( ( "*" | "/" | "%" ) unary_postfix )*`
     fn factor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.unary_postfix()?;
-        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+        while let Some(op) = self.pull_if(match_token!(Punctuation(
             Punctuation::Mul | Punctuation::Div | Punctuation::Rem
         ))) {
             let rhs = self.unary_postfix()?;
@@ -187,13 +189,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `unary_postfix -> unary_prefix ( "?" )* ;`
+    /// `unary_postfix -> unary_prefix ( "?" )*`
     fn unary_postfix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.unary_prefix()?;
-        while let Some(op) = self
-            .tokens
-            .next_if(match_token!(Punctuation(Punctuation::Coalesce)))
-        {
+        while let Some(op) = self.pull_if(match_token!(Punctuation(Punctuation::Coalesce))) {
             expr = Expr::unary(Unary {
                 operand: expr,
                 op,
@@ -203,9 +202,9 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `unary_prefix -> ( ( "!" | "!!" | "-" ) exponent )* ;`
+    /// `unary_prefix -> ( ( "!" | "!!" | "-" ) exponent )*`
     fn unary_prefix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        if let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+        if let Some(op) = self.pull_if(match_token!(Punctuation(
             Punctuation::Not | Punctuation::Exists | Punctuation::SubNeg
         ))) {
             let operand = self.unary_prefix()?;
@@ -219,23 +218,27 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         }
     }
 
-    /// `exponent -> conversion ( "**" conversion )* ;`
+    /// `exponent -> fn_call_or_conversion ( "**" fn_call_or_conversion )*`
     fn exponent(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.conversion()?;
-        while let Some(op) = self
-            .tokens
-            .next_if(match_token!(Punctuation(Punctuation::Pow)))
-        {
-            let rhs = self.conversion()?;
+        let mut expr = self.fn_call_or_conversion()?;
+        while let Some(op) = self.pull_if(match_token!(Punctuation(Punctuation::Pow))) {
+            let rhs = self.fn_call_or_conversion()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
         Ok(expr)
     }
 
-    /// `conversion -> primary ( "-:>" | "=:>" ) type_expression ;`
+    /// `fn_call_or_conversion -> fn_call | conversion`
+    fn fn_call_or_conversion(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        self.conversion()
+            .or_else(|_| self.fn_call().map(Expr::fn_call))
+        // TODO: give a more specific error than just the fn call one
+    }
+
+    /// `conversion -> primary ( "-:>" | "=:>" ) type_expression`
     fn conversion(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.primary()?;
-        while let Some(op) = self.tokens.next_if(match_token!(Punctuation(
+        while let Some(op) = self.pull_if(match_token!(Punctuation(
             Punctuation::Convert | Punctuation::Transmute
         ))) {
             let rhs = Expr::type_expr(self.type_expression()?);
@@ -244,20 +247,22 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `primary -> literal | group ;`
+    /// `primary -> literal | group`
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        self.literal().or_else(|_| self.group()).map_err(|mut e| {
-            if let ErrorType::MissingToken { expect } | ErrorType::UnexpectedToken { expect, .. } =
-                &mut e.err
-                && *expect == ExpectedToken::ParenExpr
-            {
-                *expect = ExpectedToken::Expr;
-            }
-            e
-        })
+        self.literal()
+            .or_else(|_| self.group().map(Expr::grouping))
+            .map_err(|mut e| {
+                if let ErrorType::MissingToken { expect }
+                | ErrorType::UnexpectedToken { expect, .. } = &mut e.err
+                    && *expect == ExpectedToken::ParenExpr
+                {
+                    *expect = ExpectedToken::Expr;
+                }
+                e
+            })
     }
 
-    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | TEXT ;`
+    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | TEXT`
     fn literal(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.try_pull(
             match_token!(
@@ -274,8 +279,8 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         .map(Expr::literal)
     }
 
-    /// `group -> "(" expression ")" ;`
-    fn group(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+    /// `group -> "(" expression ")"`
+    fn group(&mut self) -> Result<Grouping<'src>, ContextError<'src>> {
         let open = self.try_pull(
             match_token!(Punctuation(Punctuation::LParen)),
             ExpectedToken::ParenExpr,
@@ -285,7 +290,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             match_token!(Punctuation(Punctuation::RParen)),
             ExpectedToken::ExprOrRParen,
         )
-        .map(move |close| Expr::grouping(Grouping { open, expr, close }))
+        .map(move |close| Grouping { open, expr, close })
         .map_err(|e| {
             e.map_type(|err| match err {
                 ErrorType::MissingToken { .. } => ErrorType::MissingCloseBracket {
@@ -309,7 +314,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" "fail" )?;`
+    /// `type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" "fail" )?`
     fn type_expression(&mut self) -> Result<TypeExpr<'src>, ContextError<'src>> {
         let name = self.try_pull(
             |token| match token.val {
@@ -320,8 +325,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             ExpectedToken::TypeExpr,
         )?;
         let or_ty = self
-            .tokens
-            .next_if(match_token!(Punctuation(Punctuation::Or)))
+            .pull_if(match_token!(Punctuation(Punctuation::Or)))
             .map(|pipe| {
                 Ok(OrType {
                     pipe,
@@ -334,6 +338,67 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(TypeExpr {
             name,
             or_ty: or_ty.transpose()?,
+        })
+    }
+
+    /// `fn_source -> IDENTIFIER | group`
+    fn fn_source(&mut self) -> Result<FnSource<'src>, ContextError<'src>> {
+        self.pull_if(match_token!(Identifier | Callable))
+            .map(FnSource::Ident)
+            .or_else(|| self.group().ok().map(FnSource::Group))
+            .ok_or_else(|| {
+                ContextError::missing_or_unexpected(
+                    self.tokens.peek().copied(),
+                    self.source,
+                    ExpectedToken::FnSource,
+                )
+            })
+    }
+
+    /// `arg_list1 -> ( "," expression )*`
+    fn arg_list1(&mut self) -> Result<ArgList1<'src>, ContextError<'src>> {
+        Ok(ArgList1 {
+            comma: self.try_pull(
+                match_token!(Punctuation(Punctuation::Comma)),
+                ExpectedToken::CommaOrRParen,
+            )?,
+            arg: self.expression()?,
+            rest: self.arg_list1().ok().map(Box::new),
+        })
+    }
+
+    /// `arg_list -> expression ( arg_list1 )* ( "," )?`
+    fn arg_list(&mut self) -> Result<ArgList<'src>, ContextError<'src>> {
+        Ok(ArgList {
+            first: self.expression()?,
+            rest: self.arg_list1().ok(),
+            trailing_comma: self.pull_if(match_token!(Punctuation(Punctuation::Comma))),
+        })
+    }
+
+    /// `fn_call -> fn_source "(" ( expr ( "," expr )* ( "," )? )? ")"`
+    fn fn_call(&mut self) -> Result<FnCall<'src>, ContextError<'src>> {
+        let func = self.fn_source()?;
+        let open = self.try_pull(
+            match_token!(Punctuation(Punctuation::LParen)),
+            ExpectedToken::LParen,
+        )?;
+        let (args, close) =
+            if let Some(close) = self.pull_if(match_token!(Punctuation(Punctuation::LParen))) {
+                (None, close)
+            } else {
+                let args = self.arg_list()?;
+                let close = self.try_pull(
+                    match_token!(Punctuation(Punctuation::LParen)),
+                    ExpectedToken::CommaOrRParen,
+                )?;
+                (Some(args), close)
+            };
+        Ok(FnCall {
+            func,
+            open,
+            args,
+            close,
         })
     }
 

@@ -60,7 +60,7 @@ use crate::{
     error::OpSide,
     grammar::{
         ast::{Binary, Expr, Grouping, Unary},
-        fmt::{Lisp, Polish},
+        fmt::Lisp,
     },
     print_ast,
     scanner::token::{Token, punc::Punctuation, value::LexValue},
@@ -105,12 +105,11 @@ fn test_ast_printer1() {
             },
         }),
     });
-    println!("source reconstruction:\n{ast}\n\ndebug:\n{ast:#?}\n\ncustom:");
+    println!("debug:\n{ast:#?}\n\ncustom:");
     print_ast(&ast, 0, 0);
     let lisp_repr = Lisp::new(&ast).to_string();
     println!("\nlisp:\n{lisp_repr}");
     println!("\nlisp (colored):\n{:#}", Lisp::new(&ast));
-    println!("\nPolish:\n{}", Polish::new(&ast));
     assert_eq!(lisp_repr, "(* (- 123) (group 45.67))");
 }
 
@@ -153,7 +152,7 @@ fn test_ast_printer2() {
             },
         }),
     });
-    println!("source reconstruction:\n{ast}\n\ncustom:");
+    println!("debug:\n{ast:?}\n\ncustom:");
     print_ast(&ast, 0, 0);
     let lisp_repr = Lisp::new(&ast).to_string();
     println!("\nlisp:\n{lisp_repr}");
@@ -199,7 +198,7 @@ fn test_ast_printer3() {
             },
         }),
     });
-    println!("source reconstruction:\n{ast}\n\ncustom:");
+    println!("debug:\n{ast:?}\n\ncustom:");
     print_ast(&ast, 0, 0);
     let lisp_repr = Lisp::new(&ast).to_string();
     println!("\nlisp:\n{lisp_repr}");

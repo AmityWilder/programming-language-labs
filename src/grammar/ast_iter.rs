@@ -2,7 +2,7 @@ use std::range::Range;
 
 use crate::{
     error::{ContextError, OpSide},
-    grammar::{Binary, Expr, Grouping, OrType, TypeExpr, Unary},
+    grammar::{Binary, Expr, Grouping, OrType, TypeExpr, Unary, ast::FnCall},
     highlight::{TokenHighlight, syntax::Syntax},
     scanner::{
         Scanner,
@@ -45,6 +45,9 @@ pub enum ExprIterKind<'src, 'expr> {
         name: Option<&'expr Token<'src>>,
         pipe: Option<&'expr Token<'src>>,
         or_ty: Option<&'expr Token<'src>>,
+    },
+    FnCall {
+        // TODO
     },
 }
 
@@ -114,6 +117,8 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
                         .take()
                         .map(|x| ExprOrToken::Semantic(x, Syntax::Typename))
                 }),
+
+            ExprIterKind::FnCall { .. } => todo!(),
         }
     }
 }
@@ -170,14 +175,27 @@ impl<'src> Expr<'src> {
                 }
             }
 
-            Expr::Type(TypeExpr { name, or_ty }) => ExprIter {
-                kind: ExprIterKind::Type {
-                    name: Some(name),
-                    pipe: or_ty.as_ref().map(|OrType { pipe, .. }| pipe),
-                    or_ty: or_ty.as_ref().map(|OrType { ty, .. }| ty),
-                },
-                depth,
-            },
+            Expr::Type(inner) => {
+                let TypeExpr { name, or_ty } = &**inner;
+                ExprIter {
+                    kind: ExprIterKind::Type {
+                        name: Some(name),
+                        pipe: or_ty.as_ref().map(|OrType { pipe, .. }| pipe),
+                        or_ty: or_ty.as_ref().map(|OrType { ty, .. }| ty),
+                    },
+                    depth,
+                }
+            }
+
+            Expr::FnCall(inner) => {
+                let FnCall {
+                    func,
+                    open,
+                    args,
+                    close,
+                } = &**inner;
+                todo!()
+            }
         }
     }
 }

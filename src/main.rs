@@ -38,7 +38,6 @@
     allocator_api,
     split_array,
     pattern,
-    deref_patterns,
     slice_pattern,
     pattern_type_range_trait,
     deref_pure_trait,
@@ -98,7 +97,7 @@ use crate::{
     error::ContextError,
     eval::{RunValue, evaluate},
     grammar::{
-        ast::{Binary, Expr, Grouping, OrType, TypeExpr, Unary},
+        ast::{Binary, Expr, FnCall, Grouping, OrType, TypeExpr, Unary},
         ast_iter::semantic,
         fmt::Lisp,
         parse,
@@ -260,7 +259,7 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
         }
 
         Expr::Type(inner) => {
-            let TypeExpr { name, or_ty } = inner;
+            let TypeExpr { name, or_ty } = &**inner;
             header("Type");
 
             field("name", indent);
@@ -274,6 +273,48 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
             } else {
                 println!("{}", SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name));
             }
+        }
+
+        Expr::FnCall(inner) => {
+            let FnCall {
+                func,
+                open,
+                args,
+                close,
+            } = &**inner;
+            let style = SYNTAX_STYLE_ANSI[Syntax::Bracket(br_depth)];
+
+            header("FnCall");
+
+            field("func", indent);
+            match func {
+                grammar::ast::FnSource::Ident(name) => {
+                    println!("{}", SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name));
+                }
+                // TODO: this is copied from elsewhere in this function
+                grammar::ast::FnSource::Group(Grouping { open, expr, close }) => {
+                    let style = SYNTAX_STYLE_ANSI[Syntax::Bracket(br_depth)];
+
+                    header("Grouping");
+
+                    field(" open", indent);
+                    println!("{}", style.style_dbg(open));
+
+                    let field_indent = field(" expr", indent);
+                    print_ast(expr, field_indent, br_depth.strict_add(1));
+
+                    field("close", indent);
+                    println!("{}", style.style_dbg(close));
+                }
+            }
+
+            field("open", indent);
+            println!("{}", style.style_dbg(open));
+
+            // TODO: args
+
+            field("close", indent);
+            println!("{}", style.style_dbg(open));
         }
     }
 }
@@ -646,8 +687,7 @@ impl Cli {
             let help = HELP
                 .iter()
                 .find(|(hfield, _)| hfield == field)
-                .map(|(_, help)| *help)
-                .unwrap_or_default();
+                .map_or_default(|(_, help)| *help);
             writeln!(f, "  {opt:<widest$}  {help}")?;
         }
         Ok(())

@@ -4,6 +4,64 @@ use crate::{
 };
 use std::range::Range;
 
+pub trait AstNode<'src> {
+    fn range(&self, source: &'src str) -> Range<usize>;
+
+    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
+    // TBD: what if part of it is from a nested macro?
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>>;
+}
+
+impl<'src, T> AstNode<'src> for &T
+where
+    T: AstNode<'src>,
+{
+    fn range(&self, source: &'src str) -> Range<usize> {
+        (*self).range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (*self).expansion(source)
+    }
+}
+
+impl<'src, T, U> AstNode<'src> for (T, U)
+where
+    T: AstNode<'src>,
+    U: AstNode<'src>,
+{
+    fn range(&self, source: &'src str) -> Range<usize> {
+        Range {
+            start: self.0.range(source).start,
+            end: self.1.range(source).end,
+        }
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        let exp = (self.0.expansion(source)?, self.1.expansion(source)?);
+        (exp.0 == exp.1).then(|| {
+            if exp.0.arg == exp.1.arg {
+                exp.0
+            } else {
+                ExpansionData {
+                    range: exp.0.range,
+                    arg: None,
+                }
+            }
+        })
+    }
+}
+
+impl<'src> AstNode<'src> for Token<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        self.lex_range(source)
+    }
+
+    fn expansion(&self, _: &'src str) -> Option<ExpansionData<'src>> {
+        self.mac
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Binary<'src> {
     pub lhs: Expr<'src>,
@@ -11,31 +69,14 @@ pub struct Binary<'src> {
     pub rhs: Expr<'src>,
 }
 
-impl<'src> Binary<'src> {
+impl<'src> AstNode<'src> for Binary<'src> {
     fn range(&self, source: &'src str) -> Range<usize> {
-        Range {
-            start: self.lhs.range(source).start,
-            end: self.rhs.range(source).end,
-        }
+        (&self.lhs, &self.rhs).range(source)
     }
 
-    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    pub fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        let lhs_mac = self.lhs.expansion(source)?;
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         // don't need to check op because it's between them, so it must be in the same expansion if the other two are
-        let rhs_mac = self.rhs.expansion(source)?;
-        (lhs_mac == rhs_mac).then_some(lhs_mac)
-    }
-}
-
-impl std::fmt::Display for Binary<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self {
-            lhs,
-            op: Token { lex: op, .. },
-            rhs,
-        } = self;
-        write!(f, "{lhs} {op} {rhs}")
+        (&self.lhs, &self.rhs).expansion(source)
     }
 }
 
@@ -47,50 +88,18 @@ pub struct Unary<'src> {
     pub side: OpSide,
 }
 
-impl<'src> Unary<'src> {
+impl<'src> AstNode<'src> for Unary<'src> {
     fn range(&self, source: &'src str) -> Range<usize> {
-        let op_range = self.op.lex_range(source);
-        let operand_range = self.operand.range(source);
         match self.side {
-            OpSide::Left => Range {
-                start: operand_range.start,
-                end: op_range.end,
-            },
-            OpSide::Right => Range {
-                start: op_range.start,
-                end: operand_range.end,
-            },
+            OpSide::Left => (&self.operand, &self.op).range(source),
+            OpSide::Right => (&self.op, &self.operand).range(source),
         }
     }
 
-    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    pub fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        let op_mac = self.op.mac?;
-        let rhs_mac = self.operand.expansion(source)?;
-        (op_mac.range == rhs_mac.range).then(|| {
-            // same argument too
-            if op_mac == rhs_mac {
-                op_mac
-            } else {
-                ExpansionData {
-                    range: op_mac.range,
-                    arg: None,
-                }
-            }
-        })
-    }
-}
-
-impl std::fmt::Display for Unary<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self {
-            side,
-            op: Token { lex: op, .. },
-            operand,
-        } = self;
-        match side {
-            OpSide::Left => write!(f, "{operand}{op}"),
-            OpSide::Right => write!(f, "{op}{operand}"),
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        match self.side {
+            OpSide::Left => (&self.operand, &self.op).expansion(source),
+            OpSide::Right => (&self.op, &self.operand).expansion(source),
         }
     }
 }
@@ -102,43 +111,16 @@ pub struct Grouping<'src> {
     pub close: Token<'src>,
 }
 
-impl<'src> Grouping<'src> {
+impl<'src> AstNode<'src> for Grouping<'src> {
     fn range(&self, source: &'src str) -> Range<usize> {
-        Range {
-            start: self.open.lex_range(source).start,
-            end: self.close.lex_range(source).end,
-        }
+        (&self.open, &self.close).range(source)
     }
 
-    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    pub fn expansion(&self, _: &'src str) -> Option<ExpansionData<'src>> {
-        let open_mac = self.open.mac?;
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         // don't need to check expr because it's between open and close,
         // and therefore must be in the same expansion if the other two are.
         // this is also cheaper, since now we don't have to recursively check the inner expressions :)
-        let close_mac = self.close.mac?;
-        (open_mac.range == close_mac.range).then(|| {
-            // same argument too
-            if open_mac == close_mac {
-                open_mac
-            } else {
-                ExpansionData {
-                    range: open_mac.range,
-                    arg: None,
-                }
-            }
-        })
-    }
-}
-
-impl std::fmt::Display for Grouping<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self {
-            open: Token { lex: open, .. },
-            expr,
-            close: Token { lex: close, .. },
-        } = self;
-        write!(f, "{open}{expr}{close}")
+        (&self.open, &self.close).expansion(source)
     }
 }
 
@@ -150,29 +132,13 @@ pub struct OrType<'src> {
     pub ty: Token<'src>,
 }
 
-impl<'src> OrType<'src> {
+impl<'src> AstNode<'src> for OrType<'src> {
     fn range(&self, source: &'src str) -> Range<usize> {
-        Range {
-            start: self.pipe.lex_range(source).start,
-            end: self.ty.lex_range(source).end,
-        }
+        (&self.pipe, &self.ty).range(source)
     }
 
-    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    pub fn expansion(&self, _: &'src str) -> Option<ExpansionData<'src>> {
-        let pipe_mac = self.pipe.mac?;
-        let ty_mac = self.ty.mac?;
-        (pipe_mac.range == ty_mac.range).then(|| {
-            // same argument too
-            if pipe_mac == ty_mac {
-                pipe_mac
-            } else {
-                ExpansionData {
-                    range: pipe_mac.range,
-                    arg: None,
-                }
-            }
-        })
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.pipe, &self.ty).expansion(source)
     }
 }
 
@@ -185,53 +151,115 @@ pub struct TypeExpr<'src> {
     // TODO: generic arguments?
 }
 
-impl<'src> TypeExpr<'src> {
+impl<'src> AstNode<'src> for TypeExpr<'src> {
     fn range(&self, source: &'src str) -> Range<usize> {
-        let name_range = self.name.lex_range(source);
-        self.or_ty.as_ref().map_or(name_range, |or_ty| Range {
-            start: name_range.start,
-            end: or_ty.range(source).end,
-        })
+        if let Some(or_ty) = &self.or_ty {
+            (self.name, or_ty).range(source)
+        } else {
+            self.name.range(source)
+        }
     }
 
-    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    pub fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         if let Some(or_ty) = &self.or_ty {
-            let name_mac = self.name.mac?;
-            let or_ty_mac = or_ty.expansion(source)?;
-            // TODO: clearly this is being repeated a lot
-            (name_mac.range == or_ty_mac.range).then(|| {
-                // same argument too
-                if name_mac == or_ty_mac {
-                    name_mac
-                } else {
-                    ExpansionData {
-                        range: name_mac.range,
-                        arg: None,
-                    }
-                }
-            })
+            (self.name, or_ty).expansion(source)
         } else {
-            self.name.mac
+            self.name.expansion(source)
         }
     }
 }
 
-impl std::fmt::Display for TypeExpr<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self {
-            name: Token { lex: name, .. },
-            or_ty,
-        } = self;
-        if let Some(OrType {
-            pipe: Token { lex: pipe, .. },
-            ty: Token { lex: ty, .. },
-        }) = or_ty
-        {
-            write!(f, "{name} {pipe} {ty}")
-        } else {
-            write!(f, "{name}")
+#[derive(Debug, Clone, PartialEq)]
+pub enum FnSource<'src> {
+    Ident(Token<'src>),
+    Group(Grouping<'src>),
+}
+
+impl<'src> AstNode<'src> for FnSource<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        match self {
+            Self::Ident(inner) => inner.range(source),
+            Self::Group(inner) => inner.range(source),
         }
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        match self {
+            Self::Ident(inner) => inner.expansion(source),
+            Self::Group(inner) => inner.expansion(source),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArgList1<'src> {
+    pub comma: Token<'src>,
+    pub arg: Expr<'src>,
+    pub rest: Option<Box<ArgList1<'src>>>,
+}
+
+impl<'src> AstNode<'src> for ArgList1<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        if let Some(rest) = &self.rest {
+            (&self.comma, &**rest).range(source)
+        } else {
+            (&self.comma, &self.arg).range(source)
+        }
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        if let Some(rest) = &self.rest {
+            (&self.comma, &**rest).expansion(source)
+        } else {
+            (&self.comma, &self.arg).expansion(source)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArgList<'src> {
+    pub first: Expr<'src>,
+    pub rest: Option<ArgList1<'src>>,
+    pub trailing_comma: Option<Token<'src>>,
+}
+
+impl<'src> AstNode<'src> for ArgList<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        if let Some(trailing_comma) = &self.trailing_comma {
+            (&self.first, trailing_comma).range(source)
+        } else if let Some(rest) = &self.rest {
+            (&self.first, rest).range(source)
+        } else {
+            self.first.range(source)
+        }
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        if let Some(trailing_comma) = &self.trailing_comma {
+            (&self.first, trailing_comma).expansion(source)
+        } else if let Some(rest) = &self.rest {
+            (&self.first, rest).expansion(source)
+        } else {
+            self.first.expansion(source)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnCall<'src> {
+    pub func: FnSource<'src>,
+    pub open: Token<'src>,
+    pub args: Option<ArgList<'src>>,
+    pub close: Token<'src>,
+}
+
+impl<'src> AstNode<'src> for FnCall<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        (&self.func, &self.close).range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.func, &self.close).expansion(source)
     }
 }
 
@@ -241,44 +269,35 @@ pub enum Expr<'src> {
     Unary(Box<Unary<'src>>),
     Literal(Token<'src>),
     Grouping(Box<Grouping<'src>>),
-    Type(TypeExpr<'src>),
+    Type(Box<TypeExpr<'src>>),
+    FnCall(Box<FnCall<'src>>),
 }
 
-impl std::fmt::Display for Expr<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<'src> AstNode<'src> for Expr<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
         match self {
-            Self::Binary(inner) => inner.fmt(f),
-            Self::Unary(inner) => inner.fmt(f),
-            Self::Literal(Token { lex, .. }) => lex.fmt(f),
-            Self::Grouping(inner) => inner.fmt(f),
-            Self::Type(inner) => std::fmt::Display::fmt(inner, f),
+            Self::Binary(inner) => inner.range(source),
+            Self::Unary(inner) => inner.range(source),
+            Self::Literal(token) => token.range(source),
+            Self::Grouping(inner) => inner.range(source),
+            Self::Type(inner) => inner.range(source),
+            Self::FnCall(inner) => inner.range(source),
+        }
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        match self {
+            Self::Binary(inner) => inner.expansion(source),
+            Self::Unary(inner) => inner.expansion(source),
+            Self::Literal(token) => token.expansion(source),
+            Self::Grouping(inner) => inner.expansion(source),
+            Self::Type(inner) => inner.expansion(source),
+            Self::FnCall(inner) => inner.expansion(source),
         }
     }
 }
 
 impl<'src> Expr<'src> {
-    pub fn range(&self, source: &'src str) -> Range<usize> {
-        match self {
-            Self::Binary(binary) => binary.range(source),
-            Self::Unary(unary) => unary.range(source),
-            Self::Literal(token) => token.lex_range(source),
-            Self::Grouping(group) => group.range(source),
-            Self::Type(ty) => ty.range(source),
-        }
-    }
-
-    /// Only considered a macro range if the ENTIRE EXPRESSION is from the same macro expansion
-    // TBD: what if part of it is from a nested macro?
-    pub fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        match self {
-            Expr::Binary(binary) => binary.expansion(source),
-            Expr::Unary(unary) => unary.expansion(source),
-            Expr::Literal(token) => token.mac,
-            Expr::Grouping(grouping) => grouping.expansion(source),
-            Expr::Type(ty) => ty.expansion(source),
-        }
-    }
-
     pub fn binary(inner: Binary<'src>) -> Self {
         Self::Binary(Box::new(inner))
     }
@@ -295,7 +314,11 @@ impl<'src> Expr<'src> {
         Self::Grouping(Box::new(inner))
     }
 
-    pub const fn type_expr(inner: TypeExpr<'src>) -> Self {
-        Self::Type(inner)
+    pub fn type_expr(inner: TypeExpr<'src>) -> Self {
+        Self::Type(Box::new(inner))
+    }
+
+    pub fn fn_call(inner: FnCall<'src>) -> Self {
+        Self::FnCall(Box::new(inner))
     }
 }
