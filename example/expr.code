@@ -60,5 +60,3 @@ def \foo($x, $y) { $x*$x+$y }
 def \foo($x, $y) { -5 $x $y }
 def \bar($x, $y) { $x | $y }
 \foo{-:>}{\bar{uint}{none}}
-
-f(5)
