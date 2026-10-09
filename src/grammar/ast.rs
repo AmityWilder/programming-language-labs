@@ -63,6 +63,26 @@ impl<'src> AstNode<'src> for Token<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Ternary<'src> {
+    pub lhs: Expr<'src>,
+    pub lop: Token<'src>,
+    pub mhs: Expr<'src>,
+    pub rop: Token<'src>,
+    pub rhs: Expr<'src>,
+}
+
+impl<'src> AstNode<'src> for Ternary<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        (&self.lhs, &self.rhs).range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        // don't need to check op because it's between them, so it must be in the same expansion if the other two are
+        (&self.lhs, &self.rhs).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Binary<'src> {
     pub lhs: Expr<'src>,
     pub op: Token<'src>,
@@ -265,6 +285,7 @@ impl<'src> AstNode<'src> for FnCall<'src> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'src> {
+    Ternary(Box<Ternary<'src>>),
     Binary(Box<Binary<'src>>),
     Unary(Box<Unary<'src>>),
     Literal(Token<'src>),
@@ -276,6 +297,7 @@ pub enum Expr<'src> {
 impl<'src> AstNode<'src> for Expr<'src> {
     fn range(&self, source: &'src str) -> Range<usize> {
         match self {
+            Self::Ternary(inner) => inner.range(source),
             Self::Binary(inner) => inner.range(source),
             Self::Unary(inner) => inner.range(source),
             Self::Literal(token) => token.range(source),
@@ -287,6 +309,7 @@ impl<'src> AstNode<'src> for Expr<'src> {
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         match self {
+            Self::Ternary(inner) => inner.expansion(source),
             Self::Binary(inner) => inner.expansion(source),
             Self::Unary(inner) => inner.expansion(source),
             Self::Literal(token) => token.expansion(source),
@@ -298,6 +321,10 @@ impl<'src> AstNode<'src> for Expr<'src> {
 }
 
 impl<'src> Expr<'src> {
+    pub fn ternary(inner: Ternary<'src>) -> Self {
+        Self::Ternary(Box::new(inner))
+    }
+
     pub fn binary(inner: Binary<'src>) -> Self {
         Self::Binary(Box::new(inner))
     }

@@ -60,7 +60,7 @@ use crate::{
     error::OpSide,
     grammar::{
         ast::{Binary, Expr, Grouping, Unary},
-        fmt::Lisp,
+        fmt::lisp::Lisp,
     },
     print_ast,
     scanner::token::{Token, punc::Punctuation, value::LexValue},

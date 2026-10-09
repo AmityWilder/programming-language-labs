@@ -4,7 +4,7 @@ use crate::{
     error::{
         ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
     },
-    grammar::ast::{AstNode, Binary, Expr, Unary},
+    grammar::ast::{AstNode, Binary, Expr, Ternary, Unary},
     scanner::token::{
         Token,
         keyword::Keyword,
@@ -831,6 +831,33 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
         Pow, Rem, Rotl, Rotr, Shl, Shr, SubNeg, Transmute, Xnor, Xor,
     };
     match ast {
+        Expr::Ternary(inner) => {
+            let Ternary {
+                lhs,
+                lop,
+                mhs,
+                rop,
+                rhs,
+            } = &**inner;
+
+            match (lop.val, rop.val) {
+                (LexValue::Keyword(Keyword::If), LexValue::Keyword(Keyword::Or)) => {
+                    // TBD: how will this interact with pattern conditions?
+                    if let RunValue::Bool(cond) = evaluate(source, mhs)? {
+                        if cond {
+                            evaluate(source, lhs)
+                        } else {
+                            evaluate(source, rhs)
+                        }
+                    } else {
+                        todo!("error: must be a boolean");
+                    }
+                }
+
+                _ => unimplemented!(),
+            }
+        }
+
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
             let l = evaluate(source, lhs)?;
