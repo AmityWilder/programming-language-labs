@@ -11,7 +11,7 @@ use crate::{
 use std::collections::{HashMap, VecDeque};
 
 #[cfg(test)]
-mod test;
+mod tests;
 
 /// Macro substitution
 #[derive(Debug, Clone)]

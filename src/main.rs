@@ -86,7 +86,7 @@ use crate::{
     scanner::{
         token::{
             Token,
-            value::{CharLiteral, LexValue, StrLiteral},
+            value::{CharLiteral, LexValue, TextLiteral},
         },
         tokenize,
     },
@@ -103,7 +103,7 @@ mod regex;
 mod scanner;
 
 #[cfg(test)] // only include testing module in test builds
-mod test;
+mod tests;
 
 /// The style table currently being used
 // TODO: make this configurable by file(?)
@@ -450,7 +450,7 @@ where
 pub enum RunSyntax<'src> {
     Mono(Syntax),
     Char(CharLiteral),
-    Text(StrLiteral<'src>),
+    Text(TextLiteral<'src>),
 }
 
 impl Default for RunSyntax<'_> {
@@ -530,7 +530,7 @@ fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
             _ = write!(buf, "{s:?}"); // infallible for String
             RunToken {
                 lex: buf,
-                syn: RunSyntax::Text(StrLiteral {
+                syn: RunSyntax::Text(TextLiteral {
                     content: buf
                         .strip_circumfix('\"', '\"')
                         .expect("string debug should include delimiters"),
