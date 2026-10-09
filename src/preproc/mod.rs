@@ -10,6 +10,9 @@ use crate::{
 };
 use std::collections::{HashMap, VecDeque};
 
+#[cfg(test)]
+mod test;
+
 /// Macro substitution
 #[derive(Debug, Clone)]
 struct MacroSub<'src, I> {
