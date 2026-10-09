@@ -108,6 +108,21 @@ pub struct ExpansionData<'src> {
     pub arg: Option<(usize, &'src str)>,
 }
 
+impl<'src> ExpansionData<'src> {
+    #[inline]
+    pub const fn from_body(range: Range<usize>) -> Self {
+        Self { range, arg: None }
+    }
+
+    #[inline]
+    pub const fn from_arg(range: Range<usize>, index: usize, name: &'src str) -> Self {
+        Self {
+            range,
+            arg: Some((index, name)),
+        }
+    }
+}
+
 /// A single token - its lexeme ([`Self::lex`]) and value ([`Self::val`]).
 #[derive(Clone, Copy, PartialEq, Default)]
 pub struct Token<'src> {
