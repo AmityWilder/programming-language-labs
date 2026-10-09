@@ -12,7 +12,7 @@ use crate::{
         symbols::{CHAR_DELIM, TEXT_DELIM},
         token::{
             Token,
-            value::{CharLiteral, Escapes, LexValue, StrLiteral},
+            value::{CharLiteral, Escapes, LexValue, TextLiteral},
         },
     },
 };
@@ -20,6 +20,9 @@ use std::range::Range;
 
 pub mod style;
 pub mod syntax;
+
+#[cfg(test)]
+pub mod tests;
 
 /// Remaps input ranges to be offset by the length of a delimiter ([`CHAR_DELIM`]/[`STR_DELIM`])
 const fn remap_subtoken_range(Range { start, end }: Range<usize>) -> Range<usize> {
@@ -191,7 +194,7 @@ pub type EscapeRanges<'src> = std::iter::FilterMap<
 fn escaped_text_literal<'src>(
     lex: &'src str,
     syn: Syntax,
-    literal: StrLiteral<'src>,
+    literal: TextLiteral<'src>,
 ) -> SubTokenSyntax<'src, EscapedRanges<EscapeRanges<'src>>> {
     SubTokenSyntax::new(
         lex,

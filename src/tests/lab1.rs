@@ -647,7 +647,7 @@ mod scan {
 
     mod str {
         use super::*;
-        use crate::scanner::token::value::StrLiteral;
+        use crate::scanner::token::value::TextLiteral;
 
         #[test]
         fn test_scan_str_simple() {
@@ -656,7 +656,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: LexValue::TextLiteral(StrLiteral { content: "a" }),
+                    val: LexValue::TextLiteral(TextLiteral { content: "a" }),
                     mac: None
                 })]
             );
@@ -669,7 +669,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: LexValue::TextLiteral(StrLiteral { content: "aa" }),
+                    val: LexValue::TextLiteral(TextLiteral { content: "aa" }),
                     mac: None
                 })]
             );
@@ -682,7 +682,7 @@ mod scan {
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
                     lex: SOURCE,
-                    val: LexValue::TextLiteral(StrLiteral { content: "" }),
+                    val: LexValue::TextLiteral(TextLiteral { content: "" }),
                     mac: None
                 })]
             );
@@ -712,7 +712,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::TextLiteral(StrLiteral { content: "\\0" }),
+                        val: LexValue::TextLiteral(TextLiteral { content: "\\0" }),
                         mac: None
                     })]
                 );
@@ -725,7 +725,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::TextLiteral(StrLiteral { content: "\\x1b" }),
+                        val: LexValue::TextLiteral(TextLiteral { content: "\\x1b" }),
                         mac: None
                     })]
                 );
@@ -738,7 +738,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::TextLiteral(StrLiteral { content: "\\1b" }),
+                        val: LexValue::TextLiteral(TextLiteral { content: "\\1b" }),
                         mac: None
                     })]
                 );

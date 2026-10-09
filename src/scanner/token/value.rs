@@ -24,19 +24,19 @@ pub struct CharLiteral {
 
 /// No-alloc version of [`StringLiteral`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct StrLiteral<'src> {
+pub struct TextLiteral<'src> {
     /// The string literal without delimiters - the value if it has no escapes.
     /// May contain unconverted escape sequences
     pub content: &'src str,
 }
 
-impl<'src> StrLiteral<'src> {
+impl<'src> TextLiteral<'src> {
     /// Identify whether a string literal contains escape sequences.
     pub fn has_escapes(&self) -> bool {
         self.content.contains(ESCAPE)
     }
 
-    /// Process the [`StrLiteral`] into a [`StringLiteral`]
+    /// Process the [`TextLiteral`] into a [`StringLiteral`]
     pub fn process(&self) -> Result<StringLiteral, ErrorType<'src>> {
         StringLiteral::try_from(*self)
     }
@@ -54,10 +54,10 @@ pub struct StringLiteral {
     pub escapes: Vec<Range<usize>>,
 }
 
-impl<'src> TryFrom<StrLiteral<'src>> for StringLiteral {
+impl<'src> TryFrom<TextLiteral<'src>> for StringLiteral {
     type Error = ErrorType<'src>;
 
-    fn try_from(value: StrLiteral<'src>) -> Result<Self, Self::Error> {
+    fn try_from(value: TextLiteral<'src>) -> Result<Self, Self::Error> {
         if value.has_escapes() {
             let replacements = Escapes::new(value.content).collect::<Result<Vec<_>, _>>()?;
             let escapes = replacements.iter().map(|(range, _)| *range).collect();
@@ -123,7 +123,7 @@ pub enum LexValue<'src> {
     /// Character literal
     CharLiteral(CharLiteral),
     /// String literal
-    TextLiteral(StrLiteral<'src>),
+    TextLiteral(TextLiteral<'src>),
 
     // language builtin
     /// Boolean literal
@@ -283,7 +283,7 @@ impl<'src> LexValue<'src> {
         {
             Err(e)
         } else {
-            Ok(Self::TextLiteral(StrLiteral { content }))
+            Ok(Self::TextLiteral(TextLiteral { content }))
         }
     }
 }
