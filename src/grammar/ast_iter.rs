@@ -10,6 +10,8 @@ use crate::{
     },
 };
 
+use super::ast::Ternary;
+
 #[derive(Debug, Clone)]
 pub enum ExprOrToken<'src, 'expr> {
     Token(&'expr Token<'src>),
@@ -20,6 +22,13 @@ pub enum ExprOrToken<'src, 'expr> {
 
 #[derive(Debug, Clone)]
 pub enum ExprIterKind<'src, 'expr> {
+    Ternary {
+        lhs: Option<&'expr Expr<'src>>,
+        lop: Option<&'expr Token<'src>>,
+        mhs: Option<&'expr Expr<'src>>,
+        rop: Option<&'expr Token<'src>>,
+        rhs: Option<&'expr Expr<'src>>,
+    },
     Binary {
         lhs: Option<&'expr Expr<'src>>,
         op: Option<&'expr Token<'src>>,
@@ -62,6 +71,20 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match &mut self.kind {
+            ExprIterKind::Ternary {
+                lhs,
+                lop,
+                mhs,
+                rop,
+                rhs,
+            } => lhs
+                .take()
+                .map(|x| ExprOrToken::Expr(x, self.depth))
+                .or_else(|| lop.take().map(ExprOrToken::Token))
+                .or_else(|| mhs.take().map(|x| ExprOrToken::Expr(x, self.depth)))
+                .or_else(|| rop.take().map(ExprOrToken::Token))
+                .or_else(|| rhs.take().map(|x| ExprOrToken::Expr(x, self.depth))),
+
             ExprIterKind::Binary { lhs, op, rhs } => lhs
                 .take()
                 .map(|x| ExprOrToken::Expr(x, self.depth))
@@ -126,6 +149,26 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
 impl<'src> Expr<'src> {
     fn iter(&self, depth: usize) -> ExprIter<'src, '_> {
         match self {
+            Expr::Ternary(inner) => {
+                let Ternary {
+                    lhs,
+                    lop,
+                    mhs,
+                    rop,
+                    rhs,
+                } = &**inner;
+                ExprIter {
+                    kind: ExprIterKind::Ternary {
+                        lhs: Some(lhs),
+                        lop: Some(lop),
+                        mhs: Some(mhs),
+                        rop: Some(rop),
+                        rhs: Some(rhs),
+                    },
+                    depth,
+                }
+            }
+
             Expr::Binary(inner) => {
                 let Binary { lhs, op, rhs } = &**inner;
                 ExprIter {

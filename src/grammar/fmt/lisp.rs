@@ -2,7 +2,7 @@ use crate::{
     SYNTAX_STYLE_ANSI,
     grammar::{
         Binary, Expr, Grouping, OrType, TypeExpr, Unary,
-        ast::{ArgList, ArgList1, FnCall, FnSource},
+        ast::{ArgList, ArgList1, FnCall, FnSource, Ternary},
     },
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
     scanner::token::Token,
@@ -45,6 +45,18 @@ macro_rules! parenthesize {
         )*
         $f.write_str(")")
     }};
+}
+
+impl LispDisplay for Ternary<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        parenthesize!(
+            f,
+            format!("{}{}", self.lop.lex, self.rop.lex),
+            Lisp::new(&self.mhs),
+            Lisp::new(&self.lhs),
+            Lisp::new(&self.rhs)
+        )
+    }
 }
 
 impl LispDisplay for Binary<'_> {
@@ -119,6 +131,7 @@ impl LispDisplay for FnCall<'_> {
 impl LispDisplay for Expr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Ternary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Binary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
             // TBD: should this use val instead of lex?

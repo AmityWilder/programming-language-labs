@@ -62,7 +62,7 @@ pub struct SyntaxStyle<T, A> {
     pub number_literal: T,
     /// Style for [`Syntax::CharLiteral`]
     pub char_literal: T,
-    /// Style for [`Syntax::StringLiteral`]
+    /// Style for [`Syntax::TextLiteral`]
     pub string_literal: T,
     /// Style for [`Syntax::EscapeSeq`]
     pub escape_seq: T,

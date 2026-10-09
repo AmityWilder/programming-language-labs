@@ -66,13 +66,15 @@
 // )]
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
+use grammar::ast::Ternary;
+
 use crate::{
     error::ContextError,
     eval::{RunValue, evaluate},
     grammar::{
         ast::{Binary, Expr, FnCall, Grouping, OrType, TypeExpr, Unary},
         ast_iter::semantic,
-        fmt::Lisp,
+        fmt::lisp::Lisp,
         parse,
     },
     highlight::{
@@ -181,6 +183,20 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
     }
 
     match node {
+        Expr::Ternary(inner) => {
+            let Ternary {
+                lhs,
+                lop,
+                mhs,
+                rop,
+                rhs,
+            } = &**inner;
+
+            header("Ternary");
+
+            field("lhs", indent);
+        }
+
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
 
