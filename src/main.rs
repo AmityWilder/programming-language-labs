@@ -10,13 +10,8 @@
     const_destruct,
     const_trait_impl,
     const_convert,
-    const_bool,
     const_cmp,
-    const_iter,
-    const_index,
     const_format_args,
-    const_option_ops,
-    const_range,
     adt_const_params,
     unboxed_closures,
     pattern,
@@ -176,10 +171,19 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
         println!("\x1b[94m{name}:\x1b[0m");
     }
 
-    fn field(name: &str, indent: usize) -> usize {
+    fn tkn_field(name: &str, value: &Token<'_>, override_syn: Option<Syntax>, indent: usize) {
+        const INDENT_BY: &str = "  ";
+        println!(
+            "{:>indent$}{INDENT_BY}\x1b[90m{name}:\x1b[0m {}",
+            "",
+            SYNTAX_STYLE_ANSI[override_syn.unwrap_or_else(|| value.syntax())].style_dbg(value)
+        );
+    }
+
+    fn ast_field(name: &str, expr: &Expr<'_>, indent: usize, next_br_depth: usize) {
         const INDENT_BY: &str = "  ";
         print!("{:>indent$}{INDENT_BY}\x1b[90m{name}:\x1b[0m ", "");
-        indent.strict_add(INDENT_BY.len())
+        print_ast(expr, indent.strict_add(INDENT_BY.len()), next_br_depth);
     }
 
     match node {
@@ -191,119 +195,58 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
                 rop,
                 rhs,
             } = &**inner;
-
             header("Ternary");
-
-            field("lhs", indent);
+            ast_field("lhs", lhs, indent, br_depth);
+            tkn_field("lop", lop, None, indent);
+            ast_field("mhs", mhs, indent, br_depth);
+            tkn_field("rop", rop, None, indent);
+            ast_field("rhs", rhs, indent, br_depth);
         }
 
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
-
             header("Binary");
-
-            let field_indent = field("lhs", indent);
-            print_ast(lhs, field_indent, br_depth);
-
-            field(" op", indent);
-            println!("{}", SYNTAX_STYLE_ANSI[op.syntax()].style_dbg(op));
-
-            let field_indent = field("rhs", indent);
-            print_ast(rhs, field_indent, br_depth);
+            ast_field("lhs", lhs, indent, br_depth);
+            tkn_field(" op", op, None, indent);
+            ast_field("rhs", rhs, indent, br_depth);
         }
 
         Expr::Unary(inner) => {
             let Unary { op, operand, side } = &**inner;
-
             header("Unary");
-
-            field(" op", indent);
-            println!("{}", SYNTAX_STYLE_ANSI[op.syntax()].style_dbg(op));
-
-            let field_indent = field(side.as_str(), indent);
-            print_ast(operand, field_indent, br_depth);
+            tkn_field(" op", op, None, indent);
+            ast_field(side.as_str(), operand, indent, br_depth);
         }
 
         Expr::Literal(token) => {
             header("Literal");
-
-            field("token", indent);
-            println!("{}", SYNTAX_STYLE_ANSI[token.syntax()].style_dbg(token));
+            tkn_field("token", token, None, indent);
         }
 
         Expr::Grouping(inner) => {
             let Grouping { open, expr, close } = &**inner;
-            let style = SYNTAX_STYLE_ANSI[Syntax::Bracket(br_depth)];
-
+            let syn = Syntax::Bracket(br_depth);
             header("Grouping");
-
-            field(" open", indent);
-            println!("{}", style.style_dbg(open));
-
-            let field_indent = field(" expr", indent);
-            print_ast(expr, field_indent, br_depth.strict_add(1));
-
-            field("close", indent);
-            println!("{}", style.style_dbg(close));
+            tkn_field(" open", open, Some(syn), indent);
+            ast_field(" expr", expr, indent, br_depth.strict_add(1));
+            tkn_field("close", close, Some(syn), indent);
         }
 
         Expr::Type(inner) => {
             let TypeExpr { name, or_ty } = &**inner;
             header("Type");
-
-            field("name", indent);
+            tkn_field("name", name, None, indent);
             if let Some(OrType { pipe, ty }) = or_ty {
-                println!(
-                    "{} {} {}",
-                    SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name),
-                    SYNTAX_STYLE_ANSI[pipe.syntax()].style_dbg(pipe),
-                    SYNTAX_STYLE_ANSI[ty.syntax()].style_dbg(ty)
-                );
-            } else {
-                println!("{}", SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name));
+                tkn_field("pipe", pipe, None, indent);
+                tkn_field("  ty", ty, None, indent);
             }
         }
 
         Expr::FnCall(inner) => {
-            let FnCall {
-                func,
-                open,
-                args,
-                close,
-            } = &**inner;
-            let style = SYNTAX_STYLE_ANSI[Syntax::Bracket(br_depth)];
-
+            let FnCall { .. } = &**inner;
             header("FnCall");
 
-            field("func", indent);
-            match func {
-                grammar::ast::FnSource::Ident(name) => {
-                    println!("{}", SYNTAX_STYLE_ANSI[name.syntax()].style_dbg(name));
-                }
-                // TODO: this is copied from elsewhere in this function
-                grammar::ast::FnSource::Group(Grouping { open, expr, close }) => {
-                    let style = SYNTAX_STYLE_ANSI[Syntax::Bracket(br_depth)];
-
-                    header("Grouping");
-
-                    field(" open", indent);
-                    println!("{}", style.style_dbg(open));
-
-                    let field_indent = field(" expr", indent);
-                    print_ast(expr, field_indent, br_depth.strict_add(1));
-
-                    field("close", indent);
-                    println!("{}", style.style_dbg(close));
-                }
-            }
-
-            field("open", indent);
-            println!("{}", style.style_dbg(open));
-
-            // TODO: args
-
-            field("close", indent);
-            println!("{}", style.style_dbg(open));
+            // TODO
         }
     }
 }

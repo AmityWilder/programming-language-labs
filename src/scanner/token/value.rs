@@ -1,5 +1,6 @@
 //! [`Value`] of tokens
 
+pub use super::{keyword::Keyword, punc::Punctuation};
 use crate::{
     error::{ErrorType, NumErrorKind},
     scanner::{
@@ -7,7 +8,7 @@ use crate::{
             BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX, TEXT_DELIM,
             UNSIGNED_SUFFIX,
         },
-        token::{escape_char, escape_seq, keyword::Keyword, punc::Punctuation},
+        token::{escape_char, escape_seq},
     },
 };
 use std::range::Range;
@@ -22,10 +23,12 @@ pub struct CharLiteral {
     pub is_escaped: bool,
 }
 
-/// No-alloc version of [`StringLiteral`]
+/// Non-allocated version of [`LiteralText`]
+///
+/// Exists purely to provide member functions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct TextLiteral<'src> {
-    /// The string literal without delimiters - the value if it has no escapes.
+    /// The string literal without delimiters - the value, if it has no escapes.
     /// May contain unconverted escape sequences
     pub content: &'src str,
 }
@@ -36,17 +39,17 @@ impl<'src> TextLiteral<'src> {
         self.content.contains(ESCAPE)
     }
 
-    /// Process the [`TextLiteral`] into a [`StringLiteral`]
-    pub fn process(&self) -> Result<StringLiteral, ErrorType<'src>> {
-        StringLiteral::try_from(*self)
+    /// Process the [`TextLiteral`] into [`LiteralText`]
+    pub fn process(&self) -> Result<LiteralText, ErrorType<'src>> {
+        LiteralText::try_from(*self)
     }
 }
 
 /// Information about a string literal
 ///
-/// Allocating version of [`StrLiteral`]
+/// Allocated version of [`TextLiteral`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct StringLiteral {
+pub struct LiteralText {
     /// The text content of the string literal; escape sequences converted and delimiters excluded.
     pub text: String,
 
@@ -54,7 +57,7 @@ pub struct StringLiteral {
     pub escapes: Vec<Range<usize>>,
 }
 
-impl<'src> TryFrom<TextLiteral<'src>> for StringLiteral {
+impl<'src> TryFrom<TextLiteral<'src>> for LiteralText {
     type Error = ErrorType<'src>;
 
     fn try_from(value: TextLiteral<'src>) -> Result<Self, Self::Error> {
@@ -88,12 +91,12 @@ impl<'src> TryFrom<TextLiteral<'src>> for StringLiteral {
                 prev_end = range.end;
             }
 
-            Ok(StringLiteral {
+            Ok(LiteralText {
                 text: processed,
                 escapes,
             })
         } else {
-            Ok(StringLiteral {
+            Ok(LiteralText {
                 text: value.content.to_string(),
                 escapes: Vec::new(),
             })
