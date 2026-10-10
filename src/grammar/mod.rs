@@ -14,6 +14,9 @@ pub mod ast;
 pub mod ast_iter;
 pub mod fmt;
 
+#[cfg(test)]
+pub mod tests;
+
 macro_rules! match_token {
     ($($variant:ident$(($pattern:pat))?)|+) => {
         |token| matches!(token.val, $($crate::scanner::token::value::LexValue::$variant$(($pattern))?)|+)
@@ -443,86 +446,5 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 break;
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::scanner::tokenize;
-
-    #[test]
-    fn test_parse0() {
-        const SOURCE: &str = "5 + -(7 / 8) * 3";
-        let expr = parse(
-            SOURCE,
-            tokenize(SOURCE).map(|item| item.expect("this example should not have any lex errors")),
-        )
-        .collect::<Result<Vec<_>, _>>()
-        .expect("this example should be a valid expression");
-        assert_eq!(
-            expr.as_slice(),
-            &[Expr::binary(Binary {
-                lhs: Expr::literal(Token {
-                    lex: "5",
-                    val: LexValue::SIntLiteral(5),
-                    mac: None
-                }),
-                op: Token {
-                    lex: "+",
-                    val: LexValue::Punctuation(Punctuation::Add),
-                    mac: None
-                },
-                rhs: Expr::binary(Binary {
-                    lhs: Expr::unary(Unary {
-                        side: OpSide::Right,
-                        op: Token {
-                            lex: "-",
-                            val: LexValue::Punctuation(Punctuation::SubNeg),
-                            mac: None
-                        },
-                        operand: Expr::grouping(Grouping {
-                            open: Token {
-                                lex: "(",
-                                val: LexValue::Punctuation(Punctuation::LParen),
-                                mac: None
-                            },
-                            expr: Expr::binary(Binary {
-                                lhs: Expr::literal(Token {
-                                    lex: "7",
-                                    val: LexValue::SIntLiteral(7),
-                                    mac: None
-                                }),
-                                op: Token {
-                                    lex: "/",
-                                    val: LexValue::Punctuation(Punctuation::Div),
-                                    mac: None
-                                },
-                                rhs: Expr::literal(Token {
-                                    lex: "8",
-                                    val: LexValue::SIntLiteral(8),
-                                    mac: None
-                                })
-                            }),
-                            close: Token {
-                                lex: ")",
-                                val: LexValue::Punctuation(Punctuation::RParen),
-                                mac: None
-                            }
-                        })
-                    }),
-                    op: Token {
-                        lex: "*",
-                        val: LexValue::Punctuation(Punctuation::Mul),
-                        mac: None
-                    },
-                    rhs: Expr::Literal(Token {
-                        lex: "3",
-                        val: LexValue::SIntLiteral(3),
-                        mac: None
-                    })
-                })
-            })]
-        );
     }
 }
