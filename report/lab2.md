@@ -20,7 +20,7 @@ conversion -> primary ( "-:>" | "=:>" ) type_expression ;
 primary -> literal | group ;
 literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | TEXT ;
 group -> "(" expression ")" ;
-type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" "fail" )? ;
+type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" ( "fail" | "none" | "nevr" ) )? ;
 ```
 
 UNDER CONSTRUCTION:
