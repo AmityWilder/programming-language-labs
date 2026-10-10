@@ -81,15 +81,9 @@ impl LispDisplay for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { name, or_ty } = self;
         if let Some(OrType { pipe, ty }) = or_ty {
-            parenthesize!(
-                f,
-                pipe.lex,
-                crate::SYNTAX_STYLE_ANSI[Syntax::Typename].style(name.lex),
-                crate::SYNTAX_STYLE_ANSI[Syntax::Typename].style(ty.lex)
-            )
+            parenthesize!(f, pipe.lex, name.lex, ty.lex)
         } else {
-            let ty = crate::SYNTAX_STYLE_ANSI[Syntax::Typename];
-            std::fmt::Display::fmt(&ty.style(name.lex), f)
+            std::fmt::Display::fmt(name.lex, f)
         }
     }
 }

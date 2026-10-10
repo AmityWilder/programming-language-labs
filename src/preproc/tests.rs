@@ -2,6 +2,9 @@ use super::*;
 use crate::scanner::Scanner;
 use std::range::Range;
 
+/// Outputs the provided pattern, or a `_` if no pattern is present.
+///
+/// Intended for use with optional (`$()?`) patterns.
 macro_rules! or_discard {
     () => {
         _
@@ -12,6 +15,9 @@ macro_rules! or_discard {
     };
 }
 
+/// Outputs the provided tokens wrapped in a [`Some`], or a [`None`] if no tokens are present.
+///
+/// Intended for use with optional (`$()?` or `$()*`) patterns.
 macro_rules! optional {
     () => {
         None
@@ -22,13 +28,33 @@ macro_rules! optional {
     };
 }
 
+/// 1. Concatenates the lexemes of the first array of tokens and then asserts that a scanner will produce them.
+/// 2. Defines any requested local variables.
+/// 3. Calls [`preprocess`] on the token stream, asserting the output is equal to the second array of tokens.
+/// 4. Finally, performs any additional assertions provided after the second array.
+///
+/// Tokens may be preceded with `@ name:` to create a binding to that token, for aid in creating assertions.
+///
+/// ```no_run
+/// spoof_tokens! {
+///     [/* tokens for scanner */]
+///
+///     /* local variables */
+///
+///     [/* expected preprocessor result */]
+///
+///     (/* binding for source code variable */) {
+///         /* extra assertions */
+///     }
+/// }
+/// ```
 macro_rules! spoof_tokens {
     (
         [$(
             $(@ $marker:ident:)?
             (
                 $lex:expr,
-                $Variant:ident$(($val:expr))?$(.$SubVariant:ident)? $(,)?
+                $Variant:ident$(($val:expr))?$(::$SubVariant:ident)? $(,)?
             )
         ),* $(,)?],
 
@@ -41,7 +67,7 @@ macro_rules! spoof_tokens {
                     $(@ $pp_marker:ident:)?
                     (
                         $pp_lex:expr,
-                        $PpVariant:ident$(($pp_val:expr))?$(.$PpSubVariant:ident)?
+                        $PpVariant:ident$(($pp_val:expr))?$(::$PpSubVariant:ident)?
                         $(, in $macro_range:expr $(, as ($idx:expr, $name:expr $(,)?))? $(,)?)?
                     )
                 )?
@@ -107,15 +133,15 @@ macro_rules! spoof_tokens {
 fn test_strip_definitions() {
     spoof_tokens! {
         [
-            ("def", Keyword.Def),
+            ("def", Keyword::Def),
             (" ", Whitespace),
             (r"\foo", Macro),
-            ("(", Punctuation.LParen),
-            (")", Punctuation.RParen),
+            ("(", Punctuation::LParen),
+            (")", Punctuation::RParen),
             (" ", Whitespace),
-            ("{", Punctuation.LBrace),
+            ("{", Punctuation::LBrace),
             ("6", SIntLiteral(6)),
-            ("}", Punctuation.RBrace),
+            ("}", Punctuation::RBrace),
         ],
 
         [],
@@ -128,15 +154,15 @@ fn test_strip_definitions() {
 fn test_noarg() {
     spoof_tokens! {
         [
-            ("def", Keyword.Def),
+            ("def", Keyword::Def),
             (" ", Whitespace),
             (r"\foo", Macro),
-            ("(", Punctuation.LParen),
-            (")", Punctuation.RParen),
+            ("(", Punctuation::LParen),
+            (")", Punctuation::RParen),
             (" ", Whitespace),
-            ("{", Punctuation.LBrace),
+            ("{", Punctuation::LBrace),
             @ body_token: ("6", SIntLiteral(6)),
-            ("}", Punctuation.RBrace),
+            ("}", Punctuation::RBrace),
             ("\n", Whitespace),
             @ macro_call: (r"\foo", Macro),
         ],
@@ -156,21 +182,21 @@ fn test_noarg() {
 fn test_arg() {
     spoof_tokens! {
         [
-            ("def", Keyword.Def),
+            ("def", Keyword::Def),
             (" ", Whitespace),
             (r"\foo", Macro),
-            ("(", Punctuation.LParen),
+            ("(", Punctuation::LParen),
             ("$x", MacroParam),
-            (")", Punctuation.RParen),
+            (")", Punctuation::RParen),
             (" ", Whitespace),
-            ("{", Punctuation.LBrace),
+            ("{", Punctuation::LBrace),
             ("$x", MacroParam),
-            ("}", Punctuation.RBrace),
+            ("}", Punctuation::RBrace),
             ("\n", Whitespace),
             @ macro_start: (r"\foo", Macro),
-            ("{", Punctuation.LBrace),
+            ("{", Punctuation::LBrace),
             @ arg_token: ("9", SIntLiteral(9)),
-            @ macro_end: ("}", Punctuation.RBrace),
+            @ macro_end: ("}", Punctuation::RBrace),
         ],
 
         let expansion_range = Range::from(macro_start.lex_range(source).start..macro_end.lex_range(source).end);
@@ -190,29 +216,29 @@ fn test_arg() {
 fn test_multiarg() {
     spoof_tokens! {
         [
-            ("def", Keyword.Def),
+            ("def", Keyword::Def),
             (" ", Whitespace),
             (r"\foo", Macro),
-            ("(", Punctuation.LParen),
+            ("(", Punctuation::LParen),
             ("$x", MacroParam),
-            (",", Punctuation.Comma),
+            (",", Punctuation::Comma),
             (" ", Whitespace),
             ("$y", MacroParam),
-            (")", Punctuation.RParen),
+            (")", Punctuation::RParen),
             (" ", Whitespace),
-            ("{", Punctuation.LBrace),
+            ("{", Punctuation::LBrace),
             ("$x", MacroParam),
-            ("+", Punctuation.Add),
+            ("+", Punctuation::Add),
             ("$y", MacroParam),
-            ("}", Punctuation.RBrace),
+            ("}", Punctuation::RBrace),
             ("\n", Whitespace),
             @ macro_start: (r"\foo", Macro),
-            ("{", Punctuation.LBrace),
+            ("{", Punctuation::LBrace),
             @ arg1_token: ("a", Identifier),
-            ("}", Punctuation.RBrace),
-            ("{", Punctuation.LBrace),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
             @ arg2_token: ("b", Identifier),
-            @ macro_end: ("}", Punctuation.RBrace),
+            @ macro_end: ("}", Punctuation::RBrace),
         ],
 
         let expansion_range = Range {
@@ -223,7 +249,7 @@ fn test_multiarg() {
         [
             Ok(("\n", Whitespace)),
             Ok(@ preproc_arg1: ("a", Identifier, in expansion_range, as (0, "$x"))),
-            Ok(("+", Punctuation.Add, in expansion_range)),
+            Ok(("+", Punctuation::Add, in expansion_range)),
             Ok(@ preproc_arg2: ("b", Identifier, in expansion_range, as (1, "$y"))),
         ],
 
@@ -238,35 +264,35 @@ fn test_multiarg() {
 fn test_nested() {
     spoof_tokens! {
         [
-            ("def", Keyword.Def),
+            ("def", Keyword::Def),
             (" ", Whitespace),
             (r"\foo", Macro),
-            ("(", Punctuation.LParen),
+            ("(", Punctuation::LParen),
             ("$x", MacroParam),
-            (",", Punctuation.Comma),
+            (",", Punctuation::Comma),
             (" ", Whitespace),
             ("$y", MacroParam),
-            (")", Punctuation.RParen),
+            (")", Punctuation::RParen),
             (" ", Whitespace),
-            ("{", Punctuation.LBrace),
+            ("{", Punctuation::LBrace),
             ("$x", MacroParam),
-            ("+", Punctuation.Add),
+            ("+", Punctuation::Add),
             ("$y", MacroParam),
-            ("}", Punctuation.RBrace),
+            ("}", Punctuation::RBrace),
             ("\n", Whitespace),
             @ macro_start: (r"\foo", Macro),
-            ("{", Punctuation.LBrace),
+            ("{", Punctuation::LBrace),
             @ nest_start: (r"\foo", Macro),
-            ("{", Punctuation.LBrace),
+            ("{", Punctuation::LBrace),
             @ arg1_token: ("a", Identifier),
-            ("}", Punctuation.RBrace),
-            ("{", Punctuation.LBrace),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
             @ arg2_token: ("b", Identifier),
-            @ nest_end: ("}", Punctuation.RBrace),
-            ("}", Punctuation.RBrace),
-            ("{", Punctuation.LBrace),
+            @ nest_end: ("}", Punctuation::RBrace),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
             @ arg3_token: ("c", Identifier),
-            @ macro_end: ("}", Punctuation.RBrace),
+            @ macro_end: ("}", Punctuation::RBrace),
         ],
 
         let expansion_range = Range {
@@ -281,9 +307,9 @@ fn test_nested() {
         [
             Ok(("\n", Whitespace)),
             Ok(@ preproc_arg1: ("a", Identifier, in nested_range, as (0, "$x"))),
-            Ok(("+", Punctuation.Add, in nested_range)),
+            Ok(("+", Punctuation::Add, in nested_range)),
             Ok(@ preproc_arg2: ("b", Identifier, in nested_range, as (1, "$y"))),
-            Ok(("+", Punctuation.Add, in expansion_range)),
+            Ok(("+", Punctuation::Add, in expansion_range)),
             Ok(@ preproc_arg3: ("c", Identifier, in expansion_range, as (1, "$y"))),
         ],
 

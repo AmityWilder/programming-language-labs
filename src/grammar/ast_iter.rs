@@ -231,12 +231,7 @@ impl<'src> Expr<'src> {
             }
 
             Expr::FnCall(inner) => {
-                let FnCall {
-                    func,
-                    open,
-                    args,
-                    close,
-                } = &**inner;
+                let FnCall { .. } = &**inner;
                 todo!()
             }
         }
