@@ -1,5 +1,7 @@
 //! # Batscript
 //!
+//! A scripting language written in Rust.
+//!
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
@@ -61,13 +63,11 @@
 // )]
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
-use grammar::ast::Ternary;
-
 use crate::{
     error::ContextError,
     eval::{RunValue, evaluate},
     grammar::{
-        ast::{Binary, Expr, FnCall, Grouping, OrType, TypeExpr, Unary},
+        ast::{Binary, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
         ast_iter::semantic,
         fmt::lisp::Lisp,
         parse,
@@ -240,13 +240,6 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
                 tkn_field("pipe", pipe, None, indent);
                 tkn_field("  ty", ty, None, indent);
             }
-        }
-
-        Expr::FnCall(inner) => {
-            let FnCall { .. } = &**inner;
-            header("FnCall");
-
-            // TODO
         }
     }
 }

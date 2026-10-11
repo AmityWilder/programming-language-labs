@@ -2,7 +2,6 @@
 
 use crate::{
     error::{ContextError, ErrorType, ExpectedToken, OpSide},
-    grammar::ast::{ArgList, ArgList1, FnCall, FnSource},
     scanner::{
         BadBracketCombo, Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
@@ -221,21 +220,14 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         }
     }
 
-    /// `exponent -> fn_call_or_conversion ( "**" fn_call_or_conversion )*`
+    /// `exponent -> conversion ( "**" conversion )*`
     fn exponent(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.fn_call_or_conversion()?;
+        let mut expr = self.conversion()?;
         while let Some(op) = self.pull_if(match_token!(Punctuation(Punctuation::Pow))) {
-            let rhs = self.fn_call_or_conversion()?;
+            let rhs = self.conversion()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
         Ok(expr)
-    }
-
-    /// `fn_call_or_conversion -> fn_call | conversion`
-    fn fn_call_or_conversion(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        self.conversion()
-            .or_else(|_| self.fn_call().map(Expr::fn_call))
-        // TODO: give a more specific error than just the fn call one
     }
 
     /// `conversion -> primary ( "-:>" | "=:>" ) type_expression`
@@ -341,67 +333,6 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(TypeExpr {
             name,
             or_ty: or_ty.transpose()?,
-        })
-    }
-
-    /// `fn_source -> IDENTIFIER | group`
-    fn fn_source(&mut self) -> Result<FnSource<'src>, ContextError<'src>> {
-        self.pull_if(match_token!(Identifier | Callable))
-            .map(FnSource::Ident)
-            .or_else(|| self.group().ok().map(FnSource::Group))
-            .ok_or_else(|| {
-                ContextError::missing_or_unexpected(
-                    self.tokens.peek().copied(),
-                    self.source,
-                    ExpectedToken::FnSource,
-                )
-            })
-    }
-
-    /// `arg_list1 -> ( "," expression )*`
-    fn arg_list1(&mut self) -> Result<ArgList1<'src>, ContextError<'src>> {
-        Ok(ArgList1 {
-            comma: self.try_pull(
-                match_token!(Punctuation(Punctuation::Comma)),
-                ExpectedToken::CommaOrRParen,
-            )?,
-            arg: self.expression()?,
-            rest: self.arg_list1().ok().map(Box::new),
-        })
-    }
-
-    /// `arg_list -> expression ( arg_list1 )* ( "," )?`
-    fn arg_list(&mut self) -> Result<ArgList<'src>, ContextError<'src>> {
-        Ok(ArgList {
-            first: self.expression()?,
-            rest: self.arg_list1().ok(),
-            trailing_comma: self.pull_if(match_token!(Punctuation(Punctuation::Comma))),
-        })
-    }
-
-    /// `fn_call -> fn_source "(" ( expr ( "," expr )* ( "," )? )? ")"`
-    fn fn_call(&mut self) -> Result<FnCall<'src>, ContextError<'src>> {
-        let func = self.fn_source()?;
-        let open = self.try_pull(
-            match_token!(Punctuation(Punctuation::LParen)),
-            ExpectedToken::LParen,
-        )?;
-        let (args, close) =
-            if let Some(close) = self.pull_if(match_token!(Punctuation(Punctuation::LParen))) {
-                (None, close)
-            } else {
-                let args = self.arg_list()?;
-                let close = self.try_pull(
-                    match_token!(Punctuation(Punctuation::LParen)),
-                    ExpectedToken::CommaOrRParen,
-                )?;
-                (Some(args), close)
-            };
-        Ok(FnCall {
-            func,
-            open,
-            args,
-            close,
         })
     }
 

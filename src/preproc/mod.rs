@@ -295,7 +295,7 @@ impl<'src> Preprocessor<'src> {
         let def = self
             .macros
             .get(&macro_name.lex)
-            .expect("should have returned an error at the start of the fn");
+            .expect("should have returned an error while counting parameters");
 
         self.tokens.prepend(
             def.substitute(args)

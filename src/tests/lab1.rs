@@ -432,7 +432,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::SIntLiteral(0x9F),
+                        val: LexValue::SIntLiteral(0x9f),
                         mac: None
                     })]
                 );
