@@ -1,4 +1,4 @@
-//! [`Value`] of tokens
+//! [`LexValue`] of tokens
 
 pub use super::{keyword::Keyword, punc::Punctuation};
 use crate::{
@@ -104,7 +104,7 @@ impl<'src> TryFrom<TextLiteral<'src>> for LiteralText {
     }
 }
 
-/// The value represented by a [`Token`]
+/// The value represented by a [`Token`](super::Token)
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum LexValue<'src> {
     // ignored

@@ -1,16 +1,13 @@
-use std::range::Range;
-
 use crate::{
     error::{ContextError, OpSide},
-    grammar::{Binary, Expr, Grouping, OrType, TypeExpr, Unary, ast::FnCall},
+    grammar::ast::{Binary, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
     highlight::{TokenHighlight, syntax::Syntax},
     scanner::{
         Scanner,
         token::{ExpansionData, Token, punc::Punctuation, value::LexValue},
     },
 };
-
-use super::ast::Ternary;
+use std::range::Range;
 
 #[derive(Debug, Clone)]
 pub enum ExprOrToken<'src, 'expr> {
@@ -54,9 +51,6 @@ pub enum ExprIterKind<'src, 'expr> {
         name: Option<&'expr Token<'src>>,
         pipe: Option<&'expr Token<'src>>,
         or_ty: Option<&'expr Token<'src>>,
-    },
-    FnCall {
-        // TODO
     },
 }
 
@@ -140,8 +134,6 @@ impl<'src, 'expr> Iterator for ExprIter<'src, 'expr> {
                         .take()
                         .map(|x| ExprOrToken::Semantic(x, Syntax::Typename))
                 }),
-
-            ExprIterKind::FnCall { .. } => todo!(),
         }
     }
 }
@@ -228,11 +220,6 @@ impl<'src> Expr<'src> {
                     },
                     depth,
                 }
-            }
-
-            Expr::FnCall(inner) => {
-                let FnCall { .. } = &**inner;
-                todo!()
             }
         }
     }

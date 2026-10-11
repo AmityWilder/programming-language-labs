@@ -1,9 +1,6 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    grammar::{
-        Binary, Expr, Grouping, OrType, TypeExpr, Unary,
-        ast::{ArgList, ArgList1, FnCall, FnSource, Ternary},
-    },
+    grammar::ast::{Binary, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
     scanner::token::Token,
 };
@@ -88,40 +85,6 @@ impl LispDisplay for TypeExpr<'_> {
     }
 }
 
-impl LispDisplay for FnCall<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { func, args, .. } = self;
-        f.write_str("(")?;
-        match func {
-            FnSource::Ident(name) => {
-                if f.alternate() {
-                    std::fmt::Display::fmt(
-                        &crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(name.lex),
-                        f,
-                    )?;
-                } else {
-                    f.write_str(name.lex)?;
-                }
-            }
-            FnSource::Group(grouping) => LispDisplay::fmt(grouping, f)?,
-        }
-        if let Some(ArgList { first, rest, .. }) = args {
-            f.write_str(" ")?;
-            LispDisplay::fmt(first, f)?;
-            let mut rest = rest.as_ref();
-            while let Some(ArgList1 {
-                arg, rest: next, ..
-            }) = rest
-            {
-                f.write_str(" ")?;
-                LispDisplay::fmt(arg, f)?;
-                rest = next.as_deref();
-            }
-        }
-        f.write_str(")")
-    }
-}
-
 impl LispDisplay for Expr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -138,7 +101,6 @@ impl LispDisplay for Expr<'_> {
             }
             Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
             Self::Type(inner) => LispDisplay::fmt(&**inner, f),
-            Self::FnCall(inner) => LispDisplay::fmt(&**inner, f),
         }
     }
 }

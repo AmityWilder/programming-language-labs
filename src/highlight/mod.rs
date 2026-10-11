@@ -24,7 +24,7 @@ pub mod syntax;
 #[cfg(test)]
 pub mod tests;
 
-/// Remaps input ranges to be offset by the length of a delimiter ([`CHAR_DELIM`]/[`STR_DELIM`])
+/// Remaps input ranges to be offset by the length of a delimiter ([`CHAR_DELIM`]/[`TEXT_DELIM`])
 const fn remap_subtoken_range(Range { start, end }: Range<usize>) -> Range<usize> {
     const ASCII_DELIM_LEN: usize = 1;
     const {

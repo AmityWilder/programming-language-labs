@@ -995,7 +995,5 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
 
             _ => unimplemented!(),
         },
-
-        Expr::FnCall(_) => todo!(),
     }
 }

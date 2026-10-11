@@ -102,7 +102,6 @@ impl<'src> AstNode<'src> for Binary<'src> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unary<'src> {
-    /// Promises to use [`Punctuation::Neg`] instead of [`Punctuation::Sub`]
     pub op: Token<'src>,
     pub operand: Expr<'src>,
     pub side: OpSide,
@@ -126,8 +125,10 @@ impl<'src> AstNode<'src> for Unary<'src> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Grouping<'src> {
+    /// `(`
     pub open: Token<'src>,
     pub expr: Expr<'src>,
+    /// `)`
     pub close: Token<'src>,
 }
 
@@ -165,10 +166,10 @@ impl<'src> AstNode<'src> for OrType<'src> {
 /// A concrete type
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeExpr<'src> {
-    pub name: Token<'src>,
-    pub or_ty: Option<OrType<'src>>,
     // TODO: namespace?
+    pub name: Token<'src>,
     // TODO: generic arguments?
+    pub or_ty: Option<OrType<'src>>,
 }
 
 impl<'src> AstNode<'src> for TypeExpr<'src> {
@@ -190,100 +191,6 @@ impl<'src> AstNode<'src> for TypeExpr<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FnSource<'src> {
-    Ident(Token<'src>),
-    Group(Grouping<'src>),
-}
-
-impl<'src> AstNode<'src> for FnSource<'src> {
-    fn range(&self, source: &'src str) -> Range<usize> {
-        match self {
-            Self::Ident(inner) => inner.range(source),
-            Self::Group(inner) => inner.range(source),
-        }
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        match self {
-            Self::Ident(inner) => inner.expansion(source),
-            Self::Group(inner) => inner.expansion(source),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ArgList1<'src> {
-    pub comma: Token<'src>,
-    pub arg: Expr<'src>,
-    pub rest: Option<Box<ArgList1<'src>>>,
-}
-
-impl<'src> AstNode<'src> for ArgList1<'src> {
-    fn range(&self, source: &'src str) -> Range<usize> {
-        if let Some(rest) = &self.rest {
-            (&self.comma, &**rest).range(source)
-        } else {
-            (&self.comma, &self.arg).range(source)
-        }
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        if let Some(rest) = &self.rest {
-            (&self.comma, &**rest).expansion(source)
-        } else {
-            (&self.comma, &self.arg).expansion(source)
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ArgList<'src> {
-    pub first: Expr<'src>,
-    pub rest: Option<ArgList1<'src>>,
-    pub trailing_comma: Option<Token<'src>>,
-}
-
-impl<'src> AstNode<'src> for ArgList<'src> {
-    fn range(&self, source: &'src str) -> Range<usize> {
-        if let Some(trailing_comma) = &self.trailing_comma {
-            (&self.first, trailing_comma).range(source)
-        } else if let Some(rest) = &self.rest {
-            (&self.first, rest).range(source)
-        } else {
-            self.first.range(source)
-        }
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        if let Some(trailing_comma) = &self.trailing_comma {
-            (&self.first, trailing_comma).expansion(source)
-        } else if let Some(rest) = &self.rest {
-            (&self.first, rest).expansion(source)
-        } else {
-            self.first.expansion(source)
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct FnCall<'src> {
-    pub func: FnSource<'src>,
-    pub open: Token<'src>,
-    pub args: Option<ArgList<'src>>,
-    pub close: Token<'src>,
-}
-
-impl<'src> AstNode<'src> for FnCall<'src> {
-    fn range(&self, source: &'src str) -> Range<usize> {
-        (&self.func, &self.close).range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.func, &self.close).expansion(source)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'src> {
     Ternary(Box<Ternary<'src>>),
     Binary(Box<Binary<'src>>),
@@ -291,7 +198,6 @@ pub enum Expr<'src> {
     Literal(Token<'src>),
     Grouping(Box<Grouping<'src>>),
     Type(Box<TypeExpr<'src>>),
-    FnCall(Box<FnCall<'src>>),
 }
 
 impl<'src> AstNode<'src> for Expr<'src> {
@@ -303,7 +209,6 @@ impl<'src> AstNode<'src> for Expr<'src> {
             Self::Literal(token) => token.range(source),
             Self::Grouping(inner) => inner.range(source),
             Self::Type(inner) => inner.range(source),
-            Self::FnCall(inner) => inner.range(source),
         }
     }
 
@@ -315,7 +220,6 @@ impl<'src> AstNode<'src> for Expr<'src> {
             Self::Literal(token) => token.expansion(source),
             Self::Grouping(inner) => inner.expansion(source),
             Self::Type(inner) => inner.expansion(source),
-            Self::FnCall(inner) => inner.expansion(source),
         }
     }
 }
@@ -343,9 +247,5 @@ impl<'src> Expr<'src> {
 
     pub fn type_expr(inner: TypeExpr<'src>) -> Self {
         Self::Type(Box::new(inner))
-    }
-
-    pub fn fn_call(inner: FnCall<'src>) -> Self {
-        Self::FnCall(Box::new(inner))
     }
 }
