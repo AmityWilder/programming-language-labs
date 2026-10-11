@@ -483,7 +483,7 @@ macro_rules! CtxErrType {{
 
 CtxErrType! {
 /// The kind of error describing a [`ContextError`]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ErrorType<'src> {
     // ----------------------------
     // lex
@@ -895,7 +895,7 @@ pub enum ErrorType<'src> {
 impl std::error::Error for ErrorType<'_> {}
 
 /// A code error with the range of the error in the source code
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct ContextError<'src> {
     /// A string view of the FULL, ENTIRE source code
     pub source: &'src str,
@@ -954,6 +954,47 @@ impl<'src> ContextError<'src> {
     {
         self.err = f(self.err);
         self
+    }
+
+    pub fn to_bracket_mismatch(self, open_bracket: Bracket, open_range: Range<usize>) -> Self {
+        self.map_type(|e| match e {
+            ErrorType::UnexpectedToken {
+                actual: actual @ (")" | "]" | "}"), // Sorry this doesn't use Value anymore, Token is huge now...
+                expect,
+            } => ErrorType::IncorrectCloseBracket {
+                open_range,
+                failure: BadBracketCombo::new(
+                    open_bracket,
+                    match actual {
+                        ")" => Bracket::Paren,
+                        "]" => Bracket::Brack,
+                        "}" => Bracket::Brace,
+                        _ => unreachable!("guarded by match arm"),
+                    },
+                )
+                .unwrap_or_else(|| {
+                    let open_lex = self
+                        .source
+                        .get(open_range)
+                        .expect("open_range should be a range in source");
+                    panic!(
+                        "invalid error: brackets match; is this the wrong error?\
+                            \n expected: {expect:?}\
+                            \n open: {open_lex:?} (source[{open_range:?}])\
+                            \n close: {actual:?}"
+                    )
+                }),
+            },
+
+            ErrorType::MissingToken { .. } | ErrorType::UnexpectedToken { .. } => {
+                ErrorType::MissingCloseBracket {
+                    open_range,
+                    expect: Bracket::Brace,
+                }
+            }
+
+            _ => unreachable!(),
+        })
     }
 
     /// A token was found but not the right kind

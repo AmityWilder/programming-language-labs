@@ -286,27 +286,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             ExpectedToken::ExprOrRParen,
         )
         .map(move |close| Grouping { open, expr, close })
-        .map_err(|e| {
-            e.map_type(|err| match err {
-                ErrorType::MissingToken { .. } => ErrorType::MissingCloseBracket {
-                    open_range: open.lex_range(self.source),
-                    expect: Bracket::Paren,
-                },
-
-                ErrorType::UnexpectedToken {
-                    actual: punc @ ("}" | "]"), .. // Sorry this doesn't use Value anymore, Token is huge now...
-                } => ErrorType::IncorrectCloseBracket {
-                    open_range: open.lex_range(self.source),
-                    failure: match punc {
-                        "}" => BadBracketCombo::ParenBrace,
-                        "]" => BadBracketCombo::ParenBrack,
-                        _ => unreachable!("guarded by outer match arm"),
-                    },
-                },
-
-                err => err,
-            })
-        })
+        .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))
     }
 
     /// `type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" ( "fail" | "none" | "nevr" ) )?`

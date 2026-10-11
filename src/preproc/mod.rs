@@ -8,33 +8,40 @@ use crate::{
         token::{ExpansionData, Token, keyword::Keyword, punc::Punctuation, value::LexValue},
     },
 };
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    range::Range,
+};
 
 #[cfg(test)]
 mod tests;
 
 /// Macro substitution
 #[derive(Debug, Clone)]
-struct MacroSub<'src, I> {
+struct MacroSubstitute<'src, I> {
     /// Mapping of the parameter names to the related argument tokens
     arg_map: Vec<(&'src str, Vec<Token<'src>>)>,
     /// The tokens of the macro definition
     tokens: I,
+    /// The [`ExpansionData::arg`] for [`Self::curr_arg`]
+    curr_param: (usize, &'src str),
     /// For flattening - the tokens of the argument currently being substituted
-    curr: ((usize, &'src str), std::vec::IntoIter<Token<'src>>),
+    curr_arg: std::vec::IntoIter<Token<'src>>,
 }
 
-impl<'src, I> Iterator for MacroSub<'src, I>
+impl<'src, I> MacroSubstitute<'src, I>
 where
     I: Iterator<Item = Token<'src>>,
 {
-    type Item = (Option<(usize, &'src str)>, Token<'src>);
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn visit(
+        &mut self,
+        step_curr: fn(&mut std::vec::IntoIter<Token<'src>>) -> Option<Token<'src>>,
+        step_token: fn(&mut I) -> Option<I::Item>,
+    ) -> Option<(Option<(usize, &'src str)>, Token<'src>)> {
         loop {
-            if let Some(token) = self.curr.1.next() {
-                break Some((Some(self.curr.0), token));
-            } else if let Some(token) = self.tokens.next() {
+            if let Some(token) = step_curr(&mut self.curr_arg) {
+                break Some((Some(self.curr_param), token));
+            } else if let Some(token) = step_token(&mut self.tokens) {
                 if token.val == LexValue::MacroParam
                     && let Some((pos, (name, arg))) = self
                         .arg_map
@@ -42,7 +49,8 @@ where
                         .enumerate()
                         .find(|(_, (name, _))| name == &token.lex)
                 {
-                    self.curr = ((pos, name), arg.clone().into_iter());
+                    self.curr_param = (pos, name);
+                    self.curr_arg = arg.clone().into_iter();
                 } else {
                     break Some((None, token));
                 }
@@ -51,6 +59,34 @@ where
             }
         }
     }
+}
+
+impl<'src, I> Iterator for MacroSubstitute<'src, I>
+where
+    I: Iterator<Item = Token<'src>>,
+{
+    type Item = (Option<(usize, &'src str)>, Token<'src>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.visit(Iterator::next, Iterator::next)
+    }
+}
+
+impl<'src, I> DoubleEndedIterator for MacroSubstitute<'src, I>
+where
+    I: DoubleEndedIterator<Item = Token<'src>>,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.visit(
+            DoubleEndedIterator::next_back,
+            DoubleEndedIterator::next_back,
+        )
+    }
+}
+
+impl<'src, I> std::iter::FusedIterator for MacroSubstitute<'src, I> where
+    I: std::iter::FusedIterator<Item = Token<'src>>
+{
 }
 
 /// A macro definition
@@ -67,34 +103,124 @@ impl<'src> MacroDef<'src> {
     fn substitute<'def, I>(
         &'def self,
         args: I,
-    ) -> MacroSub<'src, std::iter::Copied<std::slice::Iter<'def, Token<'src>>>>
+    ) -> MacroSubstitute<'src, std::iter::Copied<std::slice::Iter<'def, Token<'src>>>>
     where
         I: IntoIterator<IntoIter: ExactSizeIterator, Item = Vec<Token<'src>>>,
     {
         let args = args.into_iter();
         assert_eq!(args.len(), self.params.len(), "should be handled by caller");
         let arg_map = self.params.iter().copied().zip(args).collect::<Vec<_>>();
-        MacroSub {
+        MacroSubstitute {
             arg_map,
             tokens: self.tokens.iter().copied(),
             // HACK: this isn't a substr of source!
-            curr: ((0, ""), Vec::new().into_iter()),
+            curr_param: (0, ""),
+            curr_arg: Vec::new().into_iter(),
         }
     }
 }
 
-/// Consumes macros and converts them into token sequences
-#[derive(Debug, Clone)]
-pub struct Preprocessor<'src> {
+/// `param_rest_item -> "," MACRO_PARAM`
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct ParamRestItem<'src> {
+    pub comma: Token<'src>,
+    /// [`crate::scanner::token::value::LexValue::MacroParam`]
+    pub param: Token<'src>,
+}
+
+/// `param_list -> MACRO_PARAM ( param_rest_item )* ( "," )?`
+#[derive(Debug, Clone, PartialEq, Default)]
+struct ParamList<'src> {
+    /// [`crate::scanner::token::value::LexValue::MacroParam`]
+    pub first: Token<'src>,
+    pub rest: Vec<ParamRestItem<'src>>,
+    pub trailing_comma: Option<Token<'src>>,
+}
+
+/// `param_group -> "(" param_list ")"`
+#[derive(Debug, Clone, PartialEq, Default)]
+struct ParamGroup<'src> {
+    /// `(`
+    pub open: Token<'src>,
+    pub params: Option<ParamList<'src>>,
+    /// `)`
+    pub close: Token<'src>,
+}
+
+impl<'src> ParamGroup<'src> {
+    fn list(
+        self,
+    ) -> impl DoubleEndedIterator<Item = Token<'src>> + Clone + std::iter::FusedIterator {
+        self.params.into_iter().flat_map(|list| {
+            std::iter::once(list.first).chain(list.rest.into_iter().map(|item| item.param))
+        })
+    }
+}
+
+/// `macro_replacer -> "{" ( TOKEN )* "}"`
+#[derive(Debug, Clone, PartialEq, Default)]
+struct MacroReplacer<'src> {
+    /// `{`
+    pub open: Token<'src>,
+    pub content: Vec<Token<'src>>,
+    /// `}`
+    pub close: Token<'src>,
+}
+
+impl<'src> MacroReplacer<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        Range {
+            start: self.open.lex_range(source).start,
+            end: self.close.lex_range(source).end,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+enum ReplacerKind {
+    #[default]
+    Body,
+    Argument,
+}
+
+/// `macro_definition -> "def" MACRO param_group macro_body`
+#[derive(Debug, Clone, PartialEq, Default)]
+struct MacroDefinition<'src> {
+    /// `def`
+    pub def_kw: Token<'src>,
+    /// [`crate::scanner::token::value::LexValue::Macro`]
+    pub name: Token<'src>,
+    pub params: ParamGroup<'src>,
+    pub body: MacroReplacer<'src>,
+}
+
+/// `macro_expansion -> MACRO ( macro_argument )*`
+#[derive(Debug, Clone, PartialEq, Default)]
+struct MacroExpansion<'src> {
+    /// [`crate::scanner::token::value::LexValue::Macro`]
+    pub name: Token<'src>,
+    pub args: Vec<MacroReplacer<'src>>,
+}
+
+impl<'src> MacroExpansion<'src> {
+    fn range(&self, source: &'src str) -> Range<usize> {
+        let name_range = self.name.lex_range(source);
+        self.args.last().map_or(name_range, |last_arg| Range {
+            start: name_range.start,
+            end: last_arg.range(source).end,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+struct PreprocessorStream<'src> {
     /// The source code
     source: &'src str,
     /// The token stream (actively modified)
     tokens: VecDeque<Result<Token<'src>, ContextError<'src>>>,
-    /// Macro definitions (actively modified)
-    macros: HashMap<&'src str, MacroDef<'src>>,
 }
 
-impl<'src> Preprocessor<'src> {
+impl<'src> PreprocessorStream<'src> {
     /// Construct a new preprocessor over `tokens`
     fn new<I>(source: &'src str, tokens: I) -> Self
     where
@@ -103,21 +229,59 @@ impl<'src> Preprocessor<'src> {
         Self {
             source,
             tokens: VecDeque::from_iter(tokens),
-            macros: HashMap::new(),
         }
     }
-}
 
-impl<'src> Preprocessor<'src> {
+    /// Expect a token matching `p` and return [`None`] if it is not found.
+    ///
+    /// Includes whitespace and comments
+    fn pull_if_next<P>(&mut self, p: P) -> Option<Token<'src>>
+    where
+        P: FnOnce(&Token<'src>) -> bool,
+    {
+        // peek past ignored tokens without consuming them
+        self.tokens
+            .pop_front_if(|res| res.as_ref().is_ok_and(p))
+            .map(|res| res.expect("should be guarded by is_ok_and"))
+    }
+
+    /// Expect a token matching `p` and return [`None`] if it is not found.
+    ///
+    /// Ignores whitespace and comments, but only consumes them if a match is found.
+    fn pull_if<P>(&mut self, p: P) -> Option<Token<'src>>
+    where
+        P: FnOnce(&Token<'src>) -> bool,
+    {
+        // peek past ignored tokens without consuming them
+        self.tokens
+            .iter()
+            .enumerate()
+            .map_while(|(i, res)| res.ok().map(|token| (i, token)))
+            .find(|(_, token)| !matches!(token.val, LexValue::Whitespace | LexValue::Comment))
+            .filter(|(_, token)| {
+                println!("checking token {token:?}");
+                p(token)
+            })
+            .map(|(pos, _)| {
+                println!("  pulling");
+                drop(self.tokens.drain(..pos));
+                self.tokens
+                    .pop_front()
+                    .expect("should be guarded by first_not_ignored being Some")
+                    .expect("should be guarded by is_ok_and")
+            })
+    }
+
     /// Expect a token matching `p` and return an error if it is not found.
+    ///
     /// Ignores whitespace and comments.
-    fn require<P>(
+    fn try_pull<P>(
         &mut self,
         p: P,
         expecting: ExpectedToken,
     ) -> Result<Token<'src>, ContextError<'src>>
     where
-        P: FnOnce(Token<'src>) -> bool,
+        P: FnOnce(&Token<'src>) -> bool,
     {
         // clear out the ignored tokens
         while self
@@ -131,186 +295,214 @@ impl<'src> Preprocessor<'src> {
         {}
 
         // next item that isn't whitespace or a comment
-        match self.tokens.pop_front() {
-            Some(Ok(token)) if p(token) => Ok(token),
-
-            item => {
-                // put it back
-                if let Some(item) = item.clone() {
-                    self.tokens.push_front(item);
-                }
-                Err(ContextError::missing_or_unexpected(
-                    item.transpose()?,
-                    self.source,
-                    expecting,
-                ))
-            }
-        }
+        self.tokens
+            .pop_front_if(|res| res.as_ref().is_ok_and(p))
+            .map(|res| res.expect("guarded by is_ok_and"))
+            .ok_or_else(|| match self.tokens.front().copied().transpose() {
+                Ok(token) => ContextError::missing_or_unexpected(token, self.source, expecting),
+                Err(e) => e,
+            })
     }
 
-    /// Consume a macro definition (expects `def` keyword to have already been consumed)
-    fn macro_define(&mut self) -> Result<(), ContextError<'src>> {
-        let macro_name = self.require(match_token!(Macro), ExpectedToken::MacroIdent)?;
+    fn param_list(&mut self) -> Option<ParamList<'src>> {
+        self.pull_if(match_token!(MacroParam)).map(|first| {
+            let mut trailing_comma = None;
+            let rest = std::iter::from_fn(|| {
+                trailing_comma = self.pull_if(match_token!(Punctuation(Punctuation::Comma)));
+                if trailing_comma.is_some() {
+                    self.pull_if(match_token!(MacroParam))
+                        .map(|param| ParamRestItem {
+                            comma: trailing_comma
+                                .take()
+                                .expect("guarded by `trailing_comma.is_some()`"),
+                            param,
+                        })
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
-        _ = self.require(
+            ParamList {
+                first,
+                rest,
+                trailing_comma,
+            }
+        })
+    }
+
+    fn param_group(&mut self) -> Result<ParamGroup<'src>, ContextError<'src>> {
+        let open = self.try_pull(
             match_token!(Punctuation(Punctuation::LParen)),
             ExpectedToken::LParen,
         )?;
-
-        let mut params = Vec::new();
-        loop {
-            if !params.is_empty() {
-                match self
-                    .require(
-                        match_token!(Punctuation(Punctuation::Comma | Punctuation::RParen)),
-                        ExpectedToken::CommaOrRParen,
-                    )?
-                    .val
-                {
-                    LexValue::Punctuation(Punctuation::Comma) => (),
-                    LexValue::Punctuation(Punctuation::RParen) => break,
-
-                    _ => unreachable!(),
-                }
-            }
-
-            let token = self.require(
-                match_token!(MacroParam | Punctuation(Punctuation::RParen)),
-                ExpectedToken::MacroParamOrRParen,
-            )?;
-            match token.val {
-                LexValue::MacroParam => params.push(token.lex),
-                LexValue::Punctuation(Punctuation::RParen) => break,
-
-                _ => unreachable!(),
-            }
-        }
-
-        let open_brace = self.require(
-            match_token!(Punctuation(Punctuation::LBrace)),
-            ExpectedToken::MacroDefLBrace,
-        )?;
-
-        let mut def = Vec::new();
-        let mut depth: usize = 0;
-        loop {
-            let token = self.tokens.pop_front().ok_or_else(|| {
-                ContextError::error(
-                    self.source,
-                    None,
-                    None,
-                    ErrorType::MissingCloseBracket {
-                        open_range: open_brace.lex_range(self.source),
-                        expect: Bracket::Brace,
-                    },
-                )
-            })??;
-            match token.val {
-                LexValue::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
-                LexValue::Punctuation(Punctuation::RBrace) => {
-                    if let Some(n) = depth.checked_sub(1) {
-                        depth = n;
-                    } else {
-                        break;
-                    }
-                }
-                _ => (),
-            }
-            def.push(token);
-        }
-        // replace existing definition
-        _ = self.macros.insert(
-            macro_name.lex,
-            MacroDef {
-                params,
-                tokens: def,
-            },
-        );
-
-        Ok(())
+        let params = self.param_list();
+        let close = self
+            .try_pull(
+                match_token!(Punctuation(Punctuation::RParen)),
+                // HACK: we don't actually want an ExpectedToken error, we're going to replace it.
+                ExpectedToken::MacroIdent,
+            )
+            .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))?;
+        Ok(ParamGroup {
+            open,
+            params,
+            close,
+        })
     }
 
-    /// Expand a macro call into its substituted definition
-    fn macro_expand(&mut self, macro_name: Token<'src>) -> Result<(), ContextError<'src>> {
-        let mut macro_range = macro_name.lex_range(self.source);
-
-        let param_count = self
-            .macros
-            .get(&macro_name.lex)
-            .ok_or_else(|| {
-                ContextError::error(
-                    self.source,
-                    // TODO: why is this being duplicated?
-                    Some(macro_name.lex_range(self.source)),
-                    Some(ExpansionData {
-                        range: macro_range,
-                        arg: None, // TODO
-                    }),
-                    ErrorType::MacroUndefined,
-                )
-            })?
-            .params
-            .len();
-
-        let mut args = Vec::with_capacity(param_count);
-        for _ in 0..param_count {
-            let open_brace = self.require(
-                match_token!(Punctuation(Punctuation::LBrace)),
-                ExpectedToken::MacroArgLBrace,
-            )?;
-            let mut arg = Vec::new();
+    fn replacer(&mut self, kind: ReplacerKind) -> Result<MacroReplacer<'src>, ContextError<'src>> {
+        let open = self.try_pull(
+            match_token!(Punctuation(Punctuation::LBrace)),
+            match kind {
+                ReplacerKind::Argument => ExpectedToken::MacroArgLBrace,
+                ReplacerKind::Body => ExpectedToken::MacroDefLBrace,
+            },
+        )?;
+        let content = {
             let mut depth: usize = 0;
-            loop {
-                let token = self.tokens.pop_front().ok_or_else(|| {
-                    ContextError::error(
-                        self.source,
-                        None,
-                        Some(ExpansionData {
-                            range: macro_range,
-                            arg: None, // TODO
-                        }),
-                        ErrorType::MissingCloseBracket {
-                            open_range: open_brace.lex_range(self.source),
-                            expect: Bracket::Brace,
-                        },
-                    )
-                })??;
+            std::iter::from_fn(|| {
+                let res = self
+                    .tokens
+                    .pop_front()
+                    .ok_or_else(|| {
+                        ContextError::error(
+                            self.source,
+                            None,
+                            None,
+                            ErrorType::MissingCloseBracket {
+                                open_range: open.lex_range(self.source),
+                                expect: Bracket::Brace,
+                            },
+                        )
+                    })
+                    .flatten();
+                let token = match res {
+                    Ok(x) => x,
+                    Err(e) => return Some(Err(e)),
+                };
                 match token.val {
                     LexValue::Punctuation(Punctuation::LBrace) => depth = depth.strict_add(1),
                     LexValue::Punctuation(Punctuation::RBrace) => {
                         if let Some(n) = depth.checked_sub(1) {
                             depth = n;
                         } else {
-                            macro_range.end = token.lex_range(self.source).end;
-                            break;
+                            // put it back so we can consume it after
+                            self.tokens.push_front(res);
+                            return None;
                         }
                     }
                     _ => (),
                 }
-                arg.push(token);
-            }
-            args.push(arg);
+                Some(Ok(token))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+        };
+        let close = self
+            .try_pull(
+                match_token!(Punctuation(Punctuation::RBrace)),
+                // HACK: we don't actually want an ExpectedToken error, we're going to replace it.
+                ExpectedToken::MacroIdent,
+            )
+            .map_err(|e| e.to_bracket_mismatch(Bracket::Brace, open.lex_range(self.source)))?;
+        Ok(MacroReplacer {
+            open,
+            content,
+            close,
+        })
+    }
+
+    /// Will only produce [`Some`] if the **immediately next** token begins a macro definition.
+    ///
+    /// Sensitive to whitespace and comments
+    fn macro_definition(&mut self) -> Option<Result<MacroDefinition<'src>, ContextError<'src>>> {
+        self.pull_if_next(match_token!(Keyword(Keyword::Def)))
+            .map(|def_kw| {
+                Ok(MacroDefinition {
+                    def_kw,
+                    name: self.try_pull(match_token!(Macro), ExpectedToken::MacroIdent)?,
+                    params: self.param_group()?,
+                    body: self.replacer(ReplacerKind::Body)?,
+                })
+            })
+    }
+
+    /// Will only produce [`Some`] if the **immediately next** token begins a macro expansion.
+    ///
+    /// Sensitive to whitespace and comments
+    fn macro_expansion<F>(
+        &mut self,
+        arg_count: F,
+    ) -> Option<Result<MacroExpansion<'src>, ContextError<'src>>>
+    where
+        F: FnOnce(&'src str) -> Option<usize>,
+    {
+        self.pull_if_next(match_token!(Macro)).map(|name| {
+            let expected_count = arg_count(name.lex).ok_or_else(|| {
+                ContextError::token_error(self.source, Some(name), ErrorType::MacroUndefined)
+            })?;
+            Ok(MacroExpansion {
+                name,
+                args: (0..expected_count)
+                    .map(|_| self.replacer(ReplacerKind::Argument))
+                    .collect::<Result<_, _>>()?,
+            })
+        })
+    }
+}
+
+/// Consumes macros and converts them into token sequences
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Preprocessor<'src> {
+    stream: PreprocessorStream<'src>,
+    /// Macro definitions (actively modified)
+    macros: HashMap<&'src str, MacroDef<'src>>,
+}
+
+impl<'src> Preprocessor<'src> {
+    /// Construct a new preprocessor over `tokens`
+    fn new<I>(source: &'src str, tokens: I) -> Self
+    where
+        I: IntoIterator<Item = Result<Token<'src>, ContextError<'src>>>,
+    {
+        Self {
+            stream: PreprocessorStream::new(source, tokens),
+            macros: HashMap::new(),
         }
+    }
 
-        let def = self
+    fn define_macro(&mut self, definition: MacroDefinition<'src>) {
+        // replace existing definition
+        _ = self.macros.insert(
+            definition.name.lex,
+            MacroDef {
+                params: definition.params.list().map(|token| token.lex).collect(),
+                tokens: definition.body.content,
+            },
+        );
+    }
+
+    /// # Panics
+    /// This method may panic if `expansion` does not refer to an existing macro in [`Self::macros`]
+    fn expand_macro(&mut self, expansion: MacroExpansion<'src>) {
+        let macro_def = self
             .macros
-            .get(&macro_name.lex)
-            .expect("should have returned an error while counting parameters");
+            .get(expansion.name.lex)
+            .expect("should have errored when determining the number of parameters to expect");
 
-        self.tokens.prepend(
-            def.substitute(args)
+        let macro_range = expansion.range(self.stream.source);
+
+        self.stream.tokens.prepend(
+            macro_def
+                .substitute(expansion.args.into_iter().map(|repl| repl.content))
                 .map(|(argument, mut token)| {
                     token.mac = Some(ExpansionData {
                         range: macro_range,
                         arg: argument,
                     });
                     Ok(token)
-                })
-                .collect::<Vec<_>>()
-                .drain(..),
+                }),
         );
-
-        Ok(())
     }
 }
 
@@ -319,30 +511,21 @@ impl<'src> Iterator for Preprocessor<'src> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.tokens.pop_front() {
-                // define macro
-                Some(Ok(Token {
-                    val: LexValue::Keyword(Keyword::Def),
-                    ..
-                })) => {
-                    if let Err(e) = self.macro_define() {
-                        break Some(Err(e));
-                    }
+            if let Some(definition) = self.stream.macro_definition() {
+                match definition {
+                    Ok(x) => self.define_macro(x),
+                    Err(e) => break Some(Err(e)),
                 }
-
-                // expand macro
-                Some(Ok(
-                    token @ Token {
-                        val: LexValue::Macro,
-                        ..
-                    },
-                )) => {
-                    if let Err(e) = self.macro_expand(token) {
-                        break Some(Err(e));
-                    }
+            } else if let Some(expansion) = self
+                .stream
+                .macro_expansion(|name| self.macros.get(name).map(|m| m.params.len()))
+            {
+                match expansion {
+                    Ok(x) => self.expand_macro(x),
+                    Err(e) => break Some(Err(e)),
                 }
-
-                item => break item,
+            } else {
+                break self.stream.tokens.pop_front();
             }
         }
     }

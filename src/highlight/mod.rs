@@ -174,7 +174,6 @@ const fn escaped_ranges_closure(range: Range<usize>) -> (Range<usize>, Syntax) {
 /// Offsets [`Range`]s by the length of a char/string delimiter and tuples them with [`Syntax::EscapeSeq`]
 pub type EscapedRanges<I> = std::iter::Map<I, fn(Range<usize>) -> (Range<usize>, Syntax)>;
 
-#[expect(clippy::needless_pass_by_value, reason = "filter_map closure shape")]
 const fn escape_ranges_closure(
     item: Result<(Range<usize>, char), ErrorType<'_>>,
 ) -> Option<Range<usize>> {
