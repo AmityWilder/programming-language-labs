@@ -156,7 +156,7 @@ fn match_num_literal(src: &str, allow_negative: bool) -> Option<&str> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scanner<'src> {
     /// This one doesn't get ripped apart, it exists for fulfilling context errors
-    original: &'src str,
+    pub original: &'src str,
 
     /// A reference to the original source code. Since this is only a copy, it will get ripped apart and fed to the tokens.
     /// The next token will always be at the start of this string.
