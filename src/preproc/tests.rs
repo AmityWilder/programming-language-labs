@@ -1,5 +1,11 @@
 use super::*;
-use crate::scanner::Scanner;
+use crate::{
+    error::ExpectedToken,
+    scanner::{
+        Bracket, Scanner,
+        token::value::{Keyword, LexValue, Punctuation},
+    },
+};
 use std::range::Range;
 
 /// Outputs the provided pattern, or a `_` if no pattern is present.
