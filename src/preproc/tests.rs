@@ -956,3 +956,103 @@ fn test_macro_expr_cond() {
         (source) {}
     };
 }
+
+#[test]
+fn test_macro_ifdef_false() {
+    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
+    spoof_tokens! {
+        [
+            ("rot", Keyword::Rot),
+            ("{", Punctuation::LBrace),
+            ("!!", Punctuation::Exists),
+            ("~", Punctuation::MacroConst),
+            (r"\foo", Macro),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
+            ("9", SIntLiteral(9)),
+            ("}", Punctuation::RBrace),
+            ("~", Punctuation::MacroConst),
+            ("{", Punctuation::LBrace),
+            ("2", SIntLiteral(2)),
+            ("}", Punctuation::RBrace),
+        ],
+
+        [
+            Ok(("2", SIntLiteral(2))),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_macro_ifdef_true() {
+    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            (r"\foo", Macro),
+            ("(", Punctuation::LParen),
+            (")", Punctuation::RParen),
+            ("{", Punctuation::LBrace),
+            ("}", Punctuation::RBrace),
+            ("rot", Keyword::Rot),
+            ("{", Punctuation::LBrace),
+            ("!!", Punctuation::Exists),
+            ("~", Punctuation::MacroConst),
+            (r"\foo", Macro),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
+            ("9", SIntLiteral(9)),
+            ("}", Punctuation::RBrace),
+            ("~", Punctuation::MacroConst),
+            ("{", Punctuation::LBrace),
+            ("2", SIntLiteral(2)),
+            ("}", Punctuation::RBrace),
+        ],
+
+        [
+            Ok(("9", SIntLiteral(9))),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_macro_ifdef_true_arg() {
+    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            (r"\foo", Macro),
+            ("(", Punctuation::LParen),
+            ("$x", MacroParam),
+            (")", Punctuation::RParen),
+            ("{", Punctuation::LBrace),
+            ("$x", MacroParam),
+            ("}", Punctuation::RBrace),
+            ("rot", Keyword::Rot),
+            ("{", Punctuation::LBrace),
+            ("!!", Punctuation::Exists),
+            ("~", Punctuation::MacroConst),
+            (r"\foo", Macro),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
+            ("9", SIntLiteral(9)),
+            ("}", Punctuation::RBrace),
+            ("~", Punctuation::MacroConst),
+            ("{", Punctuation::LBrace),
+            ("2", SIntLiteral(2)),
+            ("}", Punctuation::RBrace),
+        ],
+
+        [
+            Ok(("9", SIntLiteral(9))),
+        ],
+
+        (source) {}
+    };
+}
