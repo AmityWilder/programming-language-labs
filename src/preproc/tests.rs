@@ -102,22 +102,31 @@ macro_rules! spoof_tokens {
         let preproc: Vec<Result<Token<'_>, ContextError<'_>>> =
             preprocess($source, tokens.iter().cloned()).collect();
 
+        let expected = [$(
+            $Result(
+                $(Token {
+                    lex: $pp_lex,
+                    val: LexValue::$PpVariant$(($pp_val))?$(($PpVariant::$PpSubVariant))?,
+                    mac: optional!($(ExpansionData {
+                        range: std::range::Range::from($macro_range),
+                        arg: optional!($(($idx, $name))?),
+                    })?),
+                })?
+                $(ContextError::error($($err)+))?
+            )
+        ),*];
+
+        for (i, (actual, expect)) in preproc.iter().zip(expected.iter()).enumerate() {
+            assert_eq!(
+                actual,
+                expect,
+                "preproc failure at item {i}\n  left list: {preproc:#?}\n right list: {expected:#?}",
+            );
+        }
         assert_eq!(
-            &preproc,
-            &[$(
-                $Result(
-                    $(Token {
-                        lex: $pp_lex,
-                        val: LexValue::$PpVariant$(($pp_val))?$(($PpVariant::$PpSubVariant))?,
-                        mac: optional!($(ExpansionData {
-                            range: std::range::Range::from($macro_range),
-                            arg: optional!($(($idx, $name))?),
-                        })?),
-                    })?
-                    $(ContextError::error($($err)+))?
-                )
-            ),*],
-            "preproc failure",
+            preproc.len(),
+            expected.len(),
+            "preproc failure: token count mismatch\n  left list: {preproc:#?}\n right list: {expected:#?}",
         );
 
         let [$(or_discard!($($(Ok($pp_marker))?)?)),*] = preproc.as_slice() else {
@@ -221,7 +230,6 @@ fn test_multiarg() {
             (r"\foo", Macro),
             ("(", Punctuation::LParen),
             ("$x", MacroParam),
-            (",", Punctuation::Comma),
             (" ", Whitespace),
             ("$y", MacroParam),
             (")", Punctuation::RParen),
@@ -269,7 +277,6 @@ fn test_nested() {
             (r"\foo", Macro),
             ("(", Punctuation::LParen),
             ("$x", MacroParam),
-            (",", Punctuation::Comma),
             (" ", Whitespace),
             ("$y", MacroParam),
             (")", Punctuation::RParen),
@@ -318,5 +325,334 @@ fn test_nested() {
             assert!(preproc_arg2.lex_eq(arg2_token));
             assert!(preproc_arg3.lex_eq(arg3_token));
         }
+    };
+}
+
+#[test]
+fn test_no_param_group() {
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            (r"\foo", Macro),
+            (" ", Whitespace),
+            @ unexpected: ("{", Punctuation::LBrace),
+            ("$x", MacroParam),
+            ("+", Punctuation::Add),
+            ("$y", MacroParam),
+            ("}", Punctuation::RBrace),
+            ("\n", Whitespace),
+            @macro_call: (r"\foo", Macro),
+            ("{", Punctuation::LBrace),
+            ("a", Identifier),
+            ("}", Punctuation::RBrace),
+            ("+", Punctuation::Add),
+            ("5", SIntLiteral(5)),
+        ],
+
+        [
+            Err(ContextError::error(
+                source,
+                Some(unexpected.lex_range(source)),
+                None,
+                ErrorType::UnexpectedToken { expect: ExpectedToken::LParen, actual: "{" },
+            )),
+            Ok((" ", Whitespace)),
+            Ok(("{", Punctuation::LBrace)),
+            Ok(("$x", MacroParam)),
+            Ok(("+", Punctuation::Add)),
+            Ok(("$y", MacroParam)),
+            Ok(("}", Punctuation::RBrace)),
+            Ok(("\n", Whitespace)),
+            Err(ContextError::error(
+                source,
+                Some(macro_call.lex_range(source)),
+                None,
+                ErrorType::MacroUndefined,
+            )),
+            Ok(("{", Punctuation::LBrace)),
+            Ok(("a", Identifier)),
+            Ok(("}", Punctuation::RBrace)),
+            Ok(("+", Punctuation::Add)),
+            Ok(("5", SIntLiteral(5))),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_endless_param_group() {
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            (r"\foo", Macro),
+            @open: ("(", Punctuation::LParen),
+            ("$x", MacroParam),
+            (" ", Whitespace),
+            ("$y", MacroParam),
+            (" ", Whitespace),
+            @unexpected: ("{", Punctuation::LBrace),
+            ("$x", MacroParam),
+            ("+", Punctuation::Add),
+            ("$y", MacroParam),
+            ("}", Punctuation::RBrace),
+            ("\n", Whitespace),
+            @macro_call: (r"\foo", Macro),
+            ("{", Punctuation::LBrace),
+            ("a", Identifier),
+            ("}", Punctuation::RBrace),
+            ("+", Punctuation::Add),
+            ("5", SIntLiteral(5)),
+        ],
+
+        [
+            Err(ContextError::error(
+                source,
+                Some(unexpected.lex_range(source)),
+                None,
+                ErrorType::MissingCloseBracket {
+                    open_range: open.lex_range(source),
+                    expect: Bracket::Paren,
+                },
+            )),
+            Ok((" ", Whitespace)),
+            Ok(("{", Punctuation::LBrace)),
+            Ok(("$x", MacroParam)),
+            Ok(("+", Punctuation::Add)),
+            Ok(("$y", MacroParam)),
+            Ok(("}", Punctuation::RBrace)),
+            Ok(("\n", Whitespace)),
+            Err(ContextError::error(
+                source,
+                Some(macro_call.lex_range(source)),
+                None,
+                ErrorType::MacroUndefined,
+            )),
+            Ok(("{", Punctuation::LBrace)),
+            Ok(("a", Identifier)),
+            Ok(("}", Punctuation::RBrace)),
+            Ok(("+", Punctuation::Add)),
+            Ok(("5", SIntLiteral(5))),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_endless_body() {
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            (r"\foo", Macro),
+            ("(", Punctuation::LParen),
+            ("$x", MacroParam),
+            (" ", Whitespace),
+            ("$y", MacroParam),
+            (")", Punctuation::RParen),
+            (" ", Whitespace),
+            @open: ("{", Punctuation::LBrace),
+            ("$x", MacroParam),
+            ("+", Punctuation::Add),
+            ("$y", MacroParam),
+            ("\n", Whitespace),
+            (r"\foo", Macro),
+            ("{", Punctuation::LBrace),
+            ("a", Identifier),
+            ("}", Punctuation::RBrace),
+            ("+", Punctuation::Add),
+            ("5", SIntLiteral(5)),
+        ],
+
+        [
+            Err(ContextError::error(
+                source,
+                None,
+                None,
+                ErrorType::MissingCloseBracket {
+                    open_range: open.lex_range(source),
+                    expect: Bracket::Brace,
+                },
+            )),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_endless_arg() {
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            (r"\foo", Macro),
+            ("(", Punctuation::LParen),
+            ("$x", MacroParam),
+            (" ", Whitespace),
+            ("$y", MacroParam),
+            (")", Punctuation::RParen),
+            (" ", Whitespace),
+            ("{", Punctuation::LBrace),
+            ("$x", MacroParam),
+            ("+", Punctuation::Add),
+            ("$y", MacroParam),
+            ("}", Punctuation::RBrace),
+            ("\n", Whitespace),
+            (r"\foo", Macro),
+            @open: ("{", Punctuation::LBrace),
+            ("a", Identifier),
+            ("+", Punctuation::Add),
+            ("5", SIntLiteral(5)),
+        ],
+
+        [
+            Ok(("\n", Whitespace)),
+            Err(ContextError::error(
+                source,
+                None,
+                None,
+                ErrorType::MissingCloseBracket {
+                    open_range: open.lex_range(source),
+                    expect: Bracket::Brace,
+                },
+            )),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_bad_arg_count() {
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            (r"\foo", Macro),
+            ("(", Punctuation::LParen),
+            ("$x", MacroParam),
+            (" ", Whitespace),
+            ("$y", MacroParam),
+            (")", Punctuation::RParen),
+            (" ", Whitespace),
+            ("{", Punctuation::LBrace),
+            ("$x", MacroParam),
+            ("+", Punctuation::Add),
+            ("$y", MacroParam),
+            ("}", Punctuation::RBrace),
+            ("\n", Whitespace),
+            (r"\foo", Macro),
+            ("{", Punctuation::LBrace),
+            ("a", Identifier),
+            ("}", Punctuation::RBrace),
+            @ unexpected: ("+", Punctuation::Add),
+            ("5", SIntLiteral(5)),
+        ],
+
+        [
+            Ok(("\n", Whitespace)),
+            Err(ContextError::error(
+                source,
+                Some(unexpected.lex_range(source)),
+                None,
+                ErrorType::UnexpectedToken { expect: ExpectedToken::MacroArgLBrace, actual: "+" },
+            )),
+            Ok(("+", Punctuation::Add)),
+            Ok(("5", SIntLiteral(5))),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_recursive_macro() {
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            @macro_name: (r"\foo", Macro),
+            ("(", Punctuation::LParen),
+            (")", Punctuation::RParen),
+            (" ", Whitespace),
+            ("{", Punctuation::LBrace),
+            @recursive_call: (r"\foo", Macro),
+            ("}", Punctuation::RBrace),
+            ("\n", Whitespace),
+            @normal_call: (r"\foo", Macro),
+        ],
+
+        [
+            Err(ContextError::error(
+                source,
+                Some(recursive_call.lex_range(source)),
+                None,
+                ErrorType::RecursiveMacro {
+                    head_range: macro_name.lex_range(source),
+                },
+            )),
+            Ok(("\n", Whitespace)),
+            Err(ContextError::error(
+                source,
+                Some(normal_call.lex_range(source)),
+                None,
+                ErrorType::MacroUndefined,
+            )),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_multi_recursive_macro() {
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            @macro_name: (r"\foo", Macro),
+            ("(", Punctuation::LParen),
+            (")", Punctuation::RParen),
+            (" ", Whitespace),
+            ("{", Punctuation::LBrace),
+            @recursive_call1: (r"\foo", Macro),
+            ("+", Punctuation::Add),
+            @recursive_call2: (r"\foo", Macro),
+            ("}", Punctuation::RBrace),
+            ("\n", Whitespace),
+            @normal_call: (r"\foo", Macro),
+        ],
+
+        [
+            Err(ContextError::error(
+                source,
+                Some(recursive_call1.lex_range(source)),
+                None,
+                ErrorType::RecursiveMacro {
+                    head_range: macro_name.lex_range(source),
+                },
+            )),
+            Err(ContextError::error(
+                source,
+                Some(recursive_call2.lex_range(source)),
+                None,
+                ErrorType::RecursiveMacro {
+                    head_range: macro_name.lex_range(source),
+                },
+            )),
+            Ok(("\n", Whitespace)),
+            Err(ContextError::error(
+                source,
+                Some(normal_call.lex_range(source)),
+                None,
+                ErrorType::MacroUndefined,
+            )),
+        ],
+
+        (source) {}
     };
 }

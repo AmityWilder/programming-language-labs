@@ -1,6 +1,6 @@
 // macro definitions use $ for parameters to distinguish from idents in actual code.
 // their syntax is similar to LaTeX commands.
-def \foo($fn, $args) { $fn($args, 1) }
+def \foo($fn $args) { $fn($args, 1) }
 
 { } } } // unbalanced brackets outside of a string are an error
 
