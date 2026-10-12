@@ -61,5 +61,15 @@ def \foo($x $y) { -5 $x $y }
 def \bar($x $y) { $x | $y }
 \foo{-:>}{\bar{uint}{none}}
 
-def \inf() { \inf + \inf }
-\inf
+def \likes_apples() { fals }
+def \likes_oranges() { true }
+
+rot { \likes_apples } {
+    def \fruit() { "apple" }
+} ~ rot { \likes_oranges } {
+    def \fruit() { "orange" }
+} ~ {
+    def \fruit() { "banana" }
+}
+
+"i will eat a(n) " + \fruit

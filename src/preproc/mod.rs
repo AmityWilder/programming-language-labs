@@ -418,8 +418,7 @@ impl<'src> PreprocessorStream<'src> {
                 Ok(MacroAlternative {
                     squiggle,
                     predicate: {
-                        if let Some(rot_kw) = self.pull_if_next(match_token!(Keyword(Keyword::Rot)))
-                        {
+                        if let Some(rot_kw) = self.pull_if(match_token!(Keyword(Keyword::Rot))) {
                             Some(MacroPredicate {
                                 rot_kw,
                                 pred: self.replacer(ReplacerKind::Predicate)?,
@@ -463,13 +462,13 @@ pub struct Preprocessor<'src> {
 
 impl<'src> Preprocessor<'src> {
     /// Construct a new preprocessor over `tokens`
-    fn new<I>(source: &'src str, tokens: I) -> Self
+    fn new<I>(source: &'src str, macros: HashMap<&'src str, MacroDef<'src>>, tokens: I) -> Self
     where
         I: IntoIterator<Item = Result<Token<'src>, ContextError<'src>>>,
     {
         Self {
             stream: PreprocessorStream::new(source, tokens),
-            macros: HashMap::new(),
+            macros,
             errors: Vec::new(),
         }
     }
@@ -485,14 +484,16 @@ impl<'src> Preprocessor<'src> {
 
         let branch = alternatives.find(|(pred, _)| {
             pred.as_ref().is_none_or(|p| {
-                let mut tokens =
-                    preprocess(self.stream.source, p.pred.content.iter().copied().map(Ok)).filter(
-                        |res| {
-                            !res.is_ok_and(|token| {
-                                matches!(token.val, LexValue::Whitespace | LexValue::Comment)
-                            })
-                        },
-                    );
+                let mut tokens = Preprocessor::new(
+                    self.stream.source,
+                    self.macros.clone(),
+                    p.pred.content.iter().copied().map(Ok),
+                )
+                .filter(|res| {
+                    !res.is_ok_and(|token| {
+                        matches!(token.val, LexValue::Whitespace | LexValue::Comment)
+                    })
+                });
                 // TODO: make this at least a LITTLE more complex?
                 // TODO: replace the panics with errors
                 let next = tokens.next().unwrap().unwrap();
@@ -621,5 +622,5 @@ pub fn preprocess<'src, A>(source: &'src str, stream: A) -> Preprocessor<'src>
 where
     A: IntoIterator<IntoIter: 'src, Item = Result<Token<'src>, ContextError<'src>>>,
 {
-    Preprocessor::new(source, stream)
+    Preprocessor::new(source, HashMap::new(), stream)
 }
