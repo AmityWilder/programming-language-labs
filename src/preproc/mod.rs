@@ -1,8 +1,12 @@
 //! Preprocessing (macros)
 
 use crate::{
-    error::{ContextError, ErrorType, ExpectedToken},
-    grammar::match_token,
+    error::{ContextError, ErrorType, ExpectedToken, OpSide},
+    grammar::{
+        Parser,
+        ast::{Binary, Expr, Unary},
+        match_token,
+    },
     scanner::{
         Bracket,
         token::{ExpansionData, Token, keyword::Keyword, punc::Punctuation, value::LexValue},
@@ -471,6 +475,190 @@ impl<'src> PreprocessorStream<'src> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum PpValue<'src> {
+    // types (for size operations)
+    Bool,
+    Sint,
+    Uint,
+    Frac,
+    Text,
+    Char,
+
+    // values (for logic or comparison)
+    BoolLiteral(bool),
+    UIntLiteral(usize),
+    SIntLiteral(isize),
+
+    // macro name (only useable in "exists" operation)
+    Macro(&'src str),
+}
+
+fn preproc_eval(expr: Expr<'_>) -> Result<PpValue<'_>, ContextError<'_>> {
+    // TODO: Some operations are valid for Expr but not in preprocessing
+    match expr {
+        Expr::Ternary(_inner) => todo!(),
+
+        Expr::Binary(inner) => {
+            let Binary { lhs, op, rhs } = *inner;
+
+            match op.val {
+                LexValue::Punctuation(Punctuation::Add) => {
+                    match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                            Ok(PpValue::UIntLiteral(l.saturating_add(r)))
+                        }
+                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                            Ok(PpValue::SIntLiteral(l.saturating_add(r)))
+                        }
+                        _ => unimplemented!("incompatible"), // TODO: change this to an error
+                    }
+                }
+
+                LexValue::Punctuation(Punctuation::SubNeg) => {
+                    match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                            Ok(PpValue::UIntLiteral(l.saturating_sub(r)))
+                        }
+                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                            Ok(PpValue::SIntLiteral(l.saturating_sub(r)))
+                        }
+                        _ => unimplemented!("incompatible"), // TODO: change this to an error
+                    }
+                }
+
+                LexValue::Punctuation(Punctuation::Mul) => {
+                    match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                            Ok(PpValue::UIntLiteral(l.saturating_mul(r)))
+                        }
+                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                            Ok(PpValue::SIntLiteral(l.saturating_mul(r)))
+                        }
+                        _ => unimplemented!("incompatible"), // TODO: change this to an error
+                    }
+                }
+
+                LexValue::Punctuation(Punctuation::Div) => {
+                    match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                            Ok(PpValue::UIntLiteral(l.checked_div(r).unwrap_or(usize::MAX)))
+                        }
+                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                            Ok(PpValue::SIntLiteral(l.checked_div(r).unwrap_or(isize::MAX)))
+                        }
+                        _ => unimplemented!("incompatible"), // TODO: change this to an error
+                    }
+                }
+
+                LexValue::Punctuation(Punctuation::Rem) => {
+                    match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                            Ok(PpValue::UIntLiteral(l.checked_rem(r).unwrap_or(0)))
+                        }
+                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                            Ok(PpValue::SIntLiteral(l.checked_rem(r).unwrap_or(0)))
+                        }
+                        _ => unimplemented!("incompatible"), // TODO: change this to an error
+                    }
+                }
+
+                LexValue::Punctuation(Punctuation::Eq) => {
+                    Ok(PpValue::BoolLiteral(
+                        match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => l == r,
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l == r,
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l == r,
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
+                        },
+                    ))
+                }
+                LexValue::Punctuation(Punctuation::Ne) => {
+                    Ok(PpValue::BoolLiteral(
+                        match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => l != r,
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l != r,
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l != r,
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
+                        },
+                    ))
+                }
+                LexValue::Punctuation(Punctuation::Lt) => {
+                    Ok(PpValue::BoolLiteral(
+                        match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l < r,
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l < r,
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
+                        },
+                    ))
+                }
+                LexValue::Punctuation(Punctuation::Le) => {
+                    Ok(PpValue::BoolLiteral(
+                        match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l <= r,
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l <= r,
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
+                        },
+                    ))
+                }
+                LexValue::Punctuation(Punctuation::Gt) => {
+                    Ok(PpValue::BoolLiteral(
+                        match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l > r,
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l > r,
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
+                        },
+                    ))
+                }
+                LexValue::Punctuation(Punctuation::Ge) => {
+                    Ok(PpValue::BoolLiteral(
+                        match (preproc_eval(lhs)?, preproc_eval(rhs)?) {
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l >= r,
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l >= r,
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
+                        },
+                    ))
+                }
+
+                _ => unimplemented!("not a preproc operator"),
+            }
+        }
+
+        Expr::Unary(inner) => {
+            let Unary { op, operand, side } = *inner;
+            match side {
+                OpSide::Left => unimplemented!(),
+
+                OpSide::Right => match op.val {
+                    LexValue::Punctuation(Punctuation::SubNeg) => match preproc_eval(operand)? {
+                        PpValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(x.saturating_neg())),
+                        _ => unimplemented!("undefined"), // TODO: change this to an error
+                    },
+                    LexValue::Punctuation(Punctuation::Not) => match preproc_eval(operand)? {
+                        PpValue::UIntLiteral(x) => Ok(PpValue::UIntLiteral(!x)),
+                        PpValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(!x)),
+                        PpValue::BoolLiteral(x) => Ok(PpValue::BoolLiteral(!x)),
+                        _ => unimplemented!("undefined"), // TODO: change this to an error
+                    },
+                    _ => unimplemented!("not a preproc operator"), // TODO: change this to an error
+                },
+            }
+        }
+
+        Expr::Literal(inner) => match inner.val {
+            LexValue::UIntLiteral(x) => Ok(PpValue::UIntLiteral(x)),
+            LexValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(x)),
+            LexValue::BoolLiteral(x) => Ok(PpValue::BoolLiteral(x)),
+            LexValue::Macro => Ok(PpValue::Macro(inner.lex)),
+            _ => unimplemented!("not a preproc literal"), // TODO: change this to an error
+        },
+
+        Expr::Grouping(inner) => preproc_eval(inner.expr),
+
+        Expr::Type(_inner) => todo!(),
+    }
+}
+
 /// Consumes macros and converts them into token sequences
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Preprocessor<'src> {
@@ -493,41 +681,42 @@ impl<'src> Preprocessor<'src> {
         }
     }
 
-    fn expand_conditional(&mut self, conditional: MacroConditional<'src>) {
-        let mut alternatives = std::iter::once((Some(conditional.pred), conditional.then_def))
-            .chain(
-                conditional
-                    .else_def
-                    .into_iter()
-                    .map(|item| (item.predicate, item.then_def)),
-            );
+    fn expand_conditional(
+        &mut self,
+        conditional: MacroConditional<'src>,
+    ) -> Result<(), ContextError<'src>> {
+        let alternatives = std::iter::once((Some(conditional.pred), conditional.then_def)).chain(
+            conditional
+                .else_def
+                .into_iter()
+                .map(|item| (item.predicate, item.then_def)),
+        );
 
-        let branch = alternatives.find(|(pred, _)| {
-            pred.as_ref().is_none_or(|p| {
-                let mut tokens = Preprocessor::new(
+        for (pred, body) in alternatives {
+            let is_match = if let Some(p) = pred {
+                let pred_preproc = Preprocessor::new(
                     self.stream.source,
                     self.macros.clone(),
                     p.pred.content.iter().copied().map(Ok),
                 )
-                .filter(|res| {
-                    !res.is_ok_and(|token| {
-                        matches!(token.val, LexValue::Whitespace | LexValue::Comment)
-                    })
-                });
-                // TODO: make this at least a LITTLE more complex?
-                // TODO: replace the panics with errors
-                let next = tokens.next().unwrap().unwrap();
-                assert!(tokens.next().is_none(), "should be only one token");
-                match next.val {
-                    LexValue::BoolLiteral(x) => x,
-                    _ => unimplemented!(), // TODO: make this an error
+                .collect::<Result<Vec<_>, _>>()?;
+                let mut parser = Parser::new(self.stream.source, pred_preproc.into_iter());
+                let expr = parser.expression()?;
+                assert!(parser.next().is_none(), "leftover tokens"); // TODO: make this an error
+                match preproc_eval(expr)? {
+                    PpValue::BoolLiteral(x) => x,
+                    x => todo!("error: expected a bool literal, got {x:#?}"),
                 }
-            })
-        });
+            } else {
+                true
+            };
 
-        if let Some((_, body)) = branch {
-            self.stream.tokens.prepend(body.content.into_iter().map(Ok));
+            if is_match {
+                self.stream.tokens.prepend(body.content.into_iter().map(Ok));
+                break;
+            }
         }
+        Ok(())
     }
 
     fn define_macro(
@@ -611,9 +800,8 @@ impl<'src> Iterator for Preprocessor<'src> {
                 // skip expansion
                 break Some(macro_ref.map(|x| x.macro_name));
             } else if let Some(conditional) = self.stream.macro_conditional() {
-                match conditional {
-                    Ok(x) => self.expand_conditional(x),
-                    Err(e) => break Some(Err(e)),
+                if let Err(e) = conditional.and_then(|x| self.expand_conditional(x)) {
+                    break Some(Err(e));
                 }
             } else if let Some(definition) = self.stream.macro_definition() {
                 match definition {
