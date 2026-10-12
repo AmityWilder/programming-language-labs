@@ -264,12 +264,12 @@ impl<'src> ContextErrorOrRef<'src> for &ContextError<'src> {
 ///
 /// Returns true if the iterator was not empty
 #[must_use = "indicates that an error occurred"]
-fn list_errors<'src, 'err, I>(errs: I) -> bool
+fn list_errors<'src, 'err, I>(title: &str, errs: I) -> bool
 where
     'src: 'err,
     I: IntoIterator<IntoIter: 'err, Item: ContextErrorOrRef<'src>>,
 {
-    println!("errors:");
+    println!("{title} errors:");
     let mut any_errors = false;
     for e in errs {
         const INDENT: &str = "          ";
@@ -609,7 +609,7 @@ impl Default for Cli {
             prgm: PathBuf::default(),
             source_path: None,
             echo_src: false,
-            scanner_tokens: true,
+            scanner_tokens: false,
             scanner_highlight: true,
             preproc_tokens: false,
             preproc_highlight: false,
@@ -711,7 +711,10 @@ fn run_code(source: &str, config: &Cli) {
     // lex errors
     if if config.print_errors {
         println!();
-        list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err))
+        list_errors(
+            "tokenization",
+            tokens.iter().map(Result::as_ref).filter_map(Result::err),
+        )
     } else {
         tokens.iter().any(Result::is_err)
     } {
@@ -733,7 +736,10 @@ fn run_code(source: &str, config: &Cli) {
     // preproc errors
     if if config.print_errors {
         println!();
-        list_errors(tokens.iter().map(Result::as_ref).filter_map(Result::err))
+        list_errors(
+            "preprocessor",
+            tokens.iter().map(Result::as_ref).filter_map(Result::err),
+        )
     } else {
         tokens.iter().any(Result::is_err)
     } {
@@ -755,7 +761,10 @@ fn run_code(source: &str, config: &Cli) {
     // parse errors
     if if config.print_errors {
         println!();
-        list_errors(ast.iter().map(Result::as_ref).filter_map(Result::err))
+        list_errors(
+            "grammar",
+            ast.iter().map(Result::as_ref).filter_map(Result::err),
+        )
     } else {
         ast.iter().any(Result::is_err)
     } {
@@ -807,7 +816,7 @@ fn run_code(source: &str, config: &Cli) {
         // eval errors
         if if config.print_errors {
             println!();
-            list_errors(errors)
+            list_errors("runtime", errors)
         } else {
             !errors.is_empty()
         } {
