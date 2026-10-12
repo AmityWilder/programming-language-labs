@@ -84,6 +84,12 @@ macro_rules! spoof_tokens {
 
         ($source:ident) $checks:block
     ) => {{
+        #[allow(unused_imports, reason = "only here to enable proper semantic highlighting")] {
+            $($({ use $crate::scanner::token::value::$Variant::$SubVariant; })?)*
+            $({ use $crate::scanner::token::value::LexValue::$Variant; })*
+            $({ use std::result::Result::$Result; })*
+        }
+
         let $source = concat!($($lex),*);
 
         let tokens: Vec<Result<Token<'_>, ContextError<'_>>> =

@@ -4,7 +4,7 @@ use crate::{
     error::{ContextError, ErrorType, ExpectedToken, OpSide},
     scanner::{
         Bracket,
-        token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
+        token::{Token, value::LexValue},
     },
 };
 use ast::{Binary, Expr, Grouping, OrType, TypeExpr, Unary};
@@ -16,9 +16,24 @@ pub mod fmt;
 #[cfg(test)]
 pub mod tests;
 
+macro_rules! token_matches {
+    ($token:expr, $($Variant:ident$(($pattern:pat))?$(::$SubVariant:ident)?$(::{$($SubVariants:ident)|*})?)|+) => {{
+        #[allow(unused_imports, reason = "only here to allow proper semantic highlighting")] {
+            $($({ use $crate::scanner::token::value::$Variant::$SubVariant; })?)*
+            $($({ use $crate::scanner::token::value::$Variant::{$($SubVariants),*}; })?)*
+        }
+        matches!($token.val, $($crate::scanner::token::value::LexValue::$Variant
+            $(($pattern))?
+            $(($crate::scanner::token::value::$Variant::$SubVariant))?
+            $(($($crate::scanner::token::value::$Variant::$SubVariants)|*))?
+        )|+)
+    }};
+}
+pub(crate) use token_matches;
+
 macro_rules! match_token {
-    ($($variant:ident$(($pattern:pat))?)|+) => {
-        |token| matches!(token.val, $($crate::scanner::token::value::LexValue::$variant$(($pattern))?)|+)
+    ($($Variant:ident$(($pattern:pat))?$(::$SubVariant:ident)?$(::{$($SubVariants:ident)|*})?)|+) => {
+        |token| -> bool { $crate::grammar::token_matches!(token, $($Variant$(($pattern))?$(::$SubVariant)?$(::{$($SubVariants)|*})?)|+) }
     };
 }
 pub(crate) use match_token;
@@ -63,7 +78,7 @@ where
         source,
         tokens
             .into_iter()
-            .filter(|token| !matches!(token.val, LexValue::Whitespace | LexValue::Comment)),
+            .filter(|token| !token_matches!(token, Whitespace | Comment)),
     )
 }
 
@@ -98,9 +113,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `or -> xor ( ("|" | "!|") xor )*`
     fn or(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.xor()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(
-            Punctuation::Or | Punctuation::Nor
-        ))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::{Or | Nor})) {
             let rhs = self.xor()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -110,9 +123,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `xor -> and ( ("^" | "!^") and )*`
     fn xor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.and()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(
-            Punctuation::Xor | Punctuation::Xnor
-        ))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::{Xor | Xnor})) {
             let rhs = self.and()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -122,9 +133,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `and -> equality ( ("&" | "!&") equality )*`
     fn and(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.equality()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(
-            Punctuation::And | Punctuation::Nand
-        ))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::{And | Nand})) {
             let rhs = self.equality()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -134,9 +143,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `equality -> comparison ( ("!=" | "==") comparison )*`
     fn equality(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.comparison()?;
-        while let Some(op) =
-            self.pull_if(match_token!(Punctuation(Punctuation::Ne | Punctuation::Eq)))
-        {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::{Ne | Eq})) {
             let rhs = self.comparison()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -146,9 +153,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `comparison -> shift ( ( ">" | ">=" | "<" | "<=" ) shift )*`
     fn comparison(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.shift()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(
-            Punctuation::Gt | Punctuation::Ge | Punctuation::Lt | Punctuation::Le
-        ))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::{Gt | Ge | Lt | Le})) {
             let rhs = self.shift()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -158,9 +163,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `shift -> term ( ( "<<" | ">>" | "[<<]" | "[>>]" ) term )*`
     fn shift(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.term()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(
-            Punctuation::Shl | Punctuation::Shr | Punctuation::Rotl | Punctuation::Rotr
-        ))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::{Shl | Shr | Rotl | Rotr})) {
             let rhs = self.term()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -170,9 +173,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `term -> factor ( ( "+" | "-" ) factor )*`
     fn term(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.factor()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(
-            Punctuation::Add | Punctuation::SubNeg
-        ))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::{Add | SubNeg})) {
             let rhs = self.factor()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -182,9 +183,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `factor -> unary_postfix ( ( "*" | "/" | "%" ) unary_postfix )*`
     fn factor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.unary_postfix()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(
-            Punctuation::Mul | Punctuation::Div | Punctuation::Rem
-        ))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::{Mul | Div | Rem})) {
             let rhs = self.unary_postfix()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -194,7 +193,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `unary_postfix -> unary_prefix ( "?" )*`
     fn unary_postfix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.unary_prefix()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(Punctuation::Coalesce))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::Coalesce)) {
             expr = Expr::unary(Unary {
                 operand: expr,
                 op,
@@ -206,9 +205,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     /// `unary_prefix -> ( ( "!" | "!!" | "-" ) exponent )*`
     fn unary_prefix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        if let Some(op) = self.pull_if(match_token!(Punctuation(
-            Punctuation::Not | Punctuation::Exists | Punctuation::SubNeg
-        ))) {
+        if let Some(op) = self.pull_if(match_token!(Punctuation::{Not | Exists | SubNeg})) {
             let operand = self.unary_prefix()?;
             Ok(Expr::unary(Unary {
                 op,
@@ -223,7 +220,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `exponent -> conversion ( "**" conversion )*`
     fn exponent(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.conversion()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(Punctuation::Pow))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::Pow)) {
             let rhs = self.conversion()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -233,9 +230,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `conversion -> primary ( "-:>" | "=:>" ) type_expression`
     fn conversion(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.primary()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation(
-            Punctuation::Convert | Punctuation::Transmute
-        ))) {
+        while let Some(op) = self.pull_if(match_token!(Punctuation::{Convert | Transmute})) {
             let rhs = Expr::type_expr(self.type_expression()?);
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -262,7 +257,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.try_pull(
             match_token!(
                 BoolLiteral(_)
-                    | Keyword(Keyword::None)
+                    | Keyword::None
                     | UIntLiteral(_)
                     | SIntLiteral(_)
                     | FracLiteral(_)
@@ -277,13 +272,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     /// `group -> "(" expression ")"`
     fn group(&mut self) -> Result<Grouping<'src>, ContextError<'src>> {
-        let open = self.try_pull(
-            match_token!(Punctuation(Punctuation::LParen)),
-            ExpectedToken::ParenExpr,
-        )?;
+        let open = self.try_pull(match_token!(Punctuation::LParen), ExpectedToken::ParenExpr)?;
         let expr = self.expression()?;
         self.try_pull(
-            match_token!(Punctuation(Punctuation::RParen)),
+            match_token!(Punctuation::RParen),
             ExpectedToken::ExprOrRParen,
         )
         .map(move |close| Grouping { open, expr, close })
@@ -300,17 +292,15 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             },
             ExpectedToken::TypeExpr,
         )?;
-        let or_ty = self
-            .pull_if(match_token!(Punctuation(Punctuation::Or)))
-            .map(|pipe| {
-                Ok(OrType {
-                    pipe,
-                    ty: self.try_pull(
-                        match_token!(Keyword(Keyword::Fail | Keyword::None | Keyword::Nevr)),
-                        ExpectedToken::OrType,
-                    )?,
-                })
-            });
+        let or_ty = self.pull_if(match_token!(Punctuation::Or)).map(|pipe| {
+            Ok(OrType {
+                pipe,
+                ty: self.try_pull(
+                    match_token!(Keyword::{Fail | None | Nevr}),
+                    ExpectedToken::OrType,
+                )?,
+            })
+        });
         Ok(TypeExpr {
             name,
             or_ty: or_ty.transpose()?,
@@ -320,41 +310,15 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn synchronize(&mut self) {
         while let Some(token) = self.tokens.next() {
             // end of current statement
-            if matches!(token.val, LexValue::Punctuation(Punctuation::Semi)) {
+            if token_matches!(token, Punctuation::Semi) {
                 break;
             }
 
             // start of new statement/definition
-            if self.tokens.peek().is_some_and(|token| {
-                matches!(
-                    token.val,
-                    LexValue::Keyword(
-                        Keyword::Rec
-                            | Keyword::Sup
-                            | Keyword::Cat
-                            | Keyword::Alt
-                            | Keyword::Sub
-                            | Keyword::Def
-                            | Keyword::Fun
-                            | Keyword::Mem
-                            | Keyword::Let
-                            | Keyword::Uni
-                            | Keyword::Pvt
-                            | Keyword::If
-                            | Keyword::Or
-                            | Keyword::Pick
-                            | Keyword::Rep
-                            | Keyword::For
-                            | Keyword::Loop
-                            | Keyword::Cord
-                            | Keyword::Halt
-                            | Keyword::Skip
-                            | Keyword::Give
-                            | Keyword::Fail
-                            | Keyword::Emit
-                    )
-                )
-            }) {
+            if self.tokens.peek().is_some_and(match_token!(Keyword::{
+                Rec | Sup | Cat | Alt | Sub | Def | Fun | Mem | Let | Uni | Pvt | If |
+                Or | Pick | Rep | For | Loop | Cord | Halt | Skip | Give | Fail | Emit
+            })) {
                 break;
             }
         }

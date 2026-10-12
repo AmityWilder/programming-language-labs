@@ -1,5 +1,5 @@
 use super::*;
-use crate::scanner::tokenize;
+use crate::scanner::{token::punc::Punctuation, tokenize};
 
 #[test]
 fn test_parse0() {

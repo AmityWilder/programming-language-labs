@@ -1,6 +1,6 @@
 use crate::{
     error::{ContextError, ErrorType, ExpectedToken},
-    grammar::match_token,
+    grammar::{match_token, token_matches},
     scanner::{
         Bracket,
         token::{
@@ -145,9 +145,9 @@ impl<'src> PreprocessorStream<'src> {
 
     /// Returns the first token that is neither whitespace nor comment.
     pub fn peek(&self) -> Option<&Result<Token<'src>, ContextError<'src>>> {
-        self.tokens.iter().find(|res| {
-            !res.is_ok_and(|token| matches!(token.val, LexValue::Whitespace | LexValue::Comment))
-        })
+        self.tokens
+            .iter()
+            .find(|res| !res.is_ok_and(match_token!(Whitespace | Comment)))
     }
 
     /// Expect a token matching `p` and return [`None`] if it is not found.
@@ -162,7 +162,7 @@ impl<'src> PreprocessorStream<'src> {
             .iter()
             .enumerate()
             .map_while(|(i, res)| res.ok().map(|token| (i, token)))
-            .find(|(_, token)| !matches!(token.val, LexValue::Whitespace | LexValue::Comment))
+            .find(|(_, token)| !token_matches!(token, Whitespace | Comment))
             .filter(|(_, token)| p(token))
             .map(|(pos, _)| {
                 drop(self.tokens.drain(..pos));
@@ -192,14 +192,11 @@ impl<'src> PreprocessorStream<'src> {
     }
 
     pub fn param_group(&mut self) -> Result<ParamGroup<'src>, ContextError<'src>> {
-        let open = self.try_pull(
-            match_token!(Punctuation(Punctuation::LParen)),
-            ExpectedToken::LParen,
-        )?;
+        let open = self.try_pull(match_token!(Punctuation::LParen), ExpectedToken::LParen)?;
         let params = std::iter::from_fn(|| self.pull_if(match_token!(MacroParam))).collect();
         let close = self
             .try_pull(
-                match_token!(Punctuation(Punctuation::RParen)),
+                match_token!(Punctuation::RParen),
                 ExpectedToken::MacroParamOrRParen,
             )
             .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))?;
@@ -215,7 +212,7 @@ impl<'src> PreprocessorStream<'src> {
         kind: ReplacerKind,
     ) -> Result<MacroReplacer<'src>, ContextError<'src>> {
         let open = self.try_pull(
-            match_token!(Punctuation(Punctuation::LBrace)),
+            match_token!(Punctuation::LBrace),
             match kind {
                 ReplacerKind::Argument => ExpectedToken::MacroArgLBrace,
                 ReplacerKind::Body => ExpectedToken::MacroDefLBrace,
@@ -264,7 +261,7 @@ impl<'src> PreprocessorStream<'src> {
         };
         let close = self
             .try_pull(
-                match_token!(Punctuation(Punctuation::RBrace)),
+                match_token!(Punctuation::RBrace),
                 // HACK: we don't actually want an ExpectedToken error, we're going to replace it.
                 ExpectedToken::MacroIdent,
             )
@@ -282,15 +279,14 @@ impl<'src> PreprocessorStream<'src> {
     pub fn macro_definition(
         &mut self,
     ) -> Option<Result<MacroDefinition<'src>, ContextError<'src>>> {
-        self.pull_if_next(match_token!(Keyword(Keyword::Def)))
-            .map(|def_kw| {
-                Ok(MacroDefinition {
-                    def_kw,
-                    name: self.try_pull(match_token!(Macro), ExpectedToken::MacroIdent)?,
-                    params: self.param_group()?,
-                    body: self.replacer(ReplacerKind::Body)?,
-                })
+        self.pull_if_next(match_token!(Keyword::Def)).map(|def_kw| {
+            Ok(MacroDefinition {
+                def_kw,
+                name: self.try_pull(match_token!(Macro), ExpectedToken::MacroIdent)?,
+                params: self.param_group()?,
+                body: self.replacer(ReplacerKind::Body)?,
             })
+        })
     }
 
     /// Will only produce [`Some`] if the **immediately next** token begins a macro expansion.
@@ -319,12 +315,12 @@ impl<'src> PreprocessorStream<'src> {
     pub fn macro_alternative(
         &mut self,
     ) -> Option<Result<MacroAlternative<'src>, ContextError<'src>>> {
-        self.pull_if(match_token!(Punctuation(Punctuation::MacroConst)))
+        self.pull_if(match_token!(Punctuation::MacroConst))
             .map(|squiggle| {
                 Ok(MacroAlternative {
                     squiggle,
                     predicate: {
-                        if let Some(rot_kw) = self.pull_if(match_token!(Keyword(Keyword::Rot))) {
+                        if let Some(rot_kw) = self.pull_if(match_token!(Keyword::Rot)) {
                             Some(MacroPredicate {
                                 rot_kw,
                                 pred: self.replacer(ReplacerKind::Predicate)?,
@@ -344,25 +340,24 @@ impl<'src> PreprocessorStream<'src> {
     pub fn macro_conditional(
         &mut self,
     ) -> Option<Result<MacroConditional<'src>, ContextError<'src>>> {
-        self.pull_if_next(match_token!(Keyword(Keyword::Rot)))
-            .map(|rot_kw| {
-                Ok(MacroConditional {
-                    pred: MacroPredicate {
-                        rot_kw,
-                        pred: self.replacer(ReplacerKind::Predicate)?,
-                    },
-                    then_def: self.replacer(ReplacerKind::ConditionBody)?,
-                    else_def: std::iter::from_fn(|| self.macro_alternative())
-                        .collect::<Result<_, _>>()?,
-                })
+        self.pull_if_next(match_token!(Keyword::Rot)).map(|rot_kw| {
+            Ok(MacroConditional {
+                pred: MacroPredicate {
+                    rot_kw,
+                    pred: self.replacer(ReplacerKind::Predicate)?,
+                },
+                then_def: self.replacer(ReplacerKind::ConditionBody)?,
+                else_def: std::iter::from_fn(|| self.macro_alternative())
+                    .collect::<Result<_, _>>()?,
             })
+        })
     }
 
     /// Will only produce [`Some`] if the **immediately next** token begins a macro reference.
     ///
     /// Sensitive to whitespace and comments
     pub fn macro_reference(&mut self) -> Option<Result<MacroRefence<'src>, ContextError<'src>>> {
-        self.pull_if_next(match_token!(Punctuation(Punctuation::MacroConst)))
+        self.pull_if_next(match_token!(Punctuation::MacroConst))
             .map(|squiggle| {
                 Ok(MacroRefence {
                     squiggle,
