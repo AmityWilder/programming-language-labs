@@ -1,13 +1,13 @@
 3 * 2 + 6 - (2 + 2 / -(6) ** 9) - ((5 % (3*3)))
 
-5 + 2 [>>] 3 <= 8 !& 6
+5 + 2 [>>] 3 <= 8 !& 6 // expect incompatible operands error
 
 (-5)
 
-+ 4 ** 54
-(2 ** 64)
-(2 ** 63)
-(2u ** 64u)
++ 4 ** 54 // expect overflow error
+(2 ** 64) // expect overflow error
+(2 ** 63) // expect overflow error
+(2u ** 64u) // expect overflow error
 
 2+2+2+2+2+2+2
 
@@ -15,9 +15,9 @@ def \foo($x) { /* from \foo */ ($x+5) } // \foo definition
 def \bar($a $b) { /* from \bar */ (3*($a)**$b) } // \bar definition
 def \baz() { /* from \baz */ (200) } // \baz definition
 
-(-(-9_223_372_036_854_775_808))
+(-(-9_223_372_036_854_775_808)) // expect overflow error
 0b1111_1111__1111_1111__1111_1111__1111_1111__1111_1111__1111_1111__1111_1111__1111_1111u
-0xFF_FF_FF_FF_FF_FF_FF_FFu + 0b1001_1100u
+0xFF_FF_FF_FF_FF_FF_FF_FFu + 0b1001_1100u // expect overflow error
 
 \foo{\bar{\baz}{3}}
 
@@ -27,28 +27,28 @@ fals !| true
 
 "squeak " + !!none
 
-!(!5) != !!5
+!(!5) != !!5 // expect incompatible operands error
 
 5 + none?
 
 // `-:>` is conversion, `=:>` is reinterpretation
 
-5u -:> sint - 7s
-(-5 -:> uint + 3u) // error
-(5 -:> uint + 3u)  // error - COULD fail
-(-5 -:> uint | fail + 3u) // fallible
-(5 -:> uint | fail + 3u)  // fallible
+5u -:> sint - 7s // should be ok
+(-5 -:> uint + 3u) // error: fails, needs `uint | fail`
+(5 -:> uint + 3u)  // error: COULD fail, needs `uint | fail`
+(-5 -:> uint | fail + 3u) // fallible, fails at runtime
+(5 -:> uint | fail + 3u)  // fallible, but succeeds
 
 true -:> text   // stringify
 "true" -:> bool // parse
 none -:> uint   // error
 
-(-5 -:> uint) // fails at runtime
+(-5 -:> uint | fail) // fails at runtime
 (-5 =:> uint) // succeeds, but changes representation
 
 def \convert($op $ty) { (5 $op $ty) }
 \convert{-:>}{uint | fail}
-\convert{-:>}{fail}
+\convert{-:>}{fail} // expect error, you can't just convert directly to failure
 
 def \foo($x) { $x }
 5 -:> uint | \foo{none}
