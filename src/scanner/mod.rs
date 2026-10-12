@@ -259,13 +259,15 @@ impl<'src> Scanner<'src> {
                 n.checked_add(MACRO_PREFIX.len_utf8())
                     .expect("n is the length of the string after this character")
             });
-        let lex = self
-            .split_off(len)
-            .expect("find and len should return safe positions to split at");
-        Some(Token {
-            lex,
-            val: LexValue::Macro,
-            mac: None,
+        (len > MACRO_PREFIX.len_utf8()).then(|| {
+            let lex = self
+                .split_off(len)
+                .expect("find and len should return safe positions to split at");
+            Token {
+                lex,
+                val: LexValue::Macro,
+                mac: None,
+            }
         })
     }
 
@@ -277,17 +279,20 @@ impl<'src> Scanner<'src> {
             .source
             .strip_prefix(MACRO_PARAM_PREFIX)?
             .find(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | '\'')))
+            .filter(|n| *n > 0)
             .map_or(self.source.len(), |n| {
                 n.checked_add(MACRO_PARAM_PREFIX.len_utf8())
                     .expect("n is the length of the string after this character")
             });
-        let lex = self
-            .split_off(len)
-            .expect("find and len should return safe positions to split at");
-        Some(Token {
-            lex,
-            val: LexValue::MacroParam,
-            mac: None,
+        (len > MACRO_PARAM_PREFIX.len_utf8()).then(|| {
+            let lex = self
+                .split_off(len)
+                .expect("find and len should return safe positions to split at");
+            Token {
+                lex,
+                val: LexValue::MacroParam,
+                mac: None,
+            }
         })
     }
 
