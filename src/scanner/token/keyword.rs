@@ -133,14 +133,38 @@ define_token_eq! {
         /// }
         /// ```
         Def = "def",
+        /// Create a rotation (preprocessor conditional)
+        /// ### Syntax
+        /// ```rs
+        /// rot (/* preprocessor condition */) {
+        ///     /* then */
+        /// }
+        /// // or
+        /// rot (/* preprocessor condition */) {
+        ///     /* then */
+        /// } ~ {
+        ///     /* else */
+        /// }
+        /// // or
+        /// rot (/* condition 1 */) {
+        ///     /* then 1 */
+        /// } ~ rot (/* condition 2 */) {
+        ///     /* then 2 */
+        /// } /* ... */ ~ rot (/* condition n */) {
+        ///     /* then n */
+        /// } ~ {
+        ///     /* else */
+        /// }
+        /// ```
+        Rot = "rot",
         /// Define a function.
         /// ### Syntax
         /// ```rs
-        /// fn /* name */(/* param 1 */, /* param 2 */, /* ... */, /* param n */) -> /* return type */ {
+        /// fun /* name */(/* param 1 */, /* param 2 */, /* ... */, /* param n */) -> /* return type */ {
         ///     // definition
         /// }
         /// ```
-        Fn = "fn",
+        Fun = "fun",
         /// Define member items of a `rec`/`union`/`cat`.
         /// ### Syntax
         /// ```rs
@@ -187,7 +211,7 @@ define_token_eq! {
         /// without specifying its format.
         /// ### Syntax
         /// ```rs
-        /// fn foo(v)
+        /// fun foo(v)
         /// <=>
         ///     v has x, // `v.x` is defined
         ///     v has y, // `v.y` is defined
@@ -198,10 +222,10 @@ define_token_eq! {
         /// Type restraints can be added to the member by following it with a colon
         /// **Example:**
         /// ```rs
-        /// fn foo(v)
+        /// fun foo(v)
         /// <=>
         ///     v has x: uint, // `v.x` is defined as a uint
-        ///     v has fn f: (self) -> frac, // `v.y` is defined as a frac-returning method
+        ///     v has fun f: (self) -> frac, // `v.y` is defined as a frac-returning method
         /// {
         ///     // ...
         /// }

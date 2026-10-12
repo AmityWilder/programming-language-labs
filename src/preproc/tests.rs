@@ -656,3 +656,97 @@ fn test_multi_recursive_macro() {
         (source) {}
     };
 }
+
+#[test]
+fn test_conditional_skip() {
+    spoof_tokens! {
+        [
+            ("rot", Keyword::Rot),
+            (" ", Whitespace),
+            ("{", Punctuation::LBrace),
+            ("fals", BoolLiteral(false)),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
+            ("5", SIntLiteral(5)),
+            ("}", Punctuation::RBrace),
+        ],
+
+        [],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_conditional_keep() {
+    spoof_tokens! {
+        [
+            ("rot", Keyword::Rot),
+            (" ", Whitespace),
+            ("{", Punctuation::LBrace),
+            ("true", BoolLiteral(true)),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
+            ("5", SIntLiteral(5)),
+            ("}", Punctuation::RBrace),
+        ],
+
+        [
+            Ok(("5", SIntLiteral(5)))
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_conditional_else0() {
+    spoof_tokens! {
+        [
+            ("rot", Keyword::Rot),
+            (" ", Whitespace),
+            ("{", Punctuation::LBrace),
+            ("fals", BoolLiteral(false)),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
+            ("5", SIntLiteral(5)),
+            ("}", Punctuation::RBrace),
+            ("~", Punctuation::MacroOwise),
+            ("{", Punctuation::LBrace),
+            ("8", SIntLiteral(8)),
+            ("}", Punctuation::RBrace),
+        ],
+
+        [
+            Ok(("8", SIntLiteral(8)))
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_conditional_else1() {
+    spoof_tokens! {
+        [
+            ("rot", Keyword::Rot),
+            (" ", Whitespace),
+            ("{", Punctuation::LBrace),
+            ("true", BoolLiteral(true)),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
+            ("5", SIntLiteral(5)),
+            ("}", Punctuation::RBrace),
+            ("~", Punctuation::MacroOwise),
+            ("{", Punctuation::LBrace),
+            ("8", SIntLiteral(8)),
+            ("}", Punctuation::RBrace),
+        ],
+
+        [
+            Ok(("5", SIntLiteral(5)))
+        ],
+
+        (source) {}
+    };
+}

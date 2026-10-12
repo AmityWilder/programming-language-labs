@@ -334,7 +334,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                             | Keyword::Alt
                             | Keyword::Sub
                             | Keyword::Def
-                            | Keyword::Fn
+                            | Keyword::Fun
                             | Keyword::Mem
                             | Keyword::Let
                             | Keyword::Uni
