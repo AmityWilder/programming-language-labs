@@ -483,7 +483,7 @@ fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliError {
     UnknownOption {
         prgm: PathBuf,
@@ -493,21 +493,27 @@ pub enum CliError {
         prgm: PathBuf,
         unexpected: std::ffi::OsString,
     },
+    MissingValue {
+        option: std::ffi::OsString,
+    },
+    ParseError(std::str::ParseBoolError),
 }
 
 impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownOption { prgm, option } => {
-                writeln!(f, "unknown option {:?}", option.display())?;
-                writeln!(f)?;
+                writeln!(f, "unknown option {:?}\n", option.display())?;
                 Cli::usage(&prgm.display(), f)
             }
             Self::TooManyArgs { prgm, unexpected } => {
-                writeln!(f, "unexpected argument {:?}", unexpected.display())?;
-                writeln!(f)?;
+                writeln!(f, "unexpected argument {:?}\n", unexpected.display())?;
                 Cli::usage(&prgm.display(), f)
             }
+            Self::MissingValue { option } => {
+                writeln!(f, "option {:?} is missing a value", option.display())
+            }
+            Self::ParseError(e) => writeln!(f, "could not parse argument: {e}"),
         }
     }
 }
@@ -553,7 +559,7 @@ CliParser! {
     //     clippy::struct_excessive_bools,
     //     reason = "no, you're wrong. they're flags."
     // )]
-    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     struct Cli {
         prgm: PathBuf,
 
@@ -597,6 +603,25 @@ CliParser! {
     }
 }
 
+impl Default for Cli {
+    fn default() -> Self {
+        Self {
+            prgm: PathBuf::default(),
+            source_path: None,
+            echo_src: false,
+            scanner_tokens: true,
+            scanner_highlight: true,
+            preproc_tokens: false,
+            preproc_highlight: false,
+            dbg_ast: false,
+            semantic_highlight: true,
+            do_eval: true,
+            echo_exprs: false,
+            print_errors: true,
+        }
+    }
+}
+
 impl Cli {
     pub fn usage<S>(prgm: &S, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
     where
@@ -629,8 +654,19 @@ impl Cli {
         };
         while let Some(arg) = args.next_if(|arg| arg.to_str().is_some_and(|s| s.starts_with("--")))
         {
-            if let Some(option) = config.get_option_mut(arg.to_str().expect("guarded by next_if")) {
-                *option = true;
+            let s = arg.to_str().expect("guarded by next_if");
+            let value: bool = match s.split_once('=') {
+                Some(s) => s.1.parse().map_err(CliError::ParseError)?,
+                None => match args.next() {
+                    Some(s) => match s.to_str() {
+                        Some(s) => s.parse().map_err(CliError::ParseError)?,
+                        None => return Err(CliError::MissingValue { option: arg }),
+                    },
+                    None => return Err(CliError::MissingValue { option: arg }),
+                },
+            };
+            if let Some(option) = config.get_option_mut(s) {
+                *option = value;
             } else {
                 return Err(CliError::UnknownOption {
                     prgm: config.prgm,

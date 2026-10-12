@@ -76,4 +76,14 @@ rot { \likes_apples } {
 
 def \foo() { 5 }
 
-def \inf() { \inf + \foo + \inf }
+//def \inf() { \inf + \foo + \inf }
+
+rot { !(!!~\tbd) } {
+    def \tbd() { "first" }
+}
+
+rot { !(!!~\tbd) } {
+    def \tbd() { "second" }
+}
+
+"the next thing I will say is 'first': \"" + \tbd + "\""

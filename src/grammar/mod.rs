@@ -30,7 +30,7 @@ pub struct Parser<'src, I: Iterator<Item = Token<'src>>> {
 }
 
 impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
-    pub fn new(source: &'src str, tokens: I) -> Self {
+    fn new(source: &'src str, tokens: I) -> Self {
         Self {
             source,
             tokens: tokens.peekable(),
