@@ -9,6 +9,7 @@ use crate::{
         syntax::{Syntax, SyntaxStyle},
     },
     scanner::{
+        Scanner,
         symbols::{CHAR_DELIM, TEXT_DELIM},
         token::{
             Token,
@@ -143,30 +144,6 @@ where
     }
 }
 
-#[cfg(test)]
-mod subtoken_syn_tests {
-    use super::*;
-
-    #[test]
-    fn test0() {
-        let lex = r#""apple \n orange""#;
-        let list = SubTokenSyntax::new(
-            lex,
-            Syntax::TextLiteral,
-            [(Range::from(7..9), Syntax::EscapeSeq)].into_iter(),
-        )
-        .collect::<Vec<_>>();
-        assert_eq!(
-            list.as_slice(),
-            &[
-                ("\"apple ", Syntax::TextLiteral),
-                ("\\n", Syntax::EscapeSeq),
-                (" orange\"", Syntax::TextLiteral)
-            ]
-        );
-    }
-}
-
 const fn escaped_ranges_closure(range: Range<usize>) -> (Range<usize>, Syntax) {
     (remap_subtoken_range(range), Syntax::EscapeSeq)
 }
@@ -211,6 +188,66 @@ fn escaped_text_literal<'src>(
     )
 }
 
+#[derive(Debug, Clone)]
+struct CommentCodeSegments<'src> {
+    source: &'src str,
+}
+
+impl<'src> CommentCodeSegments<'src> {
+    const fn new(source: &'src str) -> Self {
+        Self { source }
+    }
+}
+
+impl<'src> Iterator for CommentCodeSegments<'src> {
+    type Item = &'src str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.source.split_once('`').map(|(_, code)| {
+            if let Some((code, rest)) = code.split_once('`') {
+                self.source = rest;
+                code
+            } else {
+                #[expect(clippy::string_slice, reason = "`len..` is a valid string slice")]
+                {
+                    self.source = &self.source[self.source.len()..];
+                }
+                code
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CommentCode<'src> {
+    comment: &'src str,
+    scanner: std::iter::FlatMap<
+        CommentCodeSegments<'src>,
+        Scanner<'src>,
+        fn(&'src str) -> Scanner<'src>,
+    >,
+}
+
+impl<'src> CommentCode<'src> {
+    fn new(comment: &'src str) -> Self {
+        Self {
+            comment,
+            scanner: CommentCodeSegments::new(comment).flat_map(Scanner::new),
+        }
+    }
+}
+
+impl Iterator for CommentCode<'_> {
+    type Item = (Range<usize>, Syntax);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.scanner.next().map(|s| match s {
+            Ok(x) => (x.lex_range(self.comment), x.syntax()),
+            Err(e) => (e.range, Syntax::Invalid),
+        })
+    }
+}
+
 /// An iterator over the subtokens of any valid token, since each has its own method of iterating
 #[derive(Debug, Clone)]
 pub enum HighlightToken<'src> {
@@ -219,6 +256,9 @@ pub enum HighlightToken<'src> {
 
     /// String literal containing escapes - interleaves the escape sequences between un-escaped chunks
     TextLiteral(SubTokenSyntax<'src, EscapedRanges<EscapeRanges<'src>>>),
+
+    /// String literal containing escapes - interleaves the escape sequences between un-escaped chunks
+    Comment(SubTokenSyntax<'src, CommentCode<'src>>),
 
     /// Any token that doesn't have subtokens
     Simple(std::iter::Once<(&'src str, Syntax)>),
@@ -231,6 +271,7 @@ impl<'src> Iterator for HighlightToken<'src> {
         match self {
             Self::CharLiteral(iter) => iter.next(),
             Self::TextLiteral(iter) => iter.next(),
+            Self::Comment(iter) => iter.next(),
             Self::Simple(iter) => iter.next(),
         }
     }
@@ -239,6 +280,7 @@ impl<'src> Iterator for HighlightToken<'src> {
         match self {
             Self::CharLiteral(iter) => iter.nth(n),
             Self::TextLiteral(iter) => iter.nth(n),
+            Self::Comment(iter) => iter.nth(n),
             Self::Simple(iter) => iter.nth(n),
         }
     }
@@ -247,6 +289,7 @@ impl<'src> Iterator for HighlightToken<'src> {
         match self {
             Self::CharLiteral(iter) => iter.count(),
             Self::TextLiteral(iter) => iter.count(),
+            Self::Comment(iter) => iter.count(),
             Self::Simple(iter) => iter.count(),
         }
     }
@@ -255,6 +298,7 @@ impl<'src> Iterator for HighlightToken<'src> {
         match self {
             Self::CharLiteral(iter) => iter.size_hint(),
             Self::TextLiteral(iter) => iter.size_hint(),
+            Self::Comment(iter) => iter.size_hint(),
             Self::Simple(iter) => iter.size_hint(),
         }
     }
@@ -274,6 +318,11 @@ where
         // string literal with escapes or interpolated string with escapes and no expressions - an iterator
         LexValue::TextLiteral(literal) if literal.has_escapes() => {
             HighlightToken::TextLiteral(escaped_text_literal(lex, syn, literal))
+        }
+
+        // string literal with escapes or interpolated string with escapes and no expressions - an iterator
+        LexValue::Comment if lex.contains('`') => {
+            HighlightToken::Comment(SubTokenSyntax::new(lex, syn, CommentCode::new(lex)))
         }
 
         // an item
@@ -366,4 +415,28 @@ where
         syntax_style[syntax].style(lexeme).fmt(f)?;
     }
     f.write_str("\x1b[0m")
+}
+
+#[cfg(test)]
+mod subtoken_syn_tests {
+    use super::*;
+
+    #[test]
+    fn test0() {
+        let lex = r#""apple \n orange""#;
+        let list = SubTokenSyntax::new(
+            lex,
+            Syntax::TextLiteral,
+            [(Range::from(7..9), Syntax::EscapeSeq)].into_iter(),
+        )
+        .collect::<Vec<_>>();
+        assert_eq!(
+            list.as_slice(),
+            &[
+                ("\"apple ", Syntax::TextLiteral),
+                ("\\n", Syntax::EscapeSeq),
+                (" orange\"", Syntax::TextLiteral)
+            ]
+        );
+    }
 }
