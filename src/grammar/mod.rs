@@ -3,7 +3,7 @@
 use crate::{
     error::{ContextError, ErrorType, ExpectedToken, OpSide},
     scanner::{
-        BadBracketCombo, Bracket,
+        Bracket,
         token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue},
     },
 };
@@ -30,7 +30,7 @@ pub struct Parser<'src, I: Iterator<Item = Token<'src>>> {
 }
 
 impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
-    fn new(source: &'src str, tokens: I) -> Self {
+    pub fn new(source: &'src str, tokens: I) -> Self {
         Self {
             source,
             tokens: tokens.peekable(),
@@ -91,7 +91,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     }
 
     /// `expression -> or`
-    fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+    pub fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.or()
     }
 
@@ -257,7 +257,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | TEXT`
+    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | TEXT | MACRO`
     fn literal(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.try_pull(
             match_token!(
@@ -268,6 +268,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                     | FracLiteral(_)
                     | CharLiteral(_)
                     | TextLiteral(_)
+                    | Macro
             ),
             ExpectedToken::Literal,
         )

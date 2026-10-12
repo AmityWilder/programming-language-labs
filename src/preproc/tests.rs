@@ -926,3 +926,33 @@ fn test_macro_const_late() {
         (source) {}
     };
 }
+
+#[test]
+fn test_macro_expr_cond() {
+    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
+    spoof_tokens! {
+        [
+            ("rot", Keyword::Rot),
+            ("{", Punctuation::LBrace),
+            ("1", SIntLiteral(1)),
+            ("+", Punctuation::Add),
+            ("1", SIntLiteral(1)),
+            ("<", Punctuation::Lt),
+            ("5", SIntLiteral(5)),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
+            ("9", SIntLiteral(9)),
+            ("}", Punctuation::RBrace),
+            ("~", Punctuation::MacroConst),
+            ("{", Punctuation::LBrace),
+            ("2", SIntLiteral(2)),
+            ("}", Punctuation::RBrace),
+        ],
+
+        [
+            Ok(("9", SIntLiteral(9))),
+        ],
+
+        (source) {}
+    };
+}
