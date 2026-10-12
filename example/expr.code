@@ -73,3 +73,7 @@ rot { \likes_apples } {
 }
 
 "i will eat a(n) " + \fruit
+
+def \foo() { 5 }
+
+def \inf() { \inf + \foo + \inf }
