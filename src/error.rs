@@ -650,8 +650,17 @@ pub enum ErrorType<'src> {
     #[code(PRE, 21)]
     #[err(|f| write!(f, "macro has not been defined at this point"))]
     #[inlay(|f| write!(f, "not defined"))]
-    #[help(|f, _src| write!(f, "try moving the definition ahead of this usage"))]
+    #[help(|f, _src| write!(f, "try moving the definition ahead of this usage or fix the errors in the definition"))]
     MacroUndefined,
+
+    #[code(PRE, 22)]
+    #[err({ .. }, |f| write!(f, "macro call is recursive"))]
+    #[inlay({ .. }, |f| write!(f, "macro calls itself here"))]
+    #[help({ .. }, |f, _src| write!(f, "macros can't be defined recursively. they do not have base cases, so it will always be infinite recursion"))]
+    #[info({ head_range }, [(*head_range, "macro defined here")])]
+    RecursiveMacro {
+        head_range: Range<usize>,
+    },
 
     // ----------------------------
     // parse
@@ -989,11 +998,11 @@ impl<'src> ContextError<'src> {
             ErrorType::MissingToken { .. } | ErrorType::UnexpectedToken { .. } => {
                 ErrorType::MissingCloseBracket {
                     open_range,
-                    expect: Bracket::Brace,
+                    expect: open_bracket,
                 }
             }
 
-            _ => unreachable!(),
+            _ => e,
         })
     }
 

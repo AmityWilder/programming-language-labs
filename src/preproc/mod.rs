@@ -120,41 +120,15 @@ impl<'src> MacroDef<'src> {
     }
 }
 
-/// `param_rest_item -> "," MACRO_PARAM`
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-struct ParamRestItem<'src> {
-    pub comma: Token<'src>,
-    /// [`crate::scanner::token::value::LexValue::MacroParam`]
-    pub param: Token<'src>,
-}
-
-/// `param_list -> MACRO_PARAM ( param_rest_item )* ( "," )?`
-#[derive(Debug, Clone, PartialEq, Default)]
-struct ParamList<'src> {
-    /// [`crate::scanner::token::value::LexValue::MacroParam`]
-    pub first: Token<'src>,
-    pub rest: Vec<ParamRestItem<'src>>,
-    pub trailing_comma: Option<Token<'src>>,
-}
-
-/// `param_group -> "(" param_list ")"`
+/// `param_group -> "(" ( MACRO_PARAM )* ")"`
 #[derive(Debug, Clone, PartialEq, Default)]
 struct ParamGroup<'src> {
     /// `(`
     pub open: Token<'src>,
-    pub params: Option<ParamList<'src>>,
+    /// [`crate::scanner::token::value::LexValue::MacroParam`]
+    pub list: Vec<Token<'src>>,
     /// `)`
     pub close: Token<'src>,
-}
-
-impl<'src> ParamGroup<'src> {
-    fn list(
-        self,
-    ) -> impl DoubleEndedIterator<Item = Token<'src>> + Clone + std::iter::FusedIterator {
-        self.params.into_iter().flat_map(|list| {
-            std::iter::once(list.first).chain(list.rest.into_iter().map(|item| item.param))
-        })
-    }
 }
 
 /// `macro_replacer -> "{" ( TOKEN )* "}"`
@@ -245,6 +219,13 @@ impl<'src> PreprocessorStream<'src> {
             .map(|res| res.expect("should be guarded by is_ok_and"))
     }
 
+    /// Returns the first token that is neither whitespace nor comment.
+    fn peek(&self) -> Option<&Result<Token<'src>, ContextError<'src>>> {
+        self.tokens.iter().find(|res| {
+            !res.is_ok_and(|token| matches!(token.val, LexValue::Whitespace | LexValue::Comment))
+        })
+    }
+
     /// Expect a token matching `p` and return [`None`] if it is not found.
     ///
     /// Ignores whitespace and comments, but only consumes them if a match is found.
@@ -258,12 +239,8 @@ impl<'src> PreprocessorStream<'src> {
             .enumerate()
             .map_while(|(i, res)| res.ok().map(|token| (i, token)))
             .find(|(_, token)| !matches!(token.val, LexValue::Whitespace | LexValue::Comment))
-            .filter(|(_, token)| {
-                println!("checking token {token:?}");
-                p(token)
-            })
+            .filter(|(_, token)| p(token))
             .map(|(pos, _)| {
-                println!("  pulling");
                 drop(self.tokens.drain(..pos));
                 self.tokens
                     .pop_front()
@@ -274,7 +251,7 @@ impl<'src> PreprocessorStream<'src> {
 
     /// Expect a token matching `p` and return an error if it is not found.
     ///
-    /// Ignores whitespace and comments.
+    /// Ignores whitespace and comments, but only consumes them if a match is found.
     fn try_pull<P>(
         &mut self,
         p: P,
@@ -283,52 +260,11 @@ impl<'src> PreprocessorStream<'src> {
     where
         P: FnOnce(&Token<'src>) -> bool,
     {
-        // clear out the ignored tokens
-        while self
-            .tokens
-            .pop_front_if(|res| {
-                res.as_ref().is_ok_and(|token| {
-                    matches!(token.val, LexValue::Whitespace | LexValue::Comment)
-                })
-            })
-            .is_some()
-        {}
-
-        // next item that isn't whitespace or a comment
-        self.tokens
-            .pop_front_if(|res| res.as_ref().is_ok_and(p))
-            .map(|res| res.expect("guarded by is_ok_and"))
-            .ok_or_else(|| match self.tokens.front().copied().transpose() {
+        self.pull_if(p)
+            .ok_or_else(|| match self.peek().copied().transpose() {
                 Ok(token) => ContextError::missing_or_unexpected(token, self.source, expecting),
                 Err(e) => e,
             })
-    }
-
-    fn param_list(&mut self) -> Option<ParamList<'src>> {
-        self.pull_if(match_token!(MacroParam)).map(|first| {
-            let mut trailing_comma = None;
-            let rest = std::iter::from_fn(|| {
-                trailing_comma = self.pull_if(match_token!(Punctuation(Punctuation::Comma)));
-                if trailing_comma.is_some() {
-                    self.pull_if(match_token!(MacroParam))
-                        .map(|param| ParamRestItem {
-                            comma: trailing_comma
-                                .take()
-                                .expect("guarded by `trailing_comma.is_some()`"),
-                            param,
-                        })
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-            ParamList {
-                first,
-                rest,
-                trailing_comma,
-            }
-        })
     }
 
     fn param_group(&mut self) -> Result<ParamGroup<'src>, ContextError<'src>> {
@@ -336,17 +272,16 @@ impl<'src> PreprocessorStream<'src> {
             match_token!(Punctuation(Punctuation::LParen)),
             ExpectedToken::LParen,
         )?;
-        let params = self.param_list();
+        let params = std::iter::from_fn(|| self.pull_if(match_token!(MacroParam))).collect();
         let close = self
             .try_pull(
                 match_token!(Punctuation(Punctuation::RParen)),
-                // HACK: we don't actually want an ExpectedToken error, we're going to replace it.
-                ExpectedToken::MacroIdent,
+                ExpectedToken::MacroParamOrRParen,
             )
             .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))?;
         Ok(ParamGroup {
             open,
-            params,
+            list: params,
             close,
         })
     }
@@ -457,6 +392,7 @@ pub struct Preprocessor<'src> {
     stream: PreprocessorStream<'src>,
     /// Macro definitions (actively modified)
     macros: HashMap<&'src str, MacroDef<'src>>,
+    errors: Vec<ContextError<'src>>,
 }
 
 impl<'src> Preprocessor<'src> {
@@ -468,18 +404,54 @@ impl<'src> Preprocessor<'src> {
         Self {
             stream: PreprocessorStream::new(source, tokens),
             macros: HashMap::new(),
+            errors: Vec::new(),
         }
     }
 
-    fn define_macro(&mut self, definition: MacroDefinition<'src>) {
+    fn define_macro(
+        &mut self,
+        definition: MacroDefinition<'src>,
+    ) -> Result<(), impl 'src + DoubleEndedIterator<Item = ContextError<'src>> + Clone> {
+        // prevent infinitely recursive macro
+        if definition
+            .body
+            .content
+            .iter()
+            .filter(match_token!(Macro))
+            .any(|token| token.lex == definition.name.lex)
+        {
+            let head_lex = definition.name.lex;
+            let head_range = definition.name.lex_range(self.stream.source);
+            let source = self.stream.source;
+            return Err(definition
+                .body
+                .content
+                .into_iter()
+                .filter(match_token!(Macro))
+                .filter(move |token| token.lex == head_lex)
+                .map(move |token| {
+                    ContextError::token_error(
+                        source,
+                        Some(token),
+                        ErrorType::RecursiveMacro { head_range },
+                    )
+                }));
+        }
+
         // replace existing definition
         _ = self.macros.insert(
             definition.name.lex,
             MacroDef {
-                params: definition.params.list().map(|token| token.lex).collect(),
+                params: definition
+                    .params
+                    .list
+                    .into_iter()
+                    .map(|token| token.lex)
+                    .collect(),
                 tokens: definition.body.content,
             },
         );
+        Ok(())
     }
 
     /// # Panics
@@ -511,9 +483,15 @@ impl<'src> Iterator for Preprocessor<'src> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(definition) = self.stream.macro_definition() {
+            if let Some(e) = self.errors.pop() {
+                break Some(Err(e));
+            } else if let Some(definition) = self.stream.macro_definition() {
                 match definition {
-                    Ok(x) => self.define_macro(x),
+                    Ok(x) => {
+                        if let Err(e) = self.define_macro(x) {
+                            self.errors.extend(e.rev()); // reversed because we're popping the back
+                        }
+                    }
                     Err(e) => break Some(Err(e)),
                 }
             } else if let Some(expansion) = self

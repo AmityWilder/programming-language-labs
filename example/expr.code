@@ -12,7 +12,7 @@
 2+2+2+2+2+2+2
 
 def \foo($x) { /* from \foo */ ($x+5) } // \foo definition
-def \bar($a, $b) { /* from \bar */ (3*($a)**$b) } // \bar definition
+def \bar($a $b) { /* from \bar */ (3*($a)**$b) } // \bar definition
 def \baz() { /* from \baz */ (200) } // \baz definition
 
 (-(-9_223_372_036_854_775_808))
@@ -46,7 +46,7 @@ none -:> uint   // error
 (-5 -:> uint) // fails at runtime
 (-5 =:> uint) // succeeds, but changes representation
 
-def \convert($op, $ty) { (5 $op $ty) }
+def \convert($op $ty) { (5 $op $ty) }
 \convert{-:>}{uint | fail}
 \convert{-:>}{fail}
 
@@ -54,9 +54,12 @@ def \foo($x) { $x }
 5 -:> uint | \foo{none}
 \foo{none}?
 
-def \foo($x, $y) { $x*$x+$y }
+def \foo($x $y) { $x*$x+$y }
 \foo{5*5*6}{3}
 
-def \foo($x, $y) { -5 $x $y }
-def \bar($x, $y) { $x | $y }
+def \foo($x $y) { -5 $x $y }
+def \bar($x $y) { $x | $y }
 \foo{-:>}{\bar{uint}{none}}
+
+def \inf() { \inf + \inf }
+\inf
