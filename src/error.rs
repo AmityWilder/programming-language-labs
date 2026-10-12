@@ -1352,7 +1352,7 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
                 && a.span.end.line == b.span.end.line
                 // overlapping items not supported - they go in separate chunks
                 && a.span.start.line == a.span.end.line
-                && a.span.end.col < b.span.start.col
+                && a.span.end.col <= b.span.start.col
         }
         self.items.chunk_by(p)
     }
