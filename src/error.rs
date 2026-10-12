@@ -15,7 +15,7 @@ use crate::{
             BIN_PREFIX, BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, HEX_PREFIX,
             OCT_PREFIX, TEXT_DELIM,
         },
-        token::{ExpansionData, Token, escape_char, punc::Punctuation},
+        token::{ExpansionData, Token, escape_char, punc::Punctuation, value::TokenEq},
     },
 };
 use std::range::Range;
@@ -770,12 +770,14 @@ pub enum ErrorType<'src> {
     #[help({ op, l_ty, r_ty, .. }, |f, _src| {
         write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
         match op {
-            Punctuation::And |
-            Punctuation::Xor |
-            Punctuation::Or |
-            Punctuation::Nand |
-            Punctuation::Nor |
-            Punctuation::Xnor if matches!(l_ty, ValueType::Bool) != matches!(r_ty, ValueType::Bool)
+            TokenEq::Punctuation(
+                Punctuation::And |
+                Punctuation::Xor |
+                Punctuation::Or |
+                Punctuation::Nand |
+                Punctuation::Nor |
+                Punctuation::Xnor
+            ) if matches!(l_ty, ValueType::Bool) != matches!(r_ty, ValueType::Bool)
                 // TODO: the user might have used a boolean literal/variable, not a comparison; this message might not be helpful in that case
                 => write!(f, "\n\nit looks like you may have been trying to perform a bitwise operation, but one side resolves to a boolean.\n\
                     bitwise/logic operations have lower precedence than comparisons, so you may need to wrap the bitwise operation in parentheses."),
@@ -789,7 +791,7 @@ pub enum ErrorType<'src> {
     ])]
     Incompatible {
         /// The binary operator
-        op: Punctuation,
+        op: TokenEq,
         l_range: Range<usize>,
         r_range: Range<usize>,
         l_ty: ValueType,
@@ -804,7 +806,7 @@ pub enum ErrorType<'src> {
     #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })])]
     Unsupported {
         /// The unary operator
-        op: Punctuation,
+        op: TokenEq,
         /// The type of the value on the right side of the operator
         r_ty: ValueType,
         r_range: Range<usize>,
@@ -895,7 +897,7 @@ pub enum ErrorType<'src> {
         (*op_range, FailedConversionMsg::new(*op, OpSide::Right, *failure, *is_binary)),
     ])]
     FailedConvert {
-        op: Punctuation,
+        op: TokenEq,
         is_binary: bool,
         op_range: Range<usize>,
         failure: IntConversionFailure,
@@ -1803,7 +1805,7 @@ impl std::fmt::Display for TargetTy {
 
 #[derive(Debug, Clone, PartialEq)]
 struct FailedConversionMsg {
-    op: Punctuation,
+    op: TokenEq,
     side: OpSide,
     failure: IntConversionFailure,
     is_binary: bool,
@@ -1811,7 +1813,7 @@ struct FailedConversionMsg {
 
 impl FailedConversionMsg {
     const fn new(
-        op: Punctuation,
+        op: TokenEq,
         side: OpSide,
         failure: IntConversionFailure,
         is_binary: bool,

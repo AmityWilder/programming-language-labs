@@ -3,6 +3,7 @@
 pub use super::{keyword::Keyword, punc::Punctuation};
 use crate::{
     error::{ErrorType, NumErrorKind},
+    eval::ValueType,
     scanner::{
         symbols::{
             BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX, TEXT_DELIM,
@@ -104,6 +105,35 @@ impl<'src> TryFrom<TextLiteral<'src>> for LiteralText {
     }
 }
 
+/// A [`LexValue`] where the lexeme can be represented by a static string
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TokenEq {
+    Keyword(Keyword),
+    Punctuation(Punctuation),
+}
+
+impl TokenEq {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            TokenEq::Keyword(kw) => kw.as_str(),
+            TokenEq::Punctuation(punc) => punc.as_str(),
+        }
+    }
+
+    pub fn op_description(self, operands: &[ValueType]) -> &'static str {
+        match self {
+            TokenEq::Keyword(kw) => kw.op_description(operands),
+            TokenEq::Punctuation(punc) => punc.op_description(operands),
+        }
+    }
+}
+
+impl std::fmt::Display for TokenEq {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
 /// The value represented by a [`Token`](super::Token)
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum LexValue<'src> {
@@ -150,6 +180,14 @@ pub enum LexValue<'src> {
 }
 
 impl<'src> LexValue<'src> {
+    pub const fn to_token_eq(self) -> Option<TokenEq> {
+        match self {
+            LexValue::Keyword(kw) => Some(TokenEq::Keyword(kw)),
+            LexValue::Punctuation(punc) => Some(TokenEq::Punctuation(punc)),
+            _ => None,
+        }
+    }
+
     /// Parses a number literal lexeme into its value
     pub fn number_literal(src: &'src str) -> Result<Self, ErrorType<'src>> {
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.

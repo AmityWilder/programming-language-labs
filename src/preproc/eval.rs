@@ -3,7 +3,7 @@ use crate::{
     grammar::ast::{Binary, Expr, Unary},
     scanner::token::{
         punc::Punctuation,
-        value::{Keyword, LexValue},
+        value::{Keyword, LexValue, TokenEq},
     },
 };
 
@@ -11,8 +11,8 @@ use crate::{
 pub enum PpValue<'src> {
     // types (for size operations)
     Bool,
-    Sint,
     Uint,
+    Sint,
     Frac,
     Char,
     Text,
@@ -35,165 +35,197 @@ where
 {
     // TODO: Some operations are valid for Expr but not in preprocessing
     match expr {
-        Expr::Ternary(_inner) => todo!(),
+        Expr::Ternary(_inner) => unimplemented!("undefined for preprocessor"),
 
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = *inner;
 
-            match op.val {
-                LexValue::Punctuation(Punctuation::Add) => {
-                    match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                            Ok(PpValue::UIntLiteral(l.saturating_add(r)))
+            let punc = op.val.to_token_eq().expect("only TokenEq ops supported");
+            match punc {
+                TokenEq::Keyword(_keyword) => unimplemented!("no binary keywords yet"),
+                TokenEq::Punctuation(punctuation) => match punctuation {
+                    Punctuation::Add => {
+                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                                Ok(PpValue::UIntLiteral(l.saturating_add(r)))
+                            }
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                                Ok(PpValue::SIntLiteral(l.saturating_add(r)))
+                            }
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
                         }
-                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                            Ok(PpValue::SIntLiteral(l.saturating_add(r)))
-                        }
-                        _ => unimplemented!("incompatible"), // TODO: change this to an error
                     }
-                }
 
-                LexValue::Punctuation(Punctuation::SubNeg) => {
-                    match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                            Ok(PpValue::UIntLiteral(l.saturating_sub(r)))
+                    Punctuation::SubNeg => {
+                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                                Ok(PpValue::UIntLiteral(l.saturating_sub(r)))
+                            }
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                                Ok(PpValue::SIntLiteral(l.saturating_sub(r)))
+                            }
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
                         }
-                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                            Ok(PpValue::SIntLiteral(l.saturating_sub(r)))
-                        }
-                        _ => unimplemented!("incompatible"), // TODO: change this to an error
                     }
-                }
 
-                LexValue::Punctuation(Punctuation::Mul) => {
-                    match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                            Ok(PpValue::UIntLiteral(l.saturating_mul(r)))
+                    Punctuation::Mul => {
+                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                                Ok(PpValue::UIntLiteral(l.saturating_mul(r)))
+                            }
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                                Ok(PpValue::SIntLiteral(l.saturating_mul(r)))
+                            }
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
                         }
-                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                            Ok(PpValue::SIntLiteral(l.saturating_mul(r)))
-                        }
-                        _ => unimplemented!("incompatible"), // TODO: change this to an error
                     }
-                }
 
-                LexValue::Punctuation(Punctuation::Div) => {
-                    match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                            Ok(PpValue::UIntLiteral(l.checked_div(r).unwrap_or(usize::MAX)))
+                    Punctuation::Div => {
+                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                                Ok(PpValue::UIntLiteral(l.checked_div(r).unwrap_or(usize::MAX)))
+                            }
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                                Ok(PpValue::SIntLiteral(l.checked_div(r).unwrap_or(isize::MAX)))
+                            }
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
                         }
-                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                            Ok(PpValue::SIntLiteral(l.checked_div(r).unwrap_or(isize::MAX)))
-                        }
-                        _ => unimplemented!("incompatible"), // TODO: change this to an error
                     }
-                }
 
-                LexValue::Punctuation(Punctuation::Rem) => {
-                    match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                        (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                            Ok(PpValue::UIntLiteral(l.checked_rem(r).unwrap_or(0)))
+                    Punctuation::Rem => {
+                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
+                                Ok(PpValue::UIntLiteral(l.checked_rem(r).unwrap_or(0)))
+                            }
+                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
+                                Ok(PpValue::SIntLiteral(l.checked_rem(r).unwrap_or(0)))
+                            }
+                            _ => unimplemented!("incompatible"), // TODO: change this to an error
                         }
-                        (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                            Ok(PpValue::SIntLiteral(l.checked_rem(r).unwrap_or(0)))
-                        }
-                        _ => unimplemented!("incompatible"), // TODO: change this to an error
                     }
-                }
 
-                LexValue::Punctuation(Punctuation::Eq) => {
-                    Ok(PpValue::BoolLiteral(
-                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => l == r,
-                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l == r,
-                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l == r,
-                            _ => unimplemented!("incompatible"), // TODO: change this to an error
-                        },
-                    ))
-                }
-                LexValue::Punctuation(Punctuation::Ne) => {
-                    Ok(PpValue::BoolLiteral(
-                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => l != r,
-                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l != r,
-                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l != r,
-                            _ => unimplemented!("incompatible"), // TODO: change this to an error
-                        },
-                    ))
-                }
-                LexValue::Punctuation(Punctuation::Lt) => {
-                    Ok(PpValue::BoolLiteral(
-                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l < r,
-                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l < r,
-                            _ => unimplemented!("incompatible"), // TODO: change this to an error
-                        },
-                    ))
-                }
-                LexValue::Punctuation(Punctuation::Le) => {
-                    Ok(PpValue::BoolLiteral(
-                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l <= r,
-                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l <= r,
-                            _ => unimplemented!("incompatible"), // TODO: change this to an error
-                        },
-                    ))
-                }
-                LexValue::Punctuation(Punctuation::Gt) => {
-                    Ok(PpValue::BoolLiteral(
-                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l > r,
-                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l > r,
-                            _ => unimplemented!("incompatible"), // TODO: change this to an error
-                        },
-                    ))
-                }
-                LexValue::Punctuation(Punctuation::Ge) => {
-                    Ok(PpValue::BoolLiteral(
-                        match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
-                            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l >= r,
-                            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l >= r,
-                            _ => unimplemented!("incompatible"), // TODO: change this to an error
-                        },
-                    ))
-                }
+                    Punctuation::Eq => {
+                        Ok(PpValue::BoolLiteral(
+                            match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                                (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => l == r,
+                                (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l == r,
+                                (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l == r,
+                                _ => unimplemented!("incompatible"), // TODO: change this to an error
+                            },
+                        ))
+                    }
+                    Punctuation::Ne => {
+                        Ok(PpValue::BoolLiteral(
+                            match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                                (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => l != r,
+                                (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l != r,
+                                (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l != r,
+                                _ => unimplemented!("incompatible"), // TODO: change this to an error
+                            },
+                        ))
+                    }
+                    Punctuation::Lt => {
+                        Ok(PpValue::BoolLiteral(
+                            match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                                (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l < r,
+                                (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l < r,
+                                _ => unimplemented!("incompatible"), // TODO: change this to an error
+                            },
+                        ))
+                    }
+                    Punctuation::Le => {
+                        Ok(PpValue::BoolLiteral(
+                            match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                                (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l <= r,
+                                (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l <= r,
+                                _ => unimplemented!("incompatible"), // TODO: change this to an error
+                            },
+                        ))
+                    }
+                    Punctuation::Gt => {
+                        Ok(PpValue::BoolLiteral(
+                            match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                                (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l > r,
+                                (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l > r,
+                                _ => unimplemented!("incompatible"), // TODO: change this to an error
+                            },
+                        ))
+                    }
+                    Punctuation::Ge => {
+                        Ok(PpValue::BoolLiteral(
+                            match (preproc_eval(lhs, mexists)?, preproc_eval(rhs, mexists)?) {
+                                (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => l >= r,
+                                (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => l >= r,
+                                _ => unimplemented!("incompatible"), // TODO: change this to an error
+                            },
+                        ))
+                    }
 
-                _ => unimplemented!("not a preproc operator"),
+                    _ => unimplemented!("not a preproc operator"),
+                },
             }
         }
 
         Expr::Unary(inner) => {
             let Unary { op, operand, side } = *inner;
+
+            let punc = op.val.to_token_eq().expect("only TokenEq ops supported");
+
             match side {
                 OpSide::Left => unimplemented!(),
 
-                OpSide::Right => match op.val {
-                    LexValue::Punctuation(Punctuation::SubNeg) => {
-                        match preproc_eval(operand, mexists)? {
-                            PpValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(x.saturating_neg())),
-                            _ => unimplemented!("undefined"), // TODO: change this to an error
-                        }
-                    }
-
-                    LexValue::Punctuation(Punctuation::Not) => {
-                        match preproc_eval(operand, mexists)? {
-                            PpValue::UIntLiteral(x) => Ok(PpValue::UIntLiteral(!x)),
-                            PpValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(!x)),
-                            PpValue::BoolLiteral(x) => Ok(PpValue::BoolLiteral(!x)),
-                            _ => unimplemented!("undefined"), // TODO: change this to an error
-                        }
-                    }
-
-                    LexValue::Punctuation(Punctuation::Exists) => {
-                        Ok(PpValue::BoolLiteral(
+                OpSide::Right => match punc {
+                    TokenEq::Keyword(keyword) => match keyword {
+                        Keyword::Szof => Ok(PpValue::UIntLiteral(
                             match preproc_eval(operand, mexists)? {
-                                PpValue::Macro(x) => mexists(x),
-                                _ => unimplemented!("undefined"), // TODO: change this to an error
+                                // TBD: should literals produce an error?
+                                PpValue::BoolLiteral(_) | PpValue::Bool => {
+                                    std::mem::size_of::<bool>()
+                                }
+                                PpValue::UIntLiteral(_) | PpValue::Uint => {
+                                    std::mem::size_of::<usize>()
+                                }
+                                PpValue::SIntLiteral(_) | PpValue::Sint => {
+                                    std::mem::size_of::<isize>()
+                                }
+                                PpValue::Frac => std::mem::size_of::<f64>(),
+                                PpValue::Char => std::mem::size_of::<char>(),
+                                PpValue::Text => std::mem::size_of::<String>(),
+                                PpValue::Macro(_) => 0,
                             },
-                        ))
-                    }
+                        )),
+                        _ => unimplemented!("undefined"), // TODO: change this to an error
+                    },
+                    TokenEq::Punctuation(punctuation) => match punctuation {
+                        Punctuation::SubNeg => {
+                            match preproc_eval(operand, mexists)? {
+                                PpValue::SIntLiteral(x) => {
+                                    Ok(PpValue::SIntLiteral(x.saturating_neg()))
+                                }
+                                _ => unimplemented!("undefined"), // TODO: change this to an error
+                            }
+                        }
 
-                    _ => unimplemented!("not a preproc operator"), // TODO: change this to an error
+                        Punctuation::Not => {
+                            match preproc_eval(operand, mexists)? {
+                                PpValue::UIntLiteral(x) => Ok(PpValue::UIntLiteral(!x)),
+                                PpValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(!x)),
+                                PpValue::BoolLiteral(x) => Ok(PpValue::BoolLiteral(!x)),
+                                _ => unimplemented!("undefined"), // TODO: change this to an error
+                            }
+                        }
+
+                        Punctuation::Exists => {
+                            Ok(PpValue::BoolLiteral(
+                                match preproc_eval(operand, mexists)? {
+                                    PpValue::Macro(x) => mexists(x),
+                                    _ => unimplemented!("undefined"), // TODO: change this to an error
+                                },
+                            ))
+                        }
+
+                        _ => unimplemented!("not a preproc operator"), // TODO: change this to an error
+                    },
                 },
             }
         }

@@ -441,6 +441,9 @@ define_token_eq! {
         /// emit fail /* error */;
         /// ```
         Emit = "emit",
+
+        /// Returns the number of bytes in the type (the size of the type)
+        Szof = "szof",
     }
 }
 

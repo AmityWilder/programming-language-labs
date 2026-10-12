@@ -3,11 +3,7 @@ use crate::{
     grammar::{match_token, token_matches},
     scanner::{
         Bracket,
-        token::{
-            Token,
-            punc::Punctuation,
-            value::{Keyword, LexValue},
-        },
+        token::{Token, punc::Punctuation, value::LexValue},
     },
 };
 use std::{collections::VecDeque, range::Range};

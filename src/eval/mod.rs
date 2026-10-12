@@ -9,7 +9,7 @@ use crate::{
         Token,
         keyword::Keyword,
         punc::Punctuation,
-        value::{CharLiteral, LexValue},
+        value::{CharLiteral, LexValue, TokenEq},
     },
 };
 use std::{borrow::Cow, cmp::Ordering};
@@ -54,10 +54,10 @@ impl OpError {
                 source,
                 Some(*op),
                 ErrorType::Incompatible {
-                    op: match op.val {
-                        LexValue::Punctuation(punc) => punc,
-                        _ => unimplemented!(),
-                    },
+                    op: op
+                        .val
+                        .to_token_eq()
+                        .expect("only TokenEq supported for ops"),
                     l_range: lhs.range(source),
                     r_range: rhs.range(source),
                     l_ty,
@@ -74,10 +74,10 @@ impl OpError {
                 Some(rhs.range(source)),
                 rhs.expansion(source),
                 ErrorType::FailedConvert {
-                    op: match op.val {
-                        LexValue::Punctuation(punc) => punc,
-                        _ => unimplemented!(),
-                    },
+                    op: op
+                        .val
+                        .to_token_eq()
+                        .expect("only TokenEq supported for ops"),
                     is_binary,
                     op_range: op.lex_range(source),
                     failure: IntConversionFailure::new(value, target_ty)
@@ -157,7 +157,7 @@ impl OpError {
         self,
         source: &'src str,
         op: &Token<'src>,
-        punc: Punctuation,
+        punc: TokenEq,
         rhs: &Expr<'src>,
     ) -> ContextError<'src> {
         match self {
@@ -180,13 +180,10 @@ impl OpError {
                 Some(rhs.range(source)),
                 rhs.expansion(source),
                 ErrorType::FailedConvert {
-                    op: match op.val {
-                        LexValue::Punctuation(Punctuation::SubNeg) => {
-                            unreachable!("grammar module should have converted unary Sub into Neg")
-                        }
-                        LexValue::Punctuation(punc) => punc,
-                        _ => unimplemented!(),
-                    },
+                    op: op
+                        .val
+                        .to_token_eq()
+                        .expect("only TokenEq supported for ops"),
                     is_binary,
                     op_range: op.lex_range(source),
                     failure: IntConversionFailure::new(value, target_ty)
@@ -823,9 +820,34 @@ impl RunValue {
             _ => true,
         })
     }
+
+    fn sizeof(self) -> Self {
+        Self::UInt(match self {
+            RunValue::None | RunValue::CoalesceNone => 0,
+            RunValue::Fail(e) => std::mem::size_of_val(&*e),
+            RunValue::Bool(x) => std::mem::size_of_val(&x),
+            RunValue::UInt(x) => std::mem::size_of_val(&x),
+            RunValue::SInt(x) => std::mem::size_of_val(&x),
+            RunValue::Frac(x) => std::mem::size_of_val(&x),
+            RunValue::Char(x) => std::mem::size_of_val(&x),
+            RunValue::Text(x) => std::mem::size_of_val(&x),
+            RunValue::Type(t) => match t {
+                ValueType::None | ValueType::Nevr => 0,
+                ValueType::Bool => std::mem::size_of::<bool>(),
+                ValueType::UInt => std::mem::size_of::<usize>(),
+                ValueType::SInt => std::mem::size_of::<isize>(),
+                ValueType::Frac => std::mem::size_of::<f64>(),
+                ValueType::Char => std::mem::size_of::<char>(),
+                ValueType::Text => std::mem::size_of::<String>(),
+                ValueType::Fail => std::mem::size_of::<Box<dyn std::error::Error>>(),
+                ValueType::Type => unimplemented!("`Type` is not a type"),
+            },
+        })
+    }
 }
 
 pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, ContextError<'src>> {
+    use Keyword::Szof;
     use Punctuation::{
         Add, And, Coalesce, Convert, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or,
         Pow, Rem, Rotl, Rotr, Shl, Shr, SubNeg, Transmute, Xnor, Xor,
@@ -870,42 +892,47 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 return Ok(RunValue::CoalesceNone);
             }
 
-            let LexValue::Punctuation(punc) = op.val else {
-                unimplemented!();
-            };
+            let punc = op
+                .val
+                .to_token_eq()
+                .expect("only TokenEq supported for ops");
             match punc {
-                And => l.and(r),
-                Xor => l.xor(r),
-                Or => l.or(r),
-                Nand => l.nand(r),
-                Xnor => l.xnor(r),
-                Nor => l.nor(r),
-                Add => l.add(r),
-                SubNeg => l.sub(r),
-                Mul => l.mul(r),
-                Div => l.div(r),
-                Rem => l.rem(r),
-                Pow => l.pow(r),
-                Shl => l.shl(r),
-                Shr => l.shr(r),
-                Rotl => l.rotl(r),
-                Rotr => l.rotr(r),
-                Convert if let RunValue::Type(r) = r => l.convert(r),
-                Transmute if let RunValue::Type(r) = r => l.transmute(r),
+                TokenEq::Keyword(_keyword) => unimplemented!("no binary keywords yet"),
 
-                Eq | Ne | Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
-                    RunValue::Bool(match punc {
-                        Ne => ord.is_none_or(Ordering::is_ne),
-                        Eq => ord.is_some_and(Ordering::is_eq),
-                        Lt => ord.is_some_and(Ordering::is_lt),
-                        Gt => ord.is_some_and(Ordering::is_gt),
-                        Le => ord.is_some_and(Ordering::is_le),
-                        Ge => ord.is_some_and(Ordering::is_ge),
-                        _ => unreachable!(),
-                    })
-                }),
+                TokenEq::Punctuation(punctuation) => match punctuation {
+                    And => l.and(r),
+                    Xor => l.xor(r),
+                    Or => l.or(r),
+                    Nand => l.nand(r),
+                    Xnor => l.xnor(r),
+                    Nor => l.nor(r),
+                    Add => l.add(r),
+                    SubNeg => l.sub(r),
+                    Mul => l.mul(r),
+                    Div => l.div(r),
+                    Rem => l.rem(r),
+                    Pow => l.pow(r),
+                    Shl => l.shl(r),
+                    Shr => l.shr(r),
+                    Rotl => l.rotl(r),
+                    Rotr => l.rotr(r),
+                    Convert if let RunValue::Type(r) = r => l.convert(r),
+                    Transmute if let RunValue::Type(r) = r => l.transmute(r),
 
-                _ => unimplemented!(),
+                    Eq | Ne | Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
+                        RunValue::Bool(match punctuation {
+                            Ne => ord.is_none_or(Ordering::is_ne),
+                            Eq => ord.is_some_and(Ordering::is_eq),
+                            Lt => ord.is_some_and(Ordering::is_lt),
+                            Gt => ord.is_some_and(Ordering::is_gt),
+                            Le => ord.is_some_and(Ordering::is_le),
+                            Ge => ord.is_some_and(Ordering::is_ge),
+                            _ => unreachable!(),
+                        })
+                    }),
+
+                    _ => unimplemented!(),
+                },
             }
             .map_err(|e| e.binary(source, op, lhs, rhs))
         }
@@ -918,19 +945,33 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 return Ok(RunValue::CoalesceNone);
             }
 
-            let LexValue::Punctuation(punc) = op.val else {
-                unimplemented!();
-            };
-            match (punc, side) {
-                // prefix
-                (Not, OpSide::Right) => x.not(),
-                (SubNeg, OpSide::Right) => x.neg(),
-                (Exists, OpSide::Right) => Ok(x.exists()),
-
+            let punc = op
+                .val
+                .to_token_eq()
+                .expect("only TokenEq supported for ops");
+            match side {
                 // postfix
-                (Coalesce, OpSide::Left) => return Ok(RunValue::CoalesceNone),
+                OpSide::Left => match punc {
+                    TokenEq::Keyword(_keyword) => unimplemented!("no postfix keywords yet"),
+                    TokenEq::Punctuation(punctuation) => match punctuation {
+                        Coalesce => return Ok(RunValue::CoalesceNone),
+                        _ => unimplemented!(),
+                    },
+                },
 
-                _ => unimplemented!(),
+                // prefix
+                OpSide::Right => match punc {
+                    TokenEq::Keyword(keyword) => match keyword {
+                        Szof => Ok(x.sizeof()),
+                        _ => unimplemented!(),
+                    },
+                    TokenEq::Punctuation(punctuation) => match punctuation {
+                        Not => x.not(),
+                        SubNeg => x.neg(),
+                        Exists => Ok(x.exists()),
+                        _ => unimplemented!(),
+                    },
+                },
             }
             .map_err(|e| e.unary(source, op, punc, operand))
         }
@@ -989,10 +1030,11 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 | Keyword::Halt
                 | Keyword::Skip
                 | Keyword::Give
-                | Keyword::Emit => unimplemented!("not a typename"),
+                | Keyword::Emit
+                | Keyword::Szof => unimplemented!("not a typename"),
             })),
 
-            LexValue::Identifier | LexValue::Callable => todo!("custom types"),
+            LexValue::Identifier | LexValue::Callable => unimplemented!("custom types"),
 
             _ => unimplemented!(),
         },
