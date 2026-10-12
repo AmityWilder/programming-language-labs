@@ -483,9 +483,26 @@ impl<'src> Preprocessor<'src> {
                     .map(|item| (item.predicate, item.then_def)),
             );
 
-        // TODO: resolution
-        let branch = alternatives
-            .find(|(pred, _)| pred.as_ref().is_none_or(|_p| /* p.pred.content */ false));
+        let branch = alternatives.find(|(pred, _)| {
+            pred.as_ref().is_none_or(|p| {
+                let mut tokens =
+                    preprocess(self.stream.source, p.pred.content.iter().copied().map(Ok)).filter(
+                        |res| {
+                            !res.is_ok_and(|token| {
+                                matches!(token.val, LexValue::Whitespace | LexValue::Comment)
+                            })
+                        },
+                    );
+                // TODO: make this at least a LITTLE more complex?
+                // TODO: replace the panics with errors
+                let next = tokens.next().unwrap().unwrap();
+                assert!(tokens.next().is_none(), "should be only one token");
+                match next.val {
+                    LexValue::BoolLiteral(x) => x,
+                    _ => unimplemented!(), // TODO: make this an error
+                }
+            })
+        });
 
         if let Some((_, body)) = branch {
             self.stream.tokens.prepend(body.content.into_iter().map(Ok));

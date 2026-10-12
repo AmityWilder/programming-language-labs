@@ -15,7 +15,7 @@ mod scan {
 
     #[test]
     fn test_invalid_token() {
-        const SOURCE: &str = "~";
+        const SOURCE: &str = "\\";
         assert_eq!(
             tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
             &[Err(ContextError {
