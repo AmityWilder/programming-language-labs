@@ -711,7 +711,7 @@ fn test_conditional_else0() {
             ("{", Punctuation::LBrace),
             ("5", SIntLiteral(5)),
             ("}", Punctuation::RBrace),
-            ("~", Punctuation::MacroOwise),
+            ("~", Punctuation::MacroConst),
             ("{", Punctuation::LBrace),
             ("8", SIntLiteral(8)),
             ("}", Punctuation::RBrace),
@@ -737,7 +737,7 @@ fn test_conditional_else1() {
             ("{", Punctuation::LBrace),
             ("5", SIntLiteral(5)),
             ("}", Punctuation::RBrace),
-            ("~", Punctuation::MacroOwise),
+            ("~", Punctuation::MacroConst),
             ("{", Punctuation::LBrace),
             ("8", SIntLiteral(8)),
             ("}", Punctuation::RBrace),
@@ -763,7 +763,7 @@ fn test_conditional_elseif0() {
             ("{", Punctuation::LBrace),
             ("5", SIntLiteral(5)),
             ("}", Punctuation::RBrace),
-            ("~", Punctuation::MacroOwise),
+            ("~", Punctuation::MacroConst),
             ("rot", Keyword::Rot),
             ("{", Punctuation::LBrace),
             ("fals", BoolLiteral(false)),
@@ -771,7 +771,7 @@ fn test_conditional_elseif0() {
             ("{", Punctuation::LBrace),
             ("8", SIntLiteral(8)),
             ("}", Punctuation::RBrace),
-            ("~", Punctuation::MacroOwise),
+            ("~", Punctuation::MacroConst),
             ("{", Punctuation::LBrace),
             ("3", SIntLiteral(3)),
             ("}", Punctuation::RBrace),
@@ -797,7 +797,7 @@ fn test_conditional_elseif1() {
             ("{", Punctuation::LBrace),
             ("5", SIntLiteral(5)),
             ("}", Punctuation::RBrace),
-            ("~", Punctuation::MacroOwise),
+            ("~", Punctuation::MacroConst),
             ("rot", Keyword::Rot),
             ("{", Punctuation::LBrace),
             ("true", BoolLiteral(true)),
@@ -805,7 +805,7 @@ fn test_conditional_elseif1() {
             ("{", Punctuation::LBrace),
             ("8", SIntLiteral(8)),
             ("}", Punctuation::RBrace),
-            ("~", Punctuation::MacroOwise),
+            ("~", Punctuation::MacroConst),
             ("{", Punctuation::LBrace),
             ("3", SIntLiteral(3)),
             ("}", Punctuation::RBrace),
@@ -831,7 +831,7 @@ fn test_conditional_elseif_skip_elses() {
             ("{", Punctuation::LBrace),
             ("5", SIntLiteral(5)),
             ("}", Punctuation::RBrace),
-            ("~", Punctuation::MacroOwise),
+            ("~", Punctuation::MacroConst),
             ("rot", Keyword::Rot),
             ("{", Punctuation::LBrace),
             ("true", BoolLiteral(true)),
@@ -839,7 +839,7 @@ fn test_conditional_elseif_skip_elses() {
             ("{", Punctuation::LBrace),
             ("8", SIntLiteral(8)),
             ("}", Punctuation::RBrace),
-            ("~", Punctuation::MacroOwise),
+            ("~", Punctuation::MacroConst),
             ("{", Punctuation::LBrace),
             ("3", SIntLiteral(3)),
             ("}", Punctuation::RBrace),
@@ -847,6 +847,80 @@ fn test_conditional_elseif_skip_elses() {
 
         [
             Ok(("5", SIntLiteral(5)))
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_macro_const() {
+    spoof_tokens! {
+        [
+            ("~", Punctuation::MacroConst),
+            (r"\foo", Macro),
+        ],
+
+        [
+            Ok((r"\foo", Macro)),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_macro_const_nested() {
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            (r"\foo", Macro),
+            ("(", Punctuation::LParen),
+            (")", Punctuation::RParen),
+            ("{", Punctuation::LBrace),
+            ("~", Punctuation::MacroConst),
+            (r"\bar", Macro),
+            ("}", Punctuation::RBrace),
+            @expansion: (r"\foo", Macro),
+        ],
+
+        [
+            Ok((r"\bar", Macro, in expansion.lex_range(source))),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_macro_const_late() {
+    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
+    spoof_tokens! {
+        [
+            ("def", Keyword::Def),
+            (" ", Whitespace),
+            (r"\foo", Macro),
+            ("(", Punctuation::LParen),
+            ("$x", MacroParam),
+            (")", Punctuation::RParen),
+            ("{", Punctuation::LBrace),
+            ("~", Punctuation::MacroConst),
+            ("$x", MacroParam),
+            ("}", Punctuation::RBrace),
+            @expansion_start: (r"\foo", Macro),
+            ("{", Punctuation::LBrace),
+            (r"\bar", Macro),
+            @expansion_end: ("}", Punctuation::RBrace),
+        ],
+
+        let expansion_range = Range {
+            start: expansion_start.lex_range(source).start,
+            end: expansion_end.lex_range(source).end,
+        };
+
+        [
+            Ok((r"\bar", Macro, in expansion_range, as (0, "$x"))),
         ],
 
         (source) {}
