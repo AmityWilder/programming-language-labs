@@ -136,21 +136,21 @@ define_token_eq! {
         /// Create a rotation (preprocessor conditional)
         /// ### Syntax
         /// ```rs
-        /// rot (/* preprocessor condition */) {
+        /// rot { /* preprocessor condition */ } {
         ///     /* then */
         /// }
         /// // or
-        /// rot (/* preprocessor condition */) {
+        /// rot { /* preprocessor condition */ } {
         ///     /* then */
         /// } ~ {
         ///     /* else */
         /// }
         /// // or
-        /// rot (/* condition 1 */) {
+        /// rot { /* condition 1 */ } {
         ///     /* then 1 */
-        /// } ~ rot (/* condition 2 */) {
+        /// } ~ rot { /* condition 2 */ } {
         ///     /* then 2 */
-        /// } /* ... */ ~ rot (/* condition n */) {
+        /// } /* ... */ ~ rot { /* condition n */ } {
         ///     /* then n */
         /// } ~ {
         ///     /* else */
