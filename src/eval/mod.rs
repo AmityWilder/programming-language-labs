@@ -971,7 +971,8 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
                 | Keyword::Alt
                 | Keyword::Sub
                 | Keyword::Def
-                | Keyword::Fn
+                | Keyword::Rot
+                | Keyword::Fun
                 | Keyword::Mem
                 | Keyword::Let
                 | Keyword::Uni

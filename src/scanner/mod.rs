@@ -546,7 +546,7 @@ impl<'src> Iterator for Scanner<'src> {
                 .inspect(|token| {
                     // non-whitespace, non-comment token
                     if !matches!(token.val, LexValue::Whitespace | LexValue::Comment) {
-                        self.is_following_fn = matches!(token.val, LexValue::Keyword(Keyword::Fn));
+                        self.is_following_fn = matches!(token.val, LexValue::Keyword(Keyword::Fun));
 
                         // punctuation except for close bracket
                         self.can_be_negative = matches!(token.val, LexValue::Punctuation(punc) if

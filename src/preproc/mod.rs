@@ -134,10 +134,8 @@ struct ParamGroup<'src> {
 /// `macro_replacer -> "{" ( TOKEN )* "}"`
 #[derive(Debug, Clone, PartialEq, Default)]
 struct MacroReplacer<'src> {
-    /// `{`
     pub open: Token<'src>,
     pub content: Vec<Token<'src>>,
-    /// `}`
     pub close: Token<'src>,
 }
 
@@ -155,9 +153,11 @@ enum ReplacerKind {
     #[default]
     Body,
     Argument,
+    Predicate,
+    ConditionBody,
 }
 
-/// `macro_definition -> "def" MACRO param_group macro_body`
+/// `macro_definition -> "def" MACRO param_group macro_replacer`
 #[derive(Debug, Clone, PartialEq, Default)]
 struct MacroDefinition<'src> {
     /// `def`
@@ -168,7 +168,7 @@ struct MacroDefinition<'src> {
     pub body: MacroReplacer<'src>,
 }
 
-/// `macro_expansion -> MACRO ( macro_argument )*`
+/// `macro_expansion -> MACRO ( macro_replacer )*`
 #[derive(Debug, Clone, PartialEq, Default)]
 struct MacroExpansion<'src> {
     /// [`crate::scanner::token::value::LexValue::Macro`]
@@ -184,6 +184,31 @@ impl<'src> MacroExpansion<'src> {
             end: last_arg.range(source).end,
         })
     }
+}
+
+/// `macro_predicate -> "rot" macro_replacer`
+#[derive(Debug, Clone, PartialEq, Default)]
+struct MacroPredicate<'src> {
+    /// `rot`
+    pub rot_kw: Token<'src>,
+    pub pred: MacroReplacer<'src>,
+}
+
+/// `macro_alternative -> "~" ( macro_predicate )? macro_replacer $( macro_alternative )?`
+#[derive(Debug, Clone, PartialEq, Default)]
+struct MacroAlternative<'src> {
+    /// `~`; necessary to distinguish from non-preprocessor `or`
+    pub squiggle: Token<'src>,
+    pub predicate: Option<MacroPredicate<'src>>,
+    pub then_def: MacroReplacer<'src>,
+}
+
+/// `macro_conditional -> macro_predicate macro_replacer ( macro_alternative )*`
+#[derive(Debug, Clone, PartialEq, Default)]
+struct MacroConditional<'src> {
+    pub pred: MacroPredicate<'src>,
+    pub then_def: MacroReplacer<'src>,
+    pub else_def: Vec<MacroAlternative<'src>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -292,6 +317,8 @@ impl<'src> PreprocessorStream<'src> {
             match kind {
                 ReplacerKind::Argument => ExpectedToken::MacroArgLBrace,
                 ReplacerKind::Body => ExpectedToken::MacroDefLBrace,
+                ReplacerKind::Predicate => ExpectedToken::MacroPredLBrace,
+                ReplacerKind::ConditionBody => ExpectedToken::MacroCondLBrace,
             },
         )?;
         let content = {
@@ -384,6 +411,45 @@ impl<'src> PreprocessorStream<'src> {
             })
         })
     }
+
+    fn macro_alternative(&mut self) -> Option<Result<MacroAlternative<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Punctuation(Punctuation::MacroOwise)))
+            .map(|squiggle| {
+                Ok(MacroAlternative {
+                    squiggle,
+                    predicate: {
+                        if let Some(rot_kw) = self.pull_if_next(match_token!(Keyword(Keyword::Rot)))
+                        {
+                            Some(MacroPredicate {
+                                rot_kw,
+                                pred: self.replacer(ReplacerKind::Predicate)?,
+                            })
+                        } else {
+                            None
+                        }
+                    },
+                    then_def: self.replacer(ReplacerKind::ConditionBody)?,
+                })
+            })
+    }
+
+    /// Will only produce [`Some`] if the **immediately next** token begins a macro conditional.
+    ///
+    /// Sensitive to whitespace and comments
+    fn macro_conditional(&mut self) -> Option<Result<MacroConditional<'src>, ContextError<'src>>> {
+        self.pull_if_next(match_token!(Keyword(Keyword::Rot)))
+            .map(|rot_kw| {
+                Ok(MacroConditional {
+                    pred: MacroPredicate {
+                        rot_kw,
+                        pred: self.replacer(ReplacerKind::Predicate)?,
+                    },
+                    then_def: self.replacer(ReplacerKind::ConditionBody)?,
+                    else_def: std::iter::from_fn(|| self.macro_alternative())
+                        .collect::<Result<_, _>>()?,
+                })
+            })
+    }
 }
 
 /// Consumes macros and converts them into token sequences
@@ -405,6 +471,24 @@ impl<'src> Preprocessor<'src> {
             stream: PreprocessorStream::new(source, tokens),
             macros: HashMap::new(),
             errors: Vec::new(),
+        }
+    }
+
+    fn expand_conditional(&mut self, conditional: MacroConditional<'src>) {
+        let mut alternatives = std::iter::once((Some(conditional.pred), conditional.then_def))
+            .chain(
+                conditional
+                    .else_def
+                    .into_iter()
+                    .map(|item| (item.predicate, item.then_def)),
+            );
+
+        // TODO: resolution
+        let branch = alternatives
+            .find(|(pred, _)| pred.as_ref().is_none_or(|_p| /* p.pred.content */ false));
+
+        if let Some((_, body)) = branch {
+            self.stream.tokens.prepend(body.content.into_iter().map(Ok));
         }
     }
 
@@ -485,7 +569,13 @@ impl<'src> Iterator for Preprocessor<'src> {
         loop {
             if let Some(e) = self.errors.pop() {
                 break Some(Err(e));
-            } else if let Some(definition) = self.stream.macro_definition() {
+            } else if let Some(conditional) = self.stream.macro_conditional() {
+                match conditional {
+                    Ok(x) => self.expand_conditional(x),
+                    Err(e) => break Some(Err(e)),
+                }
+            }
+            if let Some(definition) = self.stream.macro_definition() {
                 match definition {
                     Ok(x) => {
                         if let Err(e) = self.define_macro(x) {

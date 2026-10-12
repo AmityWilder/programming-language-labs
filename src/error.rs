@@ -356,6 +356,8 @@ expected_token! {
         MacroParamOrRParen = "a macro parameter or `)`",
         MacroDefLBrace = "a `{` for macro definition",
         MacroArgLBrace = "a `{` for macro argument",
+        MacroPredLBrace = "a `{` for a macro predicate",
+        MacroCondLBrace = "a `{` for a macro condition",
 
         // grammar
         Literal = "a literal",
