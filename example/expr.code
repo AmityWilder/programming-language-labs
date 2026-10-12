@@ -87,3 +87,10 @@ rot { !(!!~\tbd) } {
 }
 
 "the next thing I will say is 'first': \"" + \tbd + "\""
+
+/*
+block comments can have syntax-highlighted code blocks
+```
+-6 -:> uint : fail
+```
+*/

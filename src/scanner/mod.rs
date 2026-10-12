@@ -457,16 +457,14 @@ impl<'src> Scanner<'src> {
     ///
     /// Returns [`None`] if the next token is not a block comment
     fn scan_block_comment(&mut self) -> Option<Result<Token<'src>, ContextError<'src>>> {
+        // TODO: convert this to FauxRegex. this implementation too questionable.
         const BLOCK_COMMENT_CIRCUMFIX_LEN: usize =
-            BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len();
-        if !self.source.starts_with(BLOCK_COMMENT_OPEN) {
-            return None;
-        }
-        let mut prev_char = None;
-        let mut depth: usize = 0;
-        let len = self.source.strip_prefix(BLOCK_COMMENT_OPEN)
-            .expect("should not call `scan_block_comment` if `starts_with_block_comment` is false")
-            .find(|ch: char| {
+            BLOCK_COMMENT_OPEN.len() + BLOCK_COMMENT_CLOSE.len() - '*'.len_utf8();
+        let len = self.source.strip_prefix(BLOCK_COMMENT_OPEN)?
+            .find({
+                let mut prev_char = None;
+                let mut depth: usize = 0;
+                move |ch: char| {
                 if prev_char == Some('*') && ch == '/' {
                     if let Some(n) = depth.checked_sub(1) {
                         depth = n;
@@ -480,7 +478,7 @@ impl<'src> Scanner<'src> {
                 }
                 prev_char = Some(ch);
                 false
-            })
+            }})
             .map(|n| n.checked_add(BLOCK_COMMENT_CIRCUMFIX_LEN)
                 .expect("n should describe the non-block-comment-circumfix subset of a string in memory"));
         Some(

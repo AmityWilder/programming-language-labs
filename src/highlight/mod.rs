@@ -10,7 +10,9 @@ use crate::{
     },
     scanner::{
         Scanner,
-        symbols::{CHAR_DELIM, TEXT_DELIM},
+        symbols::{
+            BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, LINE_COMMENT_OPEN, TEXT_DELIM,
+        },
         token::{
             Token,
             value::{CharLiteral, Escapes, LexValue, TextLiteral},
@@ -194,27 +196,52 @@ struct CommentCodeSegments<'src> {
 }
 
 impl<'src> CommentCodeSegments<'src> {
-    const fn new(source: &'src str) -> Self {
-        Self { source }
+    fn new(source: &'src str) -> Self {
+        Self {
+            source: source
+                .strip_prefix(LINE_COMMENT_OPEN)
+                .or_else(|| source.strip_circumfix(BLOCK_COMMENT_OPEN, BLOCK_COMMENT_CLOSE))
+                .expect("comment should include delimiters"),
+        }
     }
 }
 
 impl<'src> Iterator for CommentCodeSegments<'src> {
     type Item = &'src str;
 
+    // while an endless code block could be considered incorrect,
+    // we're going to ignore it because comments shouldn't cause errors.
     fn next(&mut self) -> Option<Self::Item> {
-        self.source.split_once('`').map(|(_, code)| {
-            if let Some((code, rest)) = code.split_once('`') {
-                self.source = rest;
-                code
-            } else {
-                #[expect(clippy::string_slice, reason = "`len..` is a valid string slice")]
-                {
-                    self.source = &self.source[self.source.len()..];
+        // block
+        self.source
+            .split_once("```")
+            .map(|(_, code)| {
+                if let Some((code, rest)) = code.split_once("```") {
+                    self.source = rest;
+                    code
+                } else {
+                    #[expect(clippy::string_slice, reason = "`len..` is a valid string slice")]
+                    {
+                        self.source = &self.source[self.source.len()..];
+                    }
+                    code
                 }
-                code
-            }
-        })
+            })
+            .or_else(|| {
+                // span
+                self.source.split_once('`').map(|(_, code)| {
+                    if let Some((code, rest)) = code.split_once('`') {
+                        self.source = rest;
+                        code
+                    } else {
+                        #[expect(clippy::string_slice, reason = "`len..` is a valid string slice")]
+                        {
+                            self.source = &self.source[self.source.len()..];
+                        }
+                        code
+                    }
+                })
+            })
     }
 }
 
