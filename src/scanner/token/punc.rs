@@ -23,9 +23,10 @@ define_token_eq! {
         /// Stringify - Replace tokens with their lexemes in a macro
         #[op_desc([_] => "token stringification")]
         MacroStringify = "#",
-        /// Macro Otherwise - the preprocessor equivalent of `or`
-        #[op_desc([_, _] => "preprocessor branch")]
-        MacroOwise = "~",
+        /// Macro Constant - Either separats conditional preprocessor branches
+        /// or tells a macro not to expand
+        #[op_desc([_, _] => "preprocessor branching", [_] => "macro referencing")]
+        MacroConst = "~",
         /// Remainder - Find the remainder of `lhs / rhs`
         #[op_desc([_, _] => "remainder")]
         Rem = "%",

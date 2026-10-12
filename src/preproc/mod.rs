@@ -211,6 +211,13 @@ struct MacroConditional<'src> {
     pub else_def: Vec<MacroAlternative<'src>>,
 }
 
+/// `macro_reference -> "~" MACRO`
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct MacroRefence<'src> {
+    pub squiggle: Token<'src>,
+    pub macro_name: Token<'src>,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 struct PreprocessorStream<'src> {
     /// The source code
@@ -413,7 +420,7 @@ impl<'src> PreprocessorStream<'src> {
     }
 
     fn macro_alternative(&mut self) -> Option<Result<MacroAlternative<'src>, ContextError<'src>>> {
-        self.pull_if(match_token!(Punctuation(Punctuation::MacroOwise)))
+        self.pull_if(match_token!(Punctuation(Punctuation::MacroConst)))
             .map(|squiggle| {
                 Ok(MacroAlternative {
                     squiggle,
@@ -446,6 +453,19 @@ impl<'src> PreprocessorStream<'src> {
                     then_def: self.replacer(ReplacerKind::ConditionBody)?,
                     else_def: std::iter::from_fn(|| self.macro_alternative())
                         .collect::<Result<_, _>>()?,
+                })
+            })
+    }
+
+    /// Will only produce [`Some`] if the **immediately next** token begins a macro reference.
+    ///
+    /// Sensitive to whitespace and comments
+    fn macro_reference(&mut self) -> Option<Result<MacroRefence<'src>, ContextError<'src>>> {
+        self.pull_if_next(match_token!(Punctuation(Punctuation::MacroConst)))
+            .map(|squiggle| {
+                Ok(MacroRefence {
+                    squiggle,
+                    macro_name: self.try_pull(match_token!(Macro), ExpectedToken::MacroIdent)?,
                 })
             })
     }
@@ -587,13 +607,15 @@ impl<'src> Iterator for Preprocessor<'src> {
         loop {
             if let Some(e) = self.errors.pop() {
                 break Some(Err(e));
+            } else if let Some(macro_ref) = self.stream.macro_reference() {
+                // skip expansion
+                break Some(macro_ref.map(|x| x.macro_name));
             } else if let Some(conditional) = self.stream.macro_conditional() {
                 match conditional {
                     Ok(x) => self.expand_conditional(x),
                     Err(e) => break Some(Err(e)),
                 }
-            }
-            if let Some(definition) = self.stream.macro_definition() {
+            } else if let Some(definition) = self.stream.macro_definition() {
                 match definition {
                     Ok(x) => {
                         if let Err(e) = self.define_macro(x) {
