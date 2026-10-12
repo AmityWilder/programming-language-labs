@@ -203,9 +203,19 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `unary_prefix -> ( ( "!" | "!!" | "-" ) exponent )*`
+    /// `unary_prefix -> ( ( ( "!" | "!!" | "-" ) | "szof" ( type_expression )? ) )* exponent`
     fn unary_prefix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        if let Some(op) = self.pull_if(match_token!(Punctuation::{Not | Exists | SubNeg})) {
+        if let Some(op) = self.pull_if(match_token!(Keyword::Szof)) {
+            let operand = self
+                .type_expression()
+                .map(Expr::type_expr)
+                .or_else(|_| self.unary_prefix())?;
+            Ok(Expr::unary(Unary {
+                op,
+                operand,
+                side: OpSide::Right,
+            }))
+        } else if let Some(op) = self.pull_if(match_token!(Punctuation::{Not | Exists | SubNeg})) {
             let operand = self.unary_prefix()?;
             Ok(Expr::unary(Unary {
                 op,

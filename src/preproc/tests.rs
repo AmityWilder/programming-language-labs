@@ -95,14 +95,28 @@ macro_rules! spoof_tokens {
         let tokens: Vec<Result<Token<'_>, ContextError<'_>>> =
             Scanner::new($source).collect();
 
+        let expected = [$(Ok(Token {
+            lex: $lex,
+            val: LexValue::$Variant$(($val))?$(($Variant::$SubVariant))?,
+            mac: None,
+        })),*];
         assert_eq!(
-            &tokens,
-            &[$(Ok(Token {
-                lex: $lex,
-                val: LexValue::$Variant$(($val))?$(($Variant::$SubVariant))?,
-                mac: None,
-            })),*],
+            tokens,
+            expected,
             "scanner failure",
+        );
+
+        for (i, (actual, expected)) in tokens.iter().zip(expected.iter()).enumerate() {
+            assert_eq!(
+                actual,
+                expected,
+                "scanner failure at item {i}\n  left list: {tokens:#?}\n right list: {expected:#?}",
+            );
+        }
+        assert_eq!(
+            tokens.len(),
+            expected.len(),
+            "scanner failure: token count mismatch\n  left list: {tokens:#?}\n right list: {expected:#?}",
         );
 
         let [$(Ok(or_discard!($($marker)?))),*] = tokens.as_slice() else {
@@ -905,9 +919,9 @@ fn test_macro_const_nested() {
     };
 }
 
+/// Confirms macros in arguments aren't expanded until after the macro they are arguments to expands
 #[test]
 fn test_macro_const_late() {
-    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
     spoof_tokens! {
         [
             ("def", Keyword::Def),
@@ -941,7 +955,6 @@ fn test_macro_const_late() {
 
 #[test]
 fn test_macro_expr_cond() {
-    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
     spoof_tokens! {
         [
             ("rot", Keyword::Rot),
@@ -971,7 +984,6 @@ fn test_macro_expr_cond() {
 
 #[test]
 fn test_macro_ifdef_false() {
-    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
     spoof_tokens! {
         [
             ("rot", Keyword::Rot),
@@ -999,7 +1011,6 @@ fn test_macro_ifdef_false() {
 
 #[test]
 fn test_macro_ifdef_true() {
-    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
     spoof_tokens! {
         [
             ("def", Keyword::Def),
@@ -1034,7 +1045,6 @@ fn test_macro_ifdef_true() {
 
 #[test]
 fn test_macro_ifdef_true_arg() {
-    // confirm macros in arguments aren't expanded until after the macro they are arguments to expands
     spoof_tokens! {
         [
             ("def", Keyword::Def),
@@ -1063,6 +1073,44 @@ fn test_macro_ifdef_true_arg() {
 
         [
             Ok(("9", SIntLiteral(9))),
+        ],
+
+        (source) {}
+    };
+}
+
+#[test]
+fn test_macro_ifdef_type_size() {
+    const {
+        assert!(
+            std::mem::size_of::<usize>() >= std::mem::size_of::<bool>(),
+            "ensure the test is actually meaningful"
+        );
+    }
+
+    spoof_tokens! {
+        [
+            ("rot", Keyword::Rot),
+            ("{", Punctuation::LBrace),
+            ("szof", Keyword::Szof),
+            (" ", Whitespace),
+            ("uint", Keyword::Uint),
+            ("<", Punctuation::Lt),
+            ("szof", Keyword::Szof),
+            (" ", Whitespace),
+            ("bool", Keyword::Bool),
+            ("}", Punctuation::RBrace),
+            ("{", Punctuation::LBrace),
+            ("9", SIntLiteral(9)),
+            ("}", Punctuation::RBrace),
+            ("~", Punctuation::MacroConst),
+            ("{", Punctuation::LBrace),
+            ("2", SIntLiteral(2)),
+            ("}", Punctuation::RBrace),
+        ],
+
+        [
+            Ok(("2", SIntLiteral(2))),
         ],
 
         (source) {}

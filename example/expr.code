@@ -94,3 +94,6 @@ block comments can have syntax-highlighted code blocks
 -6 -:> uint : fail
 ```
 */
+
+szof sint
+szof 5 // should be the size of the type the expression evaluates to
