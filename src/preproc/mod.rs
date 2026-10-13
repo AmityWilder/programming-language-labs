@@ -2,7 +2,10 @@
 
 use crate::{
     error::{ContextError, ErrorType},
-    grammar::{parse, token_matches},
+    grammar::{
+        ast::{AstNode, AstNodeFinal},
+        parse, token_matches,
+    },
     preproc::{
         eval::{PpValue, preproc_eval},
         stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
@@ -11,8 +14,8 @@ use crate::{
 };
 use std::collections::HashMap;
 
-mod eval;
-mod stream;
+pub mod eval;
+pub mod stream;
 
 #[cfg(test)]
 mod tests;
@@ -170,7 +173,14 @@ impl<'src> Preprocessor<'src> {
                 assert!(parser.next().is_none(), "leftover tokens"); // TODO: make this an error
                 match preproc_eval(expr, &mut |name| self.macros.contains_key(name))? {
                     PpValue::BoolLiteral(x) => x,
-                    x => todo!("error: expected a bool literal, got {x:#?}"),
+                    actual => {
+                        return Err(ContextError::error(
+                            self.stream.source,
+                            Some(p.pred.range(self.stream.source)),
+                            p.pred.expansion(self.stream.source),
+                            ErrorType::NonBoolPrePredicate { actual },
+                        ));
+                    }
                 }
             } else {
                 true

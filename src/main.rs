@@ -19,6 +19,7 @@
     pattern,
     impl_trait_in_bindings,
     impl_trait_in_fn_trait_return,
+    macro_derive,
 )]
 #![forbid(
     clippy::missing_safety_doc,

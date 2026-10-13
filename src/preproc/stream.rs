@@ -1,15 +1,18 @@
 use crate::{
     error::{ContextError, ErrorType, ExpectedToken},
-    grammar::{match_token, token_matches},
+    grammar::{
+        ast::{AstNode, AstNodeF},
+        match_token, token_matches,
+    },
     scanner::{
         Bracket,
-        token::{Token, punc::Punctuation, value::LexValue},
+        token::{ExpansionData, Token, punc::Punctuation, value::LexValue},
     },
 };
 use std::{collections::VecDeque, range::Range};
 
 /// `param_group -> "(" ( MACRO_PARAM )* ")"`
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, AstNodeF)]
 pub struct ParamGroup<'src> {
     /// `(`
     pub open: Token<'src>,
@@ -19,20 +22,47 @@ pub struct ParamGroup<'src> {
     pub close: Token<'src>,
 }
 
+impl<'src> AstNode<'src> for ParamGroup<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.open.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.close.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.open, &self.close).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.open, &self.close).expansion(source)
+    }
+}
+
 /// `macro_replacer -> "{" ( TOKEN )* "}"`
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, AstNodeF)]
 pub struct MacroReplacer<'src> {
     pub open: Token<'src>,
     pub content: Vec<Token<'src>>,
     pub close: Token<'src>,
 }
 
-impl<'src> MacroReplacer<'src> {
-    pub fn range(&self, source: &'src str) -> Range<usize> {
-        Range {
-            start: self.open.lex_range(source).start,
-            end: self.close.lex_range(source).end,
-        }
+impl<'src> AstNode<'src> for MacroReplacer<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.open.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.close.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.open, &self.close).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.open, &self.close).expansion(source)
     }
 }
 
@@ -46,7 +76,7 @@ pub enum ReplacerKind {
 }
 
 /// `macro_definition -> "def" MACRO param_group macro_replacer`
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, AstNodeF)]
 pub struct MacroDefinition<'src> {
     /// `def`
     pub def_kw: Token<'src>,
@@ -56,34 +86,78 @@ pub struct MacroDefinition<'src> {
     pub body: MacroReplacer<'src>,
 }
 
+impl<'src> AstNode<'src> for MacroDefinition<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.def_kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.body.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.def_kw, &self.body).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.def_kw, &self.body).expansion(source)
+    }
+}
+
 /// `macro_expansion -> MACRO ( macro_replacer )*`
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, AstNodeF)]
 pub struct MacroExpansion<'src> {
     /// [`crate::scanner::token::value::LexValue::Macro`]
     pub name: Token<'src>,
     pub args: Vec<MacroReplacer<'src>>,
 }
 
-impl<'src> MacroExpansion<'src> {
-    pub fn range(&self, source: &'src str) -> Range<usize> {
-        let name_range = self.name.lex_range(source);
-        self.args.last().map_or(name_range, |last_arg| Range {
-            start: name_range.start,
-            end: last_arg.range(source).end,
-        })
+impl<'src> AstNode<'src> for MacroExpansion<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        (&self.name, self.args.as_slice()).get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.name, self.args.as_slice()).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.name, self.args.as_slice()).expansion(source)
     }
 }
 
 /// `macro_predicate -> "rot" macro_replacer`
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, AstNodeF)]
 pub struct MacroPredicate<'src> {
     /// `rot`
     pub rot_kw: Token<'src>,
     pub pred: MacroReplacer<'src>,
 }
 
+impl<'src> AstNode<'src> for MacroPredicate<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.rot_kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.pred.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.rot_kw, &self.pred).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.rot_kw, &self.pred).expansion(source)
+    }
+}
+
 /// `macro_alternative -> "~" ( macro_predicate )? macro_replacer $( macro_alternative )?`
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, AstNodeF)]
 pub struct MacroAlternative<'src> {
     /// `~`; necessary to distinguish from non-preprocessor `or`
     pub squiggle: Token<'src>,
@@ -91,19 +165,73 @@ pub struct MacroAlternative<'src> {
     pub then_def: MacroReplacer<'src>,
 }
 
+impl<'src> AstNode<'src> for MacroAlternative<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.squiggle.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.then_def.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.squiggle, &self.then_def).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.squiggle, &self.then_def).expansion(source)
+    }
+}
+
 /// `macro_conditional -> macro_predicate macro_replacer ( macro_alternative )*`
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, AstNodeF)]
 pub struct MacroConditional<'src> {
     pub pred: MacroPredicate<'src>,
     pub then_def: MacroReplacer<'src>,
     pub else_def: Vec<MacroAlternative<'src>>,
 }
 
+impl<'src> AstNode<'src> for MacroConditional<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.pred.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        (&self.then_def, self.else_def.as_slice()).get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.pred, (&self.then_def, self.else_def.as_slice())).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.pred, (&self.then_def, self.else_def.as_slice())).expansion(source)
+    }
+}
+
 /// `macro_reference -> "~" MACRO`
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, AstNodeF)]
 pub struct MacroRefence<'src> {
     pub squiggle: Token<'src>,
     pub macro_name: Token<'src>,
+}
+
+impl<'src> AstNode<'src> for MacroRefence<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.squiggle.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.macro_name.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.squiggle, &self.macro_name).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.squiggle, &self.macro_name).expansion(source)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
