@@ -274,7 +274,7 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>
         .get(i..)
         .expect("`i` should not be within a UTF-8 character");
     escape_char(esc_rest)
-        .ok_or(ErrorType::InvalidEscape(esc_rest)) // no remaining characters
+        .ok_or(ErrorType::InvalidEscape(esc_rest))
         .and_then(|(len, res)| {
             let esc = esc_rest.get(..len).expect(
                 "return of escape_char, starting at `i`, should not be within a UTF-8 character",
@@ -286,4 +286,16 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>
             res.map(|ch| (range, ch))
                 .map_err(|()| ErrorType::InvalidEscape(esc))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_esc_esc() {
+        const SOURCE: &str = r"\\";
+        let esc = escape_char(SOURCE);
+        assert_eq!(esc, Some((SOURCE.len(), Ok('\\'))));
+    }
 }

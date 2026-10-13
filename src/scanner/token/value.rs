@@ -12,7 +12,7 @@ use crate::{
         token::{escape_char, escape_seq},
     },
 };
-use std::range::Range;
+use std::{borrow::Cow, range::Range};
 
 /// Information about a character literal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -41,66 +41,28 @@ impl<'src> TextLiteral<'src> {
     }
 
     /// Process the [`TextLiteral`] into [`LiteralText`]
-    pub fn process(&self) -> Result<LiteralText, ErrorType<'src>> {
-        LiteralText::try_from(*self)
-    }
-}
-
-/// Information about a string literal
-///
-/// Allocated version of [`TextLiteral`]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct LiteralText {
-    /// The text content of the string literal; escape sequences converted and delimiters excluded.
-    pub text: String,
-
-    /// Ranges of the original lexeme (quote delimiters excluded) that refer to escape sequences
-    pub escapes: Vec<Range<usize>>,
-}
-
-impl<'src> TryFrom<TextLiteral<'src>> for LiteralText {
-    type Error = ErrorType<'src>;
-
-    fn try_from(value: TextLiteral<'src>) -> Result<Self, Self::Error> {
-        if value.has_escapes() {
-            let replacements = Escapes::new(value.content).collect::<Result<Vec<_>, _>>()?;
-            let escapes = replacements.iter().map(|(range, _)| *range).collect();
-
-            let byte_diff: usize = replacements
-                .iter()
-                .map(|(range, ch)| {
-                    (range
-                        .end
-                        .checked_sub(range.start)
-                        .expect("range should be ascending order"))
-                    .checked_sub(ch.len_utf8())
-                    .expect("should not be replacing an empty range")
-                })
-                .sum();
-            let mut processed = String::with_capacity(
-                value
-                    .content
-                    .len()
-                    .checked_sub(byte_diff)
-                    .expect("should only be removing bytes, not adding"),
-            );
+    pub fn process(&self) -> Result<Cow<'src, str>, ErrorType<'src>> {
+        if self.has_escapes() {
+            let mut processed = String::with_capacity(self.content.len());
             let mut prev_end = 0;
-            for (range, repl) in replacements {
-                processed.push_str(value.content.get(prev_end..range.start)
-                    .expect("range should never start/end within a UTF-8 character, and prev_end should always be from such a range (or 0)"));
-                processed.push(repl);
+            for res in Escapes::new(self.content) {
+                let (range, ch) = res?;
+                processed.push_str(
+                    self.content.get(prev_end..range.start).expect(
+                        "prev_end and range.start should be valid positions within content",
+                    ),
+                );
                 prev_end = range.end;
+                processed.push(ch);
             }
-
-            Ok(LiteralText {
-                text: processed,
-                escapes,
-            })
+            processed.push_str(
+                self.content
+                    .get(prev_end..)
+                    .expect("prev_end should be a valid position in content"),
+            );
+            Ok(Cow::Owned(processed))
         } else {
-            Ok(LiteralText {
-                text: value.content.to_string(),
-                escapes: Vec::new(),
-            })
+            Ok(Cow::Borrowed(self.content))
         }
     }
 }
@@ -332,22 +294,17 @@ impl<'src> LexValue<'src> {
 /// An iterator over unescaped escape characters ([`ESCAPE`]) in a string
 #[derive(Debug, Clone)]
 pub struct Escapes<'src> {
-    /// Source code
+    original: &'src str,
     source: &'src str,
-    /// Tracking of offset into [`Self::source`]
-    offset: usize,
-    /// Whether the upcoming character is escaped
-    is_esc: bool,
 }
 
 impl<'src> Escapes<'src> {
     /// Construct a new [`Escapes`] iterator from a source string
     #[must_use]
-    pub const fn new(source: &'src str) -> Self {
+    pub const fn new(original: &'src str) -> Self {
         Self {
-            source,
-            offset: 0,
-            is_esc: false,
+            original,
+            source: original,
         }
     }
 }
@@ -356,21 +313,27 @@ impl<'src> Iterator for Escapes<'src> {
     type Item = Result<(Range<usize>, char), ErrorType<'src>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.source
-            .get(self.offset..)
-            .expect("offset should never be within a UTF-8 character")
-            .match_indices(|ch: char| {
-                self.is_esc = !self.is_esc && ch == ESCAPE;
-                self.is_esc
-            })
-            .next()
-            .map(|(i, _)| {
-                self.offset = self.offset.checked_add(i).expect(
-                    "`i` should be a position after `offset` in `source`, \
-                     a string in memory whose len must fit in usize",
+        self.source.find(ESCAPE).map(|pos| {
+            #[expect(clippy::string_slice, reason = "find should produce valid positions")]
+            let next_esc = &self.source[pos..];
+            let item = escape_seq(
+                self.original,
+                self.original
+                    .substr_range(next_esc)
+                    .expect("source should be a substr of original")
+                    .start,
+            );
+            if let Ok((range, _)) = &item {
+                self.source = self.original.get(range.end..).expect(
+                    "escape sequence range's end should be a valid position within original",
                 );
-                escape_seq(self.source, self.offset)
-            })
+            } else {
+                self.source = next_esc
+                    .strip_prefix(ESCAPE)
+                    .expect("next_esc should start at the position of an escape character");
+            }
+            item
+        })
     }
 }
 
@@ -392,4 +355,32 @@ where
         std::str::from_utf8(&buf[..written_len])
             .expect("concatenation of valid UTF-8 segments should be valid UTF-8"),
     )
+}
+
+#[cfg(test)]
+mod escapes_tests {
+    use super::*;
+
+    #[test]
+    fn test_esc_esc() {
+        const SOURCE: &str = r"apple \\foo\0";
+        const EXPECT: [Result<(Range<usize>, char), ErrorType<'_>>; 2] = [
+            Ok((
+                Range {
+                    start: "apple ".len(),
+                    end: r"apple \\".len(),
+                },
+                '\\',
+            )),
+            Ok((
+                Range {
+                    start: r"apple \\foo".len(),
+                    end: r"apple \\foo\0".len(),
+                },
+                '\0',
+            )),
+        ];
+        let actual: Vec<_> = Escapes::new(SOURCE).collect();
+        assert_eq!(actual, EXPECT);
+    }
 }
