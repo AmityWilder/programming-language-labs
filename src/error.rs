@@ -656,6 +656,21 @@ pub enum ErrorType<'src> {
     MacroUndefined,
 
     #[code(PRE, 22)]
+    #[err({ .. }, |f| write!(f, "macro parameter not in scope"))]
+    #[inlay({ .. }, |f| write!(f, "unknown macro parameter"))]
+    #[help({ head_range, .. }, |f, _src| {
+        if head_range.is_some() {
+            write!(f, "try adding this parameter to the macro, ")?;
+        }
+        write!(f, "remove the `$` if it isn't for a macro, or check if a macro is expanding incorrectly")
+    })]
+    #[info({ head_range, .. }, head_range.iter().map(|&range| (range, "macro defined here")))]
+    MacroParamUndefined {
+        head_range: Option<Range<usize>>,
+        param_name: &'src str,
+    },
+
+    #[code(PRE, 23)]
     #[err({ .. }, |f| write!(f, "macro call is recursive"))]
     #[inlay({ .. }, |f| write!(f, "macro calls itself here"))]
     #[help({ .. }, |f, _src| write!(f, "macros can't be defined recursively. they do not have base cases, so it will always be infinite recursion"))]

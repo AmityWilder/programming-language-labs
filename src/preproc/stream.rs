@@ -52,7 +52,7 @@ pub struct MacroDefinition<'src> {
     pub def_kw: Token<'src>,
     /// [`crate::scanner::token::value::LexValue::Macro`]
     pub name: Token<'src>,
-    pub params: ParamGroup<'src>,
+    pub params: Option<ParamGroup<'src>>,
     pub body: MacroReplacer<'src>,
 }
 
@@ -187,19 +187,20 @@ impl<'src> PreprocessorStream<'src> {
             })
     }
 
-    pub fn param_group(&mut self) -> Result<ParamGroup<'src>, ContextError<'src>> {
-        let open = self.try_pull(match_token!(Punctuation::LParen), ExpectedToken::LParen)?;
-        let params = std::iter::from_fn(|| self.pull_if(match_token!(MacroParam))).collect();
-        let close = self
-            .try_pull(
-                match_token!(Punctuation::RParen),
-                ExpectedToken::MacroParamOrRParen,
-            )
-            .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))?;
-        Ok(ParamGroup {
-            open,
-            list: params,
-            close,
+    pub fn param_group(&mut self) -> Option<Result<ParamGroup<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Punctuation::LParen)).map(|open| {
+            let params = std::iter::from_fn(|| self.pull_if(match_token!(MacroParam))).collect();
+            let close = self
+                .try_pull(
+                    match_token!(Punctuation::RParen),
+                    ExpectedToken::MacroParamOrRParen,
+                )
+                .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))?;
+            Ok(ParamGroup {
+                open,
+                list: params,
+                close,
+            })
         })
     }
 
@@ -279,7 +280,7 @@ impl<'src> PreprocessorStream<'src> {
             Ok(MacroDefinition {
                 def_kw,
                 name: self.try_pull(match_token!(Macro), ExpectedToken::MacroIdent)?,
-                params: self.param_group()?,
+                params: self.param_group().transpose()?,
                 body: self.replacer(ReplacerKind::Body)?,
             })
         })
