@@ -40,7 +40,7 @@ impl<'src> TextLiteral<'src> {
         self.content.contains(ESCAPE)
     }
 
-    /// Process the [`TextLiteral`] into [`LiteralText`]
+    /// Replace escape sequences with their meanings
     pub fn process(&self) -> Result<Cow<'src, str>, ErrorType<'src>> {
         if self.has_escapes() {
             let mut processed = String::with_capacity(self.content.len());
