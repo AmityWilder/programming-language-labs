@@ -72,6 +72,45 @@ macro_rules! final_ast_node {
 }
 pub(crate) use final_ast_node as AstNodeF;
 
+macro_rules! simple_ast_node_enum {
+    derive() {
+        $(#[$meta:meta])*
+        $vis:vis enum $Name:ident<$lt:lifetime> {
+            $(
+                $(#[$vmeta:meta])*
+                $Variant:ident($Type:ty)
+            ),* $(,)?
+        }
+    } => {
+        impl<$lt> $crate::grammar::ast::AstNode<$lt> for $Name<$lt> {
+            fn get_range_start(&self, source: &'src str) -> Option<usize> {
+                match self {
+                    $(Self::$Variant(inner) => inner.get_range_start(source)),*
+                }
+            }
+
+            fn get_range_end(&self, source: &'src str) -> Option<usize> {
+                match self {
+                    $(Self::$Variant(inner) => inner.get_range_end(source)),*
+                }
+            }
+
+            fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+                match self {
+                    $(Self::$Variant(inner) => inner.get_range(source)),*
+                }
+            }
+
+            fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+                match self {
+                    $(Self::$Variant(inner) => inner.expansion(source)),*
+                }
+            }
+        }
+    };
+}
+pub(crate) use simple_ast_node_enum as AstEnum;
+
 /// Passthrough references
 impl<'src, T: ?Sized> AstNode<'src> for &T
 where
@@ -326,7 +365,7 @@ impl<'src> AstNode<'src> for Grouping<'src> {
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.close.get_range_start(source)
+        self.close.get_range_end(source)
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
@@ -355,7 +394,7 @@ impl<'src> AstNode<'src> for OrType<'src> {
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.ty.get_range_start(source)
+        self.ty.get_range_end(source)
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
@@ -417,7 +456,7 @@ impl<'src> AstNode<'src> for Literal<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
 pub enum Expr<'src> {
     Ternary(Box<Ternary<'src>>),
     Binary(Box<Binary<'src>>),
@@ -425,52 +464,6 @@ pub enum Expr<'src> {
     Literal(Literal<'src>),
     Grouping(Box<Grouping<'src>>),
     Type(Box<TypeExpr<'src>>),
-}
-
-impl<'src> AstNode<'src> for Expr<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        match self {
-            Self::Ternary(inner) => inner.get_range_start(source),
-            Self::Binary(inner) => inner.get_range_start(source),
-            Self::Unary(inner) => inner.get_range_start(source),
-            Self::Literal(token) => token.get_range_start(source),
-            Self::Grouping(inner) => inner.get_range_start(source),
-            Self::Type(inner) => inner.get_range_start(source),
-        }
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        match self {
-            Self::Ternary(inner) => inner.get_range_end(source),
-            Self::Binary(inner) => inner.get_range_end(source),
-            Self::Unary(inner) => inner.get_range_end(source),
-            Self::Literal(token) => token.get_range_end(source),
-            Self::Grouping(inner) => inner.get_range_end(source),
-            Self::Type(inner) => inner.get_range_end(source),
-        }
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        match self {
-            Self::Ternary(inner) => inner.get_range(source),
-            Self::Binary(inner) => inner.get_range(source),
-            Self::Unary(inner) => inner.get_range(source),
-            Self::Literal(token) => token.get_range(source),
-            Self::Grouping(inner) => inner.get_range(source),
-            Self::Type(inner) => inner.get_range(source),
-        }
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        match self {
-            Self::Ternary(inner) => inner.expansion(source),
-            Self::Binary(inner) => inner.expansion(source),
-            Self::Unary(inner) => inner.expansion(source),
-            Self::Literal(token) => token.expansion(source),
-            Self::Grouping(inner) => inner.expansion(source),
-            Self::Type(inner) => inner.expansion(source),
-        }
-    }
 }
 
 impl<'src> Expr<'src> {
@@ -496,5 +489,152 @@ impl<'src> Expr<'src> {
 
     pub fn type_expr(inner: TypeExpr<'src>) -> Self {
         Self::Type(Box::new(inner))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct IfCondition<'src> {
+    /// [`crate::scanner::token::value::Keyword::If`]
+    pub if_kw: Token<'src>,
+    pub pred: Expr<'src>,
+}
+
+impl<'src> AstNode<'src> for IfCondition<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.if_kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.pred.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.if_kw, &self.pred).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.if_kw, &self.pred).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct IfBody<'src> {
+    pub then: BlockStmt<'src>,
+    pub or: Option<Box<OrStmt<'src>>>,
+}
+
+impl<'src> AstNode<'src> for IfBody<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.then.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        (&self.then, &self.or.as_deref()).get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.then, &self.or.as_deref()).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.then, &self.or.as_deref()).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct OrStmt<'src> {
+    /// [`crate::scanner::token::value::Keyword::Or`]
+    pub or_kw: Token<'src>,
+    pub cond: Option<IfCondition<'src>>,
+    pub then: IfBody<'src>,
+}
+
+impl<'src> AstNode<'src> for OrStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.or_kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.then.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.or_kw, &self.then).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.or_kw, &self.then).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct IfStmt<'src> {
+    pub cond: IfCondition<'src>,
+    pub then: IfBody<'src>,
+}
+
+impl<'src> AstNode<'src> for IfStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.cond.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.then.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.cond, &self.then).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.cond, &self.then).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct BlockStmt<'src> {
+    /// `{`
+    pub open: Token<'src>,
+    pub stmts: Vec<Statement<'src>>,
+    /// `}`
+    pub close: Token<'src>,
+}
+
+impl<'src> AstNode<'src> for BlockStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.open.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.close.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.open, &self.close).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.open, &self.close).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
+pub enum Statement<'src> {
+    If(IfStmt<'src>),
+    Block(BlockStmt<'src>),
+    Expr(Expr<'src>),
+}
+
+impl<'src> Statement<'src> {
+    pub fn if_stmt(inner: IfStmt<'src>) -> Self {
+        Self::If(inner)
+    }
+
+    pub fn block(inner: BlockStmt<'src>) -> Self {
+        Self::Block(inner)
+    }
+
+    pub fn expr(inner: Expr<'src>) -> Self {
+        Self::Expr(inner)
     }
 }
