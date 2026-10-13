@@ -244,7 +244,7 @@ impl std::fmt::Display for ValueType {
 }
 
 #[derive(Debug, Default)]
-pub enum RunValue {
+pub enum RunValue<'src> {
     #[default]
     None,
     /// `none` that also outputs `none` as a result of every operation, instead of erroring
@@ -257,11 +257,11 @@ pub enum RunValue {
     SInt(isize),
     Frac(f64),
     Char(char),
-    Text(Cow<'static, str>),
+    Text(Cow<'src, str>),
     Type(ValueType),
 }
 
-impl RunValue {
+impl RunValue<'_> {
     pub const fn as_type(&self) -> ValueType {
         match self {
             Self::None | Self::CoalesceNone => ValueType::None,
@@ -846,7 +846,10 @@ impl RunValue {
     }
 }
 
-pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, ContextError<'src>> {
+pub fn evaluate<'src>(
+    source: &'src str,
+    ast: &Expr<'src>,
+) -> Result<RunValue<'src>, ContextError<'src>> {
     use Keyword::Szof;
     use Punctuation::{
         Add, And, Coalesce, Convert, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or,
@@ -984,7 +987,7 @@ pub fn evaluate<'src>(source: &'src str, ast: &Expr<'src>) -> Result<RunValue, C
             LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
             LexValue::TextLiteral(s) => s
                 .process()
-                .map(|s| RunValue::Text(Cow::Owned(s.text)))
+                .map(RunValue::Text)
                 .map_err(|e| ContextError::token_error(source, Some(*token), e)),
             LexValue::Keyword(Keyword::None) => Ok(RunValue::None),
 

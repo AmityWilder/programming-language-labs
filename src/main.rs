@@ -413,7 +413,7 @@ impl<'src> TokenHighlight<'src> for RunToken<'src> {
     }
 }
 
-fn runtime_token(value: RunValue, buf: &mut String) -> RunToken<'_> {
+fn runtime_token<'buf>(value: RunValue<'buf>, buf: &'buf mut String) -> RunToken<'buf> {
     use std::fmt::Write;
     match value {
         RunValue::None | RunValue::CoalesceNone => RunToken {
