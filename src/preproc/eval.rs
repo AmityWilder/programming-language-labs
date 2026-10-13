@@ -125,83 +125,65 @@ impl<'src> PpValue<'src> {
 
     const fn and(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => Ok(PpValue::BoolLiteral(l & r)),
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => Ok(PpValue::UIntLiteral(l & r)),
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => Ok(PpValue::SIntLiteral(l & r)),
+            (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(l & r)),
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(l & r)),
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => Ok(Self::SIntLiteral(l & r)),
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
     }
 
     const fn or(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => Ok(PpValue::BoolLiteral(l | r)),
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => Ok(PpValue::UIntLiteral(l | r)),
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => Ok(PpValue::SIntLiteral(l | r)),
+            (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(l | r)),
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(l | r)),
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => Ok(Self::SIntLiteral(l | r)),
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
     }
 
     const fn xor(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => Ok(PpValue::BoolLiteral(l ^ r)),
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => Ok(PpValue::UIntLiteral(l ^ r)),
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => Ok(PpValue::SIntLiteral(l ^ r)),
+            (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(l ^ r)),
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(l ^ r)),
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => Ok(Self::SIntLiteral(l ^ r)),
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
     }
 
     const fn nand(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => {
-                Ok(PpValue::BoolLiteral(!(l & r)))
-            }
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                Ok(PpValue::UIntLiteral(!(l & r)))
-            }
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                Ok(PpValue::SIntLiteral(!(l & r)))
-            }
+            (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(!(l & r))),
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(!(l & r))),
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => Ok(Self::SIntLiteral(!(l & r))),
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
     }
 
     const fn nor(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => {
-                Ok(PpValue::BoolLiteral(!(l | r)))
-            }
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                Ok(PpValue::UIntLiteral(!(l | r)))
-            }
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                Ok(PpValue::SIntLiteral(!(l | r)))
-            }
+            (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(!(l | r))),
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(!(l | r))),
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => Ok(Self::SIntLiteral(!(l | r))),
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
     }
 
     const fn xnor(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => {
-                Ok(PpValue::BoolLiteral(!(l ^ r)))
-            }
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                Ok(PpValue::UIntLiteral(!(l ^ r)))
-            }
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                Ok(PpValue::SIntLiteral(!(l ^ r)))
-            }
+            (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(!(l ^ r))),
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(!(l ^ r))),
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => Ok(Self::SIntLiteral(!(l ^ r))),
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
     }
 
     const fn add(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                Ok(PpValue::UIntLiteral(l.saturating_add(r)))
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
+                Ok(Self::UIntLiteral(l.saturating_add(r)))
             }
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                Ok(PpValue::SIntLiteral(l.saturating_add(r)))
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => {
+                Ok(Self::SIntLiteral(l.saturating_add(r)))
             }
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
@@ -209,11 +191,11 @@ impl<'src> PpValue<'src> {
 
     const fn sub(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                Ok(PpValue::UIntLiteral(l.saturating_sub(r)))
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
+                Ok(Self::UIntLiteral(l.saturating_sub(r)))
             }
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                Ok(PpValue::SIntLiteral(l.saturating_sub(r)))
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => {
+                Ok(Self::SIntLiteral(l.saturating_sub(r)))
             }
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
@@ -221,11 +203,11 @@ impl<'src> PpValue<'src> {
 
     const fn mul(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                Ok(PpValue::UIntLiteral(l.saturating_mul(r)))
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
+                Ok(Self::UIntLiteral(l.saturating_mul(r)))
             }
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                Ok(PpValue::SIntLiteral(l.saturating_mul(r)))
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => {
+                Ok(Self::SIntLiteral(l.saturating_mul(r)))
             }
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
@@ -233,11 +215,11 @@ impl<'src> PpValue<'src> {
 
     fn div(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                Ok(PpValue::UIntLiteral(l.checked_div(r).unwrap_or(usize::MAX)))
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
+                Ok(Self::UIntLiteral(l.checked_div(r).unwrap_or(usize::MAX)))
             }
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                Ok(PpValue::SIntLiteral(l.checked_div(r).unwrap_or(isize::MAX)))
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => {
+                Ok(Self::SIntLiteral(l.checked_div(r).unwrap_or(isize::MAX)))
             }
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
@@ -245,11 +227,11 @@ impl<'src> PpValue<'src> {
 
     fn rem(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => {
-                Ok(PpValue::UIntLiteral(l.checked_rem(r).unwrap_or(0)))
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
+                Ok(Self::UIntLiteral(l.checked_rem(r).unwrap_or(0)))
             }
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => {
-                Ok(PpValue::SIntLiteral(l.checked_rem(r).unwrap_or(0)))
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => {
+                Ok(Self::SIntLiteral(l.checked_rem(r).unwrap_or(0)))
             }
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
@@ -257,17 +239,17 @@ impl<'src> PpValue<'src> {
 
     const fn eq(self, rhs: Self) -> Result<bool, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::BoolLiteral(l), PpValue::BoolLiteral(r)) => Ok(l == r),
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => Ok(l == r),
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => Ok(l == r),
+            (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(l == r),
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(l == r),
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => Ok(l == r),
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
     }
 
     const fn cmp(self, rhs: Self) -> Result<std::cmp::Ordering, PpOpError<'src>> {
         match (self, rhs) {
-            (PpValue::UIntLiteral(l), PpValue::UIntLiteral(r)) => Ok(l.cmp(&r)),
-            (PpValue::SIntLiteral(l), PpValue::SIntLiteral(r)) => Ok(l.cmp(&r)),
+            (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(l.cmp(&r)),
+            (Self::SIntLiteral(l), Self::SIntLiteral(r)) => Ok(l.cmp(&r)),
             (l, r) => Err(PpOpError::Incompatible { l, r }),
         }
     }
@@ -275,28 +257,28 @@ impl<'src> PpValue<'src> {
     const fn size(self) -> usize {
         match self {
             // TBD: should literals produce an error?
-            PpValue::BoolLiteral(_) | PpValue::Bool => std::mem::size_of::<bool>(),
-            PpValue::UIntLiteral(_) | PpValue::Uint => std::mem::size_of::<usize>(),
-            PpValue::SIntLiteral(_) | PpValue::Sint => std::mem::size_of::<isize>(),
-            PpValue::Frac => std::mem::size_of::<f64>(),
-            PpValue::Char => std::mem::size_of::<char>(),
-            PpValue::Text => std::mem::size_of::<String>(),
-            PpValue::Macro(_) => 0,
+            Self::BoolLiteral(_) | Self::Bool => std::mem::size_of::<bool>(),
+            Self::UIntLiteral(_) | Self::Uint => std::mem::size_of::<usize>(),
+            Self::SIntLiteral(_) | Self::Sint => std::mem::size_of::<isize>(),
+            Self::Frac => std::mem::size_of::<f64>(),
+            Self::Char => std::mem::size_of::<char>(),
+            Self::Text => std::mem::size_of::<String>(),
+            Self::Macro(_) => 0,
         }
     }
 
     const fn neg(self) -> Result<Self, PpOpError<'src>> {
         match self {
-            PpValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(x.saturating_neg())),
+            Self::SIntLiteral(x) => Ok(Self::SIntLiteral(x.saturating_neg())),
             x => Err(PpOpError::Unsupported { x }),
         }
     }
 
     const fn not(self) -> Result<Self, PpOpError<'src>> {
         match self {
-            PpValue::UIntLiteral(x) => Ok(PpValue::UIntLiteral(!x)),
-            PpValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(!x)),
-            PpValue::BoolLiteral(x) => Ok(PpValue::BoolLiteral(!x)),
+            Self::UIntLiteral(x) => Ok(Self::UIntLiteral(!x)),
+            Self::SIntLiteral(x) => Ok(Self::SIntLiteral(!x)),
+            Self::BoolLiteral(x) => Ok(Self::BoolLiteral(!x)),
             x => Err(PpOpError::Unsupported { x }),
         }
     }
@@ -306,7 +288,7 @@ impl<'src> PpValue<'src> {
         F: FnOnce(&str) -> bool,
     {
         match self {
-            PpValue::Macro(x) => Ok(macro_exists(x)),
+            Self::Macro(x) => Ok(macro_exists(x)),
             x => Err(PpOpError::Unsupported { x }),
         }
     }
@@ -320,6 +302,12 @@ pub fn preproc_eval<'src, F>(
 where
     F: FnMut(&str) -> bool,
 {
+    use Keyword::Szof;
+    use Punctuation::{
+        Add, And, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Rem, SubNeg, Xnor,
+        Xor,
+    };
+
     // TODO: Some operations are valid for Expr but not in preprocessing
     match expr {
         Expr::Ternary(inner) => Err(ContextError::node_error(
@@ -341,63 +329,61 @@ where
 
                 TokenEq::Punctuation(punctuation) => {
                     match punctuation {
-                        Punctuation::And => preproc_eval(source, lhs, mexists)?
+                        And => preproc_eval(source, lhs, mexists)?
                             .and(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Or => preproc_eval(source, lhs, mexists)?
+                        Or => preproc_eval(source, lhs, mexists)?
                             .or(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Xor => preproc_eval(source, lhs, mexists)?
+                        Xor => preproc_eval(source, lhs, mexists)?
                             .xor(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Nand => preproc_eval(source, lhs, mexists)?
+                        Nand => preproc_eval(source, lhs, mexists)?
                             .nand(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Nor => preproc_eval(source, lhs, mexists)?
+                        Nor => preproc_eval(source, lhs, mexists)?
                             .nor(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Xnor => preproc_eval(source, lhs, mexists)?
+                        Xnor => preproc_eval(source, lhs, mexists)?
                             .xnor(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Add => preproc_eval(source, lhs, mexists)?
+                        Add => preproc_eval(source, lhs, mexists)?
                             .add(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::SubNeg => preproc_eval(source, lhs, mexists)?
+                        SubNeg => preproc_eval(source, lhs, mexists)?
                             .sub(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Mul => preproc_eval(source, lhs, mexists)?
+                        Mul => preproc_eval(source, lhs, mexists)?
                             .mul(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Div => preproc_eval(source, lhs, mexists)?
+                        Div => preproc_eval(source, lhs, mexists)?
                             .div(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Rem => preproc_eval(source, lhs, mexists)?
+                        Rem => preproc_eval(source, lhs, mexists)?
                             .rem(preproc_eval(source, rhs, mexists)?),
 
-                        Punctuation::Eq | Punctuation::Ne => preproc_eval(source, lhs, mexists)?
+                        Eq | Ne => preproc_eval(source, lhs, mexists)?
                             .eq(preproc_eval(source, rhs, mexists)?)
                             .map(|is_eq| {
                                 PpValue::BoolLiteral(match punctuation {
-                                    Punctuation::Eq => is_eq,
-                                    Punctuation::Ne => !is_eq,
+                                    Eq => is_eq,
+                                    Ne => !is_eq,
                                     _ => unreachable!("guarded by outer match arm"),
                                 })
                             }),
 
-                        Punctuation::Lt | Punctuation::Le | Punctuation::Gt | Punctuation::Ge => {
-                            preproc_eval(source, lhs, mexists)?
-                                .cmp(preproc_eval(source, rhs, mexists)?)
-                                .map(|ord| {
-                                    PpValue::BoolLiteral(match punctuation {
-                                        Punctuation::Ne => ord.is_ne(),
-                                        Punctuation::Lt => ord.is_lt(),
-                                        Punctuation::Le => ord.is_le(),
-                                        Punctuation::Gt => ord.is_gt(),
-                                        Punctuation::Ge => ord.is_ge(),
-                                        _ => unreachable!("guarded by outer match arm"),
-                                    })
+                        Lt | Le | Gt | Ge => preproc_eval(source, lhs, mexists)?
+                            .cmp(preproc_eval(source, rhs, mexists)?)
+                            .map(|ord| {
+                                PpValue::BoolLiteral(match punctuation {
+                                    Ne => ord.is_ne(),
+                                    Lt => ord.is_lt(),
+                                    Le => ord.is_le(),
+                                    Gt => ord.is_gt(),
+                                    Ge => ord.is_ge(),
+                                    _ => unreachable!("guarded by outer match arm"),
                                 })
-                        }
+                            }),
 
                         _ => {
                             return Err(ContextError::token_error(
@@ -428,7 +414,7 @@ where
 
                 OpSide::Right => match punc {
                     TokenEq::Keyword(keyword) => match keyword {
-                        Keyword::Szof => Ok(PpValue::UIntLiteral(
+                        Szof => Ok(PpValue::UIntLiteral(
                             preproc_eval(source, operand, mexists)?.size(),
                         )),
 
@@ -441,11 +427,11 @@ where
                         }
                     },
                     TokenEq::Punctuation(punctuation) => match punctuation {
-                        Punctuation::SubNeg => preproc_eval(source, operand, mexists)?.neg(),
+                        SubNeg => preproc_eval(source, operand, mexists)?.neg(),
 
-                        Punctuation::Not => preproc_eval(source, operand, mexists)?.not(),
+                        Not => preproc_eval(source, operand, mexists)?.not(),
 
-                        Punctuation::Exists => preproc_eval(source, operand, mexists)?
+                        Exists => preproc_eval(source, operand, mexists)?
                             .exists(mexists)
                             .map(PpValue::BoolLiteral),
 
