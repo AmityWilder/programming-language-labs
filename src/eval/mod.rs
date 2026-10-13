@@ -4,7 +4,7 @@ use crate::{
     error::{
         ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
     },
-    grammar::ast::{AstNode, AstNodeFinal, Binary, Expr, Ternary, Unary},
+    grammar::ast::{AstNodeFinal, Binary, Expr, Ternary, Unary},
     scanner::token::{
         Token,
         keyword::Keyword,
@@ -69,10 +69,9 @@ impl OpError {
                 target_ty,
                 value,
                 is_binary,
-            } => ContextError::error(
+            } => ContextError::node_error(
                 source,
-                Some(rhs.range(source)),
-                rhs.expansion(source),
+                rhs,
                 ErrorType::FailedConvert {
                     op: op
                         .val
@@ -175,10 +174,9 @@ impl OpError {
                 target_ty,
                 value,
                 is_binary,
-            } => ContextError::error(
+            } => ContextError::node_error(
                 source,
-                Some(rhs.range(source)),
-                rhs.expansion(source),
+                rhs,
                 ErrorType::FailedConvert {
                     op: op
                         .val
@@ -223,6 +221,8 @@ pub enum ValueType {
     Text,
     Fail,
     Type,
+    /// Only valid in preprocessing
+    Macro,
 }
 
 impl std::fmt::Display for ValueType {
@@ -239,6 +239,7 @@ impl std::fmt::Display for ValueType {
             Self::Fail => "fail",
             // TBD: where does this appear?
             Self::Type => "typename",
+            Self::Macro => "macro identifier",
         })
     }
 }
@@ -840,7 +841,7 @@ impl RunValue<'_> {
                 ValueType::Char => std::mem::size_of::<char>(),
                 ValueType::Text => std::mem::size_of::<String>(),
                 ValueType::Fail => std::mem::size_of::<Box<dyn std::error::Error>>(),
-                ValueType::Type => unimplemented!("`Type` is not a type"),
+                ValueType::Type | ValueType::Macro => unimplemented!("{t} is not a runtime type"),
             },
         })
     }

@@ -2,10 +2,7 @@
 
 use crate::{
     error::{ContextError, ErrorType},
-    grammar::{
-        ast::{AstNode, AstNodeFinal},
-        parse, token_matches,
-    },
+    grammar::{ast::AstNodeFinal, parse, token_matches},
     preproc::{
         eval::{PpValue, preproc_eval},
         stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
@@ -171,13 +168,14 @@ impl<'src> Preprocessor<'src> {
                 let mut parser = parse(self.stream.source, pred_preproc);
                 let expr = parser.expression()?;
                 assert!(parser.next().is_none(), "leftover tokens"); // TODO: make this an error
-                match preproc_eval(expr, &mut |name| self.macros.contains_key(name))? {
+                match preproc_eval(self.stream.source, &expr, &mut |name| {
+                    self.macros.contains_key(name)
+                })? {
                     PpValue::BoolLiteral(x) => x,
                     actual => {
-                        return Err(ContextError::error(
+                        return Err(ContextError::node_error(
                             self.stream.source,
-                            Some(p.pred.range(self.stream.source)),
-                            p.pred.expansion(self.stream.source),
+                            &p.pred,
                             ErrorType::NonBoolPrePredicate { actual },
                         ));
                     }

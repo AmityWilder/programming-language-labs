@@ -247,10 +247,11 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `primary -> literal | group`
+    /// `primary -> literal | group | type_expression`
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.literal()
             .or_else(|_| self.group().map(Expr::grouping))
+            .or_else(|_| self.type_expression().map(Expr::type_expr))
             .map_err(|mut e| {
                 if let ErrorType::MissingToken { expect }
                 | ErrorType::UnexpectedToken { expect, .. } = &mut e.err
