@@ -2,7 +2,7 @@
 
 use crate::{
     highlight::style::Style,
-    scanner::token::{Token, value::LexValue},
+    scanner::token::{Token, punc::Punctuation, value::LexValue},
 };
 use std::marker::Destruct;
 
@@ -371,6 +371,18 @@ impl Token<'_> {
             }
             LexValue::Macro => Syntax::MacroName,
             LexValue::MacroParam => Syntax::MacroParam,
+            LexValue::Punctuation(
+                Punctuation::MacroConcat
+                | Punctuation::MacroStringify
+                | Punctuation::MacroConst
+                | Punctuation::Coalesce,
+            ) => Syntax::CtrlKeyword,
+            LexValue::Punctuation(
+                Punctuation::Exists
+                | Punctuation::Convert
+                | Punctuation::Transmute
+                | Punctuation::Iff,
+            ) => Syntax::Keyword,
             LexValue::Punctuation(_) => Syntax::Normal,
         }
     }

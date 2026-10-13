@@ -362,7 +362,6 @@ where
         _ = write!(buf, "{}", syntax_style[syntax].style(lexeme));
     }
     _ = write!(buf, "\x1b[0m");
-    println!("```");
     let line_num_width = buf
         .split('\n')
         .count()
@@ -379,7 +378,6 @@ where
             i.strict_add(1)
         );
     }
-    println!("```");
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
