@@ -1,3 +1,4 @@
+use super::ast::Literal;
 use crate::{
     error::{ContextError, OpSide},
     grammar::ast::{Binary, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
@@ -193,10 +194,13 @@ impl<'src> Expr<'src> {
                 }
             }
 
-            Expr::Literal(token) => ExprIter {
-                kind: ExprIterKind::Literal { token: Some(token) },
-                depth,
-            },
+            Expr::Literal(inner) => {
+                let Literal { value } = inner;
+                ExprIter {
+                    kind: ExprIterKind::Literal { token: Some(value) },
+                    depth,
+                }
+            }
 
             Expr::Grouping(inner) => {
                 let Grouping { open, expr, close } = &**inner;

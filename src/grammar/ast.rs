@@ -395,11 +395,34 @@ impl<'src> AstNode<'src> for TypeExpr<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct Literal<'src> {
+    pub value: Token<'src>,
+}
+
+impl<'src> AstNode<'src> for Literal<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.value.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.value.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.value.get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.value.expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub enum Expr<'src> {
     Ternary(Box<Ternary<'src>>),
     Binary(Box<Binary<'src>>),
     Unary(Box<Unary<'src>>),
-    Literal(Token<'src>),
+    Literal(Literal<'src>),
     Grouping(Box<Grouping<'src>>),
     Type(Box<TypeExpr<'src>>),
 }
@@ -463,7 +486,7 @@ impl<'src> Expr<'src> {
         Self::Unary(Box::new(inner))
     }
 
-    pub const fn literal(literal: Token<'src>) -> Self {
+    pub const fn literal(literal: Literal<'src>) -> Self {
         Self::Literal(literal)
     }
 

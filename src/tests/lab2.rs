@@ -115,7 +115,9 @@ macro_rules! syntax_tree {
     };
 
     (Literal($($token:tt)*)) => {
-        $crate::grammar::ast::Expr::literal(token!($($token)*))
+        $crate::grammar::ast::Expr::literal($crate::grammar::ast::Literal {
+            value: token!($($token)*),
+        })
     };
 
     (Grouping(
