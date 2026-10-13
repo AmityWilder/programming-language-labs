@@ -87,6 +87,7 @@ use crate::{
         tokenize,
     },
 };
+use grammar::ast::Literal;
 use std::{path::PathBuf, range::Range};
 
 mod arrayvec;
@@ -219,9 +220,10 @@ pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
             ast_field(side.as_str(), operand, indent, br_depth);
         }
 
-        Expr::Literal(token) => {
+        Expr::Literal(inner) => {
+            let Literal { value } = inner;
             header("Literal");
-            tkn_field("token", token, None, indent);
+            tkn_field("value", value, None, indent);
         }
 
         Expr::Grouping(inner) => {

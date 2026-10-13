@@ -1,7 +1,7 @@
 use crate::{
     error::{ContextError, ErrorType, OpSide},
     eval::ValueType,
-    grammar::ast::{AstNodeFinal, Binary, Expr, Unary},
+    grammar::ast::{AstNodeFinal, Binary, Expr, Literal, Unary},
     scanner::token::{
         Token,
         punc::Punctuation,
@@ -448,18 +448,21 @@ where
             .map_err(|e| e.contextualize(source, op, None, Some(operand)))
         }
 
-        Expr::Literal(inner) => match inner.val {
-            LexValue::UIntLiteral(x) => Ok(PpValue::UIntLiteral(x)),
-            LexValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(x)),
-            LexValue::BoolLiteral(x) => Ok(PpValue::BoolLiteral(x)),
-            LexValue::Macro => Ok(PpValue::Macro(inner.lex)),
+        Expr::Literal(inner) => {
+            let Literal { value } = inner;
+            match value.val {
+                LexValue::UIntLiteral(x) => Ok(PpValue::UIntLiteral(x)),
+                LexValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(x)),
+                LexValue::BoolLiteral(x) => Ok(PpValue::BoolLiteral(x)),
+                LexValue::Macro => Ok(PpValue::Macro(value.lex)),
 
-            _ => Err(ContextError::token_error(
-                source,
-                Some(*inner),
-                ErrorType::InvalidPreLiteral,
-            )),
-        },
+                _ => Err(ContextError::token_error(
+                    source,
+                    Some(*value),
+                    ErrorType::InvalidPreLiteral,
+                )),
+            }
+        }
 
         Expr::Grouping(inner) => preproc_eval(source, &inner.expr, mexists),
 

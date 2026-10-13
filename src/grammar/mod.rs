@@ -7,7 +7,7 @@ use crate::{
         token::{Token, value::LexValue},
     },
 };
-use ast::{Binary, Expr, Grouping, OrType, TypeExpr, Unary};
+use ast::{Binary, Expr, Grouping, Literal, OrType, TypeExpr, Unary};
 
 pub mod ast;
 pub mod ast_iter;
@@ -278,7 +278,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             ),
             ExpectedToken::Literal,
         )
-        .map(Expr::literal)
+        .map(|value| Expr::literal(Literal { value }))
     }
 
     /// `group -> "(" expression ")"`

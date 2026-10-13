@@ -1,8 +1,7 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    grammar::ast::{Binary, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
+    grammar::ast::{Binary, Expr, Grouping, Literal, OrType, Ternary, TypeExpr, Unary},
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
-    scanner::token::Token,
 };
 
 /// Means of displaying content with lisp style
@@ -85,6 +84,17 @@ impl LispDisplay for TypeExpr<'_> {
     }
 }
 
+impl LispDisplay for Literal<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { value } = self;
+        if f.alternate() {
+            write_highlight(std::iter::once(value), f, &SYNTAX_STYLE_ANSI)
+        } else {
+            f.write_str(value.lex)
+        }
+    }
+}
+
 impl LispDisplay for Expr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -92,13 +102,7 @@ impl LispDisplay for Expr<'_> {
             Self::Binary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
             // TBD: should this use val instead of lex?
-            Self::Literal(tkn @ Token { lex, .. }) => {
-                if f.alternate() {
-                    write_highlight(std::iter::once(tkn), f, &SYNTAX_STYLE_ANSI)
-                } else {
-                    f.write_str(lex)
-                }
-            }
+            Self::Literal(inner) => LispDisplay::fmt(inner, f),
             Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
             Self::Type(inner) => LispDisplay::fmt(&**inner, f),
         }

@@ -4,7 +4,7 @@ use crate::{
     error::{
         ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
     },
-    grammar::ast::{AstNodeFinal, Binary, Expr, Ternary, Unary},
+    grammar::ast::{AstNodeFinal, Binary, Expr, Literal, Ternary, Unary},
     scanner::token::{
         Token,
         keyword::Keyword,
@@ -980,20 +980,23 @@ pub fn evaluate<'src>(
             .map_err(|e| e.unary(source, op, punc, operand))
         }
 
-        Expr::Literal(token) => match token.val {
-            LexValue::BoolLiteral(b) => Ok(RunValue::Bool(b)),
-            LexValue::UIntLiteral(n) => Ok(RunValue::UInt(n)),
-            LexValue::SIntLiteral(n) => Ok(RunValue::SInt(n)),
-            LexValue::FracLiteral(x) => Ok(RunValue::Frac(x)),
-            LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
-            LexValue::TextLiteral(s) => s
-                .process()
-                .map(RunValue::Text)
-                .map_err(|e| ContextError::token_error(source, Some(*token), e)),
-            LexValue::Keyword(Keyword::None) => Ok(RunValue::None),
+        Expr::Literal(token) => {
+            let Literal { value } = token;
+            match value.val {
+                LexValue::BoolLiteral(b) => Ok(RunValue::Bool(b)),
+                LexValue::UIntLiteral(n) => Ok(RunValue::UInt(n)),
+                LexValue::SIntLiteral(n) => Ok(RunValue::SInt(n)),
+                LexValue::FracLiteral(x) => Ok(RunValue::Frac(x)),
+                LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
+                LexValue::TextLiteral(s) => s
+                    .process()
+                    .map(RunValue::Text)
+                    .map_err(|e| ContextError::token_error(source, Some(*value), e)),
+                LexValue::Keyword(Keyword::None) => Ok(RunValue::None),
 
-            _ => unimplemented!(),
-        },
+                _ => unimplemented!(),
+            }
+        }
 
         Expr::Grouping(group) => evaluate(source, &group.expr),
 

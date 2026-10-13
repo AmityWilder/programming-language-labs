@@ -13,10 +13,12 @@ fn test_parse0() {
     assert_eq!(
         expr.as_slice(),
         &[Expr::binary(Binary {
-            lhs: Expr::literal(Token {
-                lex: "5",
-                val: LexValue::SIntLiteral(5),
-                mac: None
+            lhs: Expr::literal(Literal {
+                value: Token {
+                    lex: "5",
+                    val: LexValue::SIntLiteral(5),
+                    mac: None
+                }
             }),
             op: Token {
                 lex: "+",
@@ -38,20 +40,24 @@ fn test_parse0() {
                             mac: None
                         },
                         expr: Expr::binary(Binary {
-                            lhs: Expr::literal(Token {
-                                lex: "7",
-                                val: LexValue::SIntLiteral(7),
-                                mac: None
+                            lhs: Expr::literal(Literal {
+                                value: Token {
+                                    lex: "7",
+                                    val: LexValue::SIntLiteral(7),
+                                    mac: None
+                                }
                             }),
                             op: Token {
                                 lex: "/",
                                 val: LexValue::Punctuation(Punctuation::Div),
                                 mac: None
                             },
-                            rhs: Expr::literal(Token {
-                                lex: "8",
-                                val: LexValue::SIntLiteral(8),
-                                mac: None
+                            rhs: Expr::literal(Literal {
+                                value: Token {
+                                    lex: "8",
+                                    val: LexValue::SIntLiteral(8),
+                                    mac: None
+                                }
                             })
                         }),
                         close: Token {
@@ -66,10 +72,12 @@ fn test_parse0() {
                     val: LexValue::Punctuation(Punctuation::Mul),
                     mac: None
                 },
-                rhs: Expr::Literal(Token {
-                    lex: "3",
-                    val: LexValue::SIntLiteral(3),
-                    mac: None
+                rhs: Expr::Literal(Literal {
+                    value: Token {
+                        lex: "3",
+                        val: LexValue::SIntLiteral(3),
+                        mac: None
+                    }
                 })
             })
         })]
@@ -102,12 +110,12 @@ fn test_assoc_add() {
         ast,
         [Ok(Expr::binary(Binary {
             lhs: Expr::binary(Binary {
-                lhs: Expr::literal(a),
+                lhs: Expr::literal(Literal { value: a }),
                 op: b,
-                rhs: Expr::literal(c),
+                rhs: Expr::literal(Literal { value: c }),
             }),
             op: d,
-            rhs: Expr::literal(e),
+            rhs: Expr::literal(Literal { value: e }),
         }))]
     );
 }
@@ -125,12 +133,12 @@ fn test_precedence() {
     assert_eq!(
         ast,
         [Ok(Expr::binary(Binary {
-            lhs: Expr::literal(a),
+            lhs: Expr::literal(Literal { value: a }),
             op: b,
             rhs: Expr::binary(Binary {
-                lhs: Expr::literal(c),
+                lhs: Expr::literal(Literal { value: c }),
                 op: d,
-                rhs: Expr::literal(e),
+                rhs: Expr::literal(Literal { value: e }),
             }),
         }))]
     );
