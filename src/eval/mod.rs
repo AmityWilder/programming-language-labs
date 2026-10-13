@@ -280,6 +280,32 @@ impl RunValue<'_> {
 
     // Binary
 
+    /// Remember that [`PartialEq`] is separate from [`PartialOrd`].
+    /// Some types can be tested for equality while not supporting ordering.
+    fn eq(&self, other: &Self) -> Result<bool, OpError> {
+        match (self, other) {
+            (Self::None, Self::None) => Ok(true),
+            (Self::None, _) | (_, Self::None) => Ok(false), // TBD: should this be consistent with "exists"?
+            (Self::Bool(l), Self::Bool(r)) => Ok(l.eq(r)),
+            (Self::UInt(l), Self::UInt(r)) => Ok(l.eq(r)),
+            (Self::SInt(l), Self::SInt(r)) => Ok(l.eq(r)),
+            // remember that equality is symmetric
+            (Self::UInt(u), Self::SInt(s)) | (Self::SInt(s), Self::UInt(u)) => Ok({
+                // if conversion fails, they're definitely not equal
+                isize::try_from(*u).is_ok_and(|u| u.eq(s))
+            }),
+            // frac should have to convert in order to compare with integers
+            (Self::Frac(l), Self::Frac(r)) => Ok(l.eq(r)),
+            (Self::Char(l), Self::Char(r)) => Ok(l.eq(r)),
+            (Self::Text(l), Self::Text(r)) => Ok(l.eq(r)),
+            (Self::Char(c), Self::Text(t)) | (Self::Text(t), Self::Char(c)) => {
+                Ok(t.eq(c.encode_utf8(&mut [0; char::MAX_LEN_UTF8])))
+            }
+
+            (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
+        }
+    }
+
     /// Returns [`None`] if compatible but incomparable
     /// (i.e. a non-existent `NotEqual` variant of [`std::cmp::Ordering`]).
     fn cmp(&self, other: &Self) -> Result<Option<std::cmp::Ordering>, OpError> {
@@ -287,9 +313,25 @@ impl RunValue<'_> {
             (Self::Bool(l), Self::Bool(r)) => Ok(Some(l.cmp(r))),
             (Self::UInt(l), Self::UInt(r)) => Ok(Some(l.cmp(r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Some(l.cmp(r))),
+            (Self::SInt(l), Self::UInt(r)) => Ok(Some(
+                // failure to convert sint to uint implies the sint is negative,
+                // and therefore certainly less than a uint
+                usize::try_from(*l).map_or(std::cmp::Ordering::Less, |l| l.cmp(r)),
+            )),
+            (Self::UInt(l), Self::SInt(r)) => Ok(Some(
+                // failure to convert sint to uint implies the sint is negative,
+                // and therefore certainly less than a uint
+                usize::try_from(*r).map_or(std::cmp::Ordering::Greater, |r| l.cmp(&r)),
+            )),
             (Self::Frac(l), Self::Frac(r)) => Ok(l.partial_cmp(r)),
             (Self::Char(l), Self::Char(r)) => Ok(Some(l.cmp(r))),
             (Self::Text(l), Self::Text(r)) => Ok(Some(l.cmp(r))),
+            (Self::Char(l), Self::Text(r)) => Ok(Some(
+                (*l.encode_utf8(&mut [0; char::MAX_LEN_UTF8])).cmp(r.as_ref()),
+            )),
+            (Self::Text(l), Self::Char(r)) => Ok(Some(
+                l.as_ref().cmp(r.encode_utf8(&mut [0; char::MAX_LEN_UTF8])),
+            )),
 
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
@@ -301,7 +343,7 @@ impl RunValue<'_> {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l & r)),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l & r)),
 
-            // TODO: char arithmetic?
+            // TODO: char arithmetic? (needs errors)
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -312,7 +354,7 @@ impl RunValue<'_> {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l | r)),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l | r)),
 
-            // TODO: char arithmetic?
+            // TODO: char arithmetic? (needs errors)
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -323,7 +365,7 @@ impl RunValue<'_> {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(l ^ r)),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(l ^ r)),
 
-            // TODO: char arithmetic?
+            // TODO: char arithmetic? (needs errors)
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -334,7 +376,7 @@ impl RunValue<'_> {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l & r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l & r))),
 
-            // TODO: char arithmetic?
+            // TODO: char arithmetic? (needs errors)
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -345,7 +387,7 @@ impl RunValue<'_> {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l | r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l | r))),
 
-            // TODO: char arithmetic?
+            // TODO: char arithmetic? (needs errors)
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -356,7 +398,7 @@ impl RunValue<'_> {
             (Self::UInt(l), Self::UInt(r)) => Ok(Self::UInt(!(l ^ r))),
             (Self::SInt(l), Self::SInt(r)) => Ok(Self::SInt(!(l ^ r))),
 
-            // TODO: char arithmetic?
+            // TODO: char arithmetic? (needs errors)
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -388,7 +430,7 @@ impl RunValue<'_> {
 
             (Self::Text(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(l.into_owned() + &*r))),
 
-            // TODO: char arithmetic?
+            // TODO: char arithmetic? (needs errors)
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -405,7 +447,7 @@ impl RunValue<'_> {
                 .ok_or(OpError::Overflow(OverflowKind::SSub { l, r })),
             (Self::Frac(l), Self::Frac(r)) => Ok(Self::Frac(l - r)),
 
-            // TODO: char arithmetic?
+            // TODO: char arithmetic? (needs errors)
             (l, r) => Err(OpError::Incompatible(l.as_type(), r.as_type())),
         }
     }
@@ -641,7 +683,7 @@ impl RunValue<'_> {
     fn convert(self, into_ty: ValueType) -> Result<Self, OpError> {
         match (self, into_ty) {
             (Self::Type(_), _) => unimplemented!("should be caught by grammar"),
-            (_, ValueType::Type) => unimplemented!("`type` isn't a type"),
+            (_, ValueType::Type) => unimplemented!("`{into_ty}` isn't a type"),
 
             // TODO: add a warning about converting into self(?)
             // TBD: what is the value of `nevr`?
@@ -711,19 +753,40 @@ impl RunValue<'_> {
             }),
 
             // TODO: need more `FailedConversion` errors for things besides integers!
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_precision_loss,
+                reason = "no other way to convert int to float while ignoring errors"
+            )]
             (Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TBD: error (or warning) for loss of data?
             (Self::UInt(x), ValueType::Char) => Ok(match u8::try_from(x) {
                 // TODO: what about unicode?
                 Ok(x) => Self::Char(char::from(x)),
                 Err(e) => Self::Fail(Box::new(e)),
             }),
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_precision_loss,
+                reason = "no other way to convert int to float while ignoring errors"
+            )]
             (Self::SInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TBD: error (or warning) for loss of data?
             (Self::SInt(x), ValueType::Char) => Ok(match u8::try_from(x) {
                 // TODO: what about unicode?
                 Ok(x) => Self::Char(char::from(x)),
                 Err(e) => Self::Fail(Box::new(e)),
             }),
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "no other way to convert int to float while ignoring errors"
+            )]
             (Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x as usize)), // TBD: should truncation be an error/warning?
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                reason = "no other way to convert int to float while ignoring errors"
+            )]
             (Self::Frac(x), ValueType::SInt) => Ok(Self::SInt(x as isize)), // TBD: should truncation be an error/warning?
 
             #[cfg(not(target_pointer_width = "16"))]
@@ -747,7 +810,7 @@ impl RunValue<'_> {
     fn transmute(self, into_ty: ValueType) -> Result<Self, OpError> {
         match (self, into_ty) {
             (Self::Type(_), _) => unimplemented!("should be caught by grammar"),
-            (_, ValueType::Type) => unimplemented!("`type` isn't a type"),
+            (_, ValueType::Type) => unimplemented!("`{into_ty}` isn't a type"),
 
             // TODO: add a warning about transmuting into self(?)
             (x @ (Self::None | Self::CoalesceNone), ValueType::None | ValueType::Nevr)
@@ -923,15 +986,21 @@ pub fn evaluate<'src>(
                     Convert if let RunValue::Type(r) = r => l.convert(r),
                     Transmute if let RunValue::Type(r) = r => l.transmute(r),
 
-                    Eq | Ne | Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
+                    Eq | Ne => l.eq(&r).map(|is_eq| {
                         RunValue::Bool(match punctuation {
-                            Ne => ord.is_none_or(Ordering::is_ne),
-                            Eq => ord.is_some_and(Ordering::is_eq),
+                            Eq => is_eq,
+                            Ne => !is_eq,
+                            _ => unreachable!("guarded by outer match arm"),
+                        })
+                    }),
+
+                    Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
+                        RunValue::Bool(match punctuation {
                             Lt => ord.is_some_and(Ordering::is_lt),
                             Gt => ord.is_some_and(Ordering::is_gt),
                             Le => ord.is_some_and(Ordering::is_le),
                             Ge => ord.is_some_and(Ordering::is_ge),
-                            _ => unreachable!(),
+                            _ => unreachable!("guarded by outer match arm"),
                         })
                     }),
 
