@@ -9,6 +9,7 @@ use crate::{
         syntax::Syntax,
         write_highlight,
     },
+    preproc::eval::PpValue,
     scanner::{
         self, BadBracketCombo, Bracket, rfind_block_comment,
         symbols::{
@@ -677,6 +678,51 @@ pub enum ErrorType<'src> {
     #[info({ head_range }, [(*head_range, "macro defined here")])]
     RecursiveMacro {
         head_range: Range<usize>,
+    },
+
+    #[code(PRE, 24)]
+    #[err({ .. }, |f| write!(f, "preprocessor predicate must evaluate to a boolean"))]
+    #[inlay({ actual }, |f| {
+        write!(f, "expected a boolean value, found ")?;
+        match actual {
+            PpValue::Bool => f.write_str("the typename `bool` (which is not a boolean \x1b[1mvalue\x1b[22m)"),
+            PpValue::Uint => f.write_str("the typename `uint`"),
+            PpValue::Sint => f.write_str("the typename `sint`"),
+            PpValue::Frac => f.write_str("the typename `frac`"),
+            PpValue::Char => f.write_str("the typename `char`"),
+            PpValue::Text => f.write_str("the typename `text`"),
+            PpValue::UIntLiteral(x) => write!(f, "the unsigned integer {x}"),
+            PpValue::SIntLiteral(x) => write!(f, "the signed integer {x}"),
+            PpValue::Macro(x) => write!(f, "the unexpanded macro `{x}`"),
+
+            PpValue::BoolLiteral(_) => unimplemented!("should not produce this error on a boolean value"),
+        }
+    })]
+    #[help({ actual }, |f, _src| {
+        match actual {
+            PpValue::Bool |
+            PpValue::Uint |
+            PpValue::Sint |
+            PpValue::Frac |
+            PpValue::Char |
+            PpValue::Text => f.write_str("typenames are not values, and especially not booleans. \
+                if you are trying to compare the size of a type with some number, \
+                use the `szof` keyword to get the type's size, and add a comparison operator to get a boolean.\n\n\
+                if you are trying to convert a value to a boolean, you would normally need a `-:>` or `=:>` operator;
+                conversions/reinterpretations are not supported in the preprocessor however, so this is not possible."),
+
+            PpValue::UIntLiteral(_) |
+            PpValue::SIntLiteral(_) => f.write_str("integers do not coerce to booleans on their own. \
+                try comparing it (`==`, `!=`, `<`, `>`, `<=`, or `>=`) with another number to get a boolean."),
+
+            PpValue::Macro(_) => f.write_str("if you meant to expand this macro to an expression, remove the `~` operator. \
+                if you are trying to test if the macro exists, add an `!!` (\"exists\") operator in front of the `~`."),
+
+            PpValue::BoolLiteral(_) => unimplemented!("should not produce this error on a boolean value"),
+        }
+    })]
+    NonBoolPrePredicate {
+        actual: PpValue<'src>,
     },
 
     // ----------------------------

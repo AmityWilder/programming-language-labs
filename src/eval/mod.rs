@@ -4,7 +4,7 @@ use crate::{
     error::{
         ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
     },
-    grammar::ast::{AstNode, Binary, Expr, Ternary, Unary},
+    grammar::ast::{AstNode, AstNodeFinal, Binary, Expr, Ternary, Unary},
     scanner::token::{
         Token,
         keyword::Keyword,
