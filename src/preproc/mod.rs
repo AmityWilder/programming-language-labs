@@ -2,12 +2,10 @@
 
 use crate::{
     error::{ContextError, ErrorType},
-    grammar::{match_token, parse, token_matches},
+    grammar::{parse, token_matches},
     preproc::{
         eval::{PpValue, preproc_eval},
-        stream::{
-            MacroConditional, MacroDefinition, MacroExpansion, ParamGroup, PreprocessorStream,
-        },
+        stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
     },
     scanner::token::{ExpansionData, Token, value::LexValue},
 };
@@ -25,7 +23,7 @@ struct MacroSubstitute<'src, I> {
     /// Mapping of the parameter names to the related argument tokens
     arg_map: Vec<(&'src str, Vec<Token<'src>>)>,
     /// The tokens of the macro definition
-    tokens: I,
+    body: I,
     /// The [`ExpansionData::arg`] for [`Self::curr_arg`]
     curr_param: (usize, &'src str),
     /// For flattening - the tokens of the argument currently being substituted
@@ -44,7 +42,7 @@ where
         loop {
             if let Some(token) = step_curr(&mut self.curr_arg) {
                 break Some((Some(self.curr_param), token));
-            } else if let Some(token) = step_token(&mut self.tokens) {
+            } else if let Some(token) = step_token(&mut self.body) {
                 if token.val == LexValue::MacroParam
                     && let Some((pos, (name, arg))) = self
                         .arg_map
@@ -98,7 +96,7 @@ struct MacroDef<'src> {
     /// The macro parameter names
     pub params: Vec<&'src str>,
     /// The tokens of the definition (may contain macro parameters)
-    pub tokens: Vec<Token<'src>>,
+    pub body: Vec<Token<'src>>,
 }
 
 impl<'src> MacroDef<'src> {
@@ -115,13 +113,16 @@ impl<'src> MacroDef<'src> {
         let arg_map = self.params.iter().copied().zip(args).collect::<Vec<_>>();
         MacroSubstitute {
             arg_map,
-            tokens: self.tokens.iter().copied(),
+            body: self.body.iter().copied(),
             // HACK: this isn't a substr of source!
             curr_param: (0, ""),
             curr_arg: Vec::new().into_iter(),
         }
     }
 }
+
+type MacroDefResult<'src, F> =
+    Result<Option<MacroDef<'src>>, std::iter::FilterMap<std::vec::IntoIter<Token<'src>>, F>>;
 
 /// Consumes macros and converts them into token sequences
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -186,7 +187,7 @@ impl<'src> Preprocessor<'src> {
     fn define_macro(
         &mut self,
         definition: MacroDefinition<'src>,
-    ) -> Result<(), impl 'src + DoubleEndedIterator<Item = ContextError<'src>> + Clone> {
+    ) -> MacroDefResult<'src, impl 'src + FnMut(Token<'src>) -> Option<ContextError<'src>>> {
         const fn is_recursive(token: &Token<'_>, name: &str) -> bool {
             token_matches!(token, Macro) && token.lex == name
         }
@@ -195,57 +196,50 @@ impl<'src> Preprocessor<'src> {
             token_matches!(token, MacroParam) && !params.contains(&token.lex)
         }
 
-        let head_lex = definition.name.lex;
-        let params: Vec<&str> = definition
-            .params
+        let MacroDefinition {
+            def_kw: _,
+            name,
+            params,
+            body,
+        } = definition;
+
+        let head = name.lex;
+        let body = body.content;
+        let params: Vec<&str> = params
             .into_iter()
             .flat_map(|list| list.list.into_iter().map(|token| token.lex))
             .collect();
 
-        // prevent infinitely recursive macro
-        if definition
-            .body
-            .content
+        // if there are any errors, return an iterator over all of them
+        if body
             .iter()
-            .any(|token| is_recursive(token, head_lex) || is_unknown_param(token, &params))
+            .any(|token| is_recursive(token, head) || is_unknown_param(token, &params))
         {
-            let head_range = definition.name.lex_range(self.stream.source);
+            let head_range = name.lex_range(self.stream.source);
             let source = self.stream.source;
-            return Err(definition
-                .body
-                .content
-                .into_iter()
-                .filter_map(move |token| {
-                    if is_recursive(&token, head_lex) {
-                        Some(ContextError::token_error(
-                            source,
-                            Some(token),
-                            ErrorType::RecursiveMacro { head_range },
-                        ))
-                    } else if is_unknown_param(&token, &params) {
-                        Some(ContextError::token_error(
-                            source,
-                            Some(token),
-                            ErrorType::MacroParamUndefined {
-                                head_range: Some(head_range),
-                                param_name: token.lex,
-                            },
-                        ))
-                    } else {
-                        None
-                    }
-                }));
+            Err(body.into_iter().filter_map(move |token| {
+                if is_recursive(&token, head) {
+                    Some(ContextError::token_error(
+                        source,
+                        Some(token),
+                        ErrorType::RecursiveMacro { head_range },
+                    ))
+                } else if is_unknown_param(&token, &params) {
+                    Some(ContextError::token_error(
+                        source,
+                        Some(token),
+                        ErrorType::MacroParamUndefined {
+                            head_range: Some(head_range),
+                            param_name: token.lex,
+                        },
+                    ))
+                } else {
+                    None
+                }
+            }))
+        } else {
+            Ok(self.macros.insert(head, MacroDef { params, body }))
         }
-
-        // replace existing definition
-        _ = self.macros.insert(
-            head_lex,
-            MacroDef {
-                params,
-                tokens: definition.body.content,
-            },
-        );
-        Ok(())
     }
 
     /// # Panics
