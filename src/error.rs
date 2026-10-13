@@ -4,12 +4,13 @@ use crate::{
     SYNTAX_STYLE_ANSI,
     arrayvec::ArrayVec,
     eval::ValueType,
+    grammar::ast::AstNodeFinal,
     highlight::{
         style::{Color, Style, StyleWrapper},
         syntax::Syntax,
         write_highlight,
     },
-    preproc::eval::PpValue,
+    preproc::eval::{PpType, PpValue},
     scanner::{
         self, BadBracketCombo, Bracket, rfind_block_comment,
         symbols::{
@@ -672,7 +673,7 @@ pub enum ErrorType<'src> {
     },
 
     #[code(PRE, 23)]
-    #[err({ .. }, |f| write!(f, "macro call is recursive"))]
+    #[err({ .. }, |f| write!(f, "macro call cannot be recursive"))]
     #[inlay({ .. }, |f| write!(f, "macro calls itself here"))]
     #[help({ .. }, |f, _src| write!(f, "macros can't be defined recursively. they do not have base cases, so it will always be infinite recursion"))]
     #[info({ head_range }, [(*head_range, "macro defined here")])]
@@ -724,6 +725,82 @@ pub enum ErrorType<'src> {
     NonBoolPrePredicate {
         actual: PpValue<'src>,
     },
+
+    #[code(PRE, 25)]
+    #[err({ .. }, |f| write!(f, "invalid preprocessor operator"))]
+    #[inlay({ .. }, |f| write!(f, "this operator is not defined within preprocessing"))]
+    #[help({ .. }, |f, _src| write!(f, "some operations that are valid at runtime are not valid in preprocessing. \
+        check if the operation is supported, or if you may have made a typo."))]
+    InvalidPreOperator,
+
+
+
+    /// The operands in a binary operation are of incompatible type
+    #[code(PRE, 26)]
+    #[err({ op, l_ty, r_ty, .. }, |f| write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"))]
+    #[inlay({ op, l_ty, r_ty, .. }, |f| write!(f, "{} is not supported between operands of these types", op.op_description(&[l_ty.to_value_type(), r_ty.to_value_type()])))]
+    #[help({ op, l_ty, r_ty, .. }, |f, _src| {
+        write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
+        match op {
+            TokenEq::Punctuation(
+                Punctuation::And |
+                Punctuation::Xor |
+                Punctuation::Or |
+                Punctuation::Nand |
+                Punctuation::Nor |
+                Punctuation::Xnor
+            ) if matches!(l_ty, PpType::Bool) != matches!(r_ty, PpType::Bool)
+                // TODO: the user might have used a boolean literal/variable, not a comparison; this message might not be helpful in that case
+                => write!(f, "\n\nit looks like you may have been trying to perform a bitwise operation, but one side resolves to a boolean.\n\
+                    bitwise/logic operations have lower precedence than comparisons, so you may need to wrap the bitwise operation in parentheses."),
+
+            _ => Ok(())
+        }
+    })]
+    #[info({ l_ty, l_range, r_ty, r_range, .. }, [
+        (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: l_ty.to_value_type() }),
+        (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty.to_value_type() }),
+    ])]
+    PreIncompatible {
+        /// The binary operator
+        op: TokenEq,
+        l_range: Range<usize>,
+        r_range: Range<usize>,
+        l_ty: PpType,
+        r_ty: PpType,
+    },
+
+    /// The operand in a unary operation is of an unsupported type
+    #[code(PRE, 27)]
+    #[err({ op, r_ty, .. }, |f| write!(f, "`{op}` is not supported for {r_ty}"))]
+    #[inlay({ op, r_ty, .. }, |f| write!(f, "{} is not supported for operands of this type", op.op_description(&[r_ty.to_value_type()])))]
+    #[help({ .. }, |f, _src| write!(f, "try a different operator or convert the type"))]
+    #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty.to_value_type() })])]
+    PreUnsupported {
+        /// The unary operator
+        op: TokenEq,
+        /// The type of the value on the right side of the operator
+        r_ty: PpType,
+        r_range: Range<usize>,
+    },
+
+    #[code(PRE, 28)]
+    #[err({ .. }, |f| write!(f, "invalid preprocessor literal"))]
+    #[inlay({ .. }, |f| write!(f, "this literal type is not valid within preprocessing"))]
+    #[help({ .. }, |f, _src| write!(f, "only bool, uint, sint, and macro names are legal literal types within preprocessing."))]
+    InvalidPreLiteral,
+
+    #[code(PRE, 29)]
+    #[err({ .. }, |f| write!(f, "invalid preprocessor type"))]
+    #[inlay({ .. }, |f| write!(f, "this type is not valid within preprocessing"))]
+    #[help({ .. }, |f, _src| write!(f, "only `bool`, `uint`, `sint`, `frac`, `char`, and `text` are valid typenames within preprocessing."))]
+    InvalidPreType,
+
+    #[code(PRE, 29)]
+    #[err({ .. }, |f| write!(f, "invalid preprocessor type"))]
+    #[inlay({ .. }, |f| write!(f, "this type is not valid within preprocessing"))]
+    #[help({ .. }, |f, _src| write!(f, "\"or-types\" are not legal within preprocessing."))]
+    PreOrType,
 
     // ----------------------------
     // parse
@@ -1005,6 +1082,19 @@ impl<'src> ContextError<'src> {
             },
             err,
         }
+    }
+
+    /// Produce an error on an [`AstNodeFinal`] implementor
+    pub fn node_error<T>(source: &'src str, node: &T, err: ErrorType<'src>) -> Self
+    where
+        T: ?Sized + AstNodeFinal<'src>,
+    {
+        Self::error(
+            source,
+            Some(node.range(source)),
+            node.expansion(source),
+            err,
+        )
     }
 
     /// Produce an error on an optional token (the range will be its lexeme)
