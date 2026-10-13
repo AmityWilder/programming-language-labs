@@ -2,10 +2,12 @@
 
 use crate::{
     error::{ContextError, ErrorType},
-    grammar::{match_token, parse},
+    grammar::{match_token, parse, token_matches},
     preproc::{
         eval::{PpValue, preproc_eval},
-        stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
+        stream::{
+            MacroConditional, MacroDefinition, MacroExpansion, ParamGroup, PreprocessorStream,
+        },
     },
     scanner::token::{ExpansionData, Token, value::LexValue},
 };
@@ -185,42 +187,61 @@ impl<'src> Preprocessor<'src> {
         &mut self,
         definition: MacroDefinition<'src>,
     ) -> Result<(), impl 'src + DoubleEndedIterator<Item = ContextError<'src>> + Clone> {
+        const fn is_recursive(token: &Token<'_>, name: &str) -> bool {
+            token_matches!(token, Macro) && token.lex == name
+        }
+
+        fn is_unknown_param(token: &Token<'_>, params: &[&str]) -> bool {
+            token_matches!(token, MacroParam) && !params.contains(&token.lex)
+        }
+
+        let head_lex = definition.name.lex;
+        let params: Vec<&str> = definition
+            .params
+            .into_iter()
+            .flat_map(|list| list.list.into_iter().map(|token| token.lex))
+            .collect();
+
         // prevent infinitely recursive macro
         if definition
             .body
             .content
             .iter()
-            .filter(match_token!(Macro))
-            .any(|token| token.lex == definition.name.lex)
+            .any(|token| is_recursive(token, head_lex) || is_unknown_param(token, &params))
         {
-            let head_lex = definition.name.lex;
             let head_range = definition.name.lex_range(self.stream.source);
             let source = self.stream.source;
             return Err(definition
                 .body
                 .content
                 .into_iter()
-                .filter(match_token!(Macro))
-                .filter(move |token| token.lex == head_lex)
-                .map(move |token| {
-                    ContextError::token_error(
-                        source,
-                        Some(token),
-                        ErrorType::RecursiveMacro { head_range },
-                    )
+                .filter_map(move |token| {
+                    if is_recursive(&token, head_lex) {
+                        Some(ContextError::token_error(
+                            source,
+                            Some(token),
+                            ErrorType::RecursiveMacro { head_range },
+                        ))
+                    } else if is_unknown_param(&token, &params) {
+                        Some(ContextError::token_error(
+                            source,
+                            Some(token),
+                            ErrorType::MacroParamUndefined {
+                                head_range: Some(head_range),
+                                param_name: token.lex,
+                            },
+                        ))
+                    } else {
+                        None
+                    }
                 }));
         }
 
         // replace existing definition
         _ = self.macros.insert(
-            definition.name.lex,
+            head_lex,
             MacroDef {
-                params: definition
-                    .params
-                    .list
-                    .into_iter()
-                    .map(|token| token.lex)
-                    .collect(),
+                params,
                 tokens: definition.body.content,
             },
         );

@@ -360,12 +360,12 @@ fn test_no_param_group() {
         [
             ("def", Keyword::Def),
             (" ", Whitespace),
-            (r"\foo", Macro),
+            @head: (r"\foo", Macro),
             (" ", Whitespace),
-            @ unexpected: ("{", Punctuation::LBrace),
-            ("$x", MacroParam),
+            ("{", Punctuation::LBrace),
+            @x: ("$x", MacroParam),
             ("+", Punctuation::Add),
-            ("$y", MacroParam),
+            @y: ("$y", MacroParam),
             ("}", Punctuation::RBrace),
             ("\n", Whitespace),
             @macro_call: (r"\foo", Macro),
@@ -379,16 +379,22 @@ fn test_no_param_group() {
         [
             Err(ContextError::error(
                 source,
-                Some(unexpected.lex_range(source)),
+                Some(x.lex_range(source)),
                 None,
-                ErrorType::UnexpectedToken { expect: ExpectedToken::LParen, actual: "{" },
+                ErrorType::MacroParamUndefined {
+                    head_range: Some(head.lex_range(source)),
+                    param_name: "$x",
+                },
             )),
-            Ok((" ", Whitespace)),
-            Ok(("{", Punctuation::LBrace)),
-            Ok(("$x", MacroParam)),
-            Ok(("+", Punctuation::Add)),
-            Ok(("$y", MacroParam)),
-            Ok(("}", Punctuation::RBrace)),
+            Err(ContextError::error(
+                source,
+                Some(y.lex_range(source)),
+                None,
+                ErrorType::MacroParamUndefined {
+                    head_range: Some(head.lex_range(source)),
+                    param_name: "$y",
+                },
+            )),
             Ok(("\n", Whitespace)),
             Err(ContextError::error(
                 source,
