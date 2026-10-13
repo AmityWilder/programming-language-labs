@@ -15,7 +15,7 @@ def \ifndef($what $then) {
 
 rot { szof uint > szof sint } {
     "uint is larger than sint"
-} ~ rot { szof uint > szof bool } {
+} ~ rot { szof uint > 2u*szof bool } {
     "uint is larger than bool"
     "the sum of \\foo and \\bar is " + (\foo + \bar)
 } ~ {

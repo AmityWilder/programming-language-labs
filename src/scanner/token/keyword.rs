@@ -465,6 +465,8 @@ impl Keyword {
                 | Self::Give
                 | Self::Fail
                 | Self::Emit
+                | Self::Def
+                | Self::Rot
         )
     }
 
