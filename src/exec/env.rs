@@ -53,10 +53,7 @@ impl<'src> Environment<'src> {
         }
         let mem = self.arena.get_mut(range)?;
         self.table.entry(ident).or_default().push((ty, range));
-        Some(
-            mem.get_mut(..size)
-                .expect("allocation should be at least as large as the requested size"),
-        )
+        Some(mem)
     }
 
     /// Returns [`None`] if out of memory
