@@ -156,10 +156,10 @@ impl<'src> AstNode<'src> for MacroPredicate<'src> {
     }
 }
 
-/// `macro_alternative -> "ro" ( macro_predicate )? macro_replacer $( macro_alternative )?`
+/// `macro_alternative -> "tor" ( macro_predicate )? macro_replacer $( macro_alternative )?`
 #[derive(Debug, Clone, PartialEq, Default, AstNodeF)]
 pub struct MacroAlternative<'src> {
-    /// `ro`; necessary to distinguish from non-preprocessor `or`
+    /// `tor`; necessary to distinguish from non-preprocessor `or`
     pub squiggle: Token<'src>,
     pub predicate: Option<MacroPredicate<'src>>,
     pub then_def: MacroReplacer<'src>,
