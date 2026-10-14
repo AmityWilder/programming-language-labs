@@ -4,7 +4,7 @@ use std::{collections::HashMap, range::Range};
 pub struct Environment<'src> {
     /// Bytestring of memory (allows for dynamically-sized types)
     arena: Vec<u8>,
-    sp: usize,
+    stack_ptr: usize,
 
     /// Lookup table associating variable names with ranges into the arena.
     /// Each name is associated with a stack, the last element will be the most recent.
@@ -16,7 +16,7 @@ impl<'src> Environment<'src> {
     pub fn new() -> Self {
         Self {
             arena: Vec::new(),
-            sp: 0,
+            stack_ptr: 0,
             table: HashMap::new(),
         }
     }
@@ -24,22 +24,37 @@ impl<'src> Environment<'src> {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             arena: Vec::with_capacity(capacity),
-            sp: 0,
+            stack_ptr: 0,
             table: HashMap::new(),
         }
     }
 
-    pub fn declare<const N: usize>(&mut self, ident: &'src str) -> &mut [u8; N] {
-        todo!()
+    /// Returns [`None`] if out of memory
+    pub fn declare_dyn(
+        &mut self,
+        ident: &'src str,
+        align: usize,
+        size: usize,
+    ) -> Option<&mut [u8]> {
+        let start = self.stack_ptr.checked_next_multiple_of(align)?;
+        let end = start.checked_add(size)?;
+        self.stack_ptr = end;
+        let range = Range { start, end };
+        let mem = self.arena.get_mut(range)?;
+        self.table.entry(ident).or_default().push(range);
+        Some(mem)
     }
 
-    pub fn declare_uint(&mut self, ident: &'src str) -> &mut usize {
-        let data = self.declare::<{ std::mem::size_of::<usize>() }>(ident);
-        // SAFETY: pointer came from a mutable reference
-        unsafe { (&raw mut *data).cast::<usize>().as_mut_unchecked() }
-    }
-
-    pub fn declare_dyn(&mut self, ident: &'src str, size: usize) -> &mut [u8] {
-        todo!()
+    /// Returns [`None`] if out of memory
+    pub fn declare<const N: usize>(
+        &mut self,
+        ident: &'src str,
+        align: usize,
+    ) -> Option<&mut [u8; N]> {
+        self.declare_dyn(ident, align, N).map(|slice| {
+            slice
+                .as_mut_array()
+                .expect("declare_dyn should allocate exactly N bytes")
+        })
     }
 }
