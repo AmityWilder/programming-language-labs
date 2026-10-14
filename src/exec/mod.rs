@@ -6,6 +6,7 @@ use crate::{
 };
 
 pub mod env;
+pub mod error;
 pub mod eval;
 
 fn execute_decl<'src, 'prgm>(
@@ -34,7 +35,7 @@ fn execute_decl<'src, 'prgm>(
                     .stack_mut()
                     .push(
                         decl.ident.lex,
-                        value.as_type(),
+                        value.typename(),
                         value.sizeof(),
                         value.alignof(),
                     )
@@ -50,6 +51,7 @@ fn execute_decl<'src, 'prgm>(
                     RunValue::Frac(x) => segment.copy_from_slice(&x.to_ne_bytes()),
                     RunValue::Char(x) => segment.copy_from_slice(&x.to_u32().to_ne_bytes()),
                     RunValue::Text(x) => segment.copy_from_slice(x.as_bytes()), // TODO: length should be mutable for non-pvts!!
+                    RunValue::UPtr(_) => todo!(),
                     RunValue::Type(_) => unimplemented!("typename should not exist at runtime"),
                 }
             } else {

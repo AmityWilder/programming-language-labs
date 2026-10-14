@@ -478,6 +478,7 @@ fn runtime_token<'buf>(value: RunValue<'buf>, buf: &'buf mut String) -> RunToken
                 }),
             }
         }
+        RunValue::UPtr(_) => todo!(),
         RunValue::Type(t) => {
             _ = write!(buf, "{t:?}"); // infallible for String
             RunToken {
