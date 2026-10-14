@@ -11,7 +11,7 @@ use crate::{
         token::{Token, value::LexValue},
     },
 };
-use ast::{Binary, Expr, Grouping, Literal, OrType, TypeExpr, Unary};
+use ast::{Binary, Expr, Grouping, Literal, OrType, TypeAnnotation, TypeExpr, Unary};
 
 pub mod ast;
 // pub mod ast_iter; // TODO: FIX THIS
@@ -156,7 +156,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `var_declaration -> "uni" | "pvt" | "let" IDENTIFIER ( assignment )? ";"`
+    /// `var_declaration -> ( "uni" | "pvt" | "let" ) IDENTIFIER ( type_annotation )? ( assignment )? ";"`
     pub fn var_declaration(&mut self) -> Option<Result<Declaration<'src>, ContextError<'src>>> {
         self.pull_if(match_token!(Keyword::{Uni | Pvt | Let}))
             .map(|var_kw| {
@@ -164,10 +164,21 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                     var_kw,
                     // TODO: binding pattern?
                     ident: self.try_pull(match_token!(Identifier), ExpectedToken::Ident)?,
+                    ty: self.type_annotation().transpose()?,
                     assignment: self.assignment().transpose()?,
                     semi: self.try_pull(match_token!(Punctuation::Semi), ExpectedToken::Semi)?,
                 }))
             })
+    }
+
+    /// `type_annotation -> ":" type_expression`
+    pub fn type_annotation(&mut self) -> Option<Result<TypeAnnotation<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Punctuation::Colon)).map(|colon| {
+            Ok(TypeAnnotation {
+                colon,
+                ty: self.type_expression()?,
+            })
+        })
     }
 
     /// `statement -> block_statement | print_statement | if_statement | expression_statement`
@@ -361,9 +372,9 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn unary_prefix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         if let Some(op) = self.pull_if(match_token!(Keyword::Szof)) {
             let operand = self
-                .type_expression()
-                .map(|res| res.map(Expr::type_expr))
-                .unwrap_or_else(|| self.unary_prefix())?;
+                .type_expression() // TODO: combo error?
+                .map(Expr::type_expr)
+                .or_else(|_| self.unary_prefix())?;
             Ok(Expr::unary(Unary {
                 op,
                 operand,
@@ -395,11 +406,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn conversion(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.primary()?;
         while let Some(op) = self.pull_if(match_token!(Punctuation::{Convert | Transmute})) {
-            let rhs = Expr::type_expr(
-                self.type_expression()
-                    .ok_or_else(|| self.error(ExpectedToken::TypeExpr))
-                    .flatten()?,
-            );
+            let rhs = Expr::type_expr(self.type_expression()?);
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
         Ok(expr)
@@ -417,7 +424,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 self.pull_if(match_token!(Identifier))
                     .map(|ident| Ok(Expr::Variable(Variable { ident })))
             })
-            .or_else(|| self.type_expression().map(|res| res.map(Expr::type_expr)))
+            .or_else(|| self.type_expression().map(Expr::type_expr).ok().map(Ok))
             .ok_or_else(|| self.error(ExpectedToken::Expr))
             .flatten()
     }
@@ -451,26 +458,27 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     }
 
     /// `type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" ( "fail" | "none" | "nevr" ) )?`
-    fn type_expression(&mut self) -> Option<Result<TypeExpr<'src>, ContextError<'src>>> {
-        self.pull_if(|token| match token.val {
-            LexValue::Identifier => true,
-            LexValue::Keyword(kw) => kw.is_type(),
-            _ => false,
-        })
-        .map(|name| {
-            let or_ty = self.pull_if(match_token!(Punctuation::Or)).map(|pipe| {
-                Ok(OrType {
-                    pipe,
-                    ty: self.try_pull(
-                        match_token!(Keyword::{Fail | None | Nevr}),
-                        ExpectedToken::OrType,
-                    )?,
-                })
-            });
-            Ok(TypeExpr {
-                name,
-                or_ty: or_ty.transpose()?,
+    fn type_expression(&mut self) -> Result<TypeExpr<'src>, ContextError<'src>> {
+        let name = self.try_pull(
+            |token| match token.val {
+                LexValue::Identifier => true,
+                LexValue::Keyword(kw) => kw.is_type(),
+                _ => false,
+            },
+            ExpectedToken::TypeExpr,
+        )?;
+        let or_ty = self.pull_if(match_token!(Punctuation::Or)).map(|pipe| {
+            Ok(OrType {
+                pipe,
+                ty: self.try_pull(
+                    match_token!(Keyword::{Fail | None | Nevr}),
+                    ExpectedToken::OrType,
+                )?,
             })
+        });
+        Ok(TypeExpr {
+            name,
+            or_ty: or_ty.transpose()?,
         })
     }
 

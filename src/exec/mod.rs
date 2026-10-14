@@ -31,11 +31,12 @@ fn execute_decl<'src, 'prgm>(
             }
             if let Some(value) = value {
                 let segment = env
-                    .declare_dyn(
+                    .stack_mut()
+                    .push(
                         decl.ident.lex,
                         value.as_type(),
-                        value.alignof(),
                         value.sizeof(),
+                        value.alignof(),
                     )
                     .expect("out of memory"); // TODO: make this an error
                 match value {
