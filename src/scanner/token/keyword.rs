@@ -281,6 +281,9 @@ define_token_eq! {
         /// ```
         #[op_desc([_, _] => "null replacement")]
         Or = "or",
+        /// Preprocessor "else" branch
+        /// See [`Self::Rot`]
+        Tor = "tor",
         /// Choose a branch based on pattern.
         /// ### Syntax
         /// ```rs
@@ -462,6 +465,7 @@ impl Keyword {
             self,
             Self::If
                 | Self::Or
+                | Self::Tor
                 | Self::Pick
                 | Self::Rep
                 | Self::For
