@@ -370,6 +370,8 @@ expected_token! {
         Semi = "a `;`",
         Declaration = "a declaration or statement",
         Ident = "an identifier",
+        BlockStmt = "a block statement",
+        Statement = "a statement"
     }
 }
 
@@ -1041,6 +1043,13 @@ pub enum ErrorType<'src> {
         op_range: Range<usize>,
         failure: IntConversionFailure,
     },
+
+    // TODO: make this more helpful
+    #[code(RUN, 47)]
+    #[err(|f| write!(f, "cannot find variable within this scope"))]
+    #[inlay(|f| write!(f, "unknown variable"))]
+    #[help(|f, _src| write!(f, "check if the variable is in a tighter scope than where you are trying to use it"))]
+    UnknownVar,
 }
 }
 

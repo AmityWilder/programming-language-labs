@@ -4,6 +4,7 @@ use crate::{
     error::{
         ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
     },
+    exec::env::Environment,
     grammar::ast::{AstNodeFinal, Binary, Expr, Literal, Ternary, Unary},
     scanner::token::{
         Token,
@@ -275,6 +276,20 @@ impl RunValue<'_> {
             Self::Text(_) => ValueType::Text,
             // TBD: is this a good idea?
             Self::Type(t) => *t,
+        }
+    }
+
+    pub fn print(&self) {
+        match self {
+            RunValue::None | RunValue::CoalesceNone => println!("null"), // TODO: color?
+            RunValue::Fail(e) => println!("{e}"),                        // TODO: color?
+            RunValue::Bool(x) => println!("{x}"),
+            RunValue::UInt(x) => println!("{x}"),
+            RunValue::SInt(x) => println!("{x}"),
+            RunValue::Frac(x) => println!("{x}"),
+            RunValue::Char(x) => println!("{x}"),
+            RunValue::Text(x) => println!("{x}"),
+            RunValue::Type(_) => unimplemented!("typename does not exist at runtime"),
         }
     }
 
@@ -885,33 +900,60 @@ impl RunValue<'_> {
         })
     }
 
-    fn sizeof(self) -> Self {
-        Self::UInt(match self {
-            RunValue::None | RunValue::CoalesceNone => 0,
-            RunValue::Fail(e) => std::mem::size_of_val(&*e),
-            RunValue::Bool(x) => std::mem::size_of_val(&x),
-            RunValue::UInt(x) => std::mem::size_of_val(&x),
-            RunValue::SInt(x) => std::mem::size_of_val(&x),
-            RunValue::Frac(x) => std::mem::size_of_val(&x),
-            RunValue::Char(x) => std::mem::size_of_val(&x),
-            RunValue::Text(x) => std::mem::size_of_val(&x),
+    pub fn sizeof(&self) -> usize {
+        // very important that this is the ACTUAL SIZE of the value! it will be used to store it in the environment!!
+        match self {
+            RunValue::None | RunValue::CoalesceNone => std::mem::size_of_val(&()),
+            RunValue::Fail(e) => std::mem::size_of_val(&**e),
+            RunValue::Bool(x) => std::mem::size_of_val(x),
+            RunValue::UInt(x) => std::mem::size_of_val(x),
+            RunValue::SInt(x) => std::mem::size_of_val(x),
+            RunValue::Frac(x) => std::mem::size_of_val(x),
+            RunValue::Char(x) => std::mem::size_of_val(x),
+            RunValue::Text(x) => x.len(), // TODO: depends on literal/const vs runtime
             RunValue::Type(t) => match t {
-                ValueType::None | ValueType::Nevr => 0,
+                ValueType::None | ValueType::Nevr => std::mem::size_of::<()>(),
                 ValueType::Bool => std::mem::size_of::<bool>(),
                 ValueType::UInt => std::mem::size_of::<usize>(),
                 ValueType::SInt => std::mem::size_of::<isize>(),
                 ValueType::Frac => std::mem::size_of::<f64>(),
                 ValueType::Char => std::mem::size_of::<char>(),
-                ValueType::Text => std::mem::size_of::<String>(),
-                ValueType::Fail => std::mem::size_of::<Box<dyn std::error::Error>>(),
+                ValueType::Text => todo!("multiple representations"),
+                ValueType::Fail => todo!("dynamically sized"),
                 ValueType::Type | ValueType::Macro => unimplemented!("{t} is not a runtime type"),
             },
-        })
+        }
+    }
+
+    pub fn alignof(&self) -> usize {
+        // very important that this is the ACTUAL SIZE of the value! it will be used to store it in the environment!!
+        match self {
+            RunValue::None | RunValue::CoalesceNone => std::mem::align_of_val(&()),
+            RunValue::Fail(e) => std::mem::align_of_val(&*e),
+            RunValue::Bool(x) => std::mem::align_of_val(&x),
+            RunValue::UInt(x) => std::mem::align_of_val(&x),
+            RunValue::SInt(x) => std::mem::align_of_val(&x),
+            RunValue::Frac(x) => std::mem::align_of_val(&x),
+            RunValue::Char(x) => std::mem::align_of_val(&x),
+            RunValue::Text(x) => std::mem::align_of_val(&x),
+            RunValue::Type(t) => match t {
+                ValueType::None | ValueType::Nevr => std::mem::align_of::<()>(),
+                ValueType::Bool => std::mem::align_of::<bool>(),
+                ValueType::UInt => std::mem::align_of::<usize>(),
+                ValueType::SInt => std::mem::align_of::<isize>(),
+                ValueType::Frac => std::mem::align_of::<f64>(),
+                ValueType::Char => std::mem::align_of::<char>(),
+                ValueType::Text => todo!("multiple representations"),
+                ValueType::Fail => todo!("dynamically sized"),
+                ValueType::Type | ValueType::Macro => unimplemented!("{t} is not a runtime type"),
+            },
+        }
     }
 }
 
-pub fn evaluate<'src>(
+pub fn evaluate<'src, 'env>(
     source: &'src str,
+    env: &'env Environment<'src>,
     ast: &Expr<'src>,
 ) -> Result<RunValue<'src>, ContextError<'src>> {
     use Keyword::Szof;
@@ -932,11 +974,11 @@ pub fn evaluate<'src>(
             match (lop.val, rop.val) {
                 (LexValue::Keyword(Keyword::If), LexValue::Keyword(Keyword::Or)) => {
                     // TBD: how will this interact with pattern conditions?
-                    if let RunValue::Bool(cond) = evaluate(source, mhs)? {
+                    if let RunValue::Bool(cond) = evaluate(source, env, mhs)? {
                         if cond {
-                            evaluate(source, lhs)
+                            evaluate(source, env, lhs)
                         } else {
-                            evaluate(source, rhs)
+                            evaluate(source, env, rhs)
                         }
                     } else {
                         todo!("error: must be a boolean");
@@ -949,8 +991,8 @@ pub fn evaluate<'src>(
 
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
-            let l = evaluate(source, lhs)?;
-            let r = evaluate(source, rhs)?;
+            let l = evaluate(source, env, lhs)?;
+            let r = evaluate(source, env, rhs)?;
 
             if matches!(
                 (&l, &r),
@@ -1012,7 +1054,7 @@ pub fn evaluate<'src>(
 
         Expr::Unary(inner) => {
             let Unary { op, operand, side } = &**inner;
-            let x = evaluate(source, operand)?;
+            let x = evaluate(source, env, operand)?;
 
             if matches!(&x, RunValue::CoalesceNone) {
                 return Ok(RunValue::CoalesceNone);
@@ -1035,7 +1077,7 @@ pub fn evaluate<'src>(
                 // prefix
                 OpSide::Right => match punc {
                     TokenEq::Keyword(keyword) => match keyword {
-                        Szof => Ok(x.sizeof()),
+                        Szof => Ok(RunValue::UInt(x.sizeof())),
                         _ => unimplemented!(),
                     },
                     TokenEq::Punctuation(punctuation) => match punctuation {
@@ -1067,9 +1109,66 @@ pub fn evaluate<'src>(
             }
         }
 
-        Expr::Variable(_var) => todo!("variable lookup"),
+        // TODO: what if the variable is being modified?
+        Expr::Variable(var) => env
+            .get_dyn(var.ident.lex)
+            .map(|(ty, data)| match ty {
+                ValueType::None => Ok(RunValue::None),
 
-        Expr::Grouping(group) => evaluate(source, &group.expr),
+                ValueType::Nevr => panic!("cannot access nevr"),
+
+                ValueType::Bool => {
+                    if let &[x] = data {
+                        Ok(RunValue::Bool(x != 0))
+                    } else {
+                        panic!("primitives should have correct memory size")
+                    }
+                }
+
+                ValueType::UInt => Ok(RunValue::UInt(usize::from_ne_bytes(
+                    *data
+                        .as_array()
+                        .expect("primitives should have correct memory size"),
+                ))),
+
+                ValueType::SInt => Ok(RunValue::SInt(isize::from_ne_bytes(
+                    *data
+                        .as_array()
+                        .expect("primitives should have correct memory size"),
+                ))),
+
+                ValueType::Frac => Ok(RunValue::Frac(f64::from_ne_bytes(
+                    *data
+                        .as_array()
+                        .expect("primitives should have correct memory size"),
+                ))),
+
+                ValueType::Char => Ok(RunValue::Char(
+                    char::from_u32(u32::from_ne_bytes(
+                        *data
+                            .as_array()
+                            .expect("primitives should have correct memory size"),
+                    ))
+                    .expect("char should always be valid"),
+                )),
+
+                // TODO: what about owned strings?
+                ValueType::Text => Ok(RunValue::Text(Cow::Owned(
+                    (str::from_utf8(data).expect("text should always be UTF-8")).to_string(),
+                ))),
+
+                ValueType::Fail => todo!(),
+
+                ValueType::Type | ValueType::Macro => {
+                    unreachable!("{ty} should not be present at runtime")
+                }
+            })
+            .ok_or_else(|| {
+                ContextError::token_error(source, Some(&var.ident), ErrorType::UnknownVar)
+            })
+            .flatten(),
+
+        Expr::Grouping(group) => evaluate(source, env, &group.expr),
 
         Expr::Type(inner) => match inner.name.val {
             LexValue::Keyword(kw) if kw.is_type() => Ok(RunValue::Type(match kw {
@@ -1109,7 +1208,8 @@ pub fn evaluate<'src>(
                 | Keyword::Skip
                 | Keyword::Give
                 | Keyword::Emit
-                | Keyword::Szof => unimplemented!("not a typename"),
+                | Keyword::Szof
+                | Keyword::Prnt => unimplemented!("not a typename"),
             })),
 
             LexValue::Identifier | LexValue::Callable => unimplemented!("custom types"),

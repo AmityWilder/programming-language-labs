@@ -739,9 +739,38 @@ impl<'src> AstNode<'src> for ExprStmt<'src> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct PrintStmt<'src> {
+    /// `outp`
+    pub kw: Token<'src>,
+    pub expr: Expr<'src>,
+    /// `;`
+    pub semi: Token<'src>,
+}
+
+impl<'src> AstNode<'src> for PrintStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.semi.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.kw, &self.semi).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.kw, &self.semi).expansion(source)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
 pub enum Statement<'src> {
     Expr(ExprStmt<'src>),
+    // TODO: im not too fond of the print keyword
+    Print(PrintStmt<'src>),
     If(IfStmt<'src>),
     Block(BlockStmt<'src>),
 }
@@ -749,6 +778,10 @@ pub enum Statement<'src> {
 impl<'src> Statement<'src> {
     pub const fn expr(inner: ExprStmt<'src>) -> Self {
         Self::Expr(inner)
+    }
+
+    pub const fn print(inner: PrintStmt<'src>) -> Self {
+        Self::Print(inner)
     }
 
     pub const fn if_stmt(inner: IfStmt<'src>) -> Self {
