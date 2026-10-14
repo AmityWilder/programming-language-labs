@@ -4,7 +4,7 @@ use crate::{
     error::{
         ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
     },
-    exec::env::Environment,
+    exec::env::{Environment, Pointer},
     grammar::ast::{AstNodeFinal, Binary, Expr, Literal, Ternary, Unary},
     scanner::token::{
         Token,
@@ -926,27 +926,21 @@ impl RunValue<'_> {
     }
 
     pub fn alignof(&self) -> usize {
-        // very important that this is the ACTUAL SIZE of the value! it will be used to store it in the environment!!
+        // very important that this is the ACTUAL ALIGNMENT of the type! it will be used to store it in the environment!!
         match self {
-            RunValue::None | RunValue::CoalesceNone => std::mem::align_of_val(&()),
-            RunValue::Bool(x) => std::mem::align_of_val(&x),
-            RunValue::UInt(x) => std::mem::align_of_val(&x),
-            RunValue::SInt(x) => std::mem::align_of_val(&x),
-            RunValue::Frac(x) => std::mem::align_of_val(&x),
-            RunValue::Char(x) => std::mem::align_of_val(&x),
-            RunValue::Text(x) => std::mem::align_of_val(&**x),
-            RunValue::Fail(e) => std::mem::align_of_val(&**e),
-            RunValue::Type(t) => match t {
-                ValueType::None | ValueType::Nevr => std::mem::align_of::<()>(),
-                ValueType::Bool => std::mem::align_of::<bool>(),
-                ValueType::UInt => std::mem::align_of::<usize>(),
-                ValueType::SInt => std::mem::align_of::<isize>(),
-                ValueType::Frac => std::mem::align_of::<f64>(),
-                ValueType::Char => std::mem::align_of::<char>(),
-                ValueType::Text => todo!("multiple representations"),
-                ValueType::Fail => todo!("dynamically sized"),
-                ValueType::Type | ValueType::Macro => unimplemented!("{t} is not a runtime type"),
-            },
+            RunValue::None | RunValue::CoalesceNone | RunValue::Type(ValueType::None) => 0,
+            RunValue::Bool(_) | RunValue::Type(ValueType::Bool) => std::mem::align_of::<bool>(),
+            RunValue::UInt(_) | RunValue::Type(ValueType::UInt) => std::mem::align_of::<usize>(),
+            RunValue::SInt(_) | RunValue::Type(ValueType::SInt) => std::mem::align_of::<isize>(),
+            RunValue::Frac(_) | RunValue::Type(ValueType::Frac) => std::mem::align_of::<f64>(),
+            RunValue::Char(_) | RunValue::Type(ValueType::Char) => std::mem::align_of::<char>(),
+            RunValue::Text(_) | RunValue::Type(ValueType::Text) => std::mem::align_of::<u8>(), // i thiiiink?..
+            RunValue::Fail(_) | RunValue::Type(ValueType::Fail) => todo!(),
+
+            RunValue::Type(ValueType::Nevr) => todo!("shouldn't be stored"),
+            RunValue::Type(t @ (ValueType::Type | ValueType::Macro)) => {
+                unimplemented!("{t} is not a runtime type")
+            }
         }
     }
 }
@@ -1111,56 +1105,63 @@ pub fn evaluate<'src, 'env>(
 
         // TODO: what if the variable is being modified?
         Expr::Variable(var) => env
-            .get_dyn(var.ident.lex)
-            .map(|(ty, data)| match ty {
-                ValueType::None => Ok(RunValue::None),
+            .stack()
+            .lookup(var.ident.lex)
+            .map(|Pointer { ty, ptr }| {
+                let data = env
+                    .stack()
+                    .get(ptr)
+                    .expect("lookup should always give a valid pointer");
+                match ty {
+                    ValueType::None => Ok(RunValue::None),
 
-                ValueType::Nevr => panic!("cannot access nevr"),
+                    ValueType::Nevr => panic!("cannot access nevr"),
 
-                ValueType::Bool => {
-                    if let &[x] = data {
-                        Ok(RunValue::Bool(x != 0))
-                    } else {
-                        panic!("primitives should have correct memory size")
+                    ValueType::Bool => {
+                        if let &[x] = data {
+                            Ok(RunValue::Bool(x != 0))
+                        } else {
+                            panic!("primitives should have correct memory size")
+                        }
                     }
-                }
 
-                ValueType::UInt => Ok(RunValue::UInt(usize::from_ne_bytes(
-                    *data
-                        .as_array()
-                        .expect("primitives should have correct memory size"),
-                ))),
-
-                ValueType::SInt => Ok(RunValue::SInt(isize::from_ne_bytes(
-                    *data
-                        .as_array()
-                        .expect("primitives should have correct memory size"),
-                ))),
-
-                ValueType::Frac => Ok(RunValue::Frac(f64::from_ne_bytes(
-                    *data
-                        .as_array()
-                        .expect("primitives should have correct memory size"),
-                ))),
-
-                ValueType::Char => Ok(RunValue::Char(
-                    char::from_u32(u32::from_ne_bytes(
+                    ValueType::UInt => Ok(RunValue::UInt(usize::from_ne_bytes(
                         *data
                             .as_array()
                             .expect("primitives should have correct memory size"),
-                    ))
-                    .expect("char should always be valid"),
-                )),
+                    ))),
 
-                // TODO: what about owned strings?
-                ValueType::Text => Ok(RunValue::Text(Cow::Owned(
-                    (str::from_utf8(data).expect("text should always be UTF-8")).to_string(),
-                ))),
+                    ValueType::SInt => Ok(RunValue::SInt(isize::from_ne_bytes(
+                        *data
+                            .as_array()
+                            .expect("primitives should have correct memory size"),
+                    ))),
 
-                ValueType::Fail => todo!(),
+                    ValueType::Frac => Ok(RunValue::Frac(f64::from_ne_bytes(
+                        *data
+                            .as_array()
+                            .expect("primitives should have correct memory size"),
+                    ))),
 
-                ValueType::Type | ValueType::Macro => {
-                    unreachable!("{ty} should not be present at runtime")
+                    ValueType::Char => Ok(RunValue::Char(
+                        char::from_u32(u32::from_ne_bytes(
+                            *data
+                                .as_array()
+                                .expect("primitives should have correct memory size"),
+                        ))
+                        .expect("char should always be valid"),
+                    )),
+
+                    // TODO: what about owned strings?
+                    ValueType::Text => Ok(RunValue::Text(Cow::Owned(
+                        (str::from_utf8(data).expect("text should always be UTF-8")).to_string(),
+                    ))),
+
+                    ValueType::Fail => todo!(),
+
+                    ValueType::Type | ValueType::Macro => {
+                        unreachable!("{ty} should not be present at runtime")
+                    }
                 }
             })
             .ok_or_else(|| {

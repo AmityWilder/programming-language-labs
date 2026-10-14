@@ -109,76 +109,6 @@ macro_rules! simple_ast_node_enum {
 }
 pub(crate) use simple_ast_node_enum as AstEnum;
 
-/// Just the first and last fields, but they must be Final
-macro_rules! trivial_ast_node_struct {
-    derive() {
-        $(#[$meta:meta])*
-        $vis:vis struct $Name:ident<$lt:lifetime> {
-            $(#[$ffmeta:meta])*
-            $ffvis:vis $first_field:ident: $FirstType:ty,
-            $(
-                $(#[$fmeta:meta])*
-                $fvis:vis $field:ident: $Type:ty,
-            )*
-            // TODO: this is ambiguous with the `$()*` capture
-            $(#[$lfmeta:meta])*
-            $lfvis:vis $last_field:ident: $LastType:ty $(,)?
-        }
-    } => {
-        impl<$lt> $crate::grammar::ast::AstNode<$lt> for $Name<$lt>
-        where
-            $FirstType: AstNodeFinal<$lt>,
-            $LastType: AstNodeFinal<$lt>,
-        {
-            fn get_range_start(&self, source: &$lt str) -> Option<usize> {
-                self.$first_field.get_range_start(source)
-            }
-
-            fn get_range_end(&self, source: &$lt str) -> Option<usize> {
-                self.$last_field.get_range_end(source)
-            }
-
-            fn get_range(&self, source: &$lt str) -> Option<Range<usize>> {
-                (self.$first_field, &self.$last_field).get_range(source)
-            }
-
-            fn expansion(&self, source: &$lt str) -> Option<ExpansionData<$lt>> {
-                (self.$first_field, &self.$last_field).expansion(source)
-            }
-        }
-    };
-
-    derive() {
-        $(#[$meta:meta])*
-        $vis:vis struct $Name:ident<$lt:lifetime> {
-            $(#[$fmeta:meta])*
-            $fvis:vis $only_field:ident: $Type:ty,
-        }
-    } => {
-        impl<$lt> $crate::grammar::ast::AstNode<$lt> for $Name<$lt>
-        where
-            $Type: AstNodeFinal<$lt>,
-        {
-            fn get_range_start(&self, source: &$lt str) -> Option<usize> {
-                self.$only_field.get_range_start(source)
-            }
-
-            fn get_range_end(&self, source: &$lt str) -> Option<usize> {
-                self.$only_field.get_range_end(source)
-            }
-
-            fn get_range(&self, source: &$lt str) -> Option<Range<usize>> {
-                self.$only_field.get_range(source)
-            }
-
-            fn expansion(&self, source: &$lt str) -> Option<ExpansionData<$lt>> {
-                self.$only_field.expansion(source)
-            }
-        }
-    };
-}
-pub(crate) use trivial_ast_node_struct as AstStructT;
-
 /// Passthrough references
 impl<'src, T: ?Sized> AstNode<'src> for &T
 where
@@ -883,11 +813,38 @@ impl<'src> AstNode<'src> for Assignment<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct TypeAnnotation<'src> {
+    /// `:`
+    pub colon: Token<'src>,
+    // TODO: should type annotations be different from type expressions?
+    pub ty: TypeExpr<'src>,
+}
+
+impl<'src> AstNode<'src> for TypeAnnotation<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.colon.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.ty.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.colon, &self.ty).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.colon, &self.ty).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct DeclVar<'src> {
     /// [`uni`](crate::scanner::token::value::Keyword::Uni) | [`let`](crate::scanner::token::value::Keyword::Let) | [`pvt`](crate::scanner::token::value::Keyword::Pvt)
     pub var_kw: Token<'src>,
     /// [`IDENTIFIER`](crate::scanner::token::value::LexValue::Identifier)
     pub ident: Token<'src>,
+    pub ty: Option<TypeAnnotation<'src>>,
     pub assignment: Option<Assignment<'src>>,
     /// `;`
     pub semi: Token<'src>,

@@ -20,6 +20,7 @@
     impl_trait_in_bindings,
     impl_trait_in_fn_trait_return,
     macro_derive,
+    pointer_is_aligned_to,
 )]
 #![forbid(
     clippy::missing_safety_doc,
