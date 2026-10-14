@@ -156,10 +156,10 @@ impl<'src> AstNode<'src> for MacroPredicate<'src> {
     }
 }
 
-/// `macro_alternative -> "~" ( macro_predicate )? macro_replacer $( macro_alternative )?`
+/// `macro_alternative -> "ro" ( macro_predicate )? macro_replacer $( macro_alternative )?`
 #[derive(Debug, Clone, PartialEq, Default, AstNodeF)]
 pub struct MacroAlternative<'src> {
-    /// `~`; necessary to distinguish from non-preprocessor `or`
+    /// `ro`; necessary to distinguish from non-preprocessor `or`
     pub squiggle: Token<'src>,
     pub predicate: Option<MacroPredicate<'src>>,
     pub then_def: MacroReplacer<'src>,
@@ -444,23 +444,22 @@ impl<'src> PreprocessorStream<'src> {
     pub fn macro_alternative(
         &mut self,
     ) -> Option<Result<MacroAlternative<'src>, ContextError<'src>>> {
-        self.pull_if(match_token!(Punctuation::MacroConst))
-            .map(|squiggle| {
-                Ok(MacroAlternative {
-                    squiggle,
-                    predicate: {
-                        if let Some(rot_kw) = self.pull_if(match_token!(Keyword::Rot)) {
-                            Some(MacroPredicate {
-                                rot_kw,
-                                pred: self.replacer(ReplacerKind::Predicate)?,
-                            })
-                        } else {
-                            None
-                        }
-                    },
-                    then_def: self.replacer(ReplacerKind::ConditionBody)?,
-                })
+        self.pull_if(match_token!(Keyword::Tor)).map(|squiggle| {
+            Ok(MacroAlternative {
+                squiggle,
+                predicate: {
+                    if let Some(rot_kw) = self.pull_if(match_token!(Keyword::Rot)) {
+                        Some(MacroPredicate {
+                            rot_kw,
+                            pred: self.replacer(ReplacerKind::Predicate)?,
+                        })
+                    } else {
+                        None
+                    }
+                },
+                then_def: self.replacer(ReplacerKind::ConditionBody)?,
             })
+        })
     }
 
     /// Will only produce [`Some`] if the **immediately next** token begins a macro conditional.

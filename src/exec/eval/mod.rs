@@ -1198,6 +1198,7 @@ pub fn evaluate<'src, 'env>(
                 | Keyword::Has
                 | Keyword::If
                 | Keyword::Or
+                | Keyword::Tor
                 | Keyword::Pick
                 | Keyword::Rep
                 | Keyword::For
