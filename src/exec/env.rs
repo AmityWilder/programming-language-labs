@@ -1,5 +1,5 @@
 use crate::exec::eval::ValueType;
-use std::{collections::LinkedList, num::NonZero, range::Range};
+use std::{collections::LinkedList, marker::PhantomData, num::NonZero, range::Range};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct VarData {
@@ -89,16 +89,18 @@ impl<'src> Table<'src> {
         }
     }
 
+    /// Use when calling a function
     pub fn push_layer(&mut self) -> &mut Layer<'src> {
         self.layers.push_back_mut(Layer::new())
     }
 
+    /// Use when returning from a function
     pub fn pop_layer(&mut self) -> Option<Layer<'src>> {
         self.layers.pop_back()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct UntypedPointer(Range<usize>);
 
 impl PartialOrd for UntypedPointer {
@@ -114,19 +116,27 @@ impl Ord for UntypedPointer {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct Pointer {
-    pub ty: ValueType,
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Pointer<T: ?Sized> {
     pub ptr: UntypedPointer,
+    _marker: PhantomData<T>,
 }
 
-impl PartialOrd for Pointer {
+impl<T: ?Sized> PartialEq for Pointer<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.ptr == other.ptr
+    }
+}
+
+impl<T: ?Sized> Eq for Pointer<T> {}
+
+impl<T: ?Sized> PartialOrd for Pointer<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Pointer {
+impl<T: ?Sized> Ord for Pointer<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.ptr.cmp(&other.ptr)
     }
@@ -151,17 +161,6 @@ impl<'src> StackMemory<'src> {
             stack_ptr: 0,
             table: Table::new(),
         }
-    }
-
-    /// Returns [`None`] if scope creation failed.
-    pub fn push_scope(&mut self) -> Option<NonZero<usize>> {
-        todo!()
-    }
-
-    /// Returns `false` if attempting to pop global scope.
-    #[must_use]
-    pub fn pop_scope(&mut self) -> bool {
-        todo!()
     }
 
     /// Pushes a new variable at the current scope
@@ -205,7 +204,7 @@ impl<'src> StackMemory<'src> {
     }
 
     /// Returns [`None`] if variable does not exist
-    pub fn lookup<Q>(&self, ident: &Q) -> Option<Pointer>
+    pub fn ulookup<Q>(&self, ident: &Q) -> Option<UntypedPointer>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -215,20 +214,136 @@ impl<'src> StackMemory<'src> {
             .flat_map(|layer| layer.scopes.iter().flat_map(|scope| scope.vars.iter()))
             .chain(self.table.global.vars.iter())
             .rfind(|(name, _)| ident == *name)
-            .map(|(_, item)| Pointer {
-                ty: item.ty,
-                ptr: UntypedPointer(item.range),
-            })
+            .map(|(_, item)| UntypedPointer(item.range))
+    }
+
+    /// Returns [`None`] if variable does not exist
+    pub fn lookup<T, Q>(&self, ident: &Q) -> Option<Pointer<T>>
+    where
+        T: ?Sized,
+        Q: ?Sized + PartialEq<str>,
+    {
+        self.ulookup(ident).map(|ptr| Pointer {
+            ptr,
+            _marker: PhantomData,
+        })
     }
 
     /// Returns [`None`] if the pointer is out of range
-    pub fn get(&self, ptr: UntypedPointer) -> Option<&[u8]> {
+    pub fn get_raw(&self, ptr: UntypedPointer) -> Option<&[u8]> {
         self.stack.get(ptr.0)
     }
 
     /// Returns [`None`] if the pointer is out of range
-    pub fn get_mut(&mut self, ptr: UntypedPointer) -> Option<&mut [u8]> {
+    pub fn get_raw_mut(&mut self, ptr: UntypedPointer) -> Option<&mut [u8]> {
         self.stack.get_mut(ptr.0)
+    }
+
+    /// Returns [`None`] if the pointer is out of range
+    pub unsafe fn get<T: ?Sized + Primitive>(&self, ptr: Pointer<T>) -> Option<&T> {
+        // SAFETY: Caller must uphold safety contract
+        unsafe { self.get_as::<T>(ptr.ptr) }
+    }
+
+    /// Returns [`None`] if the pointer is out of range
+    pub unsafe fn get_mut<T: ?Sized + Primitive>(&mut self, ptr: Pointer<T>) -> Option<&mut T> {
+        // SAFETY: Caller must uphold safety contract
+        unsafe { self.get_mut_as::<T>(ptr.ptr) }
+    }
+
+    /// Returns [`None`] if the pointer is out of range
+    ///
+    /// # Safety
+    /// Caller must ensure that `data` is compatible with the layout of `T`
+    pub unsafe fn get_as<T: ?Sized + Primitive>(&self, ptr: UntypedPointer) -> Option<&T> {
+        self.get_raw(ptr)
+            // SAFETY: Caller must uphold safety contract
+            .map(|data| unsafe { T::from_bytes(data) })
+    }
+
+    /// Returns [`None`] if the pointer is out of range
+    ///
+    /// # Safety
+    /// Caller must ensure that `data` is compatible with the layout of `T`
+    pub unsafe fn get_mut_as<T: ?Sized + Primitive>(
+        &mut self,
+        ptr: UntypedPointer,
+    ) -> Option<&mut T> {
+        self.get_raw_mut(ptr)
+            // SAFETY: Caller must uphold safety contract
+            .map(|data| unsafe { T::from_mut_bytes(data) })
+    }
+}
+
+/// Types that can be cast from raw bytes
+pub trait Primitive {
+    /// # Safety
+    /// Caller must ensure that `data` is compatible with the layout of `Self`
+    unsafe fn from_bytes(data: &[u8]) -> &Self;
+
+    /// # Safety
+    /// Caller must ensure that `data` is compatible with the layout of `Self`
+    unsafe fn from_mut_bytes(data: &mut [u8]) -> &mut Self;
+}
+
+/// Marker for types that have a trivial implementation of [`Primitive`]
+pub trait SizedPrimitive: Sized {}
+
+impl<T: SizedPrimitive> Primitive for T {
+    unsafe fn from_bytes(data: &[u8]) -> &Self {
+        assert_eq!(data.len(), std::mem::size_of::<T>(), "buffer size mismatch");
+        let ptr = data.as_ptr().cast::<T>();
+        assert!(ptr.is_aligned(), "stack memory should be aligned");
+        // SAFETY: came from a reference
+        unsafe { ptr.as_ref_unchecked() }
+    }
+
+    unsafe fn from_mut_bytes(data: &mut [u8]) -> &mut Self {
+        assert_eq!(data.len(), std::mem::size_of::<T>(), "buffer size mismatch");
+        let ptr = data.as_mut_ptr().cast::<T>();
+        assert!(ptr.is_aligned(), "stack memory should be aligned");
+        // SAFETY: came from a mutable reference
+        unsafe { ptr.as_mut_unchecked() }
+    }
+}
+
+impl SizedPrimitive for bool {}
+impl SizedPrimitive for u8 {}
+impl SizedPrimitive for usize {}
+impl SizedPrimitive for isize {}
+impl SizedPrimitive for f64 {}
+impl SizedPrimitive for char {} // TBD: is char always 4 bytes?
+impl<T: Primitive, const N: usize> SizedPrimitive for [T; N] {}
+
+impl<T: Primitive> Primitive for [T] {
+    unsafe fn from_bytes(data: &[u8]) -> &Self {
+        let len = data
+            .len()
+            .checked_div(std::mem::size_of::<T>())
+            .expect("bytestring should be evenly divisible by T");
+        let ptr = data.as_ptr().cast::<T>();
+        // SAFETY: Caller must uphold safety contract
+        unsafe { std::slice::from_raw_parts(ptr, len) }
+    }
+
+    unsafe fn from_mut_bytes(data: &mut [u8]) -> &mut Self {
+        let len = data
+            .len()
+            .checked_div(std::mem::size_of::<T>())
+            .expect("bytestring should be evenly divisible by T");
+        let ptr = data.as_mut_ptr().cast::<T>();
+        // SAFETY: Caller must uphold safety contract
+        unsafe { std::slice::from_raw_parts_mut(ptr, len) }
+    }
+}
+
+impl Primitive for str {
+    unsafe fn from_bytes(data: &[u8]) -> &Self {
+        str::from_utf8(data).expect("should be valid UTF-8")
+    }
+
+    unsafe fn from_mut_bytes(data: &mut [u8]) -> &mut Self {
+        str::from_utf8_mut(data).expect("should be valid UTF-8")
     }
 }
 
@@ -244,11 +359,11 @@ impl<'src> Environment<'src> {
         }
     }
 
-    pub fn stack(&self) -> &StackMemory<'src> {
+    pub const fn stack(&self) -> &StackMemory<'src> {
         &self.stack
     }
 
-    pub fn stack_mut(&mut self) -> &mut StackMemory<'src> {
+    pub const fn stack_mut(&mut self) -> &mut StackMemory<'src> {
         &mut self.stack
     }
 }
