@@ -1,6 +1,6 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    grammar::ast::{Binary, Expr, Grouping, Literal, OrType, Ternary, TypeExpr, Unary},
+    grammar::ast::{Binary, Expr, Grouping, Literal, OrType, Ternary, TypeExpr, Unary, Variable},
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
 };
 
@@ -73,13 +73,31 @@ impl LispDisplay for Grouping<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct TypeName<'src>(&'src str);
+
+impl LispDisplay for TypeName<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            std::fmt::Display::fmt(&SYNTAX_STYLE_ANSI[Syntax::Typename].style(self.0), f)
+        } else {
+            f.write_str(self.0)
+        }
+    }
+}
+
 impl LispDisplay for TypeExpr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { name, or_ty } = self;
         if let Some(OrType { pipe, ty }) = or_ty {
-            parenthesize!(f, pipe.lex, name.lex, ty.lex)
+            parenthesize!(
+                f,
+                pipe.lex,
+                Lisp::new(&TypeName(name.lex)),
+                Lisp::new(&TypeName(ty.lex)),
+            )
         } else {
-            std::fmt::Display::fmt(name.lex, f)
+            std::fmt::Display::fmt(Lisp::new(&TypeName(name.lex)), f)
         }
     }
 }
@@ -95,6 +113,17 @@ impl LispDisplay for Literal<'_> {
     }
 }
 
+impl LispDisplay for Variable<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { ident } = self;
+        if f.alternate() {
+            write_highlight(std::iter::once(ident), f, &SYNTAX_STYLE_ANSI)
+        } else {
+            f.write_str(ident.lex)
+        }
+    }
+}
+
 impl LispDisplay for Expr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -103,6 +132,7 @@ impl LispDisplay for Expr<'_> {
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
             // TBD: should this use val instead of lex?
             Self::Literal(inner) => LispDisplay::fmt(inner, f),
+            Self::Variable(inner) => LispDisplay::fmt(inner, f),
             Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
             Self::Type(inner) => LispDisplay::fmt(&**inner, f),
         }

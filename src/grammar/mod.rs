@@ -1,7 +1,8 @@
 //! Context-free grammar
 
 use crate::{
-    error::{ContextError, ErrorType, ExpectedToken, OpSide},
+    error::{ContextError, ExpectedToken, OpSide},
+    grammar::ast::{Assignment, DeclVar, Declaration, ExprStmt, Program, Statement, Variable},
     scanner::{
         Bracket,
         token::{Token, value::LexValue},
@@ -10,7 +11,7 @@ use crate::{
 use ast::{Binary, Expr, Grouping, Literal, OrType, TypeExpr, Unary};
 
 pub mod ast;
-pub mod ast_iter;
+// pub mod ast_iter; // TODO: FIX THIS
 pub mod fmt;
 
 #[cfg(test)]
@@ -100,9 +101,83 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     where
         P: FnOnce(&Token<'src>) -> bool,
     {
-        self.pull_if(p).ok_or_else(|| {
-            ContextError::missing_or_unexpected(self.tokens.peek().copied(), self.source, expected)
+        self.pull_if(p).ok_or_else(|| self.error(expected))
+    }
+
+    pub fn error(&mut self, expected: ExpectedToken) -> ContextError<'src> {
+        match self.tokens.peek() {
+            Some(token) => ContextError::unexpected(token, self.source, expected),
+            None => ContextError::missing(self.source, expected),
+        }
+    }
+
+    /// `program -> ( statement )*`
+    // TODO: should this return multiple errors?
+    pub fn program(
+        &mut self,
+    ) -> Result<Program<'src>, impl IntoIterator<Item = ContextError<'src>>> {
+        let mut iter = std::iter::from_fn(|| {
+            self.tokens
+                .peek()
+                .is_some()
+                .then(|| self.declaration().inspect_err(|_| self.synchronize()))
+        });
+        let (lo, hi) = iter.size_hint();
+        let mut decls = Vec::with_capacity(hi.unwrap_or(lo));
+        while let Some(res) = iter.next() {
+            match res {
+                Ok(stmt) => decls.push(stmt),
+                Err(first) => {
+                    return Err(std::iter::once(first).chain(iter.filter_map(Result::err)));
+                }
+            }
+        }
+        Ok(Program { decls })
+    }
+
+    /// `declaration -> var_declaration | statement`
+    pub fn declaration(&mut self) -> Result<Declaration<'src>, ContextError<'src>> {
+        self.var_declaration()
+            .or_else(|| Some(self.statement().map(Declaration::stmt)))
+            .ok_or_else(|| self.error(ExpectedToken::Declaration))
+            .flatten()
+    }
+
+    /// `assignment -> "=" expression`
+    pub fn assignment(&mut self) -> Option<Result<Assignment<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Punctuation::Assign)).map(|op| {
+            Ok(Assignment {
+                op,
+                expr: self.expression()?,
+            })
         })
+    }
+
+    /// `var_declaration -> "uni" | "pvt" | "let" IDENTIFIER ( assignment )? ";"`
+    pub fn var_declaration(&mut self) -> Option<Result<Declaration<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Keyword::{Uni | Pvt | Let}))
+            .map(|var_kw| {
+                Ok(Declaration::var(DeclVar {
+                    var_kw,
+                    // TODO: binding pattern?
+                    ident: self.try_pull(match_token!(Identifier), ExpectedToken::Ident)?,
+                    assignment: self.assignment().transpose()?,
+                    semi: self.try_pull(match_token!(Punctuation::Semi), ExpectedToken::Semi)?,
+                }))
+            })
+    }
+
+    /// `statement -> expression_statement`
+    pub fn statement(&mut self) -> Result<Statement<'src>, ContextError<'src>> {
+        self.expression_statement()
+    }
+
+    /// `expression_statement -> expression ";"`
+    pub fn expression_statement(&mut self) -> Result<Statement<'src>, ContextError<'src>> {
+        Ok(Statement::expr(ExprStmt {
+            expr: self.expression()?,
+            semi: self.try_pull(match_token!(Punctuation::Semi), ExpectedToken::Semi)?,
+        }))
     }
 
     /// `expression -> or`
@@ -208,8 +283,8 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         if let Some(op) = self.pull_if(match_token!(Keyword::Szof)) {
             let operand = self
                 .type_expression()
-                .map(Expr::type_expr)
-                .or_else(|_| self.unary_prefix())?;
+                .map(|res| res.map(Expr::type_expr))
+                .unwrap_or_else(|| self.unary_prefix())?;
             Ok(Expr::unary(Unary {
                 op,
                 operand,
@@ -241,80 +316,82 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn conversion(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.primary()?;
         while let Some(op) = self.pull_if(match_token!(Punctuation::{Convert | Transmute})) {
-            let rhs = Expr::type_expr(self.type_expression()?);
+            let rhs = Expr::type_expr(
+                self.type_expression()
+                    .ok_or_else(|| self.error(ExpectedToken::TypeExpr))
+                    .flatten()?,
+            );
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
         Ok(expr)
     }
 
-    /// `primary -> literal | group | type_expression`
+    /// `primary -> literal | group | IDENTIFIER | type_expression`
+    ///
+    /// `type_expression` is included as a variant of `primary` in order
+    /// to allow type errors instead of just "wrong token" errors.
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.literal()
-            .or_else(|_| self.group().map(Expr::grouping))
-            .or_else(|_| self.type_expression().map(Expr::type_expr))
-            .map_err(|mut e| {
-                if let ErrorType::MissingToken { expect }
-                | ErrorType::UnexpectedToken { expect, .. } = &mut e.err
-                    && *expect == ExpectedToken::ParenExpr
-                {
-                    *expect = ExpectedToken::Expr;
-                }
-                e
+            .map(Ok)
+            .or_else(|| self.group())
+            .or_else(|| {
+                self.pull_if(match_token!(Identifier))
+                    .map(|ident| Ok(Expr::Variable(Variable { ident })))
             })
+            .or_else(|| self.type_expression().map(|res| res.map(Expr::type_expr)))
+            .ok_or_else(|| self.error(ExpectedToken::Expr))
+            .flatten()
     }
 
     /// `literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | TEXT | MACRO`
-    fn literal(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        self.try_pull(
-            match_token!(
-                BoolLiteral(_)
-                    | Keyword::None
-                    | UIntLiteral(_)
-                    | SIntLiteral(_)
-                    | FracLiteral(_)
-                    | CharLiteral(_)
-                    | TextLiteral(_)
-                    | Macro
-            ),
-            ExpectedToken::Literal,
-        )
+    fn literal(&mut self) -> Option<Expr<'src>> {
+        self.pull_if(match_token!(
+            BoolLiteral(_)
+                | Keyword::None
+                | UIntLiteral(_)
+                | SIntLiteral(_)
+                | FracLiteral(_)
+                | CharLiteral(_)
+                | TextLiteral(_)
+                | Macro
+        ))
         .map(|value| Expr::literal(Literal { value }))
     }
 
     /// `group -> "(" expression ")"`
-    fn group(&mut self) -> Result<Grouping<'src>, ContextError<'src>> {
-        let open = self.try_pull(match_token!(Punctuation::LParen), ExpectedToken::ParenExpr)?;
-        let expr = self.expression()?;
-        self.try_pull(
-            match_token!(Punctuation::RParen),
-            ExpectedToken::ExprOrRParen,
-        )
-        .map(move |close| Grouping { open, expr, close })
-        .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))
+    fn group(&mut self) -> Option<Result<Expr<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Punctuation::LParen)).map(|open| {
+            let expr = self.expression()?;
+            self.try_pull(
+                match_token!(Punctuation::RParen),
+                ExpectedToken::ExprOrRParen,
+            )
+            .map(move |close| Expr::grouping(Grouping { open, expr, close }))
+            .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))
+        })
     }
 
     /// `type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" ( "fail" | "none" | "nevr" ) )?`
-    fn type_expression(&mut self) -> Result<TypeExpr<'src>, ContextError<'src>> {
-        let name = self.try_pull(
-            |token| match token.val {
-                LexValue::Identifier => true,
-                LexValue::Keyword(kw) => kw.is_type(),
-                _ => false,
-            },
-            ExpectedToken::TypeExpr,
-        )?;
-        let or_ty = self.pull_if(match_token!(Punctuation::Or)).map(|pipe| {
-            Ok(OrType {
-                pipe,
-                ty: self.try_pull(
-                    match_token!(Keyword::{Fail | None | Nevr}),
-                    ExpectedToken::OrType,
-                )?,
+    fn type_expression(&mut self) -> Option<Result<TypeExpr<'src>, ContextError<'src>>> {
+        self.pull_if(|token| match token.val {
+            LexValue::Identifier => true,
+            LexValue::Keyword(kw) => kw.is_type(),
+            _ => false,
+        })
+        .map(|name| {
+            let or_ty = self.pull_if(match_token!(Punctuation::Or)).map(|pipe| {
+                Ok(OrType {
+                    pipe,
+                    ty: self.try_pull(
+                        match_token!(Keyword::{Fail | None | Nevr}),
+                        ExpectedToken::OrType,
+                    )?,
+                })
+            });
+            Ok(TypeExpr {
+                name,
+                or_ty: or_ty.transpose()?,
             })
-        });
-        Ok(TypeExpr {
-            name,
-            or_ty: or_ty.transpose()?,
         })
     }
 

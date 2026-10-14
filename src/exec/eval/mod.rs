@@ -52,7 +52,7 @@ impl OpError {
         match self {
             OpError::Incompatible(l_ty, r_ty) => ContextError::token_error(
                 source,
-                Some(*op),
+                Some(op),
                 ErrorType::Incompatible {
                     op: op
                         .val
@@ -85,14 +85,14 @@ impl OpError {
             ),
             OpError::DivByZero => ContextError::token_error(
                 source,
-                Some(*op),
+                Some(op),
                 ErrorType::DivByZero {
                     zero: rhs.range(source),
                 },
             ),
             OpError::Overflow(e) => ContextError::token_error(
                 source,
-                Some(*op),
+                Some(op),
                 ErrorType::Overflow(match e {
                     OverflowKind::UAdd { l, r } => OverflowError::UAdd {
                         l_range: lhs.range(source),
@@ -162,7 +162,7 @@ impl OpError {
         match self {
             Self::Unsupported(r_ty) => ContextError::token_error(
                 source,
-                Some(*op),
+                Some(op),
                 ErrorType::Unsupported {
                     op: punc,
                     r_range: rhs.range(source),
@@ -190,13 +190,13 @@ impl OpError {
             ),
             Self::Overflow(OverflowKind::SNeg { r }) => ContextError::token_error(
                 source,
-                Some(*op),
+                Some(op),
                 ErrorType::Overflow(OverflowError::SNeg {
                     r_range: rhs.range(source),
                     r_value: r,
                 }),
             ),
-            Self::UNeg => ContextError::token_error(source, Some(*op), ErrorType::UnsignedNeg),
+            Self::UNeg => ContextError::token_error(source, Some(op), ErrorType::UnsignedNeg),
 
             Self::Incompatible(_, _) | Self::DivByZero | Self::Overflow(_) => {
                 unimplemented!("not valid for unary")
@@ -1049,8 +1049,8 @@ pub fn evaluate<'src>(
             .map_err(|e| e.unary(source, op, punc, operand))
         }
 
-        Expr::Literal(token) => {
-            let Literal { value } = token;
+        Expr::Literal(literal) => {
+            let Literal { value } = literal;
             match value.val {
                 LexValue::BoolLiteral(b) => Ok(RunValue::Bool(b)),
                 LexValue::UIntLiteral(n) => Ok(RunValue::UInt(n)),
@@ -1060,12 +1060,14 @@ pub fn evaluate<'src>(
                 LexValue::TextLiteral(s) => s
                     .process()
                     .map(RunValue::Text)
-                    .map_err(|e| ContextError::token_error(source, Some(*value), e)),
+                    .map_err(|e| ContextError::token_error(source, Some(value), e)),
                 LexValue::Keyword(Keyword::None) => Ok(RunValue::None),
 
                 _ => unimplemented!(),
             }
         }
+
+        Expr::Variable(_var) => todo!("variable lookup"),
 
         Expr::Grouping(group) => evaluate(source, &group.expr),
 

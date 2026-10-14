@@ -52,8 +52,8 @@ macro_rules! define_token_eq {
             }
 
             #[allow(unused)]
-            pub fn op_description(self, operands: &[$crate::eval::ValueType]) -> &'static str {
-                use $crate::eval::ValueType::*;
+            pub fn op_description(self, operands: &[$crate::exec::eval::ValueType]) -> &'static str {
+                use $crate::exec::eval::ValueType::*;
                 match self {
                     $($(Self::$Variant => match operands {
                         $($operands_pat => $op_desc,)*
