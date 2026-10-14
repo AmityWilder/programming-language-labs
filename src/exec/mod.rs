@@ -60,7 +60,7 @@ fn execute_decl<'src, 'prgm>(
             Statement::Expr(expr) => _ = evaluate(source, env, &expr.expr)?, // TBD: what do we do with the output?
 
             Statement::Print(stmt) => {
-                let value = evaluate(source, env, &stmt.expr)?;
+                let value = evaluate(source, env, &stmt.group.expr)?;
                 value.print();
             }
 
