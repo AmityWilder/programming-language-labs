@@ -75,12 +75,10 @@ pub(crate) use final_ast_node as AstNodeF;
 macro_rules! simple_ast_node_enum {
     derive() {
         $(#[$meta:meta])*
-        $vis:vis enum $Name:ident<$lt:lifetime> {
-            $(
-                $(#[$vmeta:meta])*
-                $Variant:ident($Type:ty)
-            ),* $(,)?
-        }
+        $vis:vis enum $Name:ident<$lt:lifetime> {$(
+            $(#[$vmeta:meta])*
+            $Variant:ident($Type:ty)
+        ),* $(,)?}
     } => {
         impl<$lt> $crate::grammar::ast::AstNode<$lt> for $Name<$lt> {
             fn get_range_start(&self, source: &'src str) -> Option<usize> {
@@ -110,6 +108,76 @@ macro_rules! simple_ast_node_enum {
     };
 }
 pub(crate) use simple_ast_node_enum as AstEnum;
+
+/// Just the first and last fields, but they must be Final
+macro_rules! trivial_ast_node_struct {
+    derive() {
+        $(#[$meta:meta])*
+        $vis:vis struct $Name:ident<$lt:lifetime> {
+            $(#[$ffmeta:meta])*
+            $ffvis:vis $first_field:ident: $FirstType:ty,
+            $(
+                $(#[$fmeta:meta])*
+                $fvis:vis $field:ident: $Type:ty,
+            )*
+            // TODO: this is ambiguous with the `$()*` capture
+            $(#[$lfmeta:meta])*
+            $lfvis:vis $last_field:ident: $LastType:ty $(,)?
+        }
+    } => {
+        impl<$lt> $crate::grammar::ast::AstNode<$lt> for $Name<$lt>
+        where
+            $FirstType: AstNodeFinal<$lt>,
+            $LastType: AstNodeFinal<$lt>,
+        {
+            fn get_range_start(&self, source: &$lt str) -> Option<usize> {
+                self.$first_field.get_range_start(source)
+            }
+
+            fn get_range_end(&self, source: &$lt str) -> Option<usize> {
+                self.$last_field.get_range_end(source)
+            }
+
+            fn get_range(&self, source: &$lt str) -> Option<Range<usize>> {
+                (self.$first_field, &self.$last_field).get_range(source)
+            }
+
+            fn expansion(&self, source: &$lt str) -> Option<ExpansionData<$lt>> {
+                (self.$first_field, &self.$last_field).expansion(source)
+            }
+        }
+    };
+
+    derive() {
+        $(#[$meta:meta])*
+        $vis:vis struct $Name:ident<$lt:lifetime> {
+            $(#[$fmeta:meta])*
+            $fvis:vis $only_field:ident: $Type:ty,
+        }
+    } => {
+        impl<$lt> $crate::grammar::ast::AstNode<$lt> for $Name<$lt>
+        where
+            $Type: AstNodeFinal<$lt>,
+        {
+            fn get_range_start(&self, source: &$lt str) -> Option<usize> {
+                self.$only_field.get_range_start(source)
+            }
+
+            fn get_range_end(&self, source: &$lt str) -> Option<usize> {
+                self.$only_field.get_range_end(source)
+            }
+
+            fn get_range(&self, source: &$lt str) -> Option<Range<usize>> {
+                self.$only_field.get_range(source)
+            }
+
+            fn expansion(&self, source: &$lt str) -> Option<ExpansionData<$lt>> {
+                self.$only_field.expansion(source)
+            }
+        }
+    };
+}
+pub(crate) use trivial_ast_node_struct as AstStructT;
 
 /// Passthrough references
 impl<'src, T: ?Sized> AstNode<'src> for &T
@@ -456,12 +524,36 @@ impl<'src> AstNode<'src> for Literal<'src> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct Variable<'src> {
+    pub ident: Token<'src>,
+}
+
+impl<'src> AstNode<'src> for Variable<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.ident.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.ident.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.ident.get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.ident.expansion(source)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
 pub enum Expr<'src> {
     Ternary(Box<Ternary<'src>>),
     Binary(Box<Binary<'src>>),
     Unary(Box<Unary<'src>>),
     Literal(Literal<'src>),
+    Variable(Variable<'src>),
     Grouping(Box<Grouping<'src>>),
     Type(Box<TypeExpr<'src>>),
 }
@@ -479,8 +571,12 @@ impl<'src> Expr<'src> {
         Self::Unary(Box::new(inner))
     }
 
-    pub const fn literal(literal: Literal<'src>) -> Self {
-        Self::Literal(literal)
+    pub const fn literal(inner: Literal<'src>) -> Self {
+        Self::Literal(inner)
+    }
+
+    pub const fn variable(inner: Variable<'src>) -> Self {
+        Self::Variable(inner)
     }
 
     pub fn grouping(inner: Grouping<'src>) -> Self {
@@ -595,7 +691,7 @@ impl<'src> AstNode<'src> for IfStmt<'src> {
 pub struct BlockStmt<'src> {
     /// `{`
     pub open: Token<'src>,
-    pub stmts: Vec<Statement<'src>>,
+    pub body: Vec<Declaration<'src>>,
     /// `}`
     pub close: Token<'src>,
 }
@@ -618,23 +714,182 @@ impl<'src> AstNode<'src> for BlockStmt<'src> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct ExprStmt<'src> {
+    pub expr: Expr<'src>,
+    /// `;`
+    pub semi: Token<'src>,
+}
+
+impl<'src> AstNode<'src> for ExprStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.expr.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.semi.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.expr, &self.semi).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.expr, &self.semi).expansion(source)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
 pub enum Statement<'src> {
+    Expr(ExprStmt<'src>),
     If(IfStmt<'src>),
     Block(BlockStmt<'src>),
-    Expr(Expr<'src>),
 }
 
 impl<'src> Statement<'src> {
-    pub fn if_stmt(inner: IfStmt<'src>) -> Self {
+    pub const fn expr(inner: ExprStmt<'src>) -> Self {
+        Self::Expr(inner)
+    }
+
+    pub const fn if_stmt(inner: IfStmt<'src>) -> Self {
         Self::If(inner)
     }
 
-    pub fn block(inner: BlockStmt<'src>) -> Self {
+    pub const fn block(inner: BlockStmt<'src>) -> Self {
         Self::Block(inner)
     }
+}
 
-    pub fn expr(inner: Expr<'src>) -> Self {
-        Self::Expr(inner)
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct Program<'src> {
+    pub decls: Vec<Declaration<'src>>,
+}
+
+impl<'src> std::ops::Deref for Program<'src> {
+    type Target = Vec<Declaration<'src>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.decls
+    }
+}
+
+impl std::ops::DerefMut for Program<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.decls
+    }
+}
+
+impl<'src> IntoIterator for Program<'src> {
+    type Item = Declaration<'src>;
+    type IntoIter = std::vec::IntoIter<Declaration<'src>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.decls.into_iter()
+    }
+}
+
+impl<'prgm, 'src> IntoIterator for &'prgm Program<'src> {
+    type Item = &'prgm Declaration<'src>;
+    type IntoIter = std::slice::Iter<'prgm, Declaration<'src>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.decls.iter()
+    }
+}
+
+impl<'prgm, 'src> IntoIterator for &'prgm mut Program<'src> {
+    type Item = &'prgm mut Declaration<'src>;
+    type IntoIter = std::slice::IterMut<'prgm, Declaration<'src>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.decls.iter_mut()
+    }
+}
+
+impl<'src> AstNode<'src> for Program<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.decls.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.decls.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.decls.get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.decls.expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct Assignment<'src> {
+    /// `=`
+    pub op: Token<'src>,
+    pub expr: Expr<'src>,
+}
+
+impl<'src> AstNode<'src> for Assignment<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.op.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.expr.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.op, &self.expr).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.op, &self.expr).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct DeclVar<'src> {
+    /// [`uni`](crate::scanner::token::value::Keyword::Uni) | [`let`](crate::scanner::token::value::Keyword::Let) | [`pvt`](crate::scanner::token::value::Keyword::Pvt)
+    pub var_kw: Token<'src>,
+    /// [`IDENTIFIER`](crate::scanner::token::value::LexValue::Identifier)
+    pub ident: Token<'src>,
+    pub assignment: Option<Assignment<'src>>,
+    /// `;`
+    pub semi: Token<'src>,
+}
+
+impl<'src> AstNode<'src> for DeclVar<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.var_kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.semi.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.var_kw, &self.semi).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.var_kw, &self.semi).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
+pub enum Declaration<'src> {
+    Var(DeclVar<'src>),
+    Stmt(Statement<'src>),
+}
+
+impl<'src> Declaration<'src> {
+    pub const fn var(inner: DeclVar<'src>) -> Self {
+        Self::Var(inner)
+    }
+
+    pub const fn stmt(inner: Statement<'src>) -> Self {
+        Self::Stmt(inner)
     }
 }

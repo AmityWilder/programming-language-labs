@@ -3,7 +3,7 @@
 pub use super::{keyword::Keyword, punc::Punctuation};
 use crate::{
     error::{ErrorType, NumErrorKind},
-    eval::ValueType,
+    exec::eval::ValueType,
     scanner::{
         symbols::{
             BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX, TEXT_DELIM,

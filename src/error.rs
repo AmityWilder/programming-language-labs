@@ -3,7 +3,7 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     arrayvec::ArrayVec,
-    eval::ValueType,
+    exec::eval::ValueType,
     grammar::ast::AstNodeFinal,
     highlight::{
         style::{Color, Style, StyleWrapper},
@@ -351,24 +351,25 @@ macro_rules! expected_token {
 expected_token! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum ExpectedToken {
-        // preproc
-        MacroIdent = "a macro identifier",
-        LParen = "a `(`",
-        CommaOrRParen = "a `,` or `)`",
-        MacroParamOrRParen = "a macro parameter or `)`",
+        MacroIdent = "a macro identifier (like a regular identifier, but starts with `\\`",
+        MacroParamOrRParen = "a macro parameter (like a regular identifier, but starts with `$`) or `)`",
         MacroDefLBrace = "a `{` for macro definition",
         MacroArgLBrace = "a `{` for macro argument",
         MacroPredLBrace = "a `{` for a macro predicate",
         MacroCondLBrace = "a `{` for a macro condition body",
 
-        // grammar
+        LParen = "a `(`",
+        CommaOrRParen = "a `,` or `)`",
         Literal = "a literal",
         ParenExpr = "a parenthesized expression",
         ExprOrRParen = "an expression or `)`",
         Expr = "an expression",
         TypeExpr = "a type expression",
-        OrType = "the alternative type (`fail`, `none`, or `nevr`)",
+        OrType = "an \"or-type\" (`fail`, `none`, or `nevr`)",
         FnSource = "a function name or parenthesized function object expression",
+        Semi = "a `;`",
+        Declaration = "a declaration or statement",
+        Ident = "an identifier",
     }
 }
 
@@ -1100,7 +1101,7 @@ impl<'src> ContextError<'src> {
     /// Produce an error on an optional token (the range will be its lexeme)
     pub fn token_error(
         source: &'src str,
-        token: Option<Token<'src>>,
+        token: Option<&Token<'src>>,
         err: ErrorType<'src>,
     ) -> Self {
         Self::error(
@@ -1162,7 +1163,7 @@ impl<'src> ContextError<'src> {
     }
 
     /// A token was found but not the right kind
-    pub fn unexpected(token: Token<'src>, source: &'src str, expect: ExpectedToken) -> Self {
+    pub fn unexpected(token: &Token<'src>, source: &'src str, expect: ExpectedToken) -> Self {
         Self::token_error(
             source,
             Some(token),
@@ -1185,7 +1186,7 @@ impl<'src> ContextError<'src> {
 
     /// A token is expected but wasn't found; determine from its existence if it's unexpected or missing
     pub fn missing_or_unexpected(
-        token: Option<Token<'src>>,
+        token: Option<&Token<'src>>,
         source: &'src str,
         expect: ExpectedToken,
     ) -> Self {

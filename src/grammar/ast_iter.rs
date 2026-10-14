@@ -1,7 +1,7 @@
 use super::ast::Literal;
 use crate::{
     error::{ContextError, OpSide},
-    grammar::ast::{Binary, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
+    grammar::ast::{Binary, Declaration, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
     highlight::{TokenHighlight, syntax::Syntax},
     scanner::{
         Scanner,
@@ -538,15 +538,15 @@ pub type Semantics<'src, 'expr, I> = std::iter::Flatten<
     >,
 >;
 
-pub fn semantic<'src, 'expr, I>(source: &'src str, ast: I) -> Semantics<'src, 'expr, I>
-where
-    I: IntoIterator<Item = &'expr Expr<'src>>,
-{
-    SemanticIter::new(
-        source,
-        #[expect(clippy::as_conversions)]
-        ast.into_iter()
-            .flat_map(AstIter::new as fn(&'expr Expr<'src>) -> AstIter<'src, 'expr>),
-    )
-    .flatten()
-}
+// pub fn semantic<'src, 'expr, I>(source: &'src str, ast: I) -> Semantics<'src, 'expr, I>
+// where
+//     I: IntoIterator<Item = &'expr Declaration<'src>>,
+// {
+//     SemanticIter::new(
+//         source,
+//         #[expect(clippy::as_conversions)]
+//         ast.into_iter()
+//             .flat_map(AstIter::new as fn(&'expr Expr<'src>) -> AstIter<'src, 'expr>),
+//     )
+//     .flatten()
+// }

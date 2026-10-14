@@ -308,11 +308,15 @@ impl<'src> PreprocessorStream<'src> {
     where
         P: FnOnce(&Token<'src>) -> bool,
     {
-        self.pull_if(p)
-            .ok_or_else(|| match self.peek().copied().transpose() {
-                Ok(token) => ContextError::missing_or_unexpected(token, self.source, expecting),
-                Err(e) => e,
-            })
+        self.pull_if(p).ok_or_else(|| self.error(expecting))
+    }
+
+    pub fn error(&mut self, expecting: ExpectedToken) -> ContextError<'src> {
+        match self.peek() {
+            Some(Ok(token)) => ContextError::unexpected(token, self.source, expecting),
+            Some(Err(e)) => *e,
+            None => ContextError::missing(self.source, expecting),
+        }
     }
 
     pub fn param_group(&mut self) -> Option<Result<ParamGroup<'src>, ContextError<'src>>> {
@@ -426,7 +430,7 @@ impl<'src> PreprocessorStream<'src> {
     {
         self.pull_if_next(match_token!(Macro)).map(|name| {
             let expected_count = arg_count(name.lex).ok_or_else(|| {
-                ContextError::token_error(self.source, Some(name), ErrorType::MacroUndefined)
+                ContextError::token_error(self.source, Some(&name), ErrorType::MacroUndefined)
             })?;
             Ok(MacroExpansion {
                 name,

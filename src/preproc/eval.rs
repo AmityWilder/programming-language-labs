@@ -1,6 +1,6 @@
 use crate::{
     error::{ContextError, ErrorType, OpSide},
-    eval::ValueType,
+    exec::eval::ValueType,
     grammar::ast::{AstNodeFinal, Binary, Expr, Literal, Unary},
     scanner::token::{
         Token,
@@ -26,7 +26,7 @@ impl<'src> PpOpError<'src> {
         match self {
             Self::Incompatible { l, r } => ContextError::token_error(
                 source,
-                Some(*op),
+                Some(op),
                 ErrorType::PreIncompatible {
                     op: op
                         .val
@@ -40,7 +40,7 @@ impl<'src> PpOpError<'src> {
             ),
             Self::Unsupported { x } => ContextError::token_error(
                 source,
-                Some(*op),
+                Some(op),
                 ErrorType::PreUnsupported {
                     op: op
                         .val
@@ -323,7 +323,7 @@ where
             match punc {
                 TokenEq::Keyword(_keyword) => Err(ContextError::token_error(
                     source,
-                    Some(*op),
+                    Some(op),
                     ErrorType::InvalidPreOperator,
                 )),
 
@@ -388,7 +388,7 @@ where
                         _ => {
                             return Err(ContextError::token_error(
                                 source,
-                                Some(*op),
+                                Some(op),
                                 ErrorType::InvalidPreOperator,
                             ));
                         }
@@ -407,7 +407,7 @@ where
                 OpSide::Left => {
                     return Err(ContextError::token_error(
                         source,
-                        Some(*op),
+                        Some(op),
                         ErrorType::InvalidPreOperator,
                     ));
                 }
@@ -421,7 +421,7 @@ where
                         _ => {
                             return Err(ContextError::token_error(
                                 source,
-                                Some(*op),
+                                Some(op),
                                 ErrorType::InvalidPreOperator,
                             ));
                         }
@@ -438,7 +438,7 @@ where
                         _ => {
                             return Err(ContextError::token_error(
                                 source,
-                                Some(*op),
+                                Some(op),
                                 ErrorType::InvalidPreOperator,
                             ));
                         }
@@ -458,10 +458,19 @@ where
 
                 _ => Err(ContextError::token_error(
                     source,
-                    Some(*value),
+                    Some(value),
                     ErrorType::InvalidPreLiteral,
                 )),
             }
+        }
+
+        // TBD: should `pvt` variables be allowed?
+        Expr::Variable(inner) => {
+            return Err(ContextError::node_error(
+                source,
+                inner,
+                ErrorType::InvalidPreLiteral, // TODO: this might need its own error
+            ));
         }
 
         Expr::Grouping(inner) => preproc_eval(source, &inner.expr, mexists),
@@ -483,7 +492,7 @@ where
                 LexValue::Keyword(Keyword::Text) => Ok(PpValue::Text),
                 _ => Err(ContextError::token_error(
                     source,
-                    Some(inner.name),
+                    Some(&inner.name),
                     ErrorType::PreOrType,
                 )),
             }

@@ -66,10 +66,13 @@
 
 use crate::{
     error::ContextError,
-    eval::{RunValue, evaluate},
+    exec::{
+        eval::{RunValue, evaluate},
+        execute,
+    },
     grammar::{
         ast::{Binary, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
-        ast_iter::semantic,
+        // ast_iter::semantic,
         fmt::lisp::Lisp,
         parse,
     },
@@ -92,7 +95,7 @@ use std::{path::PathBuf, range::Range};
 
 mod arrayvec;
 mod error;
-mod eval;
+mod exec;
 mod grammar;
 mod highlight;
 mod preproc;
@@ -168,84 +171,84 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
     }
 };
 
-pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
-    fn header(name: &str) {
-        println!("\x1b[94m{name}:\x1b[0m");
-    }
+// pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
+//     fn header(name: &str) {
+//         println!("\x1b[94m{name}:\x1b[0m");
+//     }
 
-    fn tkn_field(name: &str, value: &Token<'_>, override_syn: Option<Syntax>, indent: usize) {
-        const INDENT_BY: &str = "  ";
-        println!(
-            "{:>indent$}{INDENT_BY}\x1b[90m{name}:\x1b[0m {}",
-            "",
-            SYNTAX_STYLE_ANSI[override_syn.unwrap_or_else(|| value.syntax())].style_dbg(value)
-        );
-    }
+//     fn tkn_field(name: &str, value: &Token<'_>, override_syn: Option<Syntax>, indent: usize) {
+//         const INDENT_BY: &str = "  ";
+//         println!(
+//             "{:>indent$}{INDENT_BY}\x1b[90m{name}:\x1b[0m {}",
+//             "",
+//             SYNTAX_STYLE_ANSI[override_syn.unwrap_or_else(|| value.syntax())].style_dbg(value)
+//         );
+//     }
 
-    fn ast_field(name: &str, expr: &Expr<'_>, indent: usize, next_br_depth: usize) {
-        const INDENT_BY: &str = "  ";
-        print!("{:>indent$}{INDENT_BY}\x1b[90m{name}:\x1b[0m ", "");
-        print_ast(expr, indent.strict_add(INDENT_BY.len()), next_br_depth);
-    }
+//     fn ast_field(name: &str, expr: &Expr<'_>, indent: usize, next_br_depth: usize) {
+//         const INDENT_BY: &str = "  ";
+//         print!("{:>indent$}{INDENT_BY}\x1b[90m{name}:\x1b[0m ", "");
+//         print_ast(expr, indent.strict_add(INDENT_BY.len()), next_br_depth);
+//     }
 
-    match node {
-        Expr::Ternary(inner) => {
-            let Ternary {
-                lhs,
-                lop,
-                mhs,
-                rop,
-                rhs,
-            } = &**inner;
-            header("Ternary");
-            ast_field("lhs", lhs, indent, br_depth);
-            tkn_field("lop", lop, None, indent);
-            ast_field("mhs", mhs, indent, br_depth);
-            tkn_field("rop", rop, None, indent);
-            ast_field("rhs", rhs, indent, br_depth);
-        }
+//     match node {
+//         Expr::Ternary(inner) => {
+//             let Ternary {
+//                 lhs,
+//                 lop,
+//                 mhs,
+//                 rop,
+//                 rhs,
+//             } = &**inner;
+//             header("Ternary");
+//             ast_field("lhs", lhs, indent, br_depth);
+//             tkn_field("lop", lop, None, indent);
+//             ast_field("mhs", mhs, indent, br_depth);
+//             tkn_field("rop", rop, None, indent);
+//             ast_field("rhs", rhs, indent, br_depth);
+//         }
 
-        Expr::Binary(inner) => {
-            let Binary { lhs, op, rhs } = &**inner;
-            header("Binary");
-            ast_field("lhs", lhs, indent, br_depth);
-            tkn_field(" op", op, None, indent);
-            ast_field("rhs", rhs, indent, br_depth);
-        }
+//         Expr::Binary(inner) => {
+//             let Binary { lhs, op, rhs } = &**inner;
+//             header("Binary");
+//             ast_field("lhs", lhs, indent, br_depth);
+//             tkn_field(" op", op, None, indent);
+//             ast_field("rhs", rhs, indent, br_depth);
+//         }
 
-        Expr::Unary(inner) => {
-            let Unary { op, operand, side } = &**inner;
-            header("Unary");
-            tkn_field(" op", op, None, indent);
-            ast_field(side.as_str(), operand, indent, br_depth);
-        }
+//         Expr::Unary(inner) => {
+//             let Unary { op, operand, side } = &**inner;
+//             header("Unary");
+//             tkn_field(" op", op, None, indent);
+//             ast_field(side.as_str(), operand, indent, br_depth);
+//         }
 
-        Expr::Literal(inner) => {
-            let Literal { value } = inner;
-            header("Literal");
-            tkn_field("value", value, None, indent);
-        }
+//         Expr::Literal(inner) => {
+//             let Literal { value } = inner;
+//             header("Literal");
+//             tkn_field("value", value, None, indent);
+//         }
 
-        Expr::Grouping(inner) => {
-            let Grouping { open, expr, close } = &**inner;
-            let syn = Syntax::Bracket(br_depth);
-            header("Grouping");
-            tkn_field(" open", open, Some(syn), indent);
-            ast_field(" expr", expr, indent, br_depth.strict_add(1));
-            tkn_field("close", close, Some(syn), indent);
-        }
+//         Expr::Grouping(inner) => {
+//             let Grouping { open, expr, close } = &**inner;
+//             let syn = Syntax::Bracket(br_depth);
+//             header("Grouping");
+//             tkn_field(" open", open, Some(syn), indent);
+//             ast_field(" expr", expr, indent, br_depth.strict_add(1));
+//             tkn_field("close", close, Some(syn), indent);
+//         }
 
-        Expr::Type(inner) => {
-            let TypeExpr { name, or_ty } = &**inner;
-            header("Type");
-            tkn_field("name", name, None, indent);
-            if let Some(OrType { pipe, ty }) = or_ty {
-                tkn_field("pipe", pipe, None, indent);
-                tkn_field("  ty", ty, None, indent);
-            }
-        }
-    }
-}
+//         Expr::Type(inner) => {
+//             let TypeExpr { name, or_ty } = &**inner;
+//             header("Type");
+//             tkn_field("name", name, None, indent);
+//             if let Some(OrType { pipe, ty }) = or_ty {
+//                 tkn_field("pipe", pipe, None, indent);
+//                 tkn_field("  ty", ty, None, indent);
+//             }
+//         }
+//     }
+// }
 
 trait ContextErrorOrRef<'src> {
     fn as_ref(&self) -> &ContextError<'src>;
@@ -748,85 +751,47 @@ fn run_code(source: &str, config: &Cli) {
     }
 
     // parse debug
-    let ast: Vec<_> = parse(source, tokens.into_iter().flatten()).collect();
-    if config.dbg_ast {
-        println!("\nparser:");
-        for res in &ast {
-            match res {
-                Ok(node) => print_ast(node, 0, 0),
-                Err(e) => println!("{}", SYNTAX_STYLE_ANSI.invalid.style_dbg(e)),
+    let prgm = match parse(source, tokens.into_iter().flatten()).program() {
+        Ok(prgm) => {
+            if config.dbg_ast {
+                println!("\nparser:");
+                println!("TODO: print_ast(&prgm, 0, 0)"); // TODO
             }
+            prgm
         }
-    }
-
-    // parse errors
-    if if config.print_errors {
-        println!();
-        list_errors(
-            "grammar",
-            ast.iter().map(Result::as_ref).filter_map(Result::err),
-        )
-    } else {
-        ast.iter().any(Result::is_err)
-    } {
-        return;
-    }
+        Err(errs) => {
+            // parse errors
+            let any_err = if config.print_errors {
+                println!();
+                list_errors("grammar", errs)
+            } else {
+                errs.into_iter().next().is_some()
+            };
+            debug_assert!(
+                any_err,
+                "parser should only error if there is an error (duh)"
+            );
+            return;
+        }
+    };
 
     // semantic highlighting
     // TODO: need to find a way to have this take Result instead of flattening
     if config.semantic_highlight {
         println!("\nsemantic highlighting:");
-        print_highlighted(semantic(source, ast.iter().flatten()), &SYNTAX_STYLE_ANSI);
+        // TODO
+        println!(
+            "TODO: print_highlighted(semantic(source, prgm.iter().flatten()), &SYNTAX_STYLE_ANSI)"
+        );
     }
 
-    // eval
+    // execution
     if config.do_eval {
-        println!("\nevaluation:");
-        let mut errors = Vec::new();
-        {
-            let mut buf = String::new();
-            for (expr, res) in ast
-                .iter()
-                .flatten()
-                .map(|expr| (expr, evaluate(source, expr)))
-            {
-                if config.echo_exprs {
-                    print!("{:#}\n  \x1b[90m=\x1b[0m ", Lisp::new(expr));
-                }
-
-                buf.clear();
-                let item = match res {
-                    Ok(x) => Ok(runtime_token(x, &mut buf)),
-                    Err(e) => {
-                        buf = format!("<{}>", e.code());
-                        errors.push(e);
-                        Err(GenericError(&buf))
-                    }
-                };
-
-                for (lexeme, syntax) in highlight(std::iter::once(item)) {
-                    print!("{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
-                }
-                println!("\x1b[0m");
-                if config.echo_exprs {
-                    println!();
-                }
-            }
+        println!("\nexecution:");
+        if let Err(e) = execute(&prgm) {
+            println!("runtime error: {e}");
         }
-
-        // eval errors
-        if if config.print_errors {
-            println!();
-            list_errors("runtime", errors)
-        } else {
-            !errors.is_empty()
-        } {
-            #[expect(
-                clippy::needless_return,
-                reason = "should return here if more items follow this in the future"
-            )]
-            return;
-        }
+        println!("\n\nfinished");
     }
 }
 

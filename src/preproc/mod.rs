@@ -229,13 +229,13 @@ impl<'src> Preprocessor<'src> {
                 if is_recursive(&token, head) {
                     Some(ContextError::token_error(
                         source,
-                        Some(token),
+                        Some(&token),
                         ErrorType::RecursiveMacro { head_range },
                     ))
                 } else if is_unknown_param(&token, &params) {
                     Some(ContextError::token_error(
                         source,
-                        Some(token),
+                        Some(&token),
                         ErrorType::MacroParamUndefined {
                             head_range: Some(head_range),
                             param_name: token.lex,
