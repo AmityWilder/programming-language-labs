@@ -904,13 +904,13 @@ impl RunValue<'_> {
         // very important that this is the ACTUAL SIZE of the value! it will be used to store it in the environment!!
         match self {
             RunValue::None | RunValue::CoalesceNone => std::mem::size_of_val(&()),
-            RunValue::Fail(e) => std::mem::size_of_val(&**e),
             RunValue::Bool(x) => std::mem::size_of_val(x),
             RunValue::UInt(x) => std::mem::size_of_val(x),
             RunValue::SInt(x) => std::mem::size_of_val(x),
             RunValue::Frac(x) => std::mem::size_of_val(x),
             RunValue::Char(x) => std::mem::size_of_val(x),
-            RunValue::Text(x) => x.len(), // TODO: depends on literal/const vs runtime
+            RunValue::Text(x) => std::mem::size_of_val(&**x), // TODO: depends on literal/const vs runtime
+            RunValue::Fail(e) => std::mem::size_of_val(&**e),
             RunValue::Type(t) => match t {
                 ValueType::None | ValueType::Nevr => std::mem::size_of::<()>(),
                 ValueType::Bool => std::mem::size_of::<bool>(),
@@ -918,7 +918,7 @@ impl RunValue<'_> {
                 ValueType::SInt => std::mem::size_of::<isize>(),
                 ValueType::Frac => std::mem::size_of::<f64>(),
                 ValueType::Char => std::mem::size_of::<char>(),
-                ValueType::Text => todo!("multiple representations"),
+                ValueType::Text => todo!("multiple representations/dynamically sized"),
                 ValueType::Fail => todo!("dynamically sized"),
                 ValueType::Type | ValueType::Macro => unimplemented!("{t} is not a runtime type"),
             },
@@ -929,13 +929,13 @@ impl RunValue<'_> {
         // very important that this is the ACTUAL SIZE of the value! it will be used to store it in the environment!!
         match self {
             RunValue::None | RunValue::CoalesceNone => std::mem::align_of_val(&()),
-            RunValue::Fail(e) => std::mem::align_of_val(&*e),
             RunValue::Bool(x) => std::mem::align_of_val(&x),
             RunValue::UInt(x) => std::mem::align_of_val(&x),
             RunValue::SInt(x) => std::mem::align_of_val(&x),
             RunValue::Frac(x) => std::mem::align_of_val(&x),
             RunValue::Char(x) => std::mem::align_of_val(&x),
-            RunValue::Text(x) => std::mem::align_of_val(&x),
+            RunValue::Text(x) => std::mem::align_of_val(&**x),
+            RunValue::Fail(e) => std::mem::align_of_val(&**e),
             RunValue::Type(t) => match t {
                 ValueType::None | ValueType::Nevr => std::mem::align_of::<()>(),
                 ValueType::Bool => std::mem::align_of::<bool>(),
