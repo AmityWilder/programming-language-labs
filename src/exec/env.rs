@@ -1,3 +1,4 @@
+use crate::exec::eval::ValueType;
 use std::{collections::HashMap, range::Range};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -9,7 +10,7 @@ pub struct Environment<'src> {
     /// Lookup table associating variable names with ranges into the arena.
     /// Each name is associated with a stack, the last element will be the most recent.
     /// When the stack is emptied, its key should be removed from the table; however this isn't guaranteed.
-    table: HashMap<&'src str, Vec<Range<usize>>>,
+    table: HashMap<&'src str, Vec<(ValueType, Range<usize>)>>,
 }
 
 impl<'src> Environment<'src> {
@@ -33,68 +34,97 @@ impl<'src> Environment<'src> {
     pub fn declare_dyn(
         &mut self,
         ident: &'src str,
+        ty: ValueType,
         align: usize,
         size: usize,
     ) -> Option<&mut [u8]> {
-        let start = self.stack_ptr.checked_next_multiple_of(align)?;
-        let end = start.checked_add(size)?;
-        self.stack_ptr = end;
-        let range = Range { start, end };
+        let range = if size == 0 {
+            // ZST
+            Range { start: 0, end: 0 }
+        } else {
+            assert_ne!(align, 0, "cannot align to 0");
+            let start = self.stack_ptr.checked_next_multiple_of(align)?;
+            let end = start.checked_add(size)?;
+            self.stack_ptr = end; // TODO: this seems wrong, how will we pop it?
+            Range { start, end }
+        };
+        if self.arena.len() < range.end && range.end <= self.arena.capacity() {
+            self.arena.resize(range.end, 0);
+        }
         let mem = self.arena.get_mut(range)?;
-        self.table.entry(ident).or_default().push(range);
-        Some(mem)
+        self.table.entry(ident).or_default().push((ty, range));
+        Some(
+            mem.get_mut(..size)
+                .expect("allocation should be at least as large as the requested size"),
+        )
     }
 
     /// Returns [`None`] if out of memory
     pub fn declare<const N: usize>(
         &mut self,
         ident: &'src str,
+        ty: ValueType,
         align: usize,
     ) -> Option<&mut [u8; N]> {
-        self.declare_dyn(ident, align, N).map(|slice| {
+        self.declare_dyn(ident, ty, align, N).map(|slice| {
             slice
                 .as_mut_array()
                 .expect("declare_dyn should allocate exactly N bytes")
         })
     }
 
-    fn mem_range(&self, ident: &'src str) -> Option<Range<usize>> {
+    fn mem_range(&self, ident: &'src str) -> Option<(ValueType, Range<usize>)> {
         self.table.get(ident)?.last().copied()
     }
 
     /// Returns [`None`] if not a name in the scope
-    pub fn get_dyn(&self, ident: &'src str) -> Option<&[u8]> {
-        self.mem_range(ident).map(|range| {
-            self.arena
-                .get(range)
-                .expect("variables should always have a valid range in the arena")
+    pub fn get_dyn(&self, ident: &'src str) -> Option<(ValueType, &[u8])> {
+        self.mem_range(ident).map(|(ty, range)| {
+            (
+                ty,
+                self.arena
+                    .get(range)
+                    .expect("variables should always have a valid range in the arena"),
+            )
         })
     }
 
     /// Returns [`None`] if not a name in the scope
-    pub fn get<const N: usize>(&self, ident: &'src str) -> Option<&[u8; N]> {
-        self.get_dyn(ident).map(|slice| {
-            slice
-                .as_array()
-                .expect("get_dyn should reference exactly N bytes")
+    pub fn get<const N: usize>(&self, ident: &'src str) -> Option<(ValueType, &[u8; N])> {
+        self.get_dyn(ident).map(|(ty, slice)| {
+            (
+                ty,
+                slice
+                    .as_array()
+                    .expect("get_dyn should reference exactly N bytes"),
+            )
         })
     }
 
     /// Returns [`None`] if not a name in the scope
-    pub fn get_mut_dyn(&mut self, ident: &'src str) -> Option<&mut [u8]> {
-        self.mem_range(ident).map(|range| {
-            self.arena
-                .get_mut(range)
-                .expect("variables should always have a valid range in the arena")
+    pub fn get_mut_dyn(&mut self, ident: &'src str) -> Option<(ValueType, &mut [u8])> {
+        self.mem_range(ident).map(|(ty, range)| {
+            (
+                ty,
+                self.arena
+                    .get_mut(range)
+                    .expect("variables should always have a valid range in the arena"),
+            )
         })
     }
 
     /// Returns [`None`] if not a name in the scope
-    pub fn get_mut<const N: usize>(&mut self, ident: &'src str) -> Option<&mut [u8; N]> {
-        self.get_mut_dyn(ident).map(|slice| {
-            slice
-                .as_mut_array()
-                .expect("get_mut_dyn should reference exactly N bytes")
+    pub fn get_mut<const N: usize>(
+        &mut self,
+        ident: &'src str,
+    ) -> Option<(ValueType, &mut [u8; N])> {
+        self.get_mut_dyn(ident).map(|(ty, slice)| {
+            (
+                ty,
+                slice
+                    .as_mut_array()
+                    .expect("get_mut_dyn should reference exactly N bytes"),
+            )
         })
     }
 }

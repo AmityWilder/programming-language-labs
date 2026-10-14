@@ -787,11 +787,12 @@ fn run_code(source: &str, config: &Cli) {
 
     // execution
     if config.do_eval {
-        println!("\nexecution:");
-        if let Err(e) = execute(&prgm) {
+        const DIVIDER: &str = "///////////////";
+        println!("\nrunning\n{DIVIDER}\n");
+        if let Err(e) = execute(source, &prgm) {
             println!("runtime error: {e}");
         }
-        println!("\n\nfinished");
+        println!("\n{DIVIDER}\nfinished");
     }
 }
 

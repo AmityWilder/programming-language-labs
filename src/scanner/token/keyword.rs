@@ -442,8 +442,16 @@ define_token_eq! {
         /// ```
         Emit = "emit",
 
+        // ----------------------------
+        // Functional
+        // ----------------------------
+
         /// Returns the number of bytes in the type (the size of the type)
+        #[op_desc([_] => "size of")]
         Szof = "szof",
+
+        /// Outputs the value to stdout (TODO: DEPRECATE)
+        Prnt = "prnt",
     }
 }
 

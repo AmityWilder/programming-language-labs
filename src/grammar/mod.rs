@@ -2,7 +2,10 @@
 
 use crate::{
     error::{ContextError, ExpectedToken, OpSide},
-    grammar::ast::{Assignment, DeclVar, Declaration, ExprStmt, Program, Statement, Variable},
+    grammar::ast::{
+        Assignment, BlockStmt, DeclVar, Declaration, ExprStmt, IfBody, IfCondition, IfStmt, OrStmt,
+        PrintStmt, Program, Statement, Variable,
+    },
     scanner::{
         Bracket,
         token::{Token, value::LexValue},
@@ -167,9 +170,15 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `statement -> expression_statement`
+    /// `statement -> block_statement | print_statement | if_statement | expression_statement`
     pub fn statement(&mut self) -> Result<Statement<'src>, ContextError<'src>> {
-        self.expression_statement()
+        self.block_statement()
+            .map(|res| res.map(Statement::block))
+            .or_else(|| self.print_statement())
+            .or_else(|| self.if_statement())
+            .or_else(|| Some(self.expression_statement()))
+            .ok_or_else(|| self.error(ExpectedToken::Statement))
+            .flatten()
     }
 
     /// `expression_statement -> expression ";"`
@@ -178,6 +187,73 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             expr: self.expression()?,
             semi: self.try_pull(match_token!(Punctuation::Semi), ExpectedToken::Semi)?,
         }))
+    }
+
+    /// `print_statement -> "prnt" expression ";"`
+    pub fn print_statement(&mut self) -> Option<Result<Statement<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Keyword::Prnt)).map(|kw| {
+            Ok(Statement::print(PrintStmt {
+                kw,
+                expr: self.expression()?,
+                semi: self.try_pull(match_token!(Punctuation::Semi), ExpectedToken::Semi)?,
+            }))
+        })
+    }
+
+    /// `if_statement -> if_condition if_body`
+    pub fn if_statement(&mut self) -> Option<Result<Statement<'src>, ContextError<'src>>> {
+        self.if_condition().map(|cond| {
+            Ok(Statement::If(IfStmt {
+                cond: cond?,
+                then: self.if_body()?,
+            }))
+        })
+    }
+
+    /// `if_condition -> "if" expression`
+    pub fn if_condition(&mut self) -> Option<Result<IfCondition<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Keyword::If)).map(|if_kw| {
+            Ok(IfCondition {
+                if_kw,
+                pred: self.expression()?,
+            })
+        })
+    }
+
+    /// `or_statement -> "or" ( if_condition )? if_body`
+    pub fn or_statement(&mut self) -> Option<Result<OrStmt<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Keyword::Or)).map(|or_kw| {
+            Ok(OrStmt {
+                or_kw,
+                cond: self.if_condition().transpose()?,
+                then: self.if_body()?,
+            })
+        })
+    }
+
+    /// `or_statement -> block_statement ( or_statement )?`
+    pub fn if_body(&mut self) -> Result<IfBody<'src>, ContextError<'src>> {
+        Ok(IfBody {
+            then: self
+                .block_statement()
+                .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
+                .flatten()?,
+            or: self.or_statement().transpose()?.map(Box::new),
+        })
+    }
+
+    /// `block_statement -> "{" ( declaration )* "}"`
+    pub fn block_statement(&mut self) -> Option<Result<BlockStmt<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Punctuation::LBrace)).map(|open| {
+            let mut body = Vec::new();
+            let close = loop {
+                if let Some(close) = self.pull_if(match_token!(Punctuation::RBrace)) {
+                    break close;
+                }
+                body.push(self.declaration()?);
+            };
+            Ok(BlockStmt { open, body, close })
+        })
     }
 
     /// `expression -> or`
