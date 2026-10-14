@@ -743,7 +743,7 @@ impl<'src> AstNode<'src> for ExprStmt<'src> {
 pub struct PrintStmt<'src> {
     /// `outp`
     pub kw: Token<'src>,
-    pub expr: Expr<'src>,
+    pub group: Grouping<'src>,
     /// `;`
     pub semi: Token<'src>,
 }

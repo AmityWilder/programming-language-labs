@@ -194,7 +194,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.pull_if(match_token!(Keyword::Prnt)).map(|kw| {
             Ok(Statement::print(PrintStmt {
                 kw,
-                expr: self.expression()?,
+                group: self
+                    .group()
+                    .ok_or_else(|| self.error(ExpectedToken::LParen))
+                    .flatten()?,
                 semi: self.try_pull(match_token!(Punctuation::Semi), ExpectedToken::Semi)?,
             }))
         })
@@ -409,7 +412,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.literal()
             .map(Ok)
-            .or_else(|| self.group())
+            .or_else(|| self.group().map(|res| res.map(Expr::grouping)))
             .or_else(|| {
                 self.pull_if(match_token!(Identifier))
                     .map(|ident| Ok(Expr::Variable(Variable { ident })))
@@ -435,14 +438,14 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     }
 
     /// `group -> "(" expression ")"`
-    fn group(&mut self) -> Option<Result<Expr<'src>, ContextError<'src>>> {
+    fn group(&mut self) -> Option<Result<Grouping<'src>, ContextError<'src>>> {
         self.pull_if(match_token!(Punctuation::LParen)).map(|open| {
             let expr = self.expression()?;
             self.try_pull(
                 match_token!(Punctuation::RParen),
                 ExpectedToken::ExprOrRParen,
             )
-            .map(move |close| Expr::grouping(Grouping { open, expr, close }))
+            .map(move |close| Grouping { open, expr, close })
             .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))
         })
     }

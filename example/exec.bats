@@ -8,8 +8,8 @@ if foo > bar {
 } or {
     let bigger = "bar";
 }
-prnt bigger + " is bigger";
+prnt(bigger + " is bigger");
 
 let foobar = foo * bar;
 
-prnt "the product of foo and bar is " + foobar;
+prnt("the product of foo and bar is " + foobar);

@@ -14,10 +14,10 @@ def \ifndef($what $then) {
 }
 
 rot { szof uint > szof sint } {
-    prnt "`uint` is larger than `sint`";
+    prnt("`uint` is larger than `sint`");
 } tor rot { szof uint > 2u*szof bool } {
-    prnt "`uint` is larger than 2 `bool`s";
-    prnt "the sum of `\\foo` and `\\bar` is " + (\foo + \bar);
+    prnt("`uint` is larger than 2 `bool`s");
+    prnt("the sum of `\\foo` and `\\bar` is " + (\foo + \bar));
 } tor {
-    prnt "no match";
+    prnt("no match");
 }
