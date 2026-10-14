@@ -57,4 +57,44 @@ impl<'src> Environment<'src> {
                 .expect("declare_dyn should allocate exactly N bytes")
         })
     }
+
+    fn mem_range(&self, ident: &'src str) -> Option<Range<usize>> {
+        self.table.get(ident)?.last().copied()
+    }
+
+    /// Returns [`None`] if not a name in the scope
+    pub fn get_dyn(&self, ident: &'src str) -> Option<&[u8]> {
+        self.mem_range(ident).map(|range| {
+            self.arena
+                .get(range)
+                .expect("variables should always have a valid range in the arena")
+        })
+    }
+
+    /// Returns [`None`] if not a name in the scope
+    pub fn get<const N: usize>(&self, ident: &'src str) -> Option<&[u8; N]> {
+        self.get_dyn(ident).map(|slice| {
+            slice
+                .as_array()
+                .expect("get_dyn should reference exactly N bytes")
+        })
+    }
+
+    /// Returns [`None`] if not a name in the scope
+    pub fn get_mut_dyn(&mut self, ident: &'src str) -> Option<&mut [u8]> {
+        self.mem_range(ident).map(|range| {
+            self.arena
+                .get_mut(range)
+                .expect("variables should always have a valid range in the arena")
+        })
+    }
+
+    /// Returns [`None`] if not a name in the scope
+    pub fn get_mut<const N: usize>(&mut self, ident: &'src str) -> Option<&mut [u8; N]> {
+        self.get_mut_dyn(ident).map(|slice| {
+            slice
+                .as_mut_array()
+                .expect("get_mut_dyn should reference exactly N bytes")
+        })
+    }
 }
