@@ -5,6 +5,7 @@ use crate::{
     scanner::token::value::{Keyword, LexValue},
 };
 
+pub mod asm;
 pub mod env;
 pub mod error;
 pub mod eval;

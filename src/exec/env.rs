@@ -1,4 +1,4 @@
-use crate::exec::eval::ValueType;
+use crate::{exec::eval::ValueType, types::fsize};
 use std::{collections::LinkedList, marker::PhantomData, num::NonZero, range::Range};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -311,7 +311,7 @@ impl SizedPrimitive for bool {}
 impl SizedPrimitive for u8 {}
 impl SizedPrimitive for usize {}
 impl SizedPrimitive for isize {}
-impl SizedPrimitive for f64 {}
+impl SizedPrimitive for fsize {}
 impl SizedPrimitive for char {} // TBD: is char always 4 bytes?
 impl<T: Primitive, const N: usize> SizedPrimitive for [T; N] {}
 

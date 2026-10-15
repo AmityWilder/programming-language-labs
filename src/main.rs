@@ -68,6 +68,7 @@
 use crate::{
     error::ContextError,
     exec::{
+        asm::{self, arch::VirtualArch},
         eval::{RunValue, evaluate},
         execute,
     },
@@ -94,6 +95,7 @@ use crate::{
 use grammar::ast::Literal;
 use std::{path::PathBuf, range::Range};
 
+mod analyzer;
 mod arrayvec;
 mod error;
 mod exec;
@@ -102,6 +104,7 @@ mod highlight;
 mod preproc;
 mod regex;
 mod scanner;
+mod types;
 
 #[cfg(test)] // only include testing module in test builds
 mod tests;
@@ -789,9 +792,16 @@ fn run_code(source: &str, config: &Cli) {
 
     // execution
     if config.do_eval {
+        const RAM_SIZE: usize = 1 << 16;
+        const STACK_SIZE: usize = 1 << 8;
         const DIVIDER: &str = "///////////////";
+        let mut asm_prgm = asm::Program::new(Vec::new());
+        let mut arch = VirtualArch::new(
+            vec![0; RAM_SIZE].into_boxed_slice(),
+            vec![0; STACK_SIZE].into_boxed_slice(),
+        );
         println!("\nrunning\n{DIVIDER}\n");
-        if let Err(e) = execute(source, &prgm) {
+        if let Err(e) = asm_prgm.run(&mut arch) {
             println!("runtime error: {e}");
         }
         println!("\n{DIVIDER}\nfinished");
