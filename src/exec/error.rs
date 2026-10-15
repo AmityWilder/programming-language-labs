@@ -6,6 +6,8 @@ pub enum Failure {
     ParseFlt(std::num::ParseFloatError),
     ParseChar(std::char::ParseCharError),
     TryFromInt(std::num::TryFromIntError),
+    Utf8Error(std::str::Utf8Error),
+    OutOfBounds,
 }
 
 impl From<std::str::ParseBoolError> for Failure {
@@ -33,6 +35,11 @@ impl From<std::num::TryFromIntError> for Failure {
         Self::TryFromInt(value)
     }
 }
+impl From<std::str::Utf8Error> for Failure {
+    fn from(value: std::str::Utf8Error) -> Self {
+        Self::Utf8Error(value)
+    }
+}
 
 impl std::fmt::Display for Failure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -42,6 +49,11 @@ impl std::fmt::Display for Failure {
             Self::ParseFlt(_) => write!(f, "could not parse float"),
             Self::ParseChar(_) => write!(f, "could not parse chararcter"),
             Self::TryFromInt(_) => write!(f, "could not convert integer"),
+            Self::Utf8Error(_) => write!(f, "string contains invalid UTF-8"),
+            Self::OutOfBounds => write!(
+                f,
+                "attempted to access a location outside the bounds of available memory"
+            ),
         }
     }
 }
@@ -54,6 +66,9 @@ impl std::error::Error for Failure {
             Self::ParseFlt(e) => Some(e),
             Self::ParseChar(e) => Some(e),
             Self::TryFromInt(e) => Some(e),
+            Self::Utf8Error(e) => Some(e),
+
+            _ => None,
         }
     }
 }

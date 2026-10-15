@@ -2,6 +2,54 @@ use crate::types::fsize;
 use std::marker::PhantomData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum RegCat {
+    #[default]
+    Zero,
+    V(usize),
+    A(usize),
+    T(usize),
+    S(usize),
+    Gp,
+    Sp,
+    Ra,
+}
+
+impl From<Reg> for RegCat {
+    fn from(value: Reg) -> Self {
+        match value {
+            Reg::Zero => Self::Zero,
+            Reg::V0 => Self::V(0),
+            Reg::V1 => Self::V(1),
+            Reg::A0 => Self::A(0),
+            Reg::A1 => Self::A(1),
+            Reg::A2 => Self::A(2),
+            Reg::A3 => Self::A(3),
+            Reg::T0 => Self::T(0),
+            Reg::T1 => Self::T(1),
+            Reg::T2 => Self::T(2),
+            Reg::T3 => Self::T(3),
+            Reg::T4 => Self::T(4),
+            Reg::T5 => Self::T(5),
+            Reg::T6 => Self::T(6),
+            Reg::T7 => Self::T(7),
+            Reg::T8 => Self::T(8),
+            Reg::T9 => Self::T(9),
+            Reg::S0 => Self::S(0),
+            Reg::S1 => Self::S(1),
+            Reg::S2 => Self::S(2),
+            Reg::S3 => Self::S(3),
+            Reg::S4 => Self::S(4),
+            Reg::S5 => Self::S(5),
+            Reg::S6 => Self::S(6),
+            Reg::S7 => Self::S(7),
+            Reg::Gp => Self::Gp,
+            Reg::Sp => Self::Sp,
+            Reg::Ra => Self::Ra,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Reg {
     #[default]
     Zero,
@@ -34,6 +82,45 @@ pub enum Reg {
     Ra,
 }
 
+impl TryFrom<RegCat> for Reg {
+    type Error = ();
+
+    fn try_from(value: RegCat) -> Result<Self, Self::Error> {
+        match value {
+            RegCat::Zero => Ok(Self::Zero),
+            RegCat::V(0) => Ok(Self::V0),
+            RegCat::V(1) => Ok(Self::V1),
+            RegCat::A(0) => Ok(Self::A0),
+            RegCat::A(1) => Ok(Self::A1),
+            RegCat::A(2) => Ok(Self::A2),
+            RegCat::A(3) => Ok(Self::A3),
+            RegCat::T(0) => Ok(Self::T0),
+            RegCat::T(1) => Ok(Self::T1),
+            RegCat::T(2) => Ok(Self::T2),
+            RegCat::T(3) => Ok(Self::T3),
+            RegCat::T(4) => Ok(Self::T4),
+            RegCat::T(5) => Ok(Self::T5),
+            RegCat::T(6) => Ok(Self::T6),
+            RegCat::T(7) => Ok(Self::T7),
+            RegCat::T(8) => Ok(Self::T8),
+            RegCat::T(9) => Ok(Self::T9),
+            RegCat::S(0) => Ok(Self::S0),
+            RegCat::S(1) => Ok(Self::S1),
+            RegCat::S(2) => Ok(Self::S2),
+            RegCat::S(3) => Ok(Self::S3),
+            RegCat::S(4) => Ok(Self::S4),
+            RegCat::S(5) => Ok(Self::S5),
+            RegCat::S(6) => Ok(Self::S6),
+            RegCat::S(7) => Ok(Self::S7),
+            RegCat::Gp => Ok(Self::Gp),
+            RegCat::Sp => Ok(Self::Sp),
+            RegCat::Ra => Ok(Self::Ra),
+
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TReg<T: ?Sized>(Reg, PhantomData<T>);
 
@@ -54,6 +141,18 @@ impl<T: ?Sized> std::hash::Hash for TReg<T> {
 impl<T: ?Sized> TReg<T> {
     pub const fn new(reg: Reg) -> Self {
         Self(reg, PhantomData)
+    }
+}
+
+impl<T> From<Reg> for TReg<T> {
+    fn from(value: Reg) -> Self {
+        Self::new(value)
+    }
+}
+
+impl<T> From<TReg<T>> for Reg {
+    fn from(value: TReg<T>) -> Self {
+        value.0
     }
 }
 
