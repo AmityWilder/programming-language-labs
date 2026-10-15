@@ -69,7 +69,7 @@ use crate::{
     error::ContextError,
     exec::{
         asm::{self, arch::VirtualArch},
-        eval::{RunValue, evaluate},
+        eval::RunValue,
         execute,
     },
     grammar::{
@@ -481,7 +481,7 @@ fn runtime_token<'buf>(value: RunValue<'buf>, buf: &'buf mut String) -> RunToken
                 }),
             }
         }
-        RunValue::UPtr(_) => todo!(),
+        RunValue::Ptr(_, _) => todo!(),
         RunValue::Type(t) => {
             _ = write!(buf, "{t:?}"); // infallible for String
             RunToken {
@@ -792,19 +792,34 @@ fn run_code(source: &str, config: &Cli) {
 
     // execution
     if config.do_eval {
+        const USE_ASM: bool = false;
         const RAM_SIZE: usize = 1 << 16;
         const STACK_SIZE: usize = 1 << 8;
-        const DIVIDER: &str = "///////////////";
-        let mut asm_prgm = asm::Program::new(Vec::new());
-        let mut arch = VirtualArch::new(
-            vec![0; RAM_SIZE].into_boxed_slice(),
-            vec![0; STACK_SIZE].into_boxed_slice(),
-        );
-        println!("\nrunning\n{DIVIDER}\n");
-        if let Err(e) = asm_prgm.run(&mut arch) {
-            println!("runtime error: {e}");
+        if USE_ASM {
+            println!("\nrunning...\n----------");
+            let mut asm_prgm = asm::Program::new(Vec::new());
+            let mut arch = VirtualArch::new(
+                vec![0; RAM_SIZE].into_boxed_slice(),
+                vec![0; STACK_SIZE].into_boxed_slice(),
+            );
+            let res = asm_prgm.run(&mut arch);
+            println!("----------\nfinished\n");
+            if let Err(e) = res
+                && config.print_errors
+            {
+                println!("runtime error: {e}");
+            }
+        } else {
+            println!("\nrunning...\n----------");
+            let res = execute(source, &prgm);
+            println!("----------\nfinished\n");
+            if let Err(e) = res
+                && config.print_errors
+            {
+                _ = list_errors("runtime", std::iter::once(e));
+                println!("runtime error: {e}");
+            }
         }
-        println!("\n{DIVIDER}\nfinished");
     }
 }
 

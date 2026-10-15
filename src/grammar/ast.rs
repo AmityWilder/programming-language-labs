@@ -479,7 +479,6 @@ impl<'src> AstNode<'src> for Variable<'src> {
 
 #[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
 pub enum Expr<'src> {
-    Ternary(Box<Ternary<'src>>),
     Binary(Box<Binary<'src>>),
     Unary(Box<Unary<'src>>),
     Literal(Literal<'src>),
@@ -489,10 +488,6 @@ pub enum Expr<'src> {
 }
 
 impl<'src> Expr<'src> {
-    pub fn ternary(inner: Ternary<'src>) -> Self {
-        Self::Ternary(Box::new(inner))
-    }
-
     pub fn binary(inner: Binary<'src>) -> Self {
         Self::Binary(Box::new(inner))
     }

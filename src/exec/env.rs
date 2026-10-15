@@ -204,7 +204,7 @@ impl<'src> StackMemory<'src> {
     }
 
     /// Returns [`None`] if variable does not exist
-    pub fn ulookup<Q>(&self, ident: &Q) -> Option<UntypedPointer>
+    pub fn lookup<Q>(&self, ident: &Q) -> Option<(ValueType, UntypedPointer)>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -214,19 +214,7 @@ impl<'src> StackMemory<'src> {
             .flat_map(|layer| layer.scopes.iter().flat_map(|scope| scope.vars.iter()))
             .chain(self.table.global.vars.iter())
             .rfind(|(name, _)| ident == *name)
-            .map(|(_, item)| UntypedPointer(item.range))
-    }
-
-    /// Returns [`None`] if variable does not exist
-    pub fn lookup<T, Q>(&self, ident: &Q) -> Option<Pointer<T>>
-    where
-        T: ?Sized,
-        Q: ?Sized + PartialEq<str>,
-    {
-        self.ulookup(ident).map(|ptr| Pointer {
-            ptr,
-            _marker: PhantomData,
-        })
+            .map(|(_, item)| (item.ty, UntypedPointer(item.range)))
     }
 
     /// Returns [`None`] if the pointer is out of range
@@ -254,7 +242,7 @@ impl<'src> StackMemory<'src> {
     /// Returns [`None`] if the pointer is out of range
     ///
     /// # Safety
-    /// Caller must ensure that `data` is compatible with the layout of `T`
+    /// Caller must ensure that `ptr` points to a memory range that is compatible with the layout of `T`
     pub unsafe fn get_as<T: ?Sized + Primitive>(&self, ptr: UntypedPointer) -> Option<&T> {
         self.get_raw(ptr)
             // SAFETY: Caller must uphold safety contract

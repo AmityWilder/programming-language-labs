@@ -3,7 +3,7 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     arrayvec::ArrayVec,
-    exec::eval::ValueType,
+    exec::{error::Failure, eval::ValueType},
     grammar::ast::AstNodeFinal,
     highlight::{
         style::{Color, Style, StyleWrapper},
@@ -891,10 +891,10 @@ pub enum ErrorType<'src> {
     },
 
     // ----------------------------
-    // eval
+    // analysis
     // ----------------------------
     /// Attempted to find the quotient or remainder with a denominator of 0
-    #[code(RUN, 41)]
+    #[code(CMP, 41)]
     #[err({ .. }, |f| write!(f, "divide by zero"))]
     #[inlay({ .. }, |f| write!(f, "dividing by 0"))]
     #[help({ .. }, |f, _src| write!(f, "ensure the right side cannot be 0"))]
@@ -905,7 +905,7 @@ pub enum ErrorType<'src> {
     },
 
     /// The operands in a binary operation are of incompatible type
-    #[code(RUN, 42)]
+    #[code(CMP, 42)]
     #[err({ op, l_ty, r_ty, .. }, |f| write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"))]
     #[inlay({ op, l_ty, r_ty, .. }, |f| write!(f, "{} is not supported between operands of these types", op.op_description(&[*l_ty, *r_ty])))]
     #[help({ op, l_ty, r_ty, .. }, |f, _src| {
@@ -940,7 +940,7 @@ pub enum ErrorType<'src> {
     },
 
     /// The operand in a unary operation is of an unsupported type
-    #[code(RUN, 43)]
+    #[code(CMP, 43)]
     #[err({ op, r_ty, .. }, |f| write!(f, "`{op}` is not supported for {r_ty}"))]
     #[inlay({ op, r_ty, .. }, |f| write!(f, "{} is not supported for operands of this type", op.op_description(&[*r_ty])))]
     #[help({ .. }, |f, _src| write!(f, "try a different operator or convert the type"))]
@@ -954,14 +954,32 @@ pub enum ErrorType<'src> {
     },
 
     /// Unsigned cannot be negated
-    #[code(RUN, 44)]
+    #[code(CMP, 44)]
     #[err(|f| write!(f, "unsigned integer cannot be negated"))]
     #[inlay(|f| write!(f, "uint can't be negated"))]
     #[help(|f, _src| write!(f, "remove the `-` or convert the integer to signed"))]
     UnsignedNeg,
 
-    /// An operation resulted in overflow
+    // TODO: make this more helpful
     #[code(RUN, 45)]
+    #[err(|f| write!(f, "cannot find variable within this scope"))]
+    #[inlay(|f| write!(f, "unknown variable"))]
+    #[help(|f, _src| write!(f, "check if the variable is in a tighter scope than where you are trying to use it"))]
+    UnknownVar,
+
+    // TODO: need an error for undefined conversion
+
+    // ----------------------------
+    // runtime
+    // ----------------------------
+    #[code(RUN, 50)]
+    #[err((_), |f| write!(f, "unhandled failure"))]
+    #[inlay((_), |f| write!(f, "failed operation"))]
+    #[help({ .. }, |f, _src| write!(f, "try handling the error"))] // TODO: make this more helpful
+    Fail(Failure),
+
+    /// An operation resulted in overflow
+    #[code(RUN, 51)]
     #[err((_), |f| write!(f, "arithmetic overflow"))]
     #[inlay((_), |f| write!(f, "unhandled integer overflow"))]
     #[help((e), |f, _src| {
@@ -1030,7 +1048,7 @@ pub enum ErrorType<'src> {
     Overflow(OverflowError),
 
     /// Failed to convert between integer types
-    #[code(RUN, 46)]
+    #[code(RUN, 52)]
     #[err({ failure, .. }, |f| write!(f, "failed conversion: {failure}"))]
     #[inlay({ .. }, |f| write!(f, "integer conversion failed"))]
     #[help({ .. }, |f, _src| write!(f, "ensure the expression fits in the target type"))]
@@ -1043,13 +1061,6 @@ pub enum ErrorType<'src> {
         op_range: Range<usize>,
         failure: IntConversionFailure,
     },
-
-    // TODO: make this more helpful
-    #[code(RUN, 47)]
-    #[err(|f| write!(f, "cannot find variable within this scope"))]
-    #[inlay(|f| write!(f, "unknown variable"))]
-    #[help(|f, _src| write!(f, "check if the variable is in a tighter scope than where you are trying to use it"))]
-    UnknownVar,
 }
 }
 
