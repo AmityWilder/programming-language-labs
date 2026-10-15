@@ -311,12 +311,6 @@ where
 
     // TODO: Some operations are valid for Expr but not in preprocessing
     match expr {
-        Expr::Ternary(inner) => Err(ContextError::node_error(
-            source,
-            &**inner,
-            ErrorType::InvalidPreOperator,
-        )),
-
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
 

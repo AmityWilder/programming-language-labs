@@ -127,7 +127,6 @@ impl LispDisplay for Variable<'_> {
 impl LispDisplay for Expr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Ternary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Binary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
             // TBD: should this use val instead of lex?

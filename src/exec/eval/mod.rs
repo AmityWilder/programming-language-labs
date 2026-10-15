@@ -6,7 +6,7 @@ use crate::{
         ContextError, ErrorType, IntConversionFailure, IntValue, OpSide, OverflowError, TargetTy,
     },
     exec::env::Environment,
-    grammar::ast::{AstNodeFinal, Binary, Expr, Literal, Unary},
+    grammar::ast::{AstNodeFinal, Binary, Expr, Grouping, Literal, TypeExpr, Unary, Variable},
     scanner::token::{
         Token,
         keyword::Keyword,
@@ -214,7 +214,6 @@ pub enum ValueType {
     #[default]
     None,
     /// Not constructable
-    // TBD: does this make sense to be a value type?
     Nevr,
     Bool,
     UInt,
@@ -265,11 +264,59 @@ pub enum RunValue<'src> {
     Char(char),
     Text(Cow<'src, str>),
     Type(ValueType),
-    UPtr(UntypedPointer),
+    Ptr(ValueType, UntypedPointer),
 }
 
-impl<'src> RunValue<'src> {
-    pub fn typename(&self) -> ValueType {
+impl RunValue<'_> {
+    /// # Safety
+    /// Caller must ensure that `ptr` points to a memory range that is compatible with the layout of `T`
+    pub unsafe fn deref<'env>(
+        ty: ValueType,
+        ptr: UntypedPointer,
+        env: &'env Environment<'_>,
+    ) -> Option<RunValue<'env>> {
+        match ty {
+            ValueType::None => Some(RunValue::None),
+
+            // SAFETY: caller must uphold safety contract
+            ValueType::Bool => unsafe { env.stack().get_as(ptr) }
+                .copied()
+                .map(RunValue::Bool),
+
+            // SAFETY: caller must uphold safety contract
+            ValueType::UInt => unsafe { env.stack().get_as(ptr) }
+                .copied()
+                .map(RunValue::UInt),
+
+            // SAFETY: caller must uphold safety contract
+            ValueType::SInt => unsafe { env.stack().get_as(ptr) }
+                .copied()
+                .map(RunValue::SInt),
+
+            // SAFETY: caller must uphold safety contract
+            ValueType::Frac => unsafe { env.stack().get_as(ptr) }
+                .copied()
+                .map(RunValue::Frac),
+
+            // SAFETY: caller must uphold safety contract
+            ValueType::Char => unsafe { env.stack().get_as(ptr) }
+                .copied()
+                .map(RunValue::Char),
+
+            // SAFETY: caller must uphold safety contract
+            ValueType::Text => unsafe { env.stack().get_as(ptr) }
+                .map(Cow::Borrowed)
+                .map(RunValue::Text), // TODO: String vs str
+
+            ValueType::Fail => todo!(),
+            ValueType::Ptr => todo!("indirection"),
+            ValueType::Nevr | ValueType::Type | ValueType::Macro => {
+                unimplemented!("can't have a pointer to {ty}")
+            }
+        }
+    }
+
+    pub const fn typename(&self) -> ValueType {
         match self {
             Self::None | Self::CoalesceNone => ValueType::None,
             Self::Fail(_) => ValueType::Fail,
@@ -279,9 +326,7 @@ impl<'src> RunValue<'src> {
             Self::Frac(_) => ValueType::Frac,
             Self::Char(_) => ValueType::Char,
             Self::Text(_) => ValueType::Text,
-            Self::UPtr(_) => ValueType::Ptr,
-            // TBD: is this a good idea?
-            Self::Type(t) => *t,
+            Self::Ptr(t, _) | Self::Type(t) => *t,
         }
     }
 
@@ -295,7 +340,7 @@ impl<'src> RunValue<'src> {
             RunValue::Frac(x) => println!("{x}"),
             RunValue::Char(x) => println!("{x}"),
             RunValue::Text(x) => println!("{x}"),
-            RunValue::UPtr(_) => todo!(),
+            RunValue::Ptr(_, _) => todo!(),
             RunValue::Type(_) => unimplemented!("typename does not exist at runtime"),
         }
     }
@@ -450,9 +495,7 @@ impl<'src> RunValue<'src> {
             (Self::Frac(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
             (Self::Char(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 
-            (Self::Text(l), Self::Text(r)) => {
-                Ok(Self::Text(Cow::Owned(l.as_ref().to_string() + &*r)))
-            }
+            (Self::Text(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 
             // TODO: char arithmetic? (needs errors)
             (l, r) => Err(OpError::Incompatible(l.typename(), r.typename())),
@@ -719,7 +762,7 @@ impl<'src> RunValue<'src> {
             | (Self::Char(_), ValueType::Char)
             | (Self::Text(_), ValueType::Text) => Ok(self.clone()),
 
-            (x, t @ (ValueType::None | ValueType::Nevr | ValueType::Fail))
+            (x, t @ (ValueType::None | ValueType::Fail))
             | (x @ (Self::None | Self::CoalesceNone), t) => {
                 Err(OpError::Incompatible(x.typename(), t))
             }
@@ -832,7 +875,7 @@ impl<'src> RunValue<'src> {
             (_, ValueType::Type) => unimplemented!("`{into_ty}` isn't a type"),
 
             // TODO: add a warning about transmuting into self(?)
-            (Self::None | Self::CoalesceNone, ValueType::None | ValueType::Nevr)
+            (Self::None | Self::CoalesceNone, ValueType::None)
             | (Self::Bool(_), ValueType::Bool)
             | (Self::UInt(_), ValueType::UInt)
             | (Self::SInt(_), ValueType::SInt)
@@ -841,8 +884,7 @@ impl<'src> RunValue<'src> {
             | (Self::Text(_), ValueType::Text) => Ok(self.clone()),
 
             // TBD: what about custom types?
-            (Self::None | Self::CoalesceNone, _)
-            | (_, ValueType::None | ValueType::Nevr | ValueType::Fail) => {
+            (Self::None | Self::CoalesceNone, _) | (_, ValueType::None | ValueType::Fail) => {
                 todo!("'transmute involving none/nevr/fail' error")
             }
 
@@ -862,7 +904,7 @@ impl<'src> RunValue<'src> {
 
     // Unary
 
-    fn not(&self) -> Result<Self, OpError> {
+    const fn not(&self) -> Result<Self, OpError> {
         match self {
             &Self::Bool(r) => Ok(Self::Bool(!r)),
             &Self::UInt(r) => Ok(Self::UInt(!r)),
@@ -906,9 +948,10 @@ impl<'src> RunValue<'src> {
             RunValue::Char(x) => std::mem::size_of_val(x),
             RunValue::Text(x) => std::mem::size_of_val(&**x), // TODO: depends on literal/const vs runtime
             RunValue::Fail(e) => std::mem::size_of_val(e),
-            RunValue::UPtr(ptr) => std::mem::size_of_val(ptr),
+            RunValue::Ptr(_, ptr) => std::mem::size_of_val(ptr),
             RunValue::Type(t) => match t {
-                ValueType::None | ValueType::Nevr => std::mem::size_of::<()>(),
+                ValueType::None => std::mem::size_of::<()>(),
+                ValueType::Nevr => unimplemented!("not storable"),
                 ValueType::Bool => std::mem::size_of::<bool>(),
                 ValueType::UInt => std::mem::size_of::<usize>(),
                 ValueType::SInt => std::mem::size_of::<isize>(),
@@ -931,13 +974,13 @@ impl<'src> RunValue<'src> {
             RunValue::SInt(_) | RunValue::Type(ValueType::SInt) => std::mem::align_of::<isize>(),
             RunValue::Frac(_) | RunValue::Type(ValueType::Frac) => std::mem::align_of::<fsize>(),
             RunValue::Char(_) | RunValue::Type(ValueType::Char) => std::mem::align_of::<char>(),
-            RunValue::Text(_) | RunValue::Type(ValueType::Text) => std::mem::align_of::<u8>(), // i thiiiink?..
+            RunValue::Text(_) | RunValue::Type(ValueType::Text) => std::mem::align_of::<u8>(), // TBD: String or str?
             RunValue::Fail(_) | RunValue::Type(ValueType::Fail) => std::mem::align_of::<Failure>(),
-            RunValue::UPtr(_) | RunValue::Type(ValueType::Ptr) => {
+            RunValue::Ptr(_, _) | RunValue::Type(ValueType::Ptr) => {
                 std::mem::align_of::<UntypedPointer>()
             }
 
-            RunValue::Type(ValueType::Nevr) => todo!("shouldn't be stored"),
+            RunValue::Type(ValueType::Nevr) => unimplemented!("not storable"),
             RunValue::Type(t @ (ValueType::Type | ValueType::Macro)) => {
                 unimplemented!("{t} is not a runtime type")
             }
@@ -945,159 +988,216 @@ impl<'src> RunValue<'src> {
     }
 }
 
-pub fn evaluate<'src>(
-    source: &'src str,
-    env: &Environment<'src>,
-    ast: &Expr<'src>,
-) -> Result<RunValue<'src>, ContextError<'src>> {
-    use Keyword::Szof;
-    use Punctuation::{
-        Add, And, Coalesce, Convert, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or,
-        Pow, Rem, Rotl, Rotr, Shl, Shr, SubNeg, Transmute, Xnor, Xor,
-    };
-    match ast {
-        Expr::Ternary(_) => todo!("deprecated"),
+pub trait Evaluate<'src> {
+    fn evaluate<'env>(
+        &self,
+        source: &'src str,
+        env: &'env Environment<'src>,
+    ) -> Result<RunValue<'env>, ContextError<'src>>;
+}
 
-        Expr::Binary(inner) => {
-            let Binary { lhs, op, rhs } = &**inner;
-            let l = evaluate(source, env, lhs)?;
-            let r = evaluate(source, env, rhs)?;
+impl<'src> Evaluate<'src> for Expr<'src> {
+    fn evaluate<'env>(
+        &self,
+        source: &'src str,
+        env: &'env Environment<'src>,
+    ) -> Result<RunValue<'env>, ContextError<'src>> {
+        match self {
+            Self::Binary(x) => x.evaluate(source, env),
+            Self::Unary(x) => x.evaluate(source, env),
+            Self::Literal(x) => x.evaluate(source, env),
+            Self::Variable(x) => x.evaluate(source, env),
+            Self::Grouping(x) => x.evaluate(source, env),
+            Self::Type(x) => x.evaluate(source, env),
+        }
+    }
+}
 
-            if matches!(
-                (&l, &r),
-                (RunValue::CoalesceNone, _) | (_, RunValue::CoalesceNone)
-            ) {
-                return Ok(RunValue::CoalesceNone);
-            }
+impl<'src> Evaluate<'src> for Binary<'src> {
+    fn evaluate<'env>(
+        &self,
+        source: &'src str,
+        env: &'env Environment<'src>,
+    ) -> Result<RunValue<'env>, ContextError<'src>> {
+        use Punctuation::{
+            Add, And, Convert, Div, Eq, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Or, Pow, Rem, Rotl,
+            Rotr, Shl, Shr, SubNeg, Transmute, Xnor, Xor,
+        };
+        let Binary { lhs, op, rhs } = self;
+        let l = lhs.evaluate(source, env)?;
+        let r = rhs.evaluate(source, env)?;
 
-            let punc = op
-                .val
-                .to_token_eq()
-                .expect("only TokenEq supported for ops");
-            match punc {
-                TokenEq::Keyword(_keyword) => unimplemented!("no binary keywords yet"),
-
-                TokenEq::Punctuation(punctuation) => match punctuation {
-                    And => l.and(&r),
-                    Xor => l.xor(&r),
-                    Or => l.or(&r),
-                    Nand => l.nand(&r),
-                    Xnor => l.xnor(&r),
-                    Nor => l.nor(&r),
-                    Add => l.add(&r),
-                    SubNeg => l.sub(&r),
-                    Mul => l.mul(&r),
-                    Div => l.div(&r),
-                    Rem => l.rem(&r),
-                    Pow => l.pow(&r),
-                    Shl => l.shl(&r),
-                    Shr => l.shr(&r),
-                    Rotl => l.rotl(&r),
-                    Rotr => l.rotr(&r),
-                    Convert if let RunValue::Type(r) = r => l.convert(r),
-                    Transmute if let RunValue::Type(r) = r => l.transmute(r),
-
-                    Eq | Ne => l.eq(&r).map(|is_eq| {
-                        RunValue::Bool(match punctuation {
-                            Eq => is_eq,
-                            Ne => !is_eq,
-                            _ => unreachable!("guarded by outer match arm"),
-                        })
-                    }),
-
-                    Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
-                        RunValue::Bool(match punctuation {
-                            Lt => ord.is_some_and(Ordering::is_lt),
-                            Gt => ord.is_some_and(Ordering::is_gt),
-                            Le => ord.is_some_and(Ordering::is_le),
-                            Ge => ord.is_some_and(Ordering::is_ge),
-                            _ => unreachable!("guarded by outer match arm"),
-                        })
-                    }),
-
-                    _ => unimplemented!(),
-                },
-            }
-            .map_err(|e| e.binary(source, op, lhs, rhs))
+        if matches!(
+            (&l, &r),
+            (RunValue::CoalesceNone, _) | (_, RunValue::CoalesceNone)
+        ) {
+            return Ok(RunValue::CoalesceNone);
         }
 
-        Expr::Unary(inner) => {
-            let Unary { op, operand, side } = &**inner;
-            let x = evaluate(source, env, operand)?;
+        let punc = op
+            .val
+            .to_token_eq()
+            .expect("only TokenEq supported for ops");
+        match punc {
+            TokenEq::Keyword(_keyword) => unimplemented!("no binary keywords yet"),
 
-            if matches!(&x, RunValue::CoalesceNone) {
-                return Ok(RunValue::CoalesceNone);
-            }
+            TokenEq::Punctuation(punctuation) => match punctuation {
+                And => l.and(&r),
+                Xor => l.xor(&r),
+                Or => l.or(&r),
+                Nand => l.nand(&r),
+                Xnor => l.xnor(&r),
+                Nor => l.nor(&r),
+                Add => l.add(&r),
+                SubNeg => l.sub(&r),
+                Mul => l.mul(&r),
+                Div => l.div(&r),
+                Rem => l.rem(&r),
+                Pow => l.pow(&r),
+                Shl => l.shl(&r),
+                Shr => l.shr(&r),
+                Rotl => l.rotl(&r),
+                Rotr => l.rotr(&r),
+                Convert if let RunValue::Type(r) = r => l.convert(r),
+                Transmute if let RunValue::Type(r) = r => l.transmute(r),
 
-            let punc = op
-                .val
-                .to_token_eq()
-                .expect("only TokenEq supported for ops");
-            match side {
-                // postfix
-                OpSide::Left => match punc {
-                    TokenEq::Keyword(_keyword) => unimplemented!("no postfix keywords yet"),
-                    TokenEq::Punctuation(punctuation) => match punctuation {
-                        Coalesce => return Ok(RunValue::CoalesceNone),
-                        _ => unimplemented!(),
-                    },
-                },
+                Eq | Ne => l.eq(&r).map(|is_eq| {
+                    RunValue::Bool(match punctuation {
+                        Eq => is_eq,
+                        Ne => !is_eq,
+                        _ => unreachable!("guarded by outer match arm"),
+                    })
+                }),
 
-                // prefix
-                OpSide::Right => match punc {
-                    TokenEq::Keyword(keyword) => match keyword {
-                        Szof => Ok(RunValue::UInt(x.sizeof())),
-                        _ => unimplemented!(),
-                    },
-                    TokenEq::Punctuation(punctuation) => match punctuation {
-                        Not => x.not(),
-                        SubNeg => x.neg(),
-                        Exists => Ok(x.exists()),
-                        _ => unimplemented!(),
-                    },
-                },
-            }
-            .map_err(|e| e.unary(source, op, punc, operand))
-        }
-
-        Expr::Literal(literal) => {
-            let Literal { value } = literal;
-            match value.val {
-                LexValue::BoolLiteral(b) => Ok(RunValue::Bool(b)),
-                LexValue::UIntLiteral(n) => Ok(RunValue::UInt(n)),
-                LexValue::SIntLiteral(n) => Ok(RunValue::SInt(n)),
-                LexValue::FracLiteral(x) => Ok(RunValue::Frac(x)),
-                LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
-                LexValue::TextLiteral(s) => s
-                    .process()
-                    .map(RunValue::Text)
-                    .map_err(|e| ContextError::token_error(source, Some(value), e)),
-                LexValue::Keyword(Keyword::None) => Ok(RunValue::None),
+                Lt | Gt | Le | Ge => l.cmp(&r).map(|ord| {
+                    RunValue::Bool(match punctuation {
+                        Lt => ord.is_some_and(Ordering::is_lt),
+                        Gt => ord.is_some_and(Ordering::is_gt),
+                        Le => ord.is_some_and(Ordering::is_le),
+                        Ge => ord.is_some_and(Ordering::is_ge),
+                        _ => unreachable!("guarded by outer match arm"),
+                    })
+                }),
 
                 _ => unimplemented!(),
-            }
+            },
+        }
+        .map_err(|e| e.binary(source, op, lhs, rhs))
+    }
+}
+
+impl<'src> Evaluate<'src> for Unary<'src> {
+    fn evaluate<'env>(
+        &self,
+        source: &'src str,
+        env: &'env Environment<'src>,
+    ) -> Result<RunValue<'env>, ContextError<'src>> {
+        use Keyword::Szof;
+        use Punctuation::{Coalesce, Exists, Not, SubNeg};
+        let Unary { op, operand, side } = self;
+        let x = operand.evaluate(source, env)?;
+
+        if matches!(&x, RunValue::CoalesceNone) {
+            return Ok(RunValue::CoalesceNone);
         }
 
-        // Assumes we are accessing by value, not reference
-        // TODO: how do we take references to store them in variables?
-        Expr::Variable(var) => env
-            .stack()
-            .ulookup(var.ident.lex)
-            .map(|ptr| {
+        let punc = op
+            .val
+            .to_token_eq()
+            .expect("only TokenEq supported for ops");
+        match side {
+            // postfix
+            OpSide::Left => match punc {
+                TokenEq::Keyword(_keyword) => unimplemented!("no postfix keywords yet"),
+                TokenEq::Punctuation(punctuation) => match punctuation {
+                    Coalesce => return Ok(RunValue::CoalesceNone),
+                    _ => unimplemented!(),
+                },
+            },
+
+            // prefix
+            OpSide::Right => match punc {
+                TokenEq::Keyword(keyword) => match keyword {
+                    Szof => Ok(RunValue::UInt(x.sizeof())),
+                    _ => unimplemented!(),
+                },
+                TokenEq::Punctuation(punctuation) => match punctuation {
+                    Not => x.not(),
+                    SubNeg => x.neg(),
+                    Exists => Ok(x.exists()),
+                    _ => unimplemented!(),
+                },
+            },
+        }
+        .map_err(|e| e.unary(source, op, punc, operand))
+    }
+}
+
+impl<'src> Evaluate<'src> for Literal<'src> {
+    fn evaluate<'env>(
+        &self,
+        source: &'src str,
+        _env: &'env Environment<'src>,
+    ) -> Result<RunValue<'env>, ContextError<'src>> {
+        let Literal { value } = self;
+        match value.val {
+            LexValue::BoolLiteral(b) => Ok(RunValue::Bool(b)),
+            LexValue::UIntLiteral(n) => Ok(RunValue::UInt(n)),
+            LexValue::SIntLiteral(n) => Ok(RunValue::SInt(n)),
+            LexValue::FracLiteral(x) => Ok(RunValue::Frac(x)),
+            LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
+            LexValue::TextLiteral(s) => s
+                .process()
+                .map(RunValue::Text)
+                .map_err(|e| ContextError::token_error(source, Some(value), e)),
+            LexValue::Keyword(Keyword::None) => Ok(RunValue::None),
+
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl<'src> Evaluate<'src> for Variable<'src> {
+    fn evaluate<'env>(
+        &self,
+        source: &'src str,
+        env: &'env Environment<'src>,
+    ) -> Result<RunValue<'env>, ContextError<'src>> {
+        env.stack()
+            .lookup(self.ident.lex)
+            .map(|(ty, ptr)| {
                 debug_assert_ne!(
                     env.stack().get_raw(ptr),
                     None,
                     "lookup should always give a valid pointer"
                 );
-                RunValue::UPtr(ptr)
+                // SAFETY: Lookup
+                unsafe { RunValue::deref(ty, ptr, env) }
+                    .expect("lookup should produce a valid range")
             })
             .ok_or_else(|| {
-                ContextError::token_error(source, Some(&var.ident), ErrorType::UnknownVar)
-            }),
+                ContextError::token_error(source, Some(&self.ident), ErrorType::UnknownVar)
+            })
+    }
+}
 
-        Expr::Grouping(group) => evaluate(source, env, &group.expr),
+impl<'src> Evaluate<'src> for Grouping<'src> {
+    fn evaluate<'env>(
+        &self,
+        source: &'src str,
+        env: &'env Environment<'src>,
+    ) -> Result<RunValue<'env>, ContextError<'src>> {
+        self.expr.evaluate(source, env)
+    }
+}
 
-        Expr::Type(inner) => match inner.name.val {
+impl<'src> Evaluate<'src> for TypeExpr<'src> {
+    fn evaluate<'env>(
+        &self,
+        _source: &'src str,
+        _env: &'env Environment<'src>,
+    ) -> Result<RunValue<'env>, ContextError<'src>> {
+        match self.name.val {
             LexValue::Keyword(kw) if kw.is_type() => Ok(RunValue::Type(match kw {
                 Keyword::None => ValueType::None,
                 Keyword::Nevr => ValueType::Nevr,
@@ -1143,6 +1243,6 @@ pub fn evaluate<'src>(
             LexValue::Identifier | LexValue::Callable => unimplemented!("custom types"),
 
             _ => unimplemented!(),
-        },
+        }
     }
 }

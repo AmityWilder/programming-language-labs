@@ -1,26 +1,27 @@
 use crate::{
-    evaluate,
+    error::ContextError,
     exec::{env::Environment, eval::RunValue},
     grammar::ast::{Declaration, Program, Statement},
     scanner::token::value::{Keyword, LexValue},
 };
+use eval::Evaluate;
 
 pub mod asm;
 pub mod env;
 pub mod error;
 pub mod eval;
 
-fn execute_decl<'src, 'prgm>(
+fn interpret<'src>(
     source: &'src str,
     env: &mut Environment<'src>,
-    decl: &'prgm Declaration<'src>,
-) -> Result<(), Box<dyn 'prgm + std::error::Error>> {
+    decl: &Declaration<'src>,
+) -> Result<(), ContextError<'src>> {
     match decl {
         Declaration::Var(decl) => {
             let value = decl
                 .assignment
                 .as_ref()
-                .map(|assignment| evaluate(source, env, &assignment.expr))
+                .map(|assignment| assignment.expr.evaluate(source, env))
                 .transpose()?;
             #[expect(clippy::match_same_arms)]
             match decl.var_kw.val {
@@ -31,7 +32,21 @@ fn execute_decl<'src, 'prgm>(
                 LexValue::Keyword(Keyword::Let) => (), // TODO
                 _ => unreachable!("should be caught by grammar"),
             }
-            if let Some(value) = value {
+            if let Some(value) = value.map(|x| -> RunValue<'static> {
+                match x {
+                    RunValue::None => RunValue::None,
+                    RunValue::CoalesceNone => RunValue::CoalesceNone,
+                    RunValue::Fail(e) => RunValue::Fail(e),
+                    RunValue::Bool(x) => RunValue::Bool(x),
+                    RunValue::UInt(x) => RunValue::UInt(x),
+                    RunValue::SInt(x) => RunValue::SInt(x),
+                    RunValue::Frac(x) => RunValue::Frac(x),
+                    RunValue::Char(x) => RunValue::Char(x),
+                    RunValue::Text(x) => RunValue::Text(std::borrow::Cow::Owned(x.into_owned())),
+                    RunValue::Type(t) => RunValue::Type(t),
+                    RunValue::Ptr(t, p) => RunValue::Ptr(t, p),
+                }
+            }) {
                 let segment = env
                     .stack_mut()
                     .push(
@@ -52,7 +67,7 @@ fn execute_decl<'src, 'prgm>(
                     RunValue::Frac(x) => segment.copy_from_slice(&x.to_ne_bytes()),
                     RunValue::Char(x) => segment.copy_from_slice(&x.to_u32().to_ne_bytes()),
                     RunValue::Text(x) => segment.copy_from_slice(x.as_bytes()), // TODO: length should be mutable for non-pvts!!
-                    RunValue::UPtr(_) => todo!(),
+                    RunValue::Ptr(_, _) => todo!(),
                     RunValue::Type(_) => unimplemented!("typename should not exist at runtime"),
                 }
             } else {
@@ -61,17 +76,17 @@ fn execute_decl<'src, 'prgm>(
         }
 
         Declaration::Stmt(stmt) => match stmt {
-            Statement::Expr(expr) => _ = evaluate(source, env, &expr.expr)?, // TBD: what do we do with the output?
+            Statement::Expr(expr) => _ = expr.expr.evaluate(source, env)?, // TBD: what do we do with the output?
 
             Statement::Print(stmt) => {
-                let value = evaluate(source, env, &stmt.group.expr)?;
+                let value = stmt.group.expr.evaluate(source, env)?;
                 value.print();
             }
 
             Statement::If(stmt) => {
                 let (mut pred, mut then) = (&stmt.cond.pred, &stmt.then);
                 let do_block = loop {
-                    let RunValue::Bool(x) = evaluate(source, env, pred)? else {
+                    let RunValue::Bool(x) = pred.evaluate(source, env)? else {
                         unimplemented!("should be caught by static analysis");
                     };
                     if x {
@@ -93,14 +108,14 @@ fn execute_decl<'src, 'prgm>(
 
                 if let Some(block) = do_block {
                     for stmt in &block.body {
-                        execute_decl(source, env, stmt)?;
+                        interpret(source, env, stmt)?;
                     }
                 }
             }
 
             Statement::Block(block) => {
                 for stmt in &block.body {
-                    execute_decl(source, env, stmt)?;
+                    interpret(source, env, stmt)?;
                 }
             }
         },
@@ -108,14 +123,11 @@ fn execute_decl<'src, 'prgm>(
     Ok(())
 }
 
-pub fn execute<'src, 'prgm>(
-    source: &'src str,
-    prgm: &'prgm Program<'src>,
-) -> Result<(), Box<dyn 'prgm + std::error::Error>> {
+pub fn execute<'src>(source: &'src str, prgm: &Program<'src>) -> Result<(), ContextError<'src>> {
     const DEFAULT_MEM: usize = (1 << 16) - 1;
     let mut env = Environment::with_capacity(DEFAULT_MEM);
     for decl in prgm {
-        execute_decl(source, &mut env, decl)?;
+        interpret(source, &mut env, decl)?;
     }
     Ok(())
 }
