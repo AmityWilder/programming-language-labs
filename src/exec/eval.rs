@@ -472,6 +472,10 @@ impl RunValue<'_> {
 
     fn add(&self, other: &Self) -> Result<Self, OpError> {
         match (self, other) {
+            // 0 + 0 = 0
+            // 0 + 1 = 1
+            // 1 + 0 = 1
+            // 1 + 1 = 1 (clamped)
             (&Self::Bool(l), &Self::Bool(r)) => Ok(Self::Bool(l | r)),
             (&Self::UInt(l), &Self::UInt(r)) => l
                 .checked_add(r)
@@ -504,6 +508,11 @@ impl RunValue<'_> {
 
     fn sub(&self, other: &Self) -> Result<Self, OpError> {
         match (self, other) {
+            // 0 - 0 = 0
+            // 0 - 1 = 0 (clamped)
+            // 1 - 0 = 1
+            // 1 - 1 = 0
+            (&Self::Bool(l), &Self::Bool(r)) => Ok(Self::Bool(l && !r)),
             (&Self::UInt(l), &Self::UInt(r)) => l
                 .checked_sub(r)
                 .map(Self::UInt)
@@ -521,7 +530,11 @@ impl RunValue<'_> {
 
     fn mul(&self, other: &Self) -> Result<Self, OpError> {
         match (self, other) {
-            (&Self::Bool(l), &Self::Bool(r)) => Ok(Self::Bool(l & r)),
+            // 0 * 0 = 0
+            // 0 * 1 = 0
+            // 1 * 0 = 0
+            // 1 * 1 = 1
+            (&Self::Bool(l), &Self::Bool(r)) => Ok(Self::Bool(l && r)),
             (&Self::UInt(l), &Self::UInt(r)) => l
                 .checked_mul(r)
                 .map(Self::UInt)
@@ -538,6 +551,11 @@ impl RunValue<'_> {
 
     fn div(&self, other: &Self) -> Result<Self, OpError> {
         match (self, other) {
+            // 0 / 0 = 1 (clamped infinity)
+            // 0 / 1 = 0
+            // 1 / 0 = 1 (clamped infinity)
+            // 1 / 1 = 1
+            (&Self::Bool(l), &Self::Bool(r)) => Ok(Self::Bool(l || !r)),
             (&Self::UInt(l), &Self::UInt(r)) => {
                 l.checked_div(r).map(Self::UInt).ok_or(OpError::DivByZero)
             }
@@ -566,6 +584,11 @@ impl RunValue<'_> {
 
     fn pow(&self, other: &Self) -> Result<Self, OpError> {
         match (self, other) {
+            // 0^0 = 1
+            // 0^1 = 0
+            // 1^0 = 1
+            // 1^1 = 1
+            (&Self::Bool(l), &Self::Bool(r)) => Ok(Self::Bool(l || !r)),
             (&Self::UInt(l), &Self::UInt(r)) => l
                 .checked_pow(u32::try_from(r).map_err(|_| OpError::FailedConversion {
                     is_binary: true,
