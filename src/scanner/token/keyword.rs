@@ -29,7 +29,7 @@ define_token_eq! {
         Uint = "uint",
         /// Signed integer type (represented as `isize` (`isize_t`))
         Sint = "sint",
-        /// Floating point type (represented as `f64`)
+        /// Floating point type (represented as `fsize` (float or double depending on hardware))
         Frac = "frac",
         /// Character type
         Char = "char",

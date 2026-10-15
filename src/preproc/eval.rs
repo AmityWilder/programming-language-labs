@@ -7,6 +7,7 @@ use crate::{
         punc::Punctuation,
         value::{Keyword, LexValue, TokenEq},
     },
+    types::fsize,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -260,7 +261,7 @@ impl<'src> PpValue<'src> {
             Self::BoolLiteral(_) | Self::Bool => std::mem::size_of::<bool>(),
             Self::UIntLiteral(_) | Self::Uint => std::mem::size_of::<usize>(),
             Self::SIntLiteral(_) | Self::Sint => std::mem::size_of::<isize>(),
-            Self::Frac => std::mem::size_of::<f64>(),
+            Self::Frac => std::mem::size_of::<fsize>(),
             Self::Char => std::mem::size_of::<char>(),
             Self::Text => std::mem::size_of::<String>(),
             Self::Macro(_) => 0,

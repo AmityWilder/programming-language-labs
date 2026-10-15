@@ -11,6 +11,7 @@ use crate::{
         },
         token::{escape_char, escape_seq},
     },
+    types::{frac, sint, uint},
 };
 use std::{borrow::Cow, range::Range};
 
@@ -108,11 +109,11 @@ pub enum LexValue<'src> {
 
     // number literal
     /// Unsigned integer literal
-    UIntLiteral(usize),
+    UIntLiteral(uint),
     /// Signed integer literal
-    SIntLiteral(isize),
+    SIntLiteral(sint),
     /// Floating point literal
-    FracLiteral(f64),
+    FracLiteral(frac),
 
     // strlike literal
     /// Character literal

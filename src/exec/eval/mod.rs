@@ -13,6 +13,7 @@ use crate::{
         punc::Punctuation,
         value::{CharLiteral, LexValue, TokenEq},
     },
+    types::fsize,
 };
 use std::{borrow::Cow, cmp::Ordering};
 
@@ -260,7 +261,7 @@ pub enum RunValue<'src> {
     Bool(bool),
     UInt(usize),
     SInt(isize),
-    Frac(f64),
+    Frac(fsize),
     Char(char),
     Text(Cow<'src, str>),
     Type(ValueType),
@@ -781,7 +782,7 @@ impl<'src> RunValue<'src> {
                 clippy::cast_precision_loss,
                 reason = "no other way to convert int to float while ignoring errors"
             )]
-            (&Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TBD: error (or warning) for loss of data?
+            (&Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(x as fsize)), // TBD: error (or warning) for loss of data?
             (&Self::UInt(x), ValueType::Char) => Ok(match u8::try_from(x) {
                 // TODO: what about unicode?
                 Ok(x) => Self::Char(char::from(x)),
@@ -792,7 +793,7 @@ impl<'src> RunValue<'src> {
                 clippy::cast_precision_loss,
                 reason = "no other way to convert int to float while ignoring errors"
             )]
-            (&Self::SInt(x), ValueType::Frac) => Ok(Self::Frac(x as f64)), // TBD: error (or warning) for loss of data?
+            (&Self::SInt(x), ValueType::Frac) => Ok(Self::Frac(x as fsize)), // TBD: error (or warning) for loss of data?
             (&Self::SInt(x), ValueType::Char) => Ok(match u8::try_from(x) {
                 // TODO: what about unicode?
                 Ok(x) => Self::Char(char::from(x)),
@@ -849,7 +850,7 @@ impl<'src> RunValue<'src> {
             (&Self::SInt(x), ValueType::UInt) => Ok(Self::UInt(x.cast_unsigned())),
 
             // TODO: specialize for pointer widths
-            (&Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(f64::from_bits(x as u64))),
+            (&Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(fsize::from_bits(x as u64))),
             (&Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x.to_bits() as usize)),
 
             (Self::Text(_), ValueType::UInt) => todo!("text pointer?"),
@@ -911,7 +912,7 @@ impl<'src> RunValue<'src> {
                 ValueType::Bool => std::mem::size_of::<bool>(),
                 ValueType::UInt => std::mem::size_of::<usize>(),
                 ValueType::SInt => std::mem::size_of::<isize>(),
-                ValueType::Frac => std::mem::size_of::<f64>(),
+                ValueType::Frac => std::mem::size_of::<fsize>(),
                 ValueType::Char => std::mem::size_of::<char>(),
                 ValueType::Text => todo!("multiple representations/dynamically sized"),
                 ValueType::Fail => std::mem::size_of::<Failure>(),
@@ -928,7 +929,7 @@ impl<'src> RunValue<'src> {
             RunValue::Bool(_) | RunValue::Type(ValueType::Bool) => std::mem::align_of::<bool>(),
             RunValue::UInt(_) | RunValue::Type(ValueType::UInt) => std::mem::align_of::<usize>(),
             RunValue::SInt(_) | RunValue::Type(ValueType::SInt) => std::mem::align_of::<isize>(),
-            RunValue::Frac(_) | RunValue::Type(ValueType::Frac) => std::mem::align_of::<f64>(),
+            RunValue::Frac(_) | RunValue::Type(ValueType::Frac) => std::mem::align_of::<fsize>(),
             RunValue::Char(_) | RunValue::Type(ValueType::Char) => std::mem::align_of::<char>(),
             RunValue::Text(_) | RunValue::Type(ValueType::Text) => std::mem::align_of::<u8>(), // i thiiiink?..
             RunValue::Fail(_) | RunValue::Type(ValueType::Fail) => std::mem::align_of::<Failure>(),
