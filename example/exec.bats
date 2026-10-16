@@ -11,7 +11,7 @@ if foo > bar {
     //bigger = "bar";
     prnt("todo: assign `bigger` with \"bar\"\n");
 }
-prnt(bigger + " is bigger\n" + '\n'); // WHY AREN'T ESCAPES WORKING IN STRINGS??
+prnt(bigger + " is bigger\n");
 
 let foobar = foo * bar;
 
