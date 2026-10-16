@@ -1,8 +1,8 @@
 use crate::{
-    analyzer::static_env::StaticEnvironment,
+    analyzer::static_env::{Domain, StaticEnvironment},
     error::{ContextError, OpSide},
     exec::{
-        env::{Environment, Pointer, Primitive, UntypedPointer},
+        env::{Environment, Primitive},
         error::Failure,
         eval::ValueType,
     },
@@ -10,12 +10,12 @@ use crate::{
     scanner::token::{
         ExpansionData, Token,
         punc::Punctuation,
-        value::{CharLiteral, Keyword, LexValue, TextLiteral, TokenEq},
+        value::{Keyword, LexValue, TokenEq},
     },
     spec_ops::{BitRotate, BitShift},
     types::{fail, frac, nevr, none, sint, text, uint},
 };
-use std::marker::PhantomData;
+use std::{marker::PhantomData, range::Range};
 
 pub mod static_env;
 
@@ -35,12 +35,17 @@ impl<'src> From<Token<'src>> for Lexeme<'src> {
 }
 
 /// Post-analysis evaluation
-pub trait Evaluate<'src, T> {
-    fn eval(&self, env: &Environment<'src>) -> Result<T, Failure>;
+pub trait Evaluate<T> {
+    fn eval(&self, env: &Environment) -> Result<T, Failure>;
 }
 
 pub trait LangType {
-    fn get_type(&self) -> ValueType;
+    const VALUE_TYPE: ValueType;
+
+    /// In case the runtime type is different
+    fn get_type(&self) -> ValueType {
+        Self::VALUE_TYPE
+    }
 
     fn szof(&self) -> usize {
         std::mem::size_of_val(self)
@@ -52,78 +57,42 @@ pub trait LangType {
 }
 
 impl LangType for none {
-    fn get_type(&self) -> ValueType {
-        ValueType::None
-    }
+    const VALUE_TYPE: ValueType = ValueType::None;
 }
 impl LangType for nevr {
-    fn get_type(&self) -> ValueType {
-        ValueType::Nevr
-    }
+    const VALUE_TYPE: ValueType = ValueType::Nevr;
 }
 impl LangType for fail {
-    fn get_type(&self) -> ValueType {
-        ValueType::Fail
-    }
+    const VALUE_TYPE: ValueType = ValueType::Fail;
 }
 impl LangType for bool {
-    fn get_type(&self) -> ValueType {
-        ValueType::Bool
-    }
+    const VALUE_TYPE: ValueType = ValueType::Bool;
 }
 impl LangType for uint {
-    fn get_type(&self) -> ValueType {
-        ValueType::UInt
-    }
+    const VALUE_TYPE: ValueType = ValueType::UInt;
 }
 impl LangType for sint {
-    fn get_type(&self) -> ValueType {
-        ValueType::SInt
-    }
+    const VALUE_TYPE: ValueType = ValueType::SInt;
 }
 impl LangType for frac {
-    fn get_type(&self) -> ValueType {
-        ValueType::Frac
-    }
+    const VALUE_TYPE: ValueType = ValueType::Frac;
 }
 impl LangType for char {
-    fn get_type(&self) -> ValueType {
-        ValueType::Char
-    }
+    const VALUE_TYPE: ValueType = ValueType::Char;
 }
 impl LangType for text {
-    fn get_type(&self) -> ValueType {
-        ValueType::Text
-    }
+    const VALUE_TYPE: ValueType = ValueType::Text;
 }
 impl LangType for str {
-    fn get_type(&self) -> ValueType {
-        ValueType::Text
-    }
+    const VALUE_TYPE: ValueType = ValueType::Text;
 }
 impl LangType for std::borrow::Cow<'_, str> {
-    fn get_type(&self) -> ValueType {
-        ValueType::Text
-    }
-}
-impl LangType for UntypedPointer {
-    fn get_type(&self) -> ValueType {
-        ValueType::Ptr
-    }
-}
-impl<T: ?Sized> LangType for Pointer<T> {
-    fn get_type(&self) -> ValueType {
-        ValueType::Ptr
-    }
+    const VALUE_TYPE: ValueType = ValueType::Text;
 }
 
 pub trait Output: Sized + LangType {
     /// Structure for operations that **result** in `Self`
-    type Ops<'src>: 'src
-        + Operators<'src, Output = Self>
-        + Evaluate<'src, Self>
-        + std::fmt::Debug
-        + Clone;
+    type Ops<'src>: 'src + Operators<'src, Output = Self> + Evaluate<Self> + std::fmt::Debug + Clone;
 }
 
 pub trait Operators<'src>: Sized {
@@ -209,8 +178,8 @@ macro_rules! impl_output {
             }
         ),*}
 
-        impl<$lt> Evaluate<$lt, $Type> for $Ops<$lt> {
-            fn eval(&self, env: &Environment<$lt>) -> Result<$Type, Failure> {
+        impl Evaluate<$Type> for $Ops<'_> {
+            fn eval(&self, env: &Environment) -> Result<$Type, Failure> {
                 match self {
                     $(Self::$Operation { $($lhs,)? $($rhs)? } => {
                         $(let $lhs = $lhs.eval(env)?;)?
@@ -508,26 +477,59 @@ pub struct Literal<'src, T> {
     pub value: T,
 }
 
-impl<'src, T: Clone> Evaluate<'src, T> for Literal<'src, T> {
-    fn eval(&self, _env: &Environment<'src>) -> Result<T, Failure> {
+impl<T: Clone> Evaluate<T> for Literal<'_, T> {
+    fn eval(&self, _env: &Environment) -> Result<T, Failure> {
         Ok(self.value.clone())
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Variable<'src, T> {
+#[derive(Debug)]
+pub struct Variable<'src, T: ?Sized> {
     pub ident: Lexeme<'src>,
+    ptr: Range<usize>,
+    dom: Domain,
     _marker: PhantomData<T>, // TODO
 }
 
-impl<'src, T: Clone + Primitive> Evaluate<'src, T> for Variable<'src, T> {
-    fn eval(&self, env: &Environment<'src>) -> Result<T, Failure> {
-        let stack = env.stack();
-        let ptr = stack
-            .tlookup(self.ident.lex)
-            .expect("should be guaranteed by analysis");
+impl<T: ?Sized> Clone for Variable<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: ?Sized> Copy for Variable<'_, T> {}
+
+impl<T: ?Sized> PartialEq for Variable<'_, T> {
+    fn eq(&self, other: &Self) -> bool {
+        // TODO: names and pointers both get recycled
+        self.ident == other.ident && self.ptr == other.ptr
+    }
+}
+
+impl<T: ?Sized> Eq for Variable<'_, T> {}
+
+impl<T: ?Sized> Default for Variable<'_, T> {
+    fn default() -> Self {
+        Self::new(Default::default(), Default::default(), Domain::default())
+    }
+}
+
+impl<'src, T: ?Sized> Variable<'src, T> {
+    const fn new(ident: Lexeme<'src>, ptr: Range<usize>, dom: Domain) -> Self {
+        Self {
+            ident,
+            ptr,
+            dom,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T: Clone + Primitive> Evaluate<T> for Variable<'_, T> {
+    fn eval(&self, env: &Environment) -> Result<T, Failure> {
+        let mem = env.stack();
         // SAFETY: static analysis promises that the variable is of the type it claims to be
-        let val = unsafe { stack.get::<T>(ptr) }.expect("should be guaranteed by analysis");
+        let val = unsafe { mem.get_as::<T>(self.ptr) }.expect("should be guaranteed by analysis");
         Ok(val.clone())
     }
 }
@@ -556,8 +558,8 @@ pub trait EvalOutput:
 
 impl<T: Sized + Clone + Output + Primitive> EvalOutput for T {}
 
-impl<'src, T: EvalOutput> Evaluate<'src, T> for Expr<'src, T> {
-    fn eval(&self, env: &Environment<'src>) -> Result<T, Failure> {
+impl<T: EvalOutput> Evaluate<T> for Expr<'_, T> {
+    fn eval(&self, env: &Environment) -> Result<T, Failure> {
         match self {
             Expr::Op { op, .. } => op.eval(env),
             Expr::Lit(lit) => lit.eval(env),
@@ -567,8 +569,8 @@ impl<'src, T: EvalOutput> Evaluate<'src, T> for Expr<'src, T> {
 }
 
 /// Like [`Evaluate`], but returns nothing and gets to mutate state
-pub trait Execute<'src> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure>;
+pub trait Execute {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure>;
 }
 
 #[expect(non_camel_case_types, reason = "enables macro magic")]
@@ -584,18 +586,36 @@ pub enum AnyExpr<'src> {
     text(Expr<'src, text>),
 }
 
+impl AnyExpr<'_> {
+    pub const fn get_type(&self) -> ValueType {
+        match self {
+            AnyExpr::none(_) => ValueType::None,
+            AnyExpr::fail(_) => ValueType::Fail,
+            AnyExpr::bool(_) => ValueType::Bool,
+            AnyExpr::uint(_) => ValueType::UInt,
+            AnyExpr::sint(_) => ValueType::SInt,
+            AnyExpr::frac(_) => ValueType::Frac,
+            AnyExpr::char(_) => ValueType::Char,
+            AnyExpr::text(_) => ValueType::Text,
+        }
+    }
+}
+
 /// Assigns to a variable of type `T`
 #[derive(Debug, Clone)]
 pub struct Assignment<'src, T: Output> {
-    pub var: Pointer<T>,
+    pub ptr: Range<usize>,
     pub val: Expr<'src, T>,
 }
 
-impl<'src, T: EvalOutput> Execute<'src> for Assignment<'src, T> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure> {
+impl<T: EvalOutput> Execute for Assignment<'_, T> {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         let tmp = self.val.eval(env)?;
+        let mem = env.stack_mut();
         // SAFETY: invariant promised by static analysis
-        *unsafe { env.stack_mut().get_mut(self.var) }.expect("guaranteed by static analysis") = tmp;
+        // TODO: how does this react to a String being dropped? can it drop a string when the scope pops??
+        let var = unsafe { mem.get_mut_as::<T>(self.ptr) }.expect("guaranteed by static analysis");
+        *var = tmp;
         Ok(())
     }
 }
@@ -605,6 +625,7 @@ impl<'src, T: EvalOutput> Execute<'src> for Assignment<'src, T> {
 pub enum AssignmentStmt<'src> {
     None(Assignment<'src, none>),
     Fail(Assignment<'src, fail>),
+    Bool(Assignment<'src, bool>),
     UInt(Assignment<'src, uint>),
     SInt(Assignment<'src, sint>),
     Frac(Assignment<'src, frac>),
@@ -612,16 +633,17 @@ pub enum AssignmentStmt<'src> {
     Text(Assignment<'src, text>),
 }
 
-impl<'src> Execute<'src> for AssignmentStmt<'src> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure> {
+impl Execute for AssignmentStmt<'_> {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         match self {
             Self::None(x) => x.exec(env),
-            Self::Fail(x) => x.exec(env),
+            Self::Bool(x) => x.exec(env),
             Self::UInt(x) => x.exec(env),
             Self::SInt(x) => x.exec(env),
             Self::Frac(x) => x.exec(env),
             Self::Char(x) => x.exec(env),
             Self::Text(x) => x.exec(env),
+            Self::Fail(x) => x.exec(env),
         }
     }
 }
@@ -633,8 +655,8 @@ pub struct ExprStmt<'src> {
     pub expr: Expr<'src, ()>,
 }
 
-impl<'src> Execute<'src> for ExprStmt<'src> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure> {
+impl Execute for ExprStmt<'_> {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         self.expr.eval(env)
     }
 }
@@ -644,8 +666,8 @@ pub struct PrintStmt<'src> {
     pub what: Expr<'src, text>, // TBD: what about literals?
 }
 
-impl<'src> Execute<'src> for PrintStmt<'src> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure> {
+impl Execute for PrintStmt<'_> {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         print!("{}", self.what.eval(env)?);
         Ok(())
     }
@@ -657,8 +679,8 @@ pub enum OrStmt<'src> {
     Final(BlockStmt<'src>),
 }
 
-impl<'src> Execute<'src> for OrStmt<'src> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure> {
+impl Execute for OrStmt<'_> {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         match self {
             Self::More(stmt) => stmt.exec(env),
             Self::Final(stmt) => stmt.exec(env),
@@ -674,8 +696,8 @@ pub struct IfStmt<'src> {
     pub or: Option<OrStmt<'src>>,
 }
 
-impl<'src> Execute<'src> for IfStmt<'src> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure> {
+impl Execute for IfStmt<'_> {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         if self.pred.eval(env)? {
             self.then.exec(env)
         } else if let Some(or) = self.or.as_mut() {
@@ -691,8 +713,8 @@ pub struct BlockStmt<'src> {
     pub items: Vec<Statement<'src>>,
 }
 
-impl<'src> Execute<'src> for BlockStmt<'src> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure> {
+impl Execute for BlockStmt<'_> {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         for item in &mut self.items {
             item.exec(env)?;
         }
@@ -703,15 +725,15 @@ impl<'src> Execute<'src> for BlockStmt<'src> {
 /// Post-analysis statement
 #[derive(Debug, Clone)]
 pub enum Statement<'src> {
-    Assign(Assignment<'src, ()>), // TODO: what type do we assign?
+    Assign(AssignmentStmt<'src>), // TODO: what type do we assign?
     Expr(ExprStmt<'src>),
     Print(PrintStmt<'src>),
     If(IfStmt<'src>),
     Block(BlockStmt<'src>),
 }
 
-impl<'src> Execute<'src> for Statement<'src> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure> {
+impl Execute for Statement<'_> {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         match self {
             Self::Assign(stmt) => stmt.exec(env),
             Self::Expr(stmt) => stmt.exec(env),
@@ -736,97 +758,124 @@ impl Program<'_> {
     }
 }
 
-impl<'src> Execute<'src> for Program<'src> {
-    fn exec(&mut self, env: &mut Environment<'src>) -> Result<(), Failure> {
+impl Execute for Program<'_> {
+    fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         self.entry.exec(env)
     }
 }
 
 pub trait FromLiteral: Output {
-    fn from_literal<'src>(token: Token<'src>) -> Option<Expr<'src, Self>>;
+    fn from_literal<'src>(
+        source: &'src str,
+        token: Token<'src>,
+    ) -> Result<Expr<'src, Self>, ContextError<'src>>;
 }
 
 impl FromLiteral for none {
-    fn from_literal<'src>(token: Token<'src>) -> Option<Expr<'src, Self>> {
+    fn from_literal<'src>(
+        source: &'src str,
+        token: Token<'src>,
+    ) -> Result<Expr<'src, Self>, ContextError<'src>> {
         if let LexValue::Keyword(Keyword::None) = token.val {
-            Some(Expr::Lit(Literal {
+            Ok(Expr::Lit(Literal {
                 src: token.into(),
                 value: (),
             }))
         } else {
-            None
+            Err(todo!("type mismatch error"))
         }
     }
 }
 impl FromLiteral for bool {
-    fn from_literal<'src>(token: Token<'src>) -> Option<Expr<'src, Self>> {
+    fn from_literal<'src>(
+        source: &'src str,
+        token: Token<'src>,
+    ) -> Result<Expr<'src, Self>, ContextError<'src>> {
         if let LexValue::BoolLiteral(value) = token.val {
-            Some(Expr::Lit(Literal {
+            Ok(Expr::Lit(Literal {
                 src: token.into(),
                 value,
             }))
         } else {
-            None
+            Err(todo!("type mismatch error"))
         }
     }
 }
 impl FromLiteral for uint {
-    fn from_literal<'src>(token: Token<'src>) -> Option<Expr<'src, Self>> {
+    fn from_literal<'src>(
+        source: &'src str,
+        token: Token<'src>,
+    ) -> Result<Expr<'src, Self>, ContextError<'src>> {
         if let LexValue::UIntLiteral(value) = token.val {
-            Some(Expr::Lit(Literal {
+            Ok(Expr::Lit(Literal {
                 src: token.into(),
                 value,
             }))
         } else {
-            None
+            Err(todo!("type mismatch error"))
         }
     }
 }
 impl FromLiteral for sint {
-    fn from_literal<'src>(token: Token<'src>) -> Option<Expr<'src, Self>> {
+    fn from_literal<'src>(
+        source: &'src str,
+        token: Token<'src>,
+    ) -> Result<Expr<'src, Self>, ContextError<'src>> {
         if let LexValue::SIntLiteral(value) = token.val {
-            Some(Expr::Lit(Literal {
+            Ok(Expr::Lit(Literal {
                 src: token.into(),
                 value,
             }))
         } else {
-            None
+            Err(todo!("type mismatch error"))
         }
     }
 }
 impl FromLiteral for frac {
-    fn from_literal<'src>(token: Token<'src>) -> Option<Expr<'src, Self>> {
+    fn from_literal<'src>(
+        source: &'src str,
+        token: Token<'src>,
+    ) -> Result<Expr<'src, Self>, ContextError<'src>> {
         if let LexValue::FracLiteral(value) = token.val {
-            Some(Expr::Lit(Literal {
+            Ok(Expr::Lit(Literal {
                 src: token.into(),
                 value,
             }))
         } else {
-            None
+            Err(todo!("type mismatch error"))
         }
     }
 }
 impl FromLiteral for char {
-    fn from_literal<'src>(token: Token<'src>) -> Option<Expr<'src, Self>> {
+    fn from_literal<'src>(
+        source: &'src str,
+        token: Token<'src>,
+    ) -> Result<Expr<'src, Self>, ContextError<'src>> {
         if let LexValue::CharLiteral(value) = token.val {
-            Some(Expr::Lit(Literal {
+            Ok(Expr::Lit(Literal {
                 src: token.into(),
                 value: value.ch,
             }))
         } else {
-            None
+            Err(todo!("type mismatch error"))
         }
     }
 }
 impl FromLiteral for text {
-    fn from_literal<'src>(token: Token<'src>) -> Option<Expr<'src, Self>> {
+    fn from_literal<'src>(
+        source: &'src str,
+        token: Token<'src>,
+    ) -> Result<Expr<'src, Self>, ContextError<'src>> {
         if let LexValue::TextLiteral(value) = token.val {
-            Some(Expr::Lit(Literal {
+            Ok(Expr::Lit(Literal {
                 src: token.into(),
-                value: value.content.to_string(),
+                value: value
+                    .process()
+                    .map_err(|e| ContextError::token_error(source, Some(&token), e))?
+                    .to_string(),
             }))
         } else {
-            None
+            Err(todo!("type mismatch error"))
         }
     }
 }
@@ -837,9 +886,20 @@ fn analyze_typed_expr<'src, T: FromLiteral>(
     expr: ast::Expr<'src>,
 ) -> Result<Expr<'src, T>, Vec<ContextError<'src>>> {
     let op_args = match expr {
-        ast::Expr::Literal(x) => return T::from_literal(x.value).ok_or_else(|| todo!("error")),
+        ast::Expr::Literal(x) => return T::from_literal(source, x.value).map_err(|e| vec![e]),
 
-        ast::Expr::Variable(x) => todo!(),
+        ast::Expr::Variable(x) => {
+            let ident: Lexeme<'src> = x.ident.into();
+            return if let Some((data, domain)) = static_env.lookup(ident.lex) {
+                if data.ty == T::VALUE_TYPE {
+                    Ok(Expr::Var(Variable::new(ident, data.range, domain)))
+                } else {
+                    todo!("type mismatch error")
+                }
+            } else {
+                todo!("variable not found in scope error")
+            };
+        }
 
         ast::Expr::Grouping(x) => return analyze_typed_expr(source, static_env, x.expr),
 
@@ -907,7 +967,28 @@ fn analyze_expr<'src>(
             };
         }
 
-        ast::Expr::Variable(x) => todo!(),
+        ast::Expr::Variable(x) => {
+            let ident: Lexeme<'src> = x.ident.into();
+            let (data, dom) = static_env.lookup(ident.lex).unwrap_or_else(|| {
+                todo!(
+                    "error: variable {} has not been defined at this point",
+                    ident.lex
+                )
+            });
+            let ptr = data.range;
+            return match data.ty {
+                ValueType::None => Ok(AnyExpr::none(Expr::Var(Variable::new(ident, ptr, dom)))),
+                ValueType::Bool => Ok(AnyExpr::bool(Expr::Var(Variable::new(ident, ptr, dom)))),
+                ValueType::UInt => Ok(AnyExpr::uint(Expr::Var(Variable::new(ident, ptr, dom)))),
+                ValueType::SInt => Ok(AnyExpr::sint(Expr::Var(Variable::new(ident, ptr, dom)))),
+                ValueType::Frac => Ok(AnyExpr::frac(Expr::Var(Variable::new(ident, ptr, dom)))),
+                ValueType::Char => Ok(AnyExpr::char(Expr::Var(Variable::new(ident, ptr, dom)))),
+                ValueType::Text => Ok(AnyExpr::text(Expr::Var(Variable::new(ident, ptr, dom)))),
+                ValueType::Fail => Ok(AnyExpr::fail(Expr::Var(Variable::new(ident, ptr, dom)))),
+                ValueType::Ptr => todo!(),
+                _ => unimplemented!("not a valid variable type"), // TBD: should this be an error or is it the grammar's job?
+            };
+        }
 
         ast::Expr::Grouping(x) => return analyze_expr(source, static_env, x.expr),
 
@@ -948,61 +1029,128 @@ fn analyze_expr<'src>(
         .map_err(|_| todo!("incompatible error"))
 }
 
+fn analyze_if_stmt<'src>(
+    source: &'src str,
+    static_env: &mut StaticEnvironment<'src>,
+    stmt: ast::IfStmt<'src>,
+) -> Result<IfStmt<'src>, Vec<ContextError<'src>>> {
+    let body = stmt.then;
+    Ok(IfStmt {
+        pred: analyze_typed_expr(source, static_env, stmt.cond.pred)?,
+        then: analyze_block(source, static_env, body.then)?,
+        or: if let Some(or) = body.or {
+            Some(if let Some(cond) = or.cond {
+                OrStmt::More(Box::new(analyze_if_stmt(
+                    source,
+                    static_env,
+                    ast::IfStmt {
+                        cond,
+                        then: or.then,
+                    },
+                )?))
+            } else {
+                let body = or.then;
+                OrStmt::Final(analyze_block(source, static_env, body.then)?)
+            })
+        } else {
+            None
+        },
+    })
+}
+
+fn analyze_block<'src>(
+    source: &'src str,
+    static_env: &mut StaticEnvironment<'src>,
+    block: ast::BlockStmt<'src>,
+) -> Result<BlockStmt<'src>, Vec<ContextError<'src>>> {
+    static_env.push_scope();
+    block
+        .body
+        .into_iter()
+        .filter_map(|decl| analyze_decl(source, static_env, decl).transpose())
+        .collect::<Result<Vec<_>, _>>()
+        .map(|items| {
+            static_env.pop_scope(); // TODO: will this break evaluation?
+            BlockStmt { items }
+        })
+}
+
 fn analyze_decl<'src>(
     source: &'src str,
     static_env: &mut StaticEnvironment<'src>,
     decl: ast::Declaration<'src>,
-) -> Option<Result<Statement<'src>, Vec<ContextError<'src>>>> {
+) -> Result<Option<Statement<'src>>, Vec<ContextError<'src>>> {
     match decl {
         ast::Declaration::Var(def) => {
-            match def.var_kw.val {
-                LexValue::Keyword(Keyword::Let) => (), // TODO
-                LexValue::Keyword(Keyword::Uni) => (), // TODO
-                LexValue::Keyword(Keyword::Pvt) => (), // TODO
-                _ => unimplemented!("should be caught by grammar"),
-            }
-            def.ident.lex;
+            // if there isn't an assignment, no action occurs
             if let Some(x) = def.assignment {
-                let expr = analyze_expr(source, static_env, x.expr);
-                Some(todo!())
+                let expr = analyze_expr(source, static_env, x.expr)?;
+                let ty = expr.get_type();
+                let data = match def.var_kw.val {
+                    LexValue::Keyword(Keyword::Let) => static_env.push_local(def.ident.lex, ty),
+                    LexValue::Keyword(Keyword::Uni) => static_env.push_global(def.ident.lex, ty),
+                    LexValue::Keyword(Keyword::Pvt) => todo!(),
+                    _ => unimplemented!("should be caught by grammar"),
+                }
+                .expect("should be constructable"); // TODO: error? or grammar?
+                let ptr = data.range;
+                Ok(Some(Statement::Assign(match expr {
+                    AnyExpr::none(val) => AssignmentStmt::None(Assignment { ptr, val }),
+                    AnyExpr::fail(val) => AssignmentStmt::Fail(Assignment { ptr, val }),
+                    AnyExpr::bool(val) => AssignmentStmt::Bool(Assignment { ptr, val }),
+                    AnyExpr::uint(val) => AssignmentStmt::UInt(Assignment { ptr, val }),
+                    AnyExpr::sint(val) => AssignmentStmt::SInt(Assignment { ptr, val }),
+                    AnyExpr::frac(val) => AssignmentStmt::Frac(Assignment { ptr, val }),
+                    AnyExpr::char(val) => AssignmentStmt::Char(Assignment { ptr, val }),
+                    AnyExpr::text(val) => AssignmentStmt::Text(Assignment { ptr, val }),
+                })))
             } else {
-                None
+                // TBD: should we insert a "type TBD" instead?
+                Ok(None)
             }
         }
 
         ast::Declaration::Stmt(stmt) => match stmt {
             ast::Statement::Expr(stmt) => todo!(),
 
-            ast::Statement::Print(stmt) => Some(
-                analyze_typed_expr(source, static_env, stmt.group.expr)
-                    .map(|what| Statement::Print(PrintStmt { what })),
-            ),
+            ast::Statement::Print(stmt) => analyze_typed_expr(source, static_env, stmt.group.expr)
+                .map(|what| Some(Statement::Print(PrintStmt { what }))),
 
-            ast::Statement::If(stmt) => todo!(),
+            ast::Statement::If(stmt) => {
+                analyze_if_stmt(source, static_env, stmt).map(|stmt| Some(Statement::If(stmt)))
+            }
 
-            ast::Statement::Block(stmt) => Some(
-                stmt.body
-                    .into_iter()
-                    .filter_map(|decl| analyze_decl(source, static_env, decl))
-                    .collect::<Result<Vec<_>, _>>()
-                    .map(|items| Statement::Block(BlockStmt { items })),
-            ),
+            ast::Statement::Block(stmt) => {
+                analyze_block(source, static_env, stmt).map(|block| Some(Statement::Block(block)))
+            }
         },
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StaticAnalysis<'src> {
+    pub global_memory_needed: usize,
+    pub stack_memory_needed: usize,
+    pub program: Program<'src>,
 }
 
 // TODO: can this be refactored to an iterator?
 pub fn analyze<'src>(
     source: &'src str,
     prgm: ast::Program<'src>,
-) -> Result<Program<'src>, Vec<ContextError<'src>>> {
+) -> Result<StaticAnalysis<'src>, Vec<ContextError<'src>>> {
     let mut static_env = StaticEnvironment::new();
-    Ok(Program {
+    let program = Program {
         entry: BlockStmt {
             items: prgm
                 .into_iter()
-                .filter_map(|decl| analyze_decl(source, &mut static_env, decl))
+                .filter_map(|decl| analyze_decl(source, &mut static_env, decl).transpose())
                 .collect::<Result<_, _>>()?,
         },
+    };
+    Ok(StaticAnalysis {
+        global_memory_needed: static_env.gp_max(),
+        stack_memory_needed: static_env.sp_max(),
+        program,
     })
 }
