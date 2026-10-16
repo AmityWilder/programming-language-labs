@@ -149,10 +149,10 @@ define_token_eq! {
         /// ```rs
         /// fn foo(v, fun) -> text
         /// <=>
-        ///     v.x: frac,
-        ///     v.y: frac,
-        ///     fn mag of v: (self) -> frac,
-        ///     fn fun: (frac) -> text,
+        ///     v.x: flpt,
+        ///     v.y: flpt,
+        ///     fn mag of v: (self) -> flpt,
+        ///     fn fun: (flpt) -> text,
         /// {
         ///     // ...
         /// }

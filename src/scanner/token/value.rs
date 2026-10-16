@@ -11,7 +11,7 @@ use crate::{
         },
         token::{escape_char, escape_seq},
     },
-    types::{frac, sint, uint},
+    types::{flpt, sint, uint},
 };
 use std::{borrow::Cow, range::Range};
 
@@ -113,7 +113,7 @@ pub enum LexValue<'src> {
     /// Signed integer literal
     SIntLiteral(sint),
     /// Floating point literal
-    FracLiteral(frac),
+    FlptLiteral(flpt),
 
     // strlike literal
     /// Character literal
@@ -159,8 +159,8 @@ impl<'src> LexValue<'src> {
             debug_assert_ne!(src, "", "scanner should not emit empty tokens"); // also guarded by condition
             src.replace('_', "") // TODO: this allocates :c
                 .parse() // turns out parse already handles the "e" syntax on its own
-                .map(Self::FracLiteral)
-                .map_err(|_| ErrorType::InvalidNumLiteral(NumErrorKind::InvalidFrac))
+                .map(Self::FlptLiteral)
+                .map_err(|_| ErrorType::InvalidNumLiteral(NumErrorKind::InvalidFlpt))
         } else {
             enum SignSuffix {
                 Signed,

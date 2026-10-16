@@ -12,7 +12,7 @@ use crate::{
         punc::Punctuation,
         value::{CharLiteral, LexValue, TokenEq},
     },
-    types::{fail, frac, fsize, none, sint, text, uint},
+    types::{fail, flpt, fsize, none, sint, text, uint},
 };
 use std::{borrow::Cow, cmp::Ordering};
 
@@ -217,7 +217,7 @@ pub enum ValueType {
     Bool,
     UInt,
     SInt,
-    Frac,
+    Flpt,
     Char,
     Text,
     Fail,
@@ -235,7 +235,7 @@ impl ValueType {
             ValueType::Bool => Some(std::mem::size_of::<bool>()),
             ValueType::UInt => Some(std::mem::size_of::<uint>()),
             ValueType::SInt => Some(std::mem::size_of::<sint>()),
-            ValueType::Frac => Some(std::mem::size_of::<frac>()),
+            ValueType::Flpt => Some(std::mem::size_of::<flpt>()),
             ValueType::Char => Some(std::mem::size_of::<char>()),
             ValueType::Text => Some(std::mem::size_of::<text>()),
             ValueType::Fail => Some(std::mem::size_of::<fail>()),
@@ -251,7 +251,7 @@ impl ValueType {
             ValueType::Bool => Some(std::mem::align_of::<bool>()),
             ValueType::UInt => Some(std::mem::align_of::<uint>()),
             ValueType::SInt => Some(std::mem::align_of::<sint>()),
-            ValueType::Frac => Some(std::mem::align_of::<frac>()),
+            ValueType::Flpt => Some(std::mem::align_of::<flpt>()),
             ValueType::Char => Some(std::mem::align_of::<char>()),
             ValueType::Text => Some(std::mem::align_of::<text>()),
             ValueType::Fail => Some(std::mem::align_of::<fail>()),
@@ -269,7 +269,7 @@ impl std::fmt::Display for ValueType {
             Self::Bool => "bool",
             Self::UInt => "uint",
             Self::SInt => "sint",
-            Self::Frac => "frac",
+            Self::Flpt => "flpt",
             Self::Char => "char",
             Self::Text => "text",
             Self::Fail => "fail",
@@ -293,7 +293,7 @@ impl std::fmt::Display for ValueType {
 //     Bool(bool),
 //     UInt(usize),
 //     SInt(isize),
-//     Frac(fsize),
+//     Flpt(fsize),
 //     Char(char),
 //     Text(Cow<'src, str>),
 //     Type(ValueType),
@@ -327,9 +327,9 @@ impl std::fmt::Display for ValueType {
 //                 .map(RunValue::SInt),
 
 //             // SAFETY: caller must uphold safety contract
-//             ValueType::Frac => unsafe { env.stack().get_as(ptr) }
+//             ValueType::Flpt => unsafe { env.stack().get_as(ptr) }
 //                 .copied()
-//                 .map(RunValue::Frac),
+//                 .map(RunValue::Flpt),
 
 //             // SAFETY: caller must uphold safety contract
 //             ValueType::Char => unsafe { env.stack().get_as(ptr) }
@@ -356,7 +356,7 @@ impl std::fmt::Display for ValueType {
 //             Self::Bool(_) => ValueType::Bool,
 //             Self::UInt(_) => ValueType::UInt,
 //             Self::SInt(_) => ValueType::SInt,
-//             Self::Frac(_) => ValueType::Frac,
+//             Self::Flpt(_) => ValueType::Flpt,
 //             Self::Char(_) => ValueType::Char,
 //             Self::Text(_) => ValueType::Text,
 //             Self::Ptr(t, _) | Self::Type(t) => *t,
@@ -370,7 +370,7 @@ impl std::fmt::Display for ValueType {
 //             RunValue::Bool(x) => println!("{x}"),
 //             RunValue::UInt(x) => println!("{x}"),
 //             RunValue::SInt(x) => println!("{x}"),
-//             RunValue::Frac(x) => println!("{x}"),
+//             RunValue::Flpt(x) => println!("{x}"),
 //             RunValue::Char(x) => println!("{x}"),
 //             RunValue::Text(x) => println!("{x}"),
 //             RunValue::Ptr(_, _) => todo!(),
@@ -394,8 +394,8 @@ impl std::fmt::Display for ValueType {
 //                 // if conversion fails, they're definitely not equal
 //                 isize::try_from(*u).is_ok_and(|u| u.eq(s))
 //             }),
-//             // frac should have to convert in order to compare with integers
-//             (Self::Frac(l), Self::Frac(r)) => Ok(l.eq(r)),
+//             // flpt should have to convert in order to compare with integers
+//             (Self::Flpt(l), Self::Flpt(r)) => Ok(l.eq(r)),
 //             (Self::Char(l), Self::Char(r)) => Ok(l.eq(r)),
 //             (Self::Text(l), Self::Text(r)) => Ok(l.eq(r)),
 //             (Self::Char(c), Self::Text(t)) | (Self::Text(t), Self::Char(c)) => {
@@ -423,7 +423,7 @@ impl std::fmt::Display for ValueType {
 //                 // and therefore certainly less than a uint
 //                 usize::try_from(*r).map_or(std::cmp::Ordering::Greater, |r| l.cmp(&r)),
 //             )),
-//             (Self::Frac(l), Self::Frac(r)) => Ok(l.partial_cmp(r)),
+//             (Self::Flpt(l), Self::Flpt(r)) => Ok(l.partial_cmp(r)),
 //             (Self::Char(l), Self::Char(r)) => Ok(Some(l.cmp(r))),
 //             (Self::Text(l), Self::Text(r)) => Ok(Some(l.cmp(r))),
 //             (Self::Char(l), Self::Text(r)) => Ok(Some(
@@ -518,18 +518,18 @@ impl std::fmt::Display for ValueType {
 //                 .checked_add(r)
 //                 .map(Self::SInt)
 //                 .ok_or(OpError::Overflow(OverflowKind::SAdd { l, r })),
-//             (&Self::Frac(l), &Self::Frac(r)) => Ok(Self::Frac(l + r)),
+//             (&Self::Flpt(l), &Self::Flpt(r)) => Ok(Self::Flpt(l + r)),
 
 //             (Self::Text(l), Self::Bool(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 //             (Self::Text(l), Self::UInt(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 //             (Self::Text(l), Self::SInt(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
-//             (Self::Text(l), Self::Frac(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+//             (Self::Text(l), Self::Flpt(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 //             (Self::Text(l), Self::Char(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 
 //             (Self::Bool(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 //             (Self::UInt(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 //             (Self::SInt(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
-//             (Self::Frac(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
+//             (Self::Flpt(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 //             (Self::Char(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
 
 //             (Self::Text(l), Self::Text(r)) => Ok(Self::Text(Cow::Owned(format!("{l}{r}")))),
@@ -554,7 +554,7 @@ impl std::fmt::Display for ValueType {
 //                 .checked_sub(r)
 //                 .map(Self::SInt)
 //                 .ok_or(OpError::Overflow(OverflowKind::SSub { l, r })),
-//             (&Self::Frac(l), &Self::Frac(r)) => Ok(Self::Frac(l - r)),
+//             (&Self::Flpt(l), &Self::Flpt(r)) => Ok(Self::Flpt(l - r)),
 
 //             // TODO: char arithmetic? (needs errors)
 //             (l, r) => Err(OpError::Incompatible(l.typename(), r.typename())),
@@ -576,7 +576,7 @@ impl std::fmt::Display for ValueType {
 //                 .checked_mul(r)
 //                 .map(Self::SInt)
 //                 .ok_or(OpError::Overflow(OverflowKind::SMul { l, r })),
-//             (&Self::Frac(l), &Self::Frac(r)) => Ok(Self::Frac(l * r)),
+//             (&Self::Flpt(l), &Self::Flpt(r)) => Ok(Self::Flpt(l * r)),
 
 //             (l, r) => Err(OpError::Incompatible(l.typename(), r.typename())),
 //         }
@@ -595,7 +595,7 @@ impl std::fmt::Display for ValueType {
 //             (&Self::SInt(l), &Self::SInt(r)) => {
 //                 l.checked_div(r).map(Self::SInt).ok_or(OpError::DivByZero)
 //             }
-//             (&Self::Frac(l), &Self::Frac(r)) => Ok(Self::Frac(l / r)),
+//             (&Self::Flpt(l), &Self::Flpt(r)) => Ok(Self::Flpt(l / r)),
 
 //             (l, r) => Err(OpError::Incompatible(l.typename(), r.typename())),
 //         }
@@ -609,7 +609,7 @@ impl std::fmt::Display for ValueType {
 //             (&Self::SInt(l), &Self::SInt(r)) => {
 //                 l.checked_rem(r).map(Self::SInt).ok_or(OpError::DivByZero)
 //             }
-//             (&Self::Frac(l), &Self::Frac(r)) => Ok(Self::Frac(l / r)),
+//             (&Self::Flpt(l), &Self::Flpt(r)) => Ok(Self::Flpt(l / r)),
 
 //             (l, r) => Err(OpError::Incompatible(l.typename(), r.typename())),
 //         }
@@ -638,8 +638,8 @@ impl std::fmt::Display for ValueType {
 //                 })?)
 //                 .map(Self::SInt)
 //                 .ok_or(OpError::Overflow(OverflowKind::SPow { l, r })),
-//             (&Self::Frac(l), &Self::UInt(r)) => {
-//                 Ok(Self::Frac(l.powi(i32::try_from(r).map_err(|_| {
+//             (&Self::Flpt(l), &Self::UInt(r)) => {
+//                 Ok(Self::Flpt(l.powi(i32::try_from(r).map_err(|_| {
 //                     OpError::FailedConversion {
 //                         is_binary: true,
 //                         target_ty: TargetTy::S32,
@@ -647,8 +647,8 @@ impl std::fmt::Display for ValueType {
 //                     }
 //                 })?)))
 //             }
-//             (&Self::Frac(l), &Self::SInt(r)) => {
-//                 Ok(Self::Frac(l.powi(i32::try_from(r).map_err(|_| {
+//             (&Self::Flpt(l), &Self::SInt(r)) => {
+//                 Ok(Self::Flpt(l.powi(i32::try_from(r).map_err(|_| {
 //                     OpError::FailedConversion {
 //                         is_binary: true,
 //                         target_ty: TargetTy::S32,
@@ -656,7 +656,7 @@ impl std::fmt::Display for ValueType {
 //                     }
 //                 })?)))
 //             }
-//             (&Self::Frac(l), &Self::Frac(r)) => Ok(Self::Frac(l.powf(r))),
+//             (&Self::Flpt(l), &Self::Flpt(r)) => Ok(Self::Flpt(l.powf(r))),
 
 //             (l, r) => Err(OpError::Incompatible(l.typename(), r.typename())),
 //         }
@@ -814,7 +814,7 @@ impl std::fmt::Display for ValueType {
 //             | (Self::Bool(_), ValueType::Bool)
 //             | (Self::UInt(_), ValueType::UInt)
 //             | (Self::SInt(_), ValueType::SInt)
-//             | (Self::Frac(_), ValueType::Frac)
+//             | (Self::Flpt(_), ValueType::Flpt)
 //             | (Self::Char(_), ValueType::Char)
 //             | (Self::Text(_), ValueType::Text) => Ok(self.clone()),
 
@@ -825,13 +825,13 @@ impl std::fmt::Display for ValueType {
 
 //             // stringify value
 //             (
-//                 x @ (Self::Bool(_) | Self::UInt(_) | Self::SInt(_) | Self::Frac(_) | Self::Char(_)),
+//                 x @ (Self::Bool(_) | Self::UInt(_) | Self::SInt(_) | Self::Flpt(_) | Self::Char(_)),
 //                 ValueType::Text,
 //             ) => Ok(Self::Text(Cow::Owned(match &x {
 //                 Self::Bool(x) => x.to_string(),
 //                 Self::UInt(x) => x.to_string(),
 //                 Self::SInt(x) => x.to_string(),
-//                 Self::Frac(x) => x.to_string(),
+//                 Self::Flpt(x) => x.to_string(),
 //                 Self::Char(x) => x.to_string(),
 //                 _ => unreachable!("guarded by match arm"),
 //             }))),
@@ -849,8 +849,8 @@ impl std::fmt::Display for ValueType {
 //                 Ok(x) => Self::SInt(x),
 //                 Err(e) => Self::Fail(Failure::from(e)),
 //             }),
-//             (Self::Text(s), ValueType::Frac) => Ok(match s.parse() {
-//                 Ok(x) => Self::Frac(x),
+//             (Self::Text(s), ValueType::Flpt) => Ok(match s.parse() {
+//                 Ok(x) => Self::Flpt(x),
 //                 Err(e) => Self::Fail(Failure::from(e)),
 //             }),
 //             (Self::Text(s), ValueType::Char) => Ok(match s.parse() {
@@ -863,7 +863,7 @@ impl std::fmt::Display for ValueType {
 
 //             (&Self::Bool(x), ValueType::UInt) => Ok(Self::UInt(x.into())),
 //             (&Self::Bool(x), ValueType::SInt) => Ok(Self::SInt(x.into())),
-//             (&Self::Bool(x), ValueType::Frac) => Ok(Self::Frac(x.into())),
+//             (&Self::Bool(x), ValueType::Flpt) => Ok(Self::Flpt(x.into())),
 //             (&Self::Bool(x), ValueType::Char) => Ok(Self::Char(if x { '1' } else { '0' })),
 
 //             (&Self::UInt(x), ValueType::SInt) => Ok(match x.try_into() {
@@ -881,7 +881,7 @@ impl std::fmt::Display for ValueType {
 //                 clippy::cast_precision_loss,
 //                 reason = "no other way to convert int to float while ignoring errors"
 //             )]
-//             (&Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(x as fsize)), // TBD: error (or warning) for loss of data?
+//             (&Self::UInt(x), ValueType::Flpt) => Ok(Self::Flpt(x as fsize)), // TBD: error (or warning) for loss of data?
 //             (&Self::UInt(x), ValueType::Char) => Ok(match u8::try_from(x) {
 //                 // TODO: what about unicode?
 //                 Ok(x) => Self::Char(char::from(x)),
@@ -892,7 +892,7 @@ impl std::fmt::Display for ValueType {
 //                 clippy::cast_precision_loss,
 //                 reason = "no other way to convert int to float while ignoring errors"
 //             )]
-//             (&Self::SInt(x), ValueType::Frac) => Ok(Self::Frac(x as fsize)), // TBD: error (or warning) for loss of data?
+//             (&Self::SInt(x), ValueType::Flpt) => Ok(Self::Flpt(x as fsize)), // TBD: error (or warning) for loss of data?
 //             (&Self::SInt(x), ValueType::Char) => Ok(match u8::try_from(x) {
 //                 // TODO: what about unicode?
 //                 Ok(x) => Self::Char(char::from(x)),
@@ -904,13 +904,13 @@ impl std::fmt::Display for ValueType {
 //                 clippy::cast_sign_loss,
 //                 reason = "no other way to convert int to float while ignoring errors"
 //             )]
-//             (&Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x as usize)), // TBD: should truncation be an error/warning?
+//             (&Self::Flpt(x), ValueType::UInt) => Ok(Self::UInt(x as usize)), // TBD: should truncation be an error/warning?
 //             #[expect(
 //                 clippy::as_conversions,
 //                 clippy::cast_possible_truncation,
 //                 reason = "no other way to convert int to float while ignoring errors"
 //             )]
-//             (&Self::Frac(x), ValueType::SInt) => Ok(Self::SInt(x as isize)), // TBD: should truncation be an error/warning?
+//             (&Self::Flpt(x), ValueType::SInt) => Ok(Self::SInt(x as isize)), // TBD: should truncation be an error/warning?
 
 //             #[cfg(not(target_pointer_width = "16"))]
 //             #[expect(
@@ -935,7 +935,7 @@ impl std::fmt::Display for ValueType {
 //             | (Self::Bool(_), ValueType::Bool)
 //             | (Self::UInt(_), ValueType::UInt)
 //             | (Self::SInt(_), ValueType::SInt)
-//             | (Self::Frac(_), ValueType::Frac)
+//             | (Self::Flpt(_), ValueType::Flpt)
 //             | (Self::Char(_), ValueType::Char)
 //             | (Self::Text(_), ValueType::Text) => Ok(self.clone()),
 
@@ -948,8 +948,8 @@ impl std::fmt::Display for ValueType {
 //             (&Self::SInt(x), ValueType::UInt) => Ok(Self::UInt(x.cast_unsigned())),
 
 //             // TODO: specialize for pointer widths
-//             (&Self::UInt(x), ValueType::Frac) => Ok(Self::Frac(fsize::from_bits(x as u64))),
-//             (&Self::Frac(x), ValueType::UInt) => Ok(Self::UInt(x.to_bits() as usize)),
+//             (&Self::UInt(x), ValueType::Flpt) => Ok(Self::Flpt(fsize::from_bits(x as u64))),
+//             (&Self::Flpt(x), ValueType::UInt) => Ok(Self::UInt(x.to_bits() as usize)),
 
 //             (Self::Text(_), ValueType::UInt) => todo!("text pointer?"),
 
@@ -986,7 +986,7 @@ impl std::fmt::Display for ValueType {
 //         Self::Bool(match self {
 //             Self::None => false,
 //             Self::Bool(r) => *r,
-//             Self::Frac(r) => !r.is_nan(),
+//             Self::Flpt(r) => !r.is_nan(),
 //             Self::Char(r) => *r != '\0',
 //             Self::Text(r) => !r.is_empty(),
 //             _ => true,
@@ -1000,7 +1000,7 @@ impl std::fmt::Display for ValueType {
 //             RunValue::Bool(x) => std::mem::size_of_val(x),
 //             RunValue::UInt(x) => std::mem::size_of_val(x),
 //             RunValue::SInt(x) => std::mem::size_of_val(x),
-//             RunValue::Frac(x) => std::mem::size_of_val(x),
+//             RunValue::Flpt(x) => std::mem::size_of_val(x),
 //             RunValue::Char(x) => std::mem::size_of_val(x),
 //             RunValue::Text(x) => std::mem::size_of_val(&**x), // TODO: depends on literal/const vs runtime
 //             RunValue::Fail(e) => std::mem::size_of_val(e),
@@ -1011,7 +1011,7 @@ impl std::fmt::Display for ValueType {
 //                 ValueType::Bool => std::mem::size_of::<bool>(),
 //                 ValueType::UInt => std::mem::size_of::<usize>(),
 //                 ValueType::SInt => std::mem::size_of::<isize>(),
-//                 ValueType::Frac => std::mem::size_of::<fsize>(),
+//                 ValueType::Flpt => std::mem::size_of::<fsize>(),
 //                 ValueType::Char => std::mem::size_of::<char>(),
 //                 ValueType::Text => todo!("multiple representations/dynamically sized"),
 //                 ValueType::Fail => std::mem::size_of::<Failure>(),
@@ -1028,7 +1028,7 @@ impl std::fmt::Display for ValueType {
 //             RunValue::Bool(_) | RunValue::Type(ValueType::Bool) => std::mem::align_of::<bool>(),
 //             RunValue::UInt(_) | RunValue::Type(ValueType::UInt) => std::mem::align_of::<usize>(),
 //             RunValue::SInt(_) | RunValue::Type(ValueType::SInt) => std::mem::align_of::<isize>(),
-//             RunValue::Frac(_) | RunValue::Type(ValueType::Frac) => std::mem::align_of::<fsize>(),
+//             RunValue::Flpt(_) | RunValue::Type(ValueType::Flpt) => std::mem::align_of::<fsize>(),
 //             RunValue::Char(_) | RunValue::Type(ValueType::Char) => std::mem::align_of::<char>(),
 //             RunValue::Text(_) | RunValue::Type(ValueType::Text) => std::mem::align_of::<u8>(), // TBD: String or str?
 //             RunValue::Fail(_) | RunValue::Type(ValueType::Fail) => std::mem::align_of::<Failure>(),
@@ -1200,7 +1200,7 @@ impl std::fmt::Display for ValueType {
 //             LexValue::BoolLiteral(b) => Ok(RunValue::Bool(b)),
 //             LexValue::UIntLiteral(n) => Ok(RunValue::UInt(n)),
 //             LexValue::SIntLiteral(n) => Ok(RunValue::SInt(n)),
-//             LexValue::FracLiteral(x) => Ok(RunValue::Frac(x)),
+//             LexValue::FlptLiteral(x) => Ok(RunValue::Flpt(x)),
 //             LexValue::CharLiteral(CharLiteral { ch, .. }) => Ok(RunValue::Char(ch)),
 //             LexValue::TextLiteral(s) => s
 //                 .process()
@@ -1260,7 +1260,7 @@ impl std::fmt::Display for ValueType {
 //                 Keyword::Bool => ValueType::Bool,
 //                 Keyword::Uint => ValueType::UInt,
 //                 Keyword::Sint => ValueType::SInt,
-//                 Keyword::Frac => ValueType::Frac,
+//                 Keyword::Flpt => ValueType::Flpt,
 //                 Keyword::Char => ValueType::Char,
 //                 Keyword::Text => ValueType::Text,
 //                 Keyword::Fail => ValueType::Fail,

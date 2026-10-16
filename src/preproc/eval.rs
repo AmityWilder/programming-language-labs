@@ -98,7 +98,7 @@ pub enum PpValue<'src> {
     Bool,
     Uint,
     Sint,
-    Frac,
+    Flpt,
     Char,
     Text,
 
@@ -114,7 +114,7 @@ pub enum PpValue<'src> {
 impl<'src> PpValue<'src> {
     const fn as_type(self) -> PpType {
         match self {
-            Self::Bool | Self::Uint | Self::Sint | Self::Frac | Self::Char | Self::Text => {
+            Self::Bool | Self::Uint | Self::Sint | Self::Flpt | Self::Char | Self::Text => {
                 PpType::Typename
             }
             Self::BoolLiteral(_) => PpType::Bool,
@@ -261,7 +261,7 @@ impl<'src> PpValue<'src> {
             Self::BoolLiteral(_) | Self::Bool => std::mem::size_of::<bool>(),
             Self::UIntLiteral(_) | Self::Uint => std::mem::size_of::<usize>(),
             Self::SIntLiteral(_) | Self::Sint => std::mem::size_of::<isize>(),
-            Self::Frac => std::mem::size_of::<fsize>(),
+            Self::Flpt => std::mem::size_of::<fsize>(),
             Self::Char => std::mem::size_of::<char>(),
             Self::Text => std::mem::size_of::<String>(),
             Self::Macro(_) => 0,
@@ -482,7 +482,7 @@ where
                 LexValue::Keyword(Keyword::Bool) => Ok(PpValue::Bool),
                 LexValue::Keyword(Keyword::Sint) => Ok(PpValue::Sint),
                 LexValue::Keyword(Keyword::Uint) => Ok(PpValue::Uint),
-                LexValue::Keyword(Keyword::Frac) => Ok(PpValue::Frac),
+                LexValue::Keyword(Keyword::Flpt) => Ok(PpValue::Flpt),
                 LexValue::Keyword(Keyword::Char) => Ok(PpValue::Char),
                 LexValue::Keyword(Keyword::Text) => Ok(PpValue::Text),
                 _ => Err(ContextError::token_error(

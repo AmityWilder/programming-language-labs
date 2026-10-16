@@ -13,7 +13,7 @@ use crate::{
         value::{Keyword, LexValue, TextLiteral, TokenEq},
     },
     spec_ops::{BitRotate, BitShift},
-    types::{fail, frac, nevr, none, sint, text, uint},
+    types::{fail, flpt, nevr, none, sint, text, uint},
 };
 use std::{marker::PhantomData, range::Range};
 
@@ -82,8 +82,8 @@ impl LangType for uint {
 impl LangType for sint {
     const VALUE_TYPE: ValueType = ValueType::SInt;
 }
-impl LangType for frac {
-    const VALUE_TYPE: ValueType = ValueType::Frac;
+impl LangType for flpt {
+    const VALUE_TYPE: ValueType = ValueType::Flpt;
 }
 impl LangType for char {
     const VALUE_TYPE: ValueType = ValueType::Char;
@@ -277,12 +277,12 @@ impl_output! {
         #[op(Punctuation::Ge)] #[def(lhs >= rhs)] SGe { lhs: sint, rhs: sint },
 
         // TBD: should float equality be supported?
-        #[op(Punctuation::Eq)] #[def(lhs == rhs)] FEq { lhs: frac, rhs: frac },
-        #[op(Punctuation::Ne)] #[def(lhs != rhs)] FNe { lhs: frac, rhs: frac },
-        #[op(Punctuation::Lt)] #[def(lhs <  rhs)] FLt { lhs: frac, rhs: frac },
-        #[op(Punctuation::Gt)] #[def(lhs >  rhs)] FGt { lhs: frac, rhs: frac },
-        #[op(Punctuation::Le)] #[def(lhs <= rhs)] FLe { lhs: frac, rhs: frac },
-        #[op(Punctuation::Ge)] #[def(lhs >= rhs)] FGe { lhs: frac, rhs: frac },
+        #[op(Punctuation::Eq)] #[def(lhs == rhs)] FEq { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::Ne)] #[def(lhs != rhs)] FNe { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::Lt)] #[def(lhs <  rhs)] FLt { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::Gt)] #[def(lhs >  rhs)] FGt { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::Le)] #[def(lhs <= rhs)] FLe { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::Ge)] #[def(lhs >= rhs)] FGe { lhs: flpt, rhs: flpt },
 
         #[op(Punctuation::Eq)] #[def(lhs == rhs)] CEq { lhs: char, rhs: char },
         #[op(Punctuation::Ne)] #[def(lhs != rhs)] CNe { lhs: char, rhs: char },
@@ -415,19 +415,19 @@ impl_output! {
 
 impl_output! {
     #[derive(Debug, Clone)]
-    for frac as pub FracOps<'src> {
+    for flpt as pub FlptOps<'src> {
         // binary
 
-        #[op(Punctuation::Add)]    #[def(lhs + rhs)]     Add { lhs: frac, rhs: frac },
-        #[op(Punctuation::SubNeg)] #[def(lhs - rhs)]     Sub { lhs: frac, rhs: frac },
-        #[op(Punctuation::Mul)]    #[def(lhs * rhs)]     Mul { lhs: frac, rhs: frac },
-        #[op(Punctuation::Div)]    #[def(lhs / rhs)]     Div { lhs: frac, rhs: frac },
-        #[op(Punctuation::Rem)]    #[def(lhs % rhs)]     Rem { lhs: frac, rhs: frac },
-        #[op(Punctuation::Pow)]    #[def(lhs.powf(rhs))] Pow { lhs: frac, rhs: frac },
+        #[op(Punctuation::Add)]    #[def(lhs + rhs)]     Add { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::SubNeg)] #[def(lhs - rhs)]     Sub { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::Mul)]    #[def(lhs * rhs)]     Mul { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::Div)]    #[def(lhs / rhs)]     Div { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::Rem)]    #[def(lhs % rhs)]     Rem { lhs: flpt, rhs: flpt },
+        #[op(Punctuation::Pow)]    #[def(lhs.powf(rhs))] Pow { lhs: flpt, rhs: flpt },
 
         // unary
 
-        #[op(Punctuation::SubNeg)] #[def(-rhs)] Neg { , rhs: frac },
+        #[op(Punctuation::SubNeg)] #[def(-rhs)] Neg { , rhs: flpt },
     }
 }
 
@@ -456,13 +456,13 @@ impl_output! {
         #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] TLAdd { lhs: text, rhs: bool },
         #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] TUAdd { lhs: text, rhs: uint },
         #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] TSAdd { lhs: text, rhs: sint },
-        #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] TFAdd { lhs: text, rhs: frac },
+        #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] TFAdd { lhs: text, rhs: flpt },
         #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] TCAdd { lhs: text, rhs: char },
 
         #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] LTAdd { lhs: bool, rhs: text },
         #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] UTAdd { lhs: uint, rhs: text },
         #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] STAdd { lhs: sint, rhs: text },
-        #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] FTAdd { lhs: frac, rhs: text },
+        #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] FTAdd { lhs: flpt, rhs: text },
         #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] CTAdd { lhs: char, rhs: text },
 
         #[op(Punctuation::Add)] #[def(format!("{lhs}{rhs}"))] TTAdd { lhs: text, rhs: text },
@@ -607,7 +607,7 @@ pub enum AnyExpr<'src> {
     bool(Expr<'src, bool>),
     uint(Expr<'src, uint>),
     sint(Expr<'src, sint>),
-    frac(Expr<'src, frac>),
+    flpt(Expr<'src, flpt>),
     char(Expr<'src, char>),
     text(Expr<'src, text>),
 }
@@ -620,7 +620,7 @@ impl AnyExpr<'_> {
             AnyExpr::bool(_) => ValueType::Bool,
             AnyExpr::uint(_) => ValueType::UInt,
             AnyExpr::sint(_) => ValueType::SInt,
-            AnyExpr::frac(_) => ValueType::Frac,
+            AnyExpr::flpt(_) => ValueType::Flpt,
             AnyExpr::char(_) => ValueType::Char,
             AnyExpr::text(_) => ValueType::Text,
         }
@@ -658,7 +658,7 @@ pub enum AssignmentStmt<'src> {
     Bool(Assignment<'src, bool>),
     UInt(Assignment<'src, uint>),
     SInt(Assignment<'src, sint>),
-    Frac(Assignment<'src, frac>),
+    Flpt(Assignment<'src, flpt>),
     Char(Assignment<'src, char>),
     Text(Assignment<'src, text>),
 }
@@ -670,7 +670,7 @@ impl Execute for AssignmentStmt<'_> {
             Self::Bool(x) => x.exec(env),
             Self::UInt(x) => x.exec(env),
             Self::SInt(x) => x.exec(env),
-            Self::Frac(x) => x.exec(env),
+            Self::Flpt(x) => x.exec(env),
             Self::Char(x) => x.exec(env),
             Self::Text(x) => x.exec(env),
             Self::Fail(x) => x.exec(env),
@@ -810,7 +810,7 @@ fn literal_type_mismatch_error<'src, T: LangType>(
         match token.val {
             LexValue::UIntLiteral(_) => uint::VALUE_TYPE,
             LexValue::SIntLiteral(_) => sint::VALUE_TYPE,
-            LexValue::FracLiteral(_) => frac::VALUE_TYPE,
+            LexValue::FlptLiteral(_) => flpt::VALUE_TYPE,
             LexValue::CharLiteral(_) => char::VALUE_TYPE,
             LexValue::TextLiteral(_) => text::VALUE_TYPE,
             LexValue::BoolLiteral(_) => bool::VALUE_TYPE,
@@ -887,12 +887,12 @@ impl FromLiteral for sint {
         }
     }
 }
-impl FromLiteral for frac {
+impl FromLiteral for flpt {
     fn from_literal<'src>(
         source: &'src str,
         token: Token<'src>,
     ) -> Result<Expr<'src, Self>, ContextError<'src>> {
-        if let LexValue::FracLiteral(value) = token.val {
+        if let LexValue::FlptLiteral(value) = token.val {
             Ok(Expr::Lit(Literal {
                 src: token.into(),
                 value,
@@ -1047,8 +1047,8 @@ fn analyze_expr<'src>(
                 LexValue::SIntLiteral(value) => {
                     Ok(AnyExpr::sint(Expr::Lit(Literal { src, value })))
                 }
-                LexValue::FracLiteral(value) => {
-                    Ok(AnyExpr::frac(Expr::Lit(Literal { src, value })))
+                LexValue::FlptLiteral(value) => {
+                    Ok(AnyExpr::flpt(Expr::Lit(Literal { src, value })))
                 }
                 LexValue::CharLiteral(value) => Ok(AnyExpr::char(Expr::Lit(Literal {
                     src,
@@ -1081,7 +1081,7 @@ fn analyze_expr<'src>(
                 ValueType::Bool => Ok(AnyExpr::bool(Expr::Var(Variable::new(ident, ptr, dom)))),
                 ValueType::UInt => Ok(AnyExpr::uint(Expr::Var(Variable::new(ident, ptr, dom)))),
                 ValueType::SInt => Ok(AnyExpr::sint(Expr::Var(Variable::new(ident, ptr, dom)))),
-                ValueType::Frac => Ok(AnyExpr::frac(Expr::Var(Variable::new(ident, ptr, dom)))),
+                ValueType::Flpt => Ok(AnyExpr::flpt(Expr::Var(Variable::new(ident, ptr, dom)))),
                 ValueType::Char => Ok(AnyExpr::char(Expr::Var(Variable::new(ident, ptr, dom)))),
                 ValueType::Text => Ok(AnyExpr::text(Expr::Var(Variable::new(ident, ptr, dom)))),
                 ValueType::Fail => Ok(AnyExpr::fail(Expr::Var(Variable::new(ident, ptr, dom)))),
@@ -1121,7 +1121,7 @@ fn analyze_expr<'src>(
         .or_else(BoolOps::new_any_expr)
         .or_else(UIntOps::new_any_expr)
         .or_else(SIntOps::new_any_expr)
-        .or_else(FracOps::new_any_expr)
+        .or_else(FlptOps::new_any_expr)
         .or_else(CharOps::new_any_expr)
         .or_else(TextOps::new_any_expr)
         .or_else(NoneOps::new_any_expr)
@@ -1221,7 +1221,7 @@ fn analyze_decl<'src>(
                         var: Variable::new(ident, ptr, dom),
                         val,
                     }),
-                    AnyExpr::frac(val) => AssignmentStmt::Frac(Assignment {
+                    AnyExpr::flpt(val) => AssignmentStmt::Flpt(Assignment {
                         var: Variable::new(ident, ptr, dom),
                         val,
                     }),

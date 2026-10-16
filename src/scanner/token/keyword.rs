@@ -30,7 +30,7 @@ define_token_eq! {
         /// Signed integer type (represented as `isize` (`isize_t`))
         Sint = "sint",
         /// Floating point type (represented as `fsize` (float or double depending on hardware))
-        Frac = "frac",
+        Flpt = "flpt",
         /// Character type
         Char = "char",
         /// String type
@@ -225,7 +225,7 @@ define_token_eq! {
         /// fun foo(v)
         /// <=>
         ///     v has x: uint, // `v.x` is defined as a uint
-        ///     v has fun f: (self) -> frac, // `v.y` is defined as a frac-returning method
+        ///     v has fun f: (self) -> flpt, // `v.y` is defined as a flpt-returning method
         /// {
         ///     // ...
         /// }
@@ -497,7 +497,7 @@ impl Keyword {
                 | Self::Bool
                 | Self::Uint
                 | Self::Sint
-                | Self::Frac
+                | Self::Flpt
                 | Self::Char
                 | Self::Text
         )

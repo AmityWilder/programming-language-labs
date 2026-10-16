@@ -18,9 +18,9 @@ exponent -> fn_call_or_conversion ( "**" fn_call_or_conversion )* ;
 fn_call_or_conversion -> fn_call | conversion ;
 conversion -> primary ( "-:>" | "=:>" ) type_expression ;
 primary -> literal | group ;
-literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | TEXT ;
+literal -> "true" | "fals" | "none" | UINT | SINT | FLPT | CHAR | TEXT ;
 group -> "(" expression ")" ;
-type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" ( "fail" | "none" | "nevr" ) )? ;
+type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "flpt" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" ( "fail" | "none" | "nevr" ) )? ;
 ```
 
 UNDER CONSTRUCTION:
@@ -89,7 +89,7 @@ fn_call -> fn_source "(" ( expr ( "," expr )* ( "," )? )? ")" ;
 - `BoolLiteral` (`true` or `fals` (the "e" is removed from "false" so it has the same number of columns as "true"))
 - `UIntLiteral` - unsigned integer
 - `SIntLiteral` - signed integer
-- `FracLiteral` - floating point
+- `FlptLiteral` - floating point
 - `CharLiteral` - character
 - `TextLiteral` - string
 - `Keyword` - specifically `none`
@@ -133,7 +133,7 @@ Expr::binary(Binary {
         },
         expr: Expr::literal(Token {
             lex: "45.67",
-            val: LexValue::FracLiteral(45.67),
+            val: LexValue::FlptLiteral(45.67),
             mac: None,
         }),
         close: Token {
@@ -217,7 +217,7 @@ syntax_tree!(
     Binary(
         Unary(Token(Punctuation::SubNeg), Literal(SIntLiteral(123))),
         Token(Punctuation::Mul),
-        Grouping(Literal(FracLiteral(45.67))),
+        Grouping(Literal(FlptLiteral(45.67))),
     )
 )
 ```
@@ -253,7 +253,7 @@ Expr::Binary(Box::new(
             },
             expr: Expr::Literal(Token {
                 lex: "45.67",
-                val: LexValue::FracLiteral(45.67),
+                val: LexValue::FlptLiteral(45.67),
                 mac: None,
             }),
             close: Token {
@@ -280,7 +280,7 @@ The tests themselves can be found in [`src/tests/lab2.rs`](/src/tests/lab2.rs).
   Binary(
       Unary(Token(Punctuation::SubNeg), Literal(SIntLiteral(123))),
       Token(Punctuation::Mul),
-      Grouping(Literal(FracLiteral(45.67))),
+      Grouping(Literal(FlptLiteral(45.67))),
   )
   ```
 
@@ -779,13 +779,13 @@ The tests themselves can be found in [`src/tests/lab2.rs`](/src/tests/lab2.rs).
   Literal(SIntLiteral(78))
   ```
 
-- `test_print_literal_frac`
+- `test_print_literal_flpt`
   - Purpose: Test the Lisp representation of a floating point literal
   - Expected Output: `54.87`
   - AST:
 
   ```rs
-  Literal(FracLiteral(54.87))
+  Literal(FlptLiteral(54.87))
   ```
 
 - `test_print_literal_char`

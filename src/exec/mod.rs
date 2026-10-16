@@ -46,7 +46,7 @@ pub mod eval;
 //                 RunValue::Bool(x) => RunValue::Bool(x),
 //                 RunValue::UInt(x) => RunValue::UInt(x),
 //                 RunValue::SInt(x) => RunValue::SInt(x),
-//                 RunValue::Frac(x) => RunValue::Frac(x),
+//                 RunValue::Flpt(x) => RunValue::Flpt(x),
 //                 RunValue::Char(x) => RunValue::Char(x),
 //                 RunValue::Text(x) => RunValue::Text(std::borrow::Cow::Owned(x.into_owned())),
 //                 RunValue::Type(t) => RunValue::Type(t),
@@ -70,7 +70,7 @@ pub mod eval;
 //                 }
 //                 RunValue::UInt(x) => segment.copy_from_slice(&x.to_ne_bytes()),
 //                 RunValue::SInt(x) => segment.copy_from_slice(&x.to_ne_bytes()),
-//                 RunValue::Frac(x) => segment.copy_from_slice(&x.to_ne_bytes()),
+//                 RunValue::Flpt(x) => segment.copy_from_slice(&x.to_ne_bytes()),
 //                 RunValue::Char(x) => segment.copy_from_slice(&x.to_u32().to_ne_bytes()),
 //                 RunValue::Text(x) => segment.copy_from_slice(x.as_bytes()), // TODO: length should be mutable for non-pvts!!
 //                 RunValue::Ptr(_, _) => todo!(),

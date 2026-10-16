@@ -175,7 +175,7 @@ fn test_ast_printer0() {
         Binary(
             Unary(Token(Punctuation::SubNeg), Literal(SIntLiteral(123))),
             Token(Punctuation::Mul),
-            Grouping(Literal(FracLiteral(45.67))),
+            Grouping(Literal(FlptLiteral(45.67))),
         )
     );
 }
@@ -362,7 +362,7 @@ literal_tests! {
     test_print_literal_none(Literal(Keyword::None), "none");
     test_print_literal_sint(Literal(SIntLiteral(-53)), "-53");
     test_print_literal_uint(Literal(SIntLiteral(78)), "78");
-    test_print_literal_frac(Literal(FracLiteral(54.87)), "54.87");
+    test_print_literal_flpt(Literal(FlptLiteral(54.87)), "54.87");
     test_print_literal_char(Literal(CharLiteral('x', false)), "'x'");
     test_print_literal_char_esc(Literal(CharLiteral('\x1b', true)), r"'\x1b'");
     test_print_literal_text(Literal(TextLiteral("apple")), r#""apple""#);

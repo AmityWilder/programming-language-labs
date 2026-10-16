@@ -1,4 +1,4 @@
-use crate::types::{fail, frac, none, sint, text, uint};
+use crate::types::{fail, flpt, none, sint, text, uint};
 use std::range::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -69,7 +69,7 @@ impl SizedPrimitive for fail {}
 impl SizedPrimitive for bool {}
 impl SizedPrimitive for uint {}
 impl SizedPrimitive for sint {}
-impl SizedPrimitive for frac {}
+impl SizedPrimitive for flpt {}
 impl SizedPrimitive for char {}
 impl SizedPrimitive for text {}
 

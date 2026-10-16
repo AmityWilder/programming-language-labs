@@ -454,7 +454,7 @@ impl<'src> TokenHighlight<'src> for RunToken<'src> {
 //             },
 //             syn: RunSyntax::Mono(Syntax::NumberLiteral),
 //         },
-//         RunValue::Frac(x) => RunToken {
+//         RunValue::Flpt(x) => RunToken {
 //             lex: {
 //                 *buf = x.to_string();
 //                 buf

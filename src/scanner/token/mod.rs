@@ -146,7 +146,7 @@ impl std::fmt::Debug for Token<'_> {
             LexValue::Comment => ("Comment", None),
             LexValue::UIntLiteral(x) => ("UIntLiteral", Some(x)),
             LexValue::SIntLiteral(x) => ("SIntLiteral", Some(x)),
-            LexValue::FracLiteral(x) => ("FltLiteral", Some(x)),
+            LexValue::FlptLiteral(x) => ("FltLiteral", Some(x)),
             LexValue::CharLiteral(x) => ("CharLiteral", Some(x)),
             LexValue::TextLiteral(x) => ("StringLiteral", Some(x)),
             LexValue::BoolLiteral(x) => ("BoolLiteral", Some(x)),
