@@ -261,6 +261,7 @@ impl_output! {
 
         #[op(Punctuation::Eq)] #[def(lhs == rhs)] LEq { lhs: bool, rhs: bool },
         #[op(Punctuation::Ne)] #[def(lhs != rhs)] LNe { lhs: bool, rhs: bool },
+
         #[op(Punctuation::Eq)] #[def(lhs == rhs)] UEq { lhs: uint, rhs: uint },
         #[op(Punctuation::Ne)] #[def(lhs != rhs)] UNe { lhs: uint, rhs: uint },
         #[op(Punctuation::Lt)] #[def(lhs <  rhs)] ULt { lhs: uint, rhs: uint },
@@ -275,6 +276,7 @@ impl_output! {
         #[op(Punctuation::Le)] #[def(lhs <= rhs)] SLe { lhs: sint, rhs: sint },
         #[op(Punctuation::Ge)] #[def(lhs >= rhs)] SGe { lhs: sint, rhs: sint },
 
+        // TBD: should float equality be supported?
         #[op(Punctuation::Eq)] #[def(lhs == rhs)] FEq { lhs: frac, rhs: frac },
         #[op(Punctuation::Ne)] #[def(lhs != rhs)] FNe { lhs: frac, rhs: frac },
         #[op(Punctuation::Lt)] #[def(lhs <  rhs)] FLt { lhs: frac, rhs: frac },
@@ -289,7 +291,13 @@ impl_output! {
         #[op(Punctuation::Le)] #[def(lhs <= rhs)] CLe { lhs: char, rhs: char },
         #[op(Punctuation::Ge)] #[def(lhs >= rhs)] CGe { lhs: char, rhs: char },
 
-        // TODO: text
+        // TODO: what about unowned strings?
+        #[op(Punctuation::Eq)] #[def(lhs == rhs)] TEq { lhs: text, rhs: text },
+        #[op(Punctuation::Ne)] #[def(lhs != rhs)] TNe { lhs: text, rhs: text },
+        #[op(Punctuation::Lt)] #[def(lhs <  rhs)] TLt { lhs: text, rhs: text },
+        #[op(Punctuation::Gt)] #[def(lhs >  rhs)] TGt { lhs: text, rhs: text },
+        #[op(Punctuation::Le)] #[def(lhs <= rhs)] TLe { lhs: text, rhs: text },
+        #[op(Punctuation::Ge)] #[def(lhs >= rhs)] TGe { lhs: text, rhs: text },
 
         // unary
 
@@ -303,11 +311,11 @@ impl_output! {
         // binary
 
         #[op(Punctuation::And)] #[def(lhs & rhs)] And { lhs: uint, rhs: uint },
-        #[op(Punctuation::Or)] #[def(lhs | rhs)] Or { lhs: uint, rhs: uint },
+        #[op(Punctuation::Or)]  #[def(lhs | rhs)] Or  { lhs: uint, rhs: uint },
         #[op(Punctuation::Xor)] #[def(lhs ^ rhs)] Xor { lhs: uint, rhs: uint },
 
         #[op(Punctuation::Nand)] #[def(!(lhs & rhs))] Nand { lhs: uint, rhs: uint },
-        #[op(Punctuation::Nor)] #[def(!(lhs | rhs))] Nor { lhs: uint, rhs: uint },
+        #[op(Punctuation::Nor)]  #[def(!(lhs | rhs))] Nor  { lhs: uint, rhs: uint },
         #[op(Punctuation::Xnor)] #[def(!(lhs ^ rhs))] Xnor { lhs: uint, rhs: uint },
 
         #[op(Punctuation::Add)]
@@ -356,11 +364,11 @@ impl_output! {
         // binary
 
         #[op(Punctuation::And)] #[def(lhs & rhs)] And { lhs: sint, rhs: sint },
-        #[op(Punctuation::Or)]  #[def(lhs | rhs)] Or { lhs: sint, rhs: sint },
+        #[op(Punctuation::Or)]  #[def(lhs | rhs)] Or  { lhs: sint, rhs: sint },
         #[op(Punctuation::Xor)] #[def(lhs ^ rhs)] Xor { lhs: sint, rhs: sint },
 
         #[op(Punctuation::Nand)] #[def(!(lhs & rhs))] Nand { lhs: sint, rhs: sint },
-        #[op(Punctuation::Nor)]  #[def(!(lhs | rhs))] Nor { lhs: sint, rhs: sint },
+        #[op(Punctuation::Nor)]  #[def(!(lhs | rhs))] Nor  { lhs: sint, rhs: sint },
         #[op(Punctuation::Xnor)] #[def(!(lhs ^ rhs))] Xnor { lhs: sint, rhs: sint },
 
         #[op(Punctuation::Add)]
@@ -495,6 +503,8 @@ impl<T: Clone> Evaluate<T> for Literal<'_, T> {
 pub struct Variable<'src, T: ?Sized> {
     pub ident: Lexeme<'src>,
     ptr: Range<usize>,
+    // TODO: can the stack and global share memory so the distinction can be in `ptr`
+    // instead of needing a field for identifying domain?
     dom: Domain,
     _marker: PhantomData<T>, // TODO
 }
@@ -518,7 +528,7 @@ impl<T: ?Sized> Eq for Variable<'_, T> {}
 
 impl<T: ?Sized> Default for Variable<'_, T> {
     fn default() -> Self {
-        Self::new(Default::default(), Default::default(), Domain::default())
+        Self::new(Lexeme::default(), Range::default(), Domain::default())
     }
 }
 
@@ -535,7 +545,10 @@ impl<'src, T: ?Sized> Variable<'src, T> {
 
 impl<T: Clone + Primitive> Evaluate<T> for Variable<'_, T> {
     fn eval(&self, env: &Environment) -> Result<T, Failure> {
-        let mem = env.stack();
+        let mem = match self.dom {
+            Domain::Stack => env.stack(),
+            Domain::Global => env.global(),
+        };
         // SAFETY: static analysis promises that the variable is of the type it claims to be
         let val = unsafe { mem.get_as::<T>(self.ptr) }.expect("should be guaranteed by analysis");
         Ok(val.clone())
@@ -612,17 +625,21 @@ impl AnyExpr<'_> {
 /// Assigns to a variable of type `T`
 #[derive(Debug, Clone)]
 pub struct Assignment<'src, T: Output> {
-    pub ptr: Range<usize>,
+    pub var: Variable<'src, T>,
     pub val: Expr<'src, T>,
 }
 
 impl<T: EvalOutput> Execute for Assignment<'_, T> {
     fn exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         let tmp = self.val.eval(env)?;
-        let mem = env.stack_mut();
+        let mem = match self.var.dom {
+            Domain::Stack => env.stack_mut(),
+            Domain::Global => env.global_mut(),
+        };
         // SAFETY: invariant promised by static analysis
         // TODO: how does this react to a String being dropped? can it drop a string when the scope pops??
-        let var = unsafe { mem.get_mut_as::<T>(self.ptr) }.expect("guaranteed by static analysis");
+        let var =
+            unsafe { mem.get_mut_as::<T>(self.var.ptr) }.expect("guaranteed by static analysis");
         *var = tmp;
         Ok(())
     }
@@ -1139,23 +1156,52 @@ fn analyze_decl<'src>(
             if let Some(x) = def.assignment {
                 let expr = analyze_expr(source, static_env, x.expr)?;
                 let ty = expr.get_type();
-                let data = match def.var_kw.val {
-                    LexValue::Keyword(Keyword::Let) => static_env.push_local(def.ident.lex, ty),
-                    LexValue::Keyword(Keyword::Uni) => static_env.push_global(def.ident.lex, ty),
+                let (data, dom) = match def.var_kw.val {
+                    LexValue::Keyword(Keyword::Let) => static_env
+                        .push_local(def.ident.lex, ty)
+                        .map(|x| (x, Domain::Stack)),
+                    LexValue::Keyword(Keyword::Uni) => static_env
+                        .push_global(def.ident.lex, ty)
+                        .map(|x| (x, Domain::Global)),
                     LexValue::Keyword(Keyword::Pvt) => todo!(),
                     _ => unimplemented!("should be caught by grammar"),
                 }
                 .expect("should be constructable"); // TODO: error? or grammar?
+                let ident = def.ident.into();
                 let ptr = data.range;
                 Ok(Some(Statement::Assign(match expr {
-                    AnyExpr::none(val) => AssignmentStmt::None(Assignment { ptr, val }),
-                    AnyExpr::fail(val) => AssignmentStmt::Fail(Assignment { ptr, val }),
-                    AnyExpr::bool(val) => AssignmentStmt::Bool(Assignment { ptr, val }),
-                    AnyExpr::uint(val) => AssignmentStmt::UInt(Assignment { ptr, val }),
-                    AnyExpr::sint(val) => AssignmentStmt::SInt(Assignment { ptr, val }),
-                    AnyExpr::frac(val) => AssignmentStmt::Frac(Assignment { ptr, val }),
-                    AnyExpr::char(val) => AssignmentStmt::Char(Assignment { ptr, val }),
-                    AnyExpr::text(val) => AssignmentStmt::Text(Assignment { ptr, val }),
+                    AnyExpr::none(val) => AssignmentStmt::None(Assignment {
+                        var: Variable::new(ident, ptr, dom),
+                        val,
+                    }),
+                    AnyExpr::fail(val) => AssignmentStmt::Fail(Assignment {
+                        var: Variable::new(ident, ptr, dom),
+                        val,
+                    }),
+                    AnyExpr::bool(val) => AssignmentStmt::Bool(Assignment {
+                        var: Variable::new(ident, ptr, dom),
+                        val,
+                    }),
+                    AnyExpr::uint(val) => AssignmentStmt::UInt(Assignment {
+                        var: Variable::new(ident, ptr, dom),
+                        val,
+                    }),
+                    AnyExpr::sint(val) => AssignmentStmt::SInt(Assignment {
+                        var: Variable::new(ident, ptr, dom),
+                        val,
+                    }),
+                    AnyExpr::frac(val) => AssignmentStmt::Frac(Assignment {
+                        var: Variable::new(ident, ptr, dom),
+                        val,
+                    }),
+                    AnyExpr::char(val) => AssignmentStmt::Char(Assignment {
+                        var: Variable::new(ident, ptr, dom),
+                        val,
+                    }),
+                    AnyExpr::text(val) => AssignmentStmt::Text(Assignment {
+                        var: Variable::new(ident, ptr, dom),
+                        val,
+                    }),
                 })))
             } else {
                 // TBD: should we insert a "type TBD" instead?

@@ -50,13 +50,17 @@ pub trait SizedPrimitive: Sized {}
 
 impl<T: SizedPrimitive> Primitive for T {
     unsafe fn ref_as(data: &[u8]) -> &Self {
+        let ptr = (&raw const *data).cast::<T>();
+        debug_assert!(ptr.is_aligned(), "pointer must be aligned");
         // SAFETY: caller must uphold safety contract
-        unsafe { &*(&raw const *data).cast() }
+        unsafe { &*ptr }
     }
 
     unsafe fn mut_as(data: &mut [u8]) -> &mut Self {
+        let ptr = (&raw mut *data).cast::<T>();
+        debug_assert!(ptr.is_aligned(), "pointer must be aligned");
         // SAFETY: caller must uphold safety contract
-        unsafe { &mut *(&raw mut *data).cast() }
+        unsafe { &mut *ptr }
     }
 }
 
