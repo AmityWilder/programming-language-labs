@@ -10,7 +10,7 @@ use crate::{
     scanner::token::{
         ExpansionData, Token,
         punc::Punctuation,
-        value::{Keyword, LexValue, TokenEq},
+        value::{Keyword, LexValue, TextLiteral, TokenEq},
     },
     spec_ops::{BitRotate, BitShift},
     types::{fail, frac, nevr, none, sint, text, uint},
@@ -861,19 +861,26 @@ impl FromLiteral for char {
         }
     }
 }
+fn text_from_literal<'src>(
+    source: &'src str,
+    token: Token<'src>,
+    value: TextLiteral<'src>,
+) -> Result<Literal<'src, text>, ContextError<'src>> {
+    Ok(Literal {
+        src: token.into(),
+        value: value
+            .process()
+            .map_err(|e| ContextError::token_error(source, Some(&token), e))?
+            .to_string(),
+    })
+}
 impl FromLiteral for text {
     fn from_literal<'src>(
         source: &'src str,
         token: Token<'src>,
     ) -> Result<Expr<'src, Self>, ContextError<'src>> {
         if let LexValue::TextLiteral(value) = token.val {
-            Ok(Expr::Lit(Literal {
-                src: token.into(),
-                value: value
-                    .process()
-                    .map_err(|e| ContextError::token_error(source, Some(&token), e))?
-                    .to_string(),
-            }))
+            text_from_literal(source, token, value).map(Expr::Lit)
         } else {
             Err(todo!("type mismatch error"))
         }
@@ -953,10 +960,9 @@ fn analyze_expr<'src>(
                     src,
                     value: value.ch,
                 }))),
-                LexValue::TextLiteral(value) => Ok(AnyExpr::text(Expr::Lit(Literal {
-                    src,
-                    value: value.content.to_string(),
-                }))),
+                LexValue::TextLiteral(value) => Ok(AnyExpr::text(Expr::Lit(
+                    text_from_literal(source, x.value, value).map_err(|e| vec![e])?, // HACK: need to make these more consistent without bloat
+                ))),
                 LexValue::BoolLiteral(value) => {
                     Ok(AnyExpr::bool(Expr::Lit(Literal { src, value })))
                 }

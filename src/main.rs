@@ -813,6 +813,8 @@ fn run_code(source: &str, config: &Cli) {
         }
     };
 
+    println!("static analysis: {program:#?}");
+
     // execution
     if config.do_eval {
         println!("\nrunning...\n----------");
