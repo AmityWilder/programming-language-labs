@@ -66,11 +66,11 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
+    analyzer::{Execute, StaticAnalysis, analyze},
     error::ContextError,
     exec::{
         asm::{self, arch::VirtualArch},
-        eval::RunValue,
-        execute,
+        env::Environment,
     },
     grammar::{
         ast::{Binary, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
@@ -422,76 +422,76 @@ impl<'src> TokenHighlight<'src> for RunToken<'src> {
     }
 }
 
-fn runtime_token<'buf>(value: RunValue<'buf>, buf: &'buf mut String) -> RunToken<'buf> {
-    use std::fmt::Write;
-    match value {
-        RunValue::None | RunValue::CoalesceNone => RunToken {
-            lex: "none",
-            syn: RunSyntax::Mono(Syntax::LanguageDefined),
-        },
-        RunValue::Fail(e) => RunToken {
-            lex: {
-                _ = write!(buf, "failed: {e}"); // infallible for String
-                buf
-            },
-            syn: RunSyntax::Mono(Syntax::Invalid),
-        },
-        RunValue::Bool(x) => RunToken {
-            lex: if x { "true" } else { "fals" },
-            syn: RunSyntax::Mono(Syntax::LanguageDefined),
-        },
-        RunValue::UInt(n) => RunToken {
-            lex: {
-                *buf = n.to_string();
-                buf
-            },
-            syn: RunSyntax::Mono(Syntax::NumberLiteral),
-        },
-        RunValue::SInt(n) => RunToken {
-            lex: {
-                *buf = n.to_string();
-                buf
-            },
-            syn: RunSyntax::Mono(Syntax::NumberLiteral),
-        },
-        RunValue::Frac(x) => RunToken {
-            lex: {
-                *buf = x.to_string();
-                buf
-            },
-            syn: RunSyntax::Mono(Syntax::NumberLiteral),
-        },
-        RunValue::Char(ch) => {
-            _ = write!(buf, "{ch:?}"); // infallible for String
-            RunToken {
-                lex: buf,
-                syn: RunSyntax::Char(CharLiteral {
-                    ch,
-                    is_escaped: buf.contains('\\'),
-                }),
-            }
-        }
-        RunValue::Text(s) => {
-            _ = write!(buf, "{s:?}"); // infallible for String
-            RunToken {
-                lex: buf,
-                syn: RunSyntax::Text(TextLiteral {
-                    content: buf
-                        .strip_circumfix('\"', '\"')
-                        .expect("string debug should include delimiters"),
-                }),
-            }
-        }
-        RunValue::Ptr(_, _) => todo!(),
-        RunValue::Type(t) => {
-            _ = write!(buf, "{t:?}"); // infallible for String
-            RunToken {
-                lex: buf,
-                syn: RunSyntax::Mono(Syntax::Typename),
-            }
-        }
-    }
-}
+// fn runtime_token<'buf>(value: RunValue<'buf>, buf: &'buf mut String) -> RunToken<'buf> {
+//     use std::fmt::Write;
+//     match value {
+//         RunValue::None | RunValue::CoalesceNone => RunToken {
+//             lex: "none",
+//             syn: RunSyntax::Mono(Syntax::LanguageDefined),
+//         },
+//         RunValue::Fail(e) => RunToken {
+//             lex: {
+//                 _ = write!(buf, "failed: {e}"); // infallible for String
+//                 buf
+//             },
+//             syn: RunSyntax::Mono(Syntax::Invalid),
+//         },
+//         RunValue::Bool(x) => RunToken {
+//             lex: if x { "true" } else { "fals" },
+//             syn: RunSyntax::Mono(Syntax::LanguageDefined),
+//         },
+//         RunValue::UInt(n) => RunToken {
+//             lex: {
+//                 *buf = n.to_string();
+//                 buf
+//             },
+//             syn: RunSyntax::Mono(Syntax::NumberLiteral),
+//         },
+//         RunValue::SInt(n) => RunToken {
+//             lex: {
+//                 *buf = n.to_string();
+//                 buf
+//             },
+//             syn: RunSyntax::Mono(Syntax::NumberLiteral),
+//         },
+//         RunValue::Frac(x) => RunToken {
+//             lex: {
+//                 *buf = x.to_string();
+//                 buf
+//             },
+//             syn: RunSyntax::Mono(Syntax::NumberLiteral),
+//         },
+//         RunValue::Char(ch) => {
+//             _ = write!(buf, "{ch:?}"); // infallible for String
+//             RunToken {
+//                 lex: buf,
+//                 syn: RunSyntax::Char(CharLiteral {
+//                     ch,
+//                     is_escaped: buf.contains('\\'),
+//                 }),
+//             }
+//         }
+//         RunValue::Text(s) => {
+//             _ = write!(buf, "{s:?}"); // infallible for String
+//             RunToken {
+//                 lex: buf,
+//                 syn: RunSyntax::Text(TextLiteral {
+//                     content: buf
+//                         .strip_circumfix('\"', '\"')
+//                         .expect("string debug should include delimiters"),
+//                 }),
+//             }
+//         }
+//         RunValue::Ptr(_, _) => todo!(),
+//         RunValue::Type(t) => {
+//             _ = write!(buf, "{t:?}"); // infallible for String
+//             RunToken {
+//                 lex: buf,
+//                 syn: RunSyntax::Mono(Syntax::Typename),
+//             }
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliError {
@@ -791,35 +791,38 @@ fn run_code(source: &str, config: &Cli) {
         );
     }
 
+    let StaticAnalysis {
+        global_memory_needed,
+        stack_memory_needed,
+        mut program,
+    } = match analyze(source, prgm) {
+        Ok(prgm) => prgm,
+        Err(errs) => {
+            // static analysis errors
+            let any_err = if config.print_errors {
+                println!();
+                list_errors("static analysis", errs)
+            } else {
+                errs.into_iter().next().is_some()
+            };
+            debug_assert!(
+                any_err,
+                "static analysis should only error if there is an error (duh)"
+            );
+            return;
+        }
+    };
+
     // execution
     if config.do_eval {
-        const USE_ASM: bool = false;
-        const RAM_SIZE: usize = 1 << 16;
-        const STACK_SIZE: usize = 1 << 8;
-        if USE_ASM {
-            println!("\nrunning...\n----------");
-            let mut asm_prgm = asm::Program::new(Vec::new());
-            let mut arch = VirtualArch::new(
-                vec![0; RAM_SIZE].into_boxed_slice(),
-                vec![0; STACK_SIZE].into_boxed_slice(),
-            );
-            let res = asm_prgm.run(&mut arch);
-            println!("----------\nfinished\n");
-            if let Err(e) = res
-                && config.print_errors
-            {
-                println!("runtime error: {e}");
-            }
-        } else {
-            println!("\nrunning...\n----------");
-            let res = execute(source, &prgm);
-            println!("----------\nfinished\n");
-            if let Err(e) = res
-                && config.print_errors
-            {
-                _ = list_errors("runtime", std::iter::once(e));
-                println!("runtime error: {e}");
-            }
+        println!("\nrunning...\n----------");
+        let mut runtime_env = Environment::with_capacity(global_memory_needed, stack_memory_needed);
+        let res = program.exec(&mut runtime_env);
+        println!("----------\nfinished\n");
+        if let Err(e) = res
+            && config.print_errors
+        {
+            println!("runtime error: {e}");
         }
     }
 }
