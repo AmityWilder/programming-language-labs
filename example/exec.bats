@@ -1,8 +1,9 @@
-uni x = 257u;
+uni x = 257;
+pvt FOO = 5 + 3;
 
 let foo = 7;
 foo = 9;
-foo = "x";
+//foo = "x"; // error: can't reassign
 let bar = 8;
 
 let bigger = "TODO";
@@ -19,3 +20,4 @@ prnt(bigger + " is bigger\n");
 
 let foobar = foo * bar + 5 * (2 - 8 + bar ** 2) / 3 % x;
 prnt("foobar = " + foobar + '\n');
+prnt("the pvt FOO = " + FOO + '\n');

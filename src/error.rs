@@ -1841,7 +1841,7 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
 struct InlineErrMsg<'src, 'err>(&'err ErrorType<'src>);
 
 /// Which side of the operator the operand is on
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OpSide {
     /// Postfix
     Left,

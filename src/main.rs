@@ -66,7 +66,7 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
-    analyzer::{Execute, StaticAnalysis, analyze},
+    // analyzer::{Execute, StaticAnalysis, analyze},
     error::ContextError,
     exec::{
         asm::{self, arch::VirtualArch},
@@ -791,42 +791,42 @@ fn run_code(source: &str, config: &Cli) {
         );
     }
 
-    let StaticAnalysis {
-        global_memory_needed,
-        stack_memory_needed,
-        mut program,
-    } = match analyze(source, prgm) {
-        Ok(prgm) => prgm,
-        Err(errs) => {
-            // static analysis errors
-            let any_err = if config.print_errors {
-                println!();
-                list_errors("static analysis", errs)
-            } else {
-                errs.into_iter().next().is_some()
-            };
-            debug_assert!(
-                any_err,
-                "static analysis should only error if there is an error (duh)"
-            );
-            return;
-        }
-    };
+    // let StaticAnalysis {
+    //     global_memory_needed,
+    //     stack_memory_needed,
+    //     mut program,
+    // } = match analyze(source, prgm) {
+    //     Ok(prgm) => prgm,
+    //     Err(errs) => {
+    //         // static analysis errors
+    //         let any_err = if config.print_errors {
+    //             println!();
+    //             list_errors("static analysis", errs)
+    //         } else {
+    //             errs.into_iter().next().is_some()
+    //         };
+    //         debug_assert!(
+    //             any_err,
+    //             "static analysis should only error if there is an error (duh)"
+    //         );
+    //         return;
+    //     }
+    // };
 
-    println!("static analysis: {program:#?}");
+    // println!("static analysis: {program:#?}");
 
-    // execution
-    if config.do_eval {
-        println!("\nrunning...\n----------");
-        let mut runtime_env = Environment::with_capacity(global_memory_needed, stack_memory_needed);
-        let res = program.exec(&mut runtime_env);
-        println!("----------\nfinished\n");
-        if let Err(e) = res
-            && config.print_errors
-        {
-            println!("runtime error: {e}");
-        }
-    }
+    // // execution
+    // if config.do_eval {
+    //     println!("\nrunning...\n----------");
+    //     let mut runtime_env = Environment::with_capacity(global_memory_needed, stack_memory_needed);
+    //     let res = program.exec(&mut runtime_env);
+    //     println!("----------\nfinished\n");
+    //     if let Err(e) = res
+    //         && config.print_errors
+    //     {
+    //         println!("runtime error: {e}");
+    //     }
+    // }
 }
 
 fn pop_trailing_newline(s: &mut String) {
