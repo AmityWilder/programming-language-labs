@@ -104,6 +104,7 @@ mod highlight;
 mod preproc;
 mod regex;
 mod scanner;
+mod spec_ops;
 mod types;
 
 #[cfg(test)] // only include testing module in test builds

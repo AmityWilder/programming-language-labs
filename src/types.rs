@@ -17,3 +17,7 @@ pub type byte = u8;
 pub type uint = usize;
 pub type sint = isize;
 pub type frac = fsize;
+pub type none = ();
+pub type nevr = !;
+pub type fail = crate::exec::error::Failure;
+pub type text = String;

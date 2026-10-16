@@ -1,4 +1,7 @@
-use crate::{exec::eval::ValueType, types::fsize};
+use crate::{
+    exec::eval::ValueType,
+    types::{byte, fail, frac, fsize, none, sint, text, uint},
+};
 use std::{collections::LinkedList, marker::PhantomData, num::NonZero, range::Range};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -116,10 +119,28 @@ impl Ord for UntypedPointer {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+/// A pointer to an [`Environment`] variable on the [`stack`](Environment::stack)
+#[derive(Debug, Default)]
 pub struct Pointer<T: ?Sized> {
     pub ptr: UntypedPointer,
     _marker: PhantomData<T>,
+}
+
+impl<T: ?Sized> Clone for Pointer<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T: ?Sized> Copy for Pointer<T> {}
+
+impl<T: ?Sized> Pointer<T> {
+    const fn new(ptr: UntypedPointer) -> Self {
+        Self {
+            ptr,
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<T: ?Sized> PartialEq for Pointer<T> {
@@ -217,6 +238,14 @@ impl<'src> StackMemory<'src> {
             .map(|(_, item)| (item.ty, UntypedPointer(item.range)))
     }
 
+    /// Returns [`None`] if variable does not exist
+    pub fn tlookup<T, Q>(&self, ident: &Q) -> Option<Pointer<T>>
+    where
+        Q: ?Sized + PartialEq<str>,
+    {
+        self.lookup(ident).map(|(_, ptr)| Pointer::new(ptr)) // TBD: assert type, or trust?
+    }
+
     /// Returns [`None`] if the pointer is out of range
     pub fn get_raw(&self, ptr: UntypedPointer) -> Option<&[u8]> {
         self.stack.get(ptr.0)
@@ -283,7 +312,7 @@ impl<T: SizedPrimitive> Primitive for T {
         let ptr = data.as_ptr().cast::<T>();
         assert!(ptr.is_aligned(), "stack memory should be aligned");
         // SAFETY: came from a reference
-        unsafe { ptr.as_ref_unchecked() }
+        unsafe { &*ptr }
     }
 
     unsafe fn from_mut_bytes(data: &mut [u8]) -> &mut Self {
@@ -291,16 +320,21 @@ impl<T: SizedPrimitive> Primitive for T {
         let ptr = data.as_mut_ptr().cast::<T>();
         assert!(ptr.is_aligned(), "stack memory should be aligned");
         // SAFETY: came from a mutable reference
-        unsafe { ptr.as_mut_unchecked() }
+        unsafe { &mut *ptr }
     }
 }
 
+impl SizedPrimitive for none {}
+// `nevr` is non-constructable
 impl SizedPrimitive for bool {}
-impl SizedPrimitive for u8 {}
-impl SizedPrimitive for usize {}
-impl SizedPrimitive for isize {}
-impl SizedPrimitive for fsize {}
-impl SizedPrimitive for char {} // TBD: is char always 4 bytes?
+impl SizedPrimitive for byte {}
+impl SizedPrimitive for uint {}
+impl SizedPrimitive for sint {}
+impl SizedPrimitive for frac {}
+impl SizedPrimitive for char {} // TBD: is char *always* 4 bytes?
+impl SizedPrimitive for text {} // hopefully this is fine...
+impl SizedPrimitive for fail {}
+
 impl<T: Primitive, const N: usize> SizedPrimitive for [T; N] {}
 
 impl<T: Primitive> Primitive for [T] {
