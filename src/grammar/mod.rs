@@ -270,9 +270,20 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `expression -> or`
+    /// `expression -> assign`
     pub fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        self.or()
+        self.assign()
+    }
+
+    /// `assign -> IDENTIFIER ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "[<<]=" | "[>>]=" | "|=" | "&=" | "^=" | "!|=" | "!&=" | "!^=" ) or | or`
+    fn assign(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let lhs = self.or()?; // we'll check if this can be assigned to in static analysis
+        if let Some(op) = self.pull_if(match_token!(Punctuation::{Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign | PowAssign | ShlAssign | ShrAssign | RotlAssign | RotrAssign | OrAssign | AndAssign | XorAssign | NorAssign | NandAssign | XnorAssign})) {
+            let rhs = self.or()?;
+            Ok(Expr::binary(Binary { lhs, op, rhs }))
+        } else {
+            Ok(lhs)
+        }
     }
 
     /// `or -> xor ( ("|" | "!|") xor )*`
