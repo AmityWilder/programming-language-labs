@@ -1,3 +1,5 @@
+uni x = 257u;
+
 let foo = 7;
 let bar = 8;
 
@@ -13,6 +15,5 @@ if foo > bar {
 }
 prnt(bigger + " is bigger\n");
 
-let foobar = foo * bar;
-
-prnt("the product of foo and bar is " + foobar + '\n');
+let foobar = foo * bar + 5 * (2 - 8 + bar ** 2) / 3 % x;
+prnt("foobar = " + foobar + '\n');
