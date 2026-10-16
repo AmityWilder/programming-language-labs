@@ -228,7 +228,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(2.5),
+                        val: LexValue::FlptLiteral(2.5),
                         mac: None
                     })]
                 );
@@ -241,7 +241,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(25.25),
+                        val: LexValue::FlptLiteral(25.25),
                         mac: None
                     })]
                 );
@@ -254,7 +254,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(-25.25),
+                        val: LexValue::FlptLiteral(-25.25),
                         mac: None
                     })]
                 );
@@ -267,7 +267,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(25.25),
+                        val: LexValue::FlptLiteral(25.25),
                         mac: None
                     })]
                 );
@@ -285,7 +285,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(5e0),
+                        val: LexValue::FlptLiteral(5e0),
                         mac: None
                     })]
                 );
@@ -298,7 +298,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(55e0),
+                        val: LexValue::FlptLiteral(55e0),
                         mac: None
                     })]
                 );
@@ -311,7 +311,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(5e-5),
+                        val: LexValue::FlptLiteral(5e-5),
                         mac: None
                     })]
                 );
@@ -324,7 +324,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(5e+5),
+                        val: LexValue::FlptLiteral(5e+5),
                         mac: None
                     })]
                 );
@@ -337,7 +337,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(5e-50),
+                        val: LexValue::FlptLiteral(5e-50),
                         mac: None
                     })]
                 );
@@ -350,7 +350,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(-5e-50),
+                        val: LexValue::FlptLiteral(-5e-50),
                         mac: None
                     })]
                 );
@@ -363,7 +363,7 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
                         lex: SOURCE,
-                        val: LexValue::FracLiteral(5e-5_0),
+                        val: LexValue::FlptLiteral(5e-5_0),
                         mac: None
                     })]
                 );
@@ -377,7 +377,7 @@ mod scan {
                     &[
                         Ok(Token {
                             lex: "-5e-5",
-                            val: LexValue::FracLiteral(-5e-5),
+                            val: LexValue::FlptLiteral(-5e-5),
                             mac: None
                         }),
                         Ok(Token {

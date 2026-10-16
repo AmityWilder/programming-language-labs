@@ -440,14 +440,14 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .flatten()
     }
 
-    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FRAC | CHAR | TEXT | MACRO`
+    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FLPT | CHAR | TEXT | MACRO`
     fn literal(&mut self) -> Option<Expr<'src>> {
         self.pull_if(match_token!(
             BoolLiteral(_)
                 | Keyword::None
                 | UIntLiteral(_)
                 | SIntLiteral(_)
-                | FracLiteral(_)
+                | FlptLiteral(_)
                 | CharLiteral(_)
                 | TextLiteral(_)
                 | Macro
@@ -468,7 +468,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "frac" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" ( "fail" | "none" | "nevr" ) )?`
+    /// `type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "flpt" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" ( "fail" | "none" | "nevr" ) )?`
     fn type_expression(&mut self) -> Result<TypeExpr<'src>, ContextError<'src>> {
         let name = self.try_pull(
             |token| match token.val {

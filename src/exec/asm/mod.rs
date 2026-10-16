@@ -9,7 +9,7 @@ use crate::{
         error::Failure,
     },
     spec_ops::BitRotate,
-    types::{frac, sint, uint},
+    types::{flpt, sint, uint},
 };
 
 pub mod arch;
@@ -138,9 +138,9 @@ instructions! {
         /// Add sints
         #[def(arch.reg[d] = arch.reg[s].saturating_add(arch.reg[t]))]
         SAdd { d: TReg<sint>, s: TReg<sint>, t: TReg<sint> },
-        /// Add fracs
+        /// Add flpts
         #[def(arch.reg[d] = arch.reg[s] + arch.reg[t])]
-        FAdd { d: TReg<frac>, s: TReg<frac>, t: TReg<frac> },
+        FAdd { d: TReg<flpt>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Subtract uints
         #[def(arch.reg[d] = arch.reg[s].saturating_sub(arch.reg[t]))]
@@ -148,9 +148,9 @@ instructions! {
         /// Subtract sints
         #[def(arch.reg[d] = arch.reg[s].saturating_sub(arch.reg[t]))]
         SSub { d: TReg<sint>, s: TReg<sint>, t: TReg<sint> },
-        /// Subtract fracs
+        /// Subtract flpts
         #[def(arch.reg[d] = arch.reg[s] - arch.reg[t])]
-        FSub { d: TReg<frac>, s: TReg<frac>, t: TReg<frac> },
+        FSub { d: TReg<flpt>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Multiply uints
         #[def(arch.reg[d] = arch.reg[s].saturating_mul(arch.reg[t]))]
@@ -158,9 +158,9 @@ instructions! {
         /// Multiply sints
         #[def(arch.reg[d] = arch.reg[s].saturating_mul(arch.reg[t]))]
         SMul { d: TReg<sint>, s: TReg<sint>, t: TReg<sint> },
-        /// Multiply fracs
+        /// Multiply flpts
         #[def(arch.reg[d] = arch.reg[s] * arch.reg[t])]
-        FMul { d: TReg<frac>, s: TReg<frac>, t: TReg<frac> },
+        FMul { d: TReg<flpt>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Power uints
         #[def(arch.reg[d] = arch.reg[t].try_into().map_or(uint::MAX, |n| arch.reg[s].pow(n)))]
@@ -168,9 +168,9 @@ instructions! {
         /// Power sints
         #[def(arch.reg[d] = arch.reg[t].max(0).try_into().map_or(sint::MAX, |n| arch.reg[s].pow(n)))]
         SPow { d: TReg<sint>, s: TReg<sint>, t: TReg<sint> },
-        /// Power fracs
+        /// Power flpts
         #[def(arch.reg[d] = arch.reg[s].powf(arch.reg[t]))]
-        FPow { d: TReg<frac>, s: TReg<frac>, t: TReg<frac> },
+        FPow { d: TReg<flpt>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Divide uints
         #[def(arch.reg[d] = arch.reg[s].checked_div(arch.reg[t]).unwrap_or(uint::MAX))]
@@ -178,9 +178,9 @@ instructions! {
         /// Divide sints
         #[def(arch.reg[d] = arch.reg[s].checked_div(arch.reg[t]).unwrap_or(sint::MAX))]
         SDiv { d: TReg<sint>, s: TReg<sint>, t: TReg<sint> },
-        /// Divide fracs
+        /// Divide flpts
         #[def(arch.reg[d] = arch.reg[s] / arch.reg[t])]
-        FDiv { d: TReg<frac>, s: TReg<frac>, t: TReg<frac> },
+        FDiv { d: TReg<flpt>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Remainder of uints
         #[def(arch.reg[d] = arch.reg[s].checked_rem(arch.reg[t]).unwrap_or(0))]
@@ -188,9 +188,9 @@ instructions! {
         /// Remainder of sints
         #[def(arch.reg[d] = arch.reg[s].checked_rem(arch.reg[t]).unwrap_or(0))]
         SRem { d: TReg<sint>, s: TReg<sint>, t: TReg<sint> },
-        /// Remainder of fracs
+        /// Remainder of flpts
         #[def(arch.reg[d] = arch.reg[s] % arch.reg[t])]
-        FRem { d: TReg<frac>, s: TReg<frac>, t: TReg<frac> },
+        FRem { d: TReg<flpt>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Left bitshift of uint
         #[def(arch.reg[d] = arch.reg[t].try_into().map_or(0, |t| arch.reg[s].unbounded_shl(t)))]
@@ -240,9 +240,9 @@ instructions! {
         /// Set if less than sint
         #[def(arch.reg[d] = arch.reg[s] < arch.reg[t])]
         SSlt { d: TReg<bool>, s: TReg<sint>, t: TReg<sint> },
-        /// Set if less than frac
+        /// Set if less than flpt
         #[def(arch.reg[d] = arch.reg[s] < arch.reg[t])]
-        FSlt { d: TReg<bool>, s: TReg<frac>, t: TReg<frac> },
+        FSlt { d: TReg<bool>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Set if greater than uint
         #[def(arch.reg[d] = arch.reg[s] > arch.reg[t])]
@@ -250,9 +250,9 @@ instructions! {
         /// Set if greater than sint
         #[def(arch.reg[d] = arch.reg[s] > arch.reg[t])]
         SSgt { d: TReg<bool>, s: TReg<sint>, t: TReg<sint> },
-        /// Set if greater than frac
+        /// Set if greater than flpt
         #[def(arch.reg[d] = arch.reg[s] > arch.reg[t])]
-        FSgt { d: TReg<bool>, s: TReg<frac>, t: TReg<frac> },
+        FSgt { d: TReg<bool>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Set if less than or equal to uint
         #[def(arch.reg[d] = arch.reg[s] <= arch.reg[t])]
@@ -260,9 +260,9 @@ instructions! {
         /// Set if less than or equal to sint
         #[def(arch.reg[d] = arch.reg[s] <= arch.reg[t])]
         SSle { d: TReg<bool>, s: TReg<sint>, t: TReg<sint> },
-        /// Set if less than or equal to frac
+        /// Set if less than or equal to flpt
         #[def(arch.reg[d] = arch.reg[s] <= arch.reg[t])]
-        FSle { d: TReg<bool>, s: TReg<frac>, t: TReg<frac> },
+        FSle { d: TReg<bool>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Set if greater than or equal to uint
         #[def(arch.reg[d] = arch.reg[s] >= arch.reg[t])]
@@ -270,9 +270,9 @@ instructions! {
         /// Set if greater than or equal to sint
         #[def(arch.reg[d] = arch.reg[s] >= arch.reg[t])]
         SSge { d: TReg<bool>, s: TReg<sint>, t: TReg<sint> },
-        /// Set if greater than or equal to frac
+        /// Set if greater than or equal to flpt
         #[def(arch.reg[d] = arch.reg[s] >= arch.reg[t])]
-        FSge { d: TReg<bool>, s: TReg<frac>, t: TReg<frac> },
+        FSge { d: TReg<bool>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Set if equal to uint
         #[def(arch.reg[d] = arch.reg[s] == arch.reg[t])]
@@ -280,9 +280,9 @@ instructions! {
         /// Set if equal to sint
         #[def(arch.reg[d] = arch.reg[s] == arch.reg[t])]
         SSeq { d: TReg<bool>, s: TReg<sint>, t: TReg<sint> },
-        /// Set if equal to frac
+        /// Set if equal to flpt
         #[def(arch.reg[d] = arch.reg[s].eq(&arch.reg[t]))]
-        FSeq { d: TReg<bool>, s: TReg<frac>, t: TReg<frac> },
+        FSeq { d: TReg<bool>, s: TReg<flpt>, t: TReg<flpt> },
 
         /// Set if not equal to uint
         #[def(arch.reg[d] = arch.reg[s] != arch.reg[t])]
@@ -290,9 +290,9 @@ instructions! {
         /// Set if not equal to sint
         #[def(arch.reg[d] = arch.reg[s] != arch.reg[t])]
         SSne { d: TReg<bool>, s: TReg<sint>, t: TReg<sint> },
-        /// Set if not equal to frac
+        /// Set if not equal to flpt
         #[def(arch.reg[d] = arch.reg[s].ne(&arch.reg[t]))]
-        FSne { d: TReg<bool>, s: TReg<frac>, t: TReg<frac> },
+        FSne { d: TReg<bool>, s: TReg<flpt>, t: TReg<flpt> },
 
         // ---------------------------------------------
         // Immediate
@@ -374,9 +374,9 @@ instructions! {
         /// Add sints
         #[def(arch.reg[d] = arch.reg[s].saturating_add(imm))]
         SAddI { d: TReg<sint>, s: TReg<sint>, imm: sint },
-        /// Add fracs
+        /// Add flpts
         #[def(arch.reg[d] = arch.reg[s] + imm)]
-        FAddI { d: TReg<frac>, s: TReg<frac>, imm: frac },
+        FAddI { d: TReg<flpt>, s: TReg<flpt>, imm: flpt },
 
         /// Subtract uints
         #[def(arch.reg[d] = arch.reg[s].saturating_sub(imm))]
@@ -384,9 +384,9 @@ instructions! {
         /// Subtract sints
         #[def(arch.reg[d] = arch.reg[s].saturating_sub(imm))]
         SSubI { d: TReg<sint>, s: TReg<sint>, imm: sint },
-        /// Subtract fracs
+        /// Subtract flpts
         #[def(arch.reg[d] = arch.reg[s] - imm)]
-        FSubI { d: TReg<frac>, s: TReg<frac>, imm: frac },
+        FSubI { d: TReg<flpt>, s: TReg<flpt>, imm: flpt },
 
         /// Multiply uints
         #[def(arch.reg[d] = arch.reg[s].saturating_mul(imm))]
@@ -394,9 +394,9 @@ instructions! {
         /// Multiply sints
         #[def(arch.reg[d] = arch.reg[s].saturating_mul(imm))]
         SMulI { d: TReg<sint>, s: TReg<sint>, imm: sint },
-        /// Multiply fracs
+        /// Multiply flpts
         #[def(arch.reg[d] = arch.reg[s] * imm)]
-        FMulI { d: TReg<frac>, s: TReg<frac>, imm: frac },
+        FMulI { d: TReg<flpt>, s: TReg<flpt>, imm: flpt },
 
         /// Power uints
         #[def(arch.reg[d] = imm.try_into().map_or(uint::MAX, |n| arch.reg[s].pow(n)))]
@@ -404,9 +404,9 @@ instructions! {
         /// Power sints
         #[def(arch.reg[d] = imm.max(0).try_into().map_or(sint::MAX, |n| arch.reg[s].pow(n)))]
         SPowI { d: TReg<sint>, s: TReg<sint>, imm: sint },
-        /// Power fracs
+        /// Power flpts
         #[def(arch.reg[d] = arch.reg[s].powf(imm))]
-        FPowI { d: TReg<frac>, s: TReg<frac>, imm: frac },
+        FPowI { d: TReg<flpt>, s: TReg<flpt>, imm: flpt },
 
         /// Divide uints
         #[def(arch.reg[d] = arch.reg[s].checked_div(imm).unwrap_or(uint::MAX))]
@@ -414,9 +414,9 @@ instructions! {
         /// Divide sints
         #[def(arch.reg[d] = arch.reg[s].checked_div(imm).unwrap_or(sint::MAX))]
         SDivI { d: TReg<sint>, s: TReg<sint>, imm: sint },
-        /// Divide fracs
+        /// Divide flpts
         #[def(arch.reg[d] = arch.reg[s] / imm)]
-        FDivI { d: TReg<frac>, s: TReg<frac>, imm: frac },
+        FDivI { d: TReg<flpt>, s: TReg<flpt>, imm: flpt },
 
         /// Remainder of uints
         #[def(arch.reg[d] = arch.reg[s].checked_rem(imm).unwrap_or(0))]
@@ -424,9 +424,9 @@ instructions! {
         /// Remainder of sints
         #[def(arch.reg[d] = arch.reg[s].checked_rem(imm).unwrap_or(0))]
         SRemI { d: TReg<sint>, s: TReg<sint>, imm: sint },
-        /// Remainder of fracs
+        /// Remainder of flpts
         #[def(arch.reg[d] = arch.reg[s] % imm)]
-        FRemI { d: TReg<frac>, s: TReg<frac>, imm: frac },
+        FRemI { d: TReg<flpt>, s: TReg<flpt>, imm: flpt },
 
         /// Left bitshift of uint
         #[def(arch.reg[d] = imm.try_into().map_or(0, |t| arch.reg[s].unbounded_shl(t)))]
@@ -476,9 +476,9 @@ instructions! {
         /// Set if less than sint
         #[def(arch.reg[d] = arch.reg[s] < imm)]
         SSltI { d: TReg<bool>, s: TReg<sint>, imm: sint },
-        /// Set if less than frac
+        /// Set if less than flpt
         #[def(arch.reg[d] = arch.reg[s] < imm)]
-        FSltI { d: TReg<bool>, s: TReg<frac>, imm: frac },
+        FSltI { d: TReg<bool>, s: TReg<flpt>, imm: flpt },
 
         /// Set if greater than uint
         #[def(arch.reg[d] = arch.reg[s] > imm)]
@@ -486,9 +486,9 @@ instructions! {
         /// Set if greater than sint
         #[def(arch.reg[d] = arch.reg[s] > imm)]
         SSgtI { d: TReg<bool>, s: TReg<sint>, imm: sint },
-        /// Set if greater than frac
+        /// Set if greater than flpt
         #[def(arch.reg[d] = arch.reg[s] > imm)]
-        FSgtI { d: TReg<bool>, s: TReg<frac>, imm: frac },
+        FSgtI { d: TReg<bool>, s: TReg<flpt>, imm: flpt },
 
         /// Set if less than or equal to uint
         #[def(arch.reg[d] = arch.reg[s] <= imm)]
@@ -496,9 +496,9 @@ instructions! {
         /// Set if less than or equal to sint
         #[def(arch.reg[d] = arch.reg[s] <= imm)]
         SSleI { d: TReg<bool>, s: TReg<sint>, imm: sint },
-        /// Set if less than or equal to frac
+        /// Set if less than or equal to flpt
         #[def(arch.reg[d] = arch.reg[s] <= imm)]
-        FSleI { d: TReg<bool>, s: TReg<frac>, imm: frac },
+        FSleI { d: TReg<bool>, s: TReg<flpt>, imm: flpt },
 
         /// Set if greater than or equal to uint
         #[def(arch.reg[d] = arch.reg[s] >= imm)]
@@ -506,9 +506,9 @@ instructions! {
         /// Set if greater than or equal to sint
         #[def(arch.reg[d] = arch.reg[s] >= imm)]
         SSgeI { d: TReg<bool>, s: TReg<sint>, imm: sint },
-        /// Set if greater than or equal to frac
+        /// Set if greater than or equal to flpt
         #[def(arch.reg[d] = arch.reg[s] >= imm)]
-        FSgeI { d: TReg<bool>, s: TReg<frac>, imm: frac },
+        FSgeI { d: TReg<bool>, s: TReg<flpt>, imm: flpt },
 
         /// Set if equal to uint
         #[def(arch.reg[d] = arch.reg[s] == imm)]
@@ -516,9 +516,9 @@ instructions! {
         /// Set if equal to sint
         #[def(arch.reg[d] = arch.reg[s] == imm)]
         SSeqI { d: TReg<bool>, s: TReg<sint>, imm: sint },
-        /// Set if equal to frac
+        /// Set if equal to flpt
         #[def(arch.reg[d] = arch.reg[s].eq(&imm))]
-        FSeqI { d: TReg<bool>, s: TReg<frac>, imm: frac },
+        FSeqI { d: TReg<bool>, s: TReg<flpt>, imm: flpt },
 
         /// Set if not equal to uint
         #[def(arch.reg[d] = arch.reg[s] != imm)]
@@ -526,9 +526,9 @@ instructions! {
         /// Set if not equal to sint
         #[def(arch.reg[d] = arch.reg[s] != imm)]
         SSneI { d: TReg<bool>, s: TReg<sint>, imm: sint },
-        /// Set if not equal to frac
+        /// Set if not equal to flpt
         #[def(arch.reg[d] = arch.reg[s].ne(&imm))]
-        FSneI { d: TReg<bool>, s: TReg<frac>, imm: frac },
+        FSneI { d: TReg<bool>, s: TReg<flpt>, imm: flpt },
 
         // ---------------------------------------------
         // Data transfer

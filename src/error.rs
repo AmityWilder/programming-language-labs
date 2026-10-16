@@ -26,7 +26,7 @@ use std::range::Range;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NumErrorKind {
     InvalidInt,
-    InvalidFrac,
+    InvalidFlpt,
     UPosOverflow,
     SPosOverflow,
     UNegOverflow,
@@ -72,7 +72,7 @@ impl NumErrorKind {
 impl std::fmt::Display for NumErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidInt | Self::InvalidFrac => "invalid digit found in source code",
+            Self::InvalidInt | Self::InvalidFlpt => "invalid digit found in source code",
             Self::UPosOverflow | Self::SPosOverflow => "number too large to fit in target type",
             Self::UNegOverflow | Self::SNegOverflow | Self::NegUnsigned => {
                 "number too small to fit in target type"
@@ -645,7 +645,7 @@ pub enum ErrorType<'src> {
             NumErrorKind::UNegOverflow => write!(f, "the smallest supported unsigned integer value is {}", usize::MIN),
             NumErrorKind::SNegOverflow => write!(f, "the smallest supported signed integer value is {}", isize::MIN),
             NumErrorKind::NegUnsigned => f.write_str("unsigned integers cannot be negative"),
-            NumErrorKind::InvalidFrac => write!(f, "I'm not sure how to help with this yet"), // TODO: float literal guidance
+            NumErrorKind::InvalidFlpt => write!(f, "I'm not sure how to help with this yet"), // TODO: float literal guidance
         }
     })]
     InvalidNumLiteral(NumErrorKind),
@@ -692,7 +692,7 @@ pub enum ErrorType<'src> {
             PpValue::Bool => f.write_str("the typename `bool` (which is not a boolean \x1b[1mvalue\x1b[22m)"),
             PpValue::Uint => f.write_str("the typename `uint`"),
             PpValue::Sint => f.write_str("the typename `sint`"),
-            PpValue::Frac => f.write_str("the typename `frac`"),
+            PpValue::Flpt => f.write_str("the typename `flpt`"),
             PpValue::Char => f.write_str("the typename `char`"),
             PpValue::Text => f.write_str("the typename `text`"),
             PpValue::UIntLiteral(x) => write!(f, "the unsigned integer {x}"),
@@ -707,7 +707,7 @@ pub enum ErrorType<'src> {
             PpValue::Bool |
             PpValue::Uint |
             PpValue::Sint |
-            PpValue::Frac |
+            PpValue::Flpt |
             PpValue::Char |
             PpValue::Text => f.write_str("typenames are not values, and especially not booleans. \
                 if you are trying to compare the size of a type with some number, \
@@ -796,7 +796,7 @@ pub enum ErrorType<'src> {
     #[code(PRE, 29)]
     #[err({ .. }, |f| write!(f, "invalid preprocessor type"))]
     #[inlay({ .. }, |f| write!(f, "this type is not valid within preprocessing"))]
-    #[help({ .. }, |f, _src| write!(f, "only `bool`, `uint`, `sint`, `frac`, `char`, and `text` are valid typenames within preprocessing."))]
+    #[help({ .. }, |f, _src| write!(f, "only `bool`, `uint`, `sint`, `flpt`, `char`, and `text` are valid typenames within preprocessing."))]
     InvalidPreType,
 
     #[code(PRE, 29)]
@@ -999,7 +999,7 @@ pub enum ErrorType<'src> {
             OverflowError::SPow {..} |
             OverflowError::SNeg {..} => writeln!(f, "sints must be between {} and {}.", isize::MIN, isize::MAX)?,
         }
-        f.write_str("use conditions to ensure this expression's output can fit within the appropriate bounds for its type, or switch to using a frac.")?;
+        f.write_str("use conditions to ensure this expression's output can fit within the appropriate bounds for its type, or switch to using a flpt.")?;
 
         match e {
             OverflowError::SNeg { r_value, .. } => {
