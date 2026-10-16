@@ -1,46 +1,73 @@
-use crate::exec::eval::ValueType;
-use std::{collections::LinkedList, num::NonZero, range::Range};
+use crate::analyzer::types::AbstractType;
+use std::collections::LinkedList;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct VarData {
-    pub range: Range<usize>,
-    pub ty: ValueType,
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstantValue(()); // TODO
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Var<'src> {
+    Run(Option<AbstractType<'src>>),
+    Pvt(ConstantValue),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct Scope<'src> {
-    pub vars: Vec<(&'src str, VarData)>,
-}
-
-impl Scope<'_> {
-    pub const fn new() -> Self {
-        Self { vars: Vec::new() }
+impl<'src> Var<'src> {
+    pub const fn get_type(&self) -> Option<&AbstractType<'src>> {
+        match self {
+            Var::Run(ty) => ty.as_ref(),
+            Var::Pvt(_) => todo!(),
+        }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Domain {
-    #[default]
-    Stack,
-    Global,
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Scope<'src> {
+    pub vars: Vec<(&'src str, Var<'src>)>,
+}
+
+impl<'src> Scope<'src> {
+    pub const fn new() -> Self {
+        Self { vars: Vec::new() }
+    }
+
+    /// Returns [`None`] if no item exists by the provided name
+    pub fn get<Q>(&self, name: &Q) -> Option<&Var<'src>>
+    where
+        Q: ?Sized + PartialEq<str>,
+    {
+        self.vars.iter().rfind(|(k, _)| name == *k).map(|(_, v)| v)
+    }
+
+    /// Returns [`None`] if no item exists by the provided name
+    pub fn get_mut<Q>(&mut self, name: &Q) -> Option<&mut Var<'src>>
+    where
+        Q: ?Sized + PartialEq<str>,
+    {
+        self.vars
+            .iter_mut()
+            .rfind(|(k, _)| name == *k)
+            .map(|(_, v)| v)
+    }
+
+    pub fn decl_var(
+        &mut self,
+        name: &'src str,
+        ty: Option<AbstractType<'src>>,
+    ) -> &mut Option<AbstractType<'src>> {
+        match &mut self.vars.push_mut((name, Var::Run(ty))).1 {
+            Var::Run(ty) => ty,
+            _ => unreachable!("pushed a Var::Run"),
+        }
+    }
+
+    pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) {
+        self.vars.push((name, Var::Pvt(value)));
+    }
 }
 
 /// [`Environment`](crate::exec::env::Environment) specialized for static analysis
 pub struct StaticEnvironment<'src> {
-    /// Global variables
     global: Scope<'src>,
-    /// Local variables
-    #[expect(
-        clippy::linkedlist,
-        reason = "scopes should be able to push and pop without many copies"
-    )]
     stack: LinkedList<Scope<'src>>,
-
-    /// Global pointer
-    gp: usize,
-    /// Stack pointer
-    sp: usize,
-    sp_max: usize,
 }
 
 impl<'src> StaticEnvironment<'src> {
@@ -48,101 +75,65 @@ impl<'src> StaticEnvironment<'src> {
         Self {
             global: Scope::new(),
             stack: LinkedList::new(),
-            gp: 0,
-            sp: 0,
-            sp_max: 0,
         }
     }
 
-    pub fn lookup<Q>(&self, name: &Q) -> Option<(&VarData, Domain)>
+    /// Returns [`None`] if no item exists with the provided name
+    pub fn get<Q>(&self, name: &Q) -> Option<&Var<'src>>
     where
         Q: ?Sized + PartialEq<str>,
     {
         self.stack
             .iter()
-            .flat_map(|scope| scope.vars.iter())
-            .rfind(|(k, _)| name == *k)
-            .map(|(_, data)| (data, Domain::Stack))
-            .or_else(|| {
-                self.global
-                    .vars
-                    .iter()
-                    .rfind(|(k, _)| name == *k)
-                    .map(|(_, data)| (data, Domain::Global))
-            })
+            .rev()
+            .find_map(|scope| scope.get(name))
+            .or_else(|| self.global.get(name))
+    }
+
+    /// Returns [`None`] if no item exists with the provided name
+    pub fn get_mut<Q>(&mut self, name: &Q) -> Option<&mut Var<'src>>
+    where
+        Q: ?Sized + PartialEq<str>,
+    {
+        self.stack
+            .iter_mut()
+            .rev()
+            .find_map(|scope| scope.get_mut(name))
+            .or_else(|| self.global.get_mut(name))
     }
 
     pub fn push_scope(&mut self) -> &mut Scope<'src> {
         self.stack.push_back_mut(Scope::new())
     }
 
-    /// Returns [`None`] if `ty` is not constructable
-    fn create(head: &mut usize, ty: ValueType) -> Option<VarData> {
-        let size = ty.size()?;
-        let align = ty.align()?;
-        assert!(
-            align.is_power_of_two(),
-            "`align` must be a power of 2\n align: {align}\n  type: {ty}"
-        );
-        let range = if let Some(size) = NonZero::new(size) {
-            let align = NonZero::new(align)
-                .unwrap_or_else(|| panic!("sized types cannot align to 0\n type: {ty}"));
-            let start = head.checked_next_multiple_of(align.get())?;
-            let end = start.checked_add(size.get())?;
-            *head = end;
-            Range { start, end }
-        } else {
-            // ZST
-            let start = *head;
-            Range { start, end: start }
-        };
-        Some(VarData { range, ty })
+    // TODO: needs to `Drop` all elements in memory (somehow)!!
+    pub fn pop_scope(&mut self) {
+        self.stack.pop_back();
     }
 
-    /// Returns [`None`] if `ty` is not constructable
-    pub fn push_global<'env>(
-        &'env mut self,
+    /// Returns a mutable reference to the undetermined type
+    pub fn decl_global_var(
+        &mut self,
         name: &'src str,
-        ty: ValueType,
-    ) -> Option<&'env mut VarData> {
-        Self::create(&mut self.gp, ty).map(|data| &mut self.global.vars.push_mut((name, data)).1)
+        ty: Option<AbstractType<'src>>,
+    ) -> &mut Option<AbstractType<'src>> {
+        self.global.decl_var(name, ty)
     }
 
-    /// Returns [`None`] if `ty` is not constructable
-    pub fn push_local<'env>(
-        &'env mut self,
+    /// Returns [`None`] if there is no local scope, or a mutable reference to the undetermined type if there is
+    pub fn decl_local_var(
+        &mut self,
         name: &'src str,
-        ty: ValueType,
-    ) -> Option<&'env mut VarData> {
-        Self::create(&mut self.sp, ty).map(|data| {
-            self.sp_max = self.sp_max.max(self.sp);
-            let scope = if let Some(scope) = self.stack.back_mut() {
-                scope
-            } else {
-                self.push_scope() // TBD: is this a legitimate way of handling this?
-            };
-            &mut scope.vars.push_mut((name, data)).1
-        })
+        ty: Option<AbstractType<'src>>,
+    ) -> Option<&mut Option<AbstractType<'src>>> {
+        self.stack.back_mut().map(|scope| scope.decl_var(name, ty))
     }
 
-    // TODO: needs to `Drop` all elements in memory!!
-    pub fn pop_scope(&mut self) -> Option<Scope<'src>> {
-        self.stack.pop_back().inspect(|_| {
-            self.sp = self
-                .stack
-                .back()
-                .and_then(|scope| scope.vars.last())
-                .map_or(0, |var| var.1.range.end);
-        })
-    }
-
-    #[inline]
-    pub const fn sp_max(&self) -> usize {
-        self.sp_max
-    }
-
-    #[inline]
-    pub const fn gp_max(&self) -> usize {
-        self.gp
+    /// Declares at global scope if there is no local scope
+    pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) {
+        self.stack
+            .back_mut()
+            .unwrap_or(&mut self.global)
+            .decl_pvt(name, value);
     }
 }

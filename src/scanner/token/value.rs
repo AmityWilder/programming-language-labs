@@ -69,7 +69,7 @@ impl<'src> TextLiteral<'src> {
 }
 
 /// A [`LexValue`] where the lexeme can be represented by a static string
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub enum TokenEq {
     Keyword(Keyword),
     Punctuation(Punctuation),

@@ -12,7 +12,7 @@ define_token_eq! {
     /// - Boolean literals (`true`/`false`)
     /// - Comparisons
     /// - "Bitwise" (logical) operations on booleans
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum Punctuation = operator {
         /// Not - Logical negation (booleans) or bitflip (integers)
         #[op_desc([Bool] => "logical not", [_] => "bitflip")]

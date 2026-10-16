@@ -2,7 +2,7 @@
 
 define_token_eq! {
     /// Language-defined reserved words for defining behavior or form
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum Keyword = keyword {
         // ----------------------------
         // Builtin values
