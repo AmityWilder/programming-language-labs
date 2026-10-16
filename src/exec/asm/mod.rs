@@ -8,114 +8,12 @@ use crate::{
         },
         error::Failure,
     },
+    spec_ops::BitRotate,
     types::{frac, sint, uint},
 };
 
 pub mod arch;
 pub mod reg;
-
-/// Lemma 1: `2^n` is a multiple of `2^h` for every integer `h` where `0<=h<=n`
-///
-/// Proof of Lemma 1:
-/// Let `P(n)` be the statement "`2^n` is a multiple of `2^h` for every integer `h` where `0<=h<=n`".
-/// Base case: `P(0)`: `2^0 = 1`. 1 is a multiple of 1.
-/// Induction step: Assume `P(0), ..., P(k)` are all true for some integer `k` such that `k>=0`.
-/// We will prove that `P(k+1)` is true.
-/// Observe: `2^(k+1) = 2 * 2^k`.
-///
-/// Theorem 1: Let `n` and `k` be non-negative integers. If `k<=n`, then any bit rotation of `n` bits
-/// on a bitstring with `k` bits can be performed with `k` bits.
-///
-/// Proof:
-///
-trait BitRotate<By> {
-    fn rotr(self, bits: By) -> Self;
-    fn rotl(self, bits: By) -> Self;
-}
-
-impl BitRotate<usize> for usize {
-    #[inline]
-    fn rotr(self, bits: usize) -> Self {
-        #[expect(
-            clippy::as_conversions,
-            clippy::cast_possible_truncation,
-            reason = "the truncation is desired"
-        )]
-        self.rotate_right(bits as u32)
-    }
-
-    #[inline]
-    fn rotl(self, bits: usize) -> Self {
-        #[expect(
-            clippy::as_conversions,
-            clippy::cast_possible_truncation,
-            reason = "the truncation is desired"
-        )]
-        self.rotate_left(bits as u32)
-    }
-}
-
-impl BitRotate<isize> for usize {
-    #[inline]
-    fn rotr(self, bits: isize) -> Self {
-        if let Ok(bits) = usize::try_from(bits) {
-            self.rotr(bits)
-        } else {
-            self.rotl(bits.unsigned_abs())
-        }
-    }
-
-    #[inline]
-    fn rotl(self, bits: isize) -> Self {
-        if let Ok(bits) = usize::try_from(bits) {
-            self.rotl(bits)
-        } else {
-            self.rotr(bits.unsigned_abs())
-        }
-    }
-}
-
-impl BitRotate<usize> for isize {
-    #[inline]
-    fn rotr(self, bits: usize) -> Self {
-        #[expect(
-            clippy::as_conversions,
-            clippy::cast_possible_truncation,
-            reason = "the truncation is desired"
-        )]
-        self.rotate_right(bits as u32)
-    }
-
-    #[inline]
-    fn rotl(self, bits: usize) -> Self {
-        #[expect(
-            clippy::as_conversions,
-            clippy::cast_possible_truncation,
-            reason = "the truncation is desired"
-        )]
-        self.rotate_left(bits as u32)
-    }
-}
-
-impl BitRotate<isize> for isize {
-    #[inline]
-    fn rotr(self, bits: isize) -> Self {
-        if let Ok(bits) = usize::try_from(bits) {
-            self.rotr(bits)
-        } else {
-            self.rotl(bits.unsigned_abs())
-        }
-    }
-
-    #[inline]
-    fn rotl(self, bits: isize) -> Self {
-        if let Ok(bits) = usize::try_from(bits) {
-            self.rotl(bits)
-        } else {
-            self.rotr(bits.unsigned_abs())
-        }
-    }
-}
 
 macro_rules! instructions {
     (
