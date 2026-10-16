@@ -1,6 +1,6 @@
 use crate::{
     analyzer::static_env::{Domain, StaticEnvironment},
-    error::{ContextError, OpSide},
+    error::{ContextError, ErrorType, OpSide},
     exec::{
         env::{Environment, Primitive},
         error::Failure,
@@ -26,6 +26,14 @@ pub mod static_env;
 pub struct Lexeme<'src> {
     pub lex: &'src str,
     pub mac: Option<ExpansionData<'src>>,
+}
+
+impl<'src> Lexeme<'src> {
+    pub fn lex_range(&self, source: &'src str) -> Range<usize> {
+        source
+            .substr_range(self.lex)
+            .expect("lexeme should be a substring of source")
+    }
 }
 
 impl<'src> From<Token<'src>> for Lexeme<'src> {
@@ -887,6 +895,42 @@ impl FromLiteral for text {
     }
 }
 
+fn incompatible_op<'src>(
+    source: &'src str,
+    (op, lhs, rhs, lex): (
+        TokenEq,
+        Option<AnyExpr<'src>>,
+        Option<AnyExpr<'src>>,
+        Lexeme<'src>,
+    ),
+) -> ContextError<'src> {
+    ContextError::error(
+        source,
+        Some(lex.lex_range(source)),
+        lex.mac,
+        match (lhs, rhs) {
+            (Some(l), Some(r)) => ErrorType::Incompatible {
+                op,
+                l_range: Range::default(), // TODO
+                r_range: Range::default(), // TODO
+                l_ty: l.get_type(),
+                r_ty: r.get_type(),
+            },
+            (Some(l), None) => ErrorType::Unsupported {
+                op,
+                r_ty: l.get_type(), // shouldnt there be a distinction between prefix and postfix?...
+                r_range: Range::default(), // TODO
+            },
+            (None, Some(r)) => ErrorType::Unsupported {
+                op,
+                r_ty: r.get_type(),
+                r_range: Range::default(), // TODO
+            },
+            (None, None) => unimplemented!(),
+        },
+    )
+}
+
 fn analyze_typed_expr<'src, T: FromLiteral>(
     source: &'src str,
     static_env: &StaticEnvironment<'src>,
@@ -935,7 +979,9 @@ fn analyze_typed_expr<'src, T: FromLiteral>(
             }
         }
     };
-    <T::Ops<'src> as Operators<'src>>::new_expr(op_args).map_err(|_| todo!("incompatible error"))
+    <T::Ops<'src> as Operators<'src>>::new_expr(op_args)
+        .map_err(|args| incompatible_op(source, args))
+        .map_err(|e| vec![e])
 }
 
 fn analyze_expr<'src>(
@@ -1032,7 +1078,8 @@ fn analyze_expr<'src>(
         .or_else(TextOps::new_any_expr)
         .or_else(NoneOps::new_any_expr)
         .or_else(FailOps::new_any_expr)
-        .map_err(|_| todo!("incompatible error"))
+        .map_err(|args| incompatible_op(source, args))
+        .map_err(|e| vec![e])
 }
 
 fn analyze_if_stmt<'src>(
