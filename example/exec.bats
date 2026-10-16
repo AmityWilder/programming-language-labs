@@ -1,6 +1,8 @@
 uni x = 257u;
 
 let foo = 7;
+foo = 9;
+foo = "x";
 let bar = 8;
 
 let bigger = "TODO";

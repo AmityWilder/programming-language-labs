@@ -44,7 +44,7 @@ impl<'src> From<Token<'src>> for Lexeme<'src> {
 
 /// Post-analysis evaluation
 pub trait Evaluate<T> {
-    fn eval(&self, env: &Environment) -> Result<T, Failure>;
+    fn eval(&self, env: &mut Environment) -> Result<T, Failure>;
 }
 
 pub trait LangType {
@@ -187,7 +187,7 @@ macro_rules! impl_output {
         ),*}
 
         impl Evaluate<$Type> for $Ops<'_> {
-            fn eval(&self, env: &Environment) -> Result<$Type, Failure> {
+            fn eval(&self, env: &mut Environment) -> Result<$Type, Failure> {
                 match self {
                     $(Self::$Operation { $($lhs,)? $($rhs)? } => {
                         $(let $lhs = $lhs.eval(env)?;)?
@@ -472,6 +472,11 @@ impl_output! {
 impl_output! {
     #[derive(Debug, Clone)]
     for none as pub NoneOps<'src> {
+        // binary
+
+        // TODO: lvalue type?
+        #[op(Punctuation::Assign)] #[def(todo!("assign rhs to lhs"))] Assign { lhs: sint, rhs: sint },
+
         // unary
 
         #[op(Punctuation::Coalesce)] #[def(lhs)] Coalesce { lhs: none, }, // TODO: don't we want to coalesce from other types?
@@ -494,7 +499,7 @@ pub struct Literal<'src, T> {
 }
 
 impl<T: Clone> Evaluate<T> for Literal<'_, T> {
-    fn eval(&self, _env: &Environment) -> Result<T, Failure> {
+    fn eval(&self, _env: &mut Environment) -> Result<T, Failure> {
         Ok(self.value.clone())
     }
 }
@@ -544,7 +549,7 @@ impl<'src, T: ?Sized> Variable<'src, T> {
 }
 
 impl<T: Clone + Primitive> Evaluate<T> for Variable<'_, T> {
-    fn eval(&self, env: &Environment) -> Result<T, Failure> {
+    fn eval(&self, env: &mut Environment) -> Result<T, Failure> {
         let mem = match self.dom {
             Domain::Stack => env.stack(),
             Domain::Global => env.global(),
@@ -580,7 +585,7 @@ pub trait EvalOutput:
 impl<T: Sized + Clone + Output + Primitive> EvalOutput for T {}
 
 impl<T: EvalOutput> Evaluate<T> for Expr<'_, T> {
-    fn eval(&self, env: &Environment) -> Result<T, Failure> {
+    fn eval(&self, env: &mut Environment) -> Result<T, Failure> {
         match self {
             Expr::Op { op, .. } => op.eval(env),
             Expr::Lit(lit) => lit.eval(env),
@@ -674,7 +679,6 @@ impl Execute for AssignmentStmt<'_> {
 }
 
 /// Mainly used for calling a function or mutating state
-// TBD: but Evaluate doesnt allow state to be mutated?
 #[derive(Debug, Clone)]
 pub struct ExprStmt<'src> {
     pub expr: Expr<'src, ()>,
@@ -789,6 +793,33 @@ impl Execute for Program<'_> {
     }
 }
 
+fn type_mismatch_error<'src, T: LangType>(
+    _source: &'src str,
+    actual: ValueType,
+) -> ContextError<'src> {
+    let expected = T::VALUE_TYPE;
+    todo!("error: type mismatch error\n expected: {expected}\n actual: {actual}")
+}
+
+fn literal_type_mismatch_error<'src, T: LangType>(
+    source: &'src str,
+    token: &Token<'src>,
+) -> ContextError<'src> {
+    type_mismatch_error::<T>(
+        source,
+        match token.val {
+            LexValue::UIntLiteral(_) => uint::VALUE_TYPE,
+            LexValue::SIntLiteral(_) => sint::VALUE_TYPE,
+            LexValue::FracLiteral(_) => frac::VALUE_TYPE,
+            LexValue::CharLiteral(_) => char::VALUE_TYPE,
+            LexValue::TextLiteral(_) => text::VALUE_TYPE,
+            LexValue::BoolLiteral(_) => bool::VALUE_TYPE,
+            LexValue::Keyword(Keyword::None) => none::VALUE_TYPE,
+            x => unimplemented!("{x:?} is not a type"),
+        },
+    )
+}
+
 pub trait FromLiteral: Output {
     fn from_literal<'src>(
         source: &'src str,
@@ -807,7 +838,7 @@ impl FromLiteral for none {
                 value: (),
             }))
         } else {
-            Err(todo!("type mismatch error"))
+            Err(literal_type_mismatch_error::<Self>(source, &token))
         }
     }
 }
@@ -822,7 +853,7 @@ impl FromLiteral for bool {
                 value,
             }))
         } else {
-            Err(todo!("type mismatch error"))
+            Err(literal_type_mismatch_error::<Self>(source, &token))
         }
     }
 }
@@ -837,7 +868,7 @@ impl FromLiteral for uint {
                 value,
             }))
         } else {
-            Err(todo!("type mismatch error"))
+            Err(literal_type_mismatch_error::<Self>(source, &token))
         }
     }
 }
@@ -852,7 +883,7 @@ impl FromLiteral for sint {
                 value,
             }))
         } else {
-            Err(todo!("type mismatch error"))
+            Err(literal_type_mismatch_error::<Self>(source, &token))
         }
     }
 }
@@ -867,7 +898,7 @@ impl FromLiteral for frac {
                 value,
             }))
         } else {
-            Err(todo!("type mismatch error"))
+            Err(literal_type_mismatch_error::<Self>(source, &token))
         }
     }
 }
@@ -882,7 +913,7 @@ impl FromLiteral for char {
                 value: value.ch,
             }))
         } else {
-            Err(todo!("type mismatch error"))
+            Err(literal_type_mismatch_error::<Self>(source, &token))
         }
     }
 }
@@ -907,7 +938,7 @@ impl FromLiteral for text {
         if let LexValue::TextLiteral(value) = token.val {
             text_from_literal(source, token, value).map(Expr::Lit)
         } else {
-            Err(todo!("type mismatch error"))
+            Err(literal_type_mismatch_error::<Self>(source, &token))
         }
     }
 }
@@ -962,7 +993,7 @@ fn analyze_typed_expr<'src, T: FromLiteral>(
                 if data.ty == T::VALUE_TYPE {
                     Ok(Expr::Var(Variable::new(ident, data.range, domain)))
                 } else {
-                    todo!("type mismatch error")
+                    Err(vec![type_mismatch_error::<T>(source, data.ty)])
                 }
             } else {
                 todo!("variable not found in scope error")
@@ -1210,7 +1241,8 @@ fn analyze_decl<'src>(
         }
 
         ast::Declaration::Stmt(stmt) => match stmt {
-            ast::Statement::Expr(stmt) => todo!(),
+            ast::Statement::Expr(stmt) => analyze_typed_expr(source, static_env, stmt.expr)
+                .map(|expr| Some(Statement::Expr(ExprStmt { expr }))),
 
             ast::Statement::Print(stmt) => analyze_typed_expr(source, static_env, stmt.group.expr)
                 .map(|what| Some(Statement::Print(PrintStmt { what }))),
