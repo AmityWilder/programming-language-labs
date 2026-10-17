@@ -1,6 +1,6 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    grammar::ast::{Binary, Expr, Grouping, Literal, OrType, Ternary, TypeExpr, Unary, Variable},
+    grammar::ast::{Binary, Expr, Grouping, Literal, OrType, TypeExpr, Unary, Variable},
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
 };
 
@@ -41,18 +41,6 @@ macro_rules! parenthesize {
         )*
         $f.write_str(")")
     }};
-}
-
-impl LispDisplay for Ternary<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        parenthesize!(
-            f,
-            format!("{}{}", self.lop.lex, self.rop.lex),
-            Lisp::new(&self.mhs),
-            Lisp::new(&self.lhs),
-            Lisp::new(&self.rhs)
-        )
-    }
 }
 
 impl LispDisplay for Binary<'_> {

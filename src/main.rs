@@ -6,7 +6,6 @@
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
 #![feature(
-    char_to_u32,
     try_from_int_error_kind, // used in number literal error
     deque_extend_front,
     const_destruct,
@@ -20,7 +19,6 @@
     impl_trait_in_bindings,
     impl_trait_in_fn_trait_return,
     macro_derive,
-    pointer_is_aligned_to,
 )]
 #![forbid(
     clippy::missing_safety_doc,
@@ -49,12 +47,14 @@
     reason = "avoid panics, or at least give a reason for them"
 )]
 #![warn(
+    clippy::suspicious,
     clippy::arithmetic_side_effects,
     clippy::as_conversions,
     clippy::indexing_slicing,
     clippy::string_slice,
     reason = "be careful about edge-cases"
 )]
+#![warn(clippy::disallowed_types)]
 // #![warn(
 //     clippy::expect_used,
 //     clippy::panic,
@@ -66,34 +66,29 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
-    // analyzer::{Execute, StaticAnalysis, analyze},
     error::ContextError,
-    exec::{
-        asm::{self, arch::VirtualArch},
-        env::Environment,
-    },
-    grammar::{
-        ast::{Binary, Expr, Grouping, OrType, Ternary, TypeExpr, Unary},
-        // ast_iter::semantic,
-        fmt::lisp::Lisp,
-        parse,
-    },
+    grammar::parse,
     highlight::{
-        GenericError, TokenHighlight, highlight,
+        TokenHighlight, highlight,
         style::{Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle, syntax_style},
     },
     preproc::preprocess,
     scanner::{
         token::{
-            Token,
+            Lexical, Token,
             value::{CharLiteral, LexValue, TextLiteral},
         },
         tokenize,
     },
 };
-use grammar::ast::Literal;
 use std::{path::PathBuf, range::Range};
+
+/// Indicates unfinished code.
+///
+/// This can be useful if you are prototyping and just
+/// want a placeholder to let your code pass type analysis.
+pub type Todo = !;
 
 mod analyzer;
 mod arrayvec;

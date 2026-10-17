@@ -1,5 +1,7 @@
-use crate::{error::OpSide, scanner::token::value::TokenEq};
-use std::collections::BTreeMap;
+use crate::{
+    Todo, analyzer::static_env::ConstantValue, error::OpSide, scanner::token::value::TokenEq,
+};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Like an [`ArrayType`], but the length is determined at runtime
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
@@ -16,11 +18,11 @@ pub struct ArrayType<'src> {
 /// Alternative for operations that can fail
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
 pub enum OrType {
+    /// Produces null on fail
+    None,
     /// Promises to never fail
     #[default]
     Nevr,
-    /// Produces null on fail
-    None,
     /// Raises an exception on fail
     Fail,
 }
@@ -40,8 +42,7 @@ pub struct RecType<'src> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
 pub struct SupType<'src> {
     pub name: &'src str,
-    /// Must be kept ordered manually
-    pub variants: Vec<StaticType<'src>>,
+    pub variants: BTreeSet<StaticType<'src>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
@@ -51,11 +52,11 @@ pub struct SubType<'src> {
     pub reqs: Vec<TypeBound<'src>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct CatType<'src> {
     pub name: &'src str,
     pub repr: Box<StaticType<'src>>,
-    pub values: Vec<!>, // TODO
+    pub values: BTreeSet<ConstantValue>,
 }
 
 /// A matcher for any function with the specified combination of parameters and return
@@ -76,11 +77,11 @@ pub struct FunType<'src> {
 /// Monomorphized or concrete type
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
 pub enum StaticType<'src> {
+    /// Return type of a statement
+    None,
     /// Return type of an endless loop - not constructable, only usable in analysis
     #[default]
     Nevr,
-    /// Return type of a statement
-    None,
     /// Exception type
     Fail,
 
@@ -113,9 +114,9 @@ pub enum StaticType<'src> {
     /// Union
     Sup(SupType<'src>),
     /// Another type, but with runtime restrictions
-    Sub(Box<SubType<'src>>), // TODO
+    Sub(Box<SubType<'src>>),
     /// Constant group
-    Cat(Box<Self>), // TODO: how do we restrict to only the options within the cat?
+    Cat(Box<Self>),
     /// Callable
     Fun(Box<FunType<'src>>),
 }
@@ -146,7 +147,7 @@ pub enum TypeBound<'src> {
 
     /// An expression the type must be guaranteed to satisfy at runtime, such as "x!=0", "x>=0", "6<=x<=10", "x.foo==x.bar", etc.
     /// Mainly enforced by checking if conditions/assertions guard this, or if the user promises it unsafely.
-    Satisfies(!), // TODO
+    Satisfies(Todo),
 }
 
 impl Default for TypeBound<'_> {

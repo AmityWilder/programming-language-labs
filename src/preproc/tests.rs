@@ -3,7 +3,10 @@ use crate::{
     error::ExpectedToken,
     scanner::{
         Bracket, Scanner,
-        token::value::{Keyword, LexValue, Punctuation},
+        token::{
+            Lexical,
+            value::{Keyword, LexValue, Punctuation},
+        },
     },
 };
 use std::range::Range;

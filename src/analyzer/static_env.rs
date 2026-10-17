@@ -1,8 +1,8 @@
-use crate::analyzer::types::AbstractType;
+use crate::{Todo, analyzer::types::AbstractType};
 use std::collections::LinkedList;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConstantValue(()); // TODO
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct ConstantValue(Todo);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Var<'src> {

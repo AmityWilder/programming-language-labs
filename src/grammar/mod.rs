@@ -3,14 +3,18 @@
 use crate::{
     error::{ContextError, ExpectedToken, OpSide},
     grammar::ast::{
-        Assignment, BlockStmt, DeclVar, Declaration, ExprStmt, IfBody, IfCondition, IfStmt, OrStmt,
+        Assignment, BlockStmt, DeclVar, Declaration, ExprStmt, IfStmt, OpToken, OrBody, OrStmt,
         PrintStmt, Program, Statement, Variable,
     },
     scanner::{
         Bracket,
-        token::{Token, value::LexValue},
+        token::{
+            Lexical, Token,
+            value::{LexValue, Operator},
+        },
     },
 };
+use Operator::*;
 use ast::{Binary, Expr, Grouping, Literal, OrType, TypeAnnotation, TypeExpr, Unary};
 
 pub mod ast;
@@ -95,6 +99,16 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.tokens.next_if(p)
     }
 
+    /// Optional token
+    fn pull_if_op(&mut self, matching: &[Operator]) -> Option<OpToken<'src>> {
+        self.tokens.next_if_map(|token| {
+            OpToken::try_from(token)
+                .ok()
+                .filter(|token| matching.contains(&token.val))
+                .ok_or(token)
+        })
+    }
+
     /// Required token
     fn try_pull<P>(
         &mut self,
@@ -111,6 +125,23 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         match self.tokens.peek() {
             Some(token) => ContextError::unexpected(token, self.source, expected),
             None => ContextError::missing(self.source, expected),
+        }
+    }
+
+    fn synchronize(&mut self) {
+        while let Some(token) = self.tokens.next() {
+            // end of current statement
+            if token_matches!(token, Punctuation::Semi) {
+                break;
+            }
+
+            // start of new statement/definition
+            if self.tokens.peek().is_some_and(match_token!(Keyword::{
+                Rec | Sup | Cat | Alt | Sub | Def | Fun | Mem | Let | Uni | Pvt | If |
+                Or | Pick | Rep | For | Loop | Cord | Halt | Skip | Give | Fail | Emit
+            })) {
+                break;
+            }
         }
     }
 
@@ -148,7 +179,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     /// `assignment -> "=" expression`
     pub fn assignment(&mut self) -> Option<Result<Assignment<'src>, ContextError<'src>>> {
-        self.pull_if(match_token!(Punctuation::Assign)).map(|op| {
+        self.pull_if_op(&[Assign]).map(|op| {
             Ok(Assignment {
                 op,
                 expr: self.expression()?,
@@ -185,75 +216,67 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     pub fn statement(&mut self) -> Result<Statement<'src>, ContextError<'src>> {
         self.block_statement()
             .map(|res| res.map(Statement::block))
-            .or_else(|| self.print_statement())
-            .or_else(|| self.if_statement())
-            .or_else(|| Some(self.expression_statement()))
+            .or_else(|| self.print_statement().map(|res| res.map(Statement::print)))
+            .or_else(|| self.if_statement().map(|res| res.map(Statement::if_stmt)))
+            .or_else(|| Some(self.expression_statement().map(Statement::expr)))
             .ok_or_else(|| self.error(ExpectedToken::Statement))
             .flatten()
     }
 
     /// `expression_statement -> expression ";"`
-    pub fn expression_statement(&mut self) -> Result<Statement<'src>, ContextError<'src>> {
-        Ok(Statement::expr(ExprStmt {
+    pub fn expression_statement(&mut self) -> Result<ExprStmt<'src>, ContextError<'src>> {
+        Ok(ExprStmt {
             expr: self.expression()?,
             semi: self.try_pull(match_token!(Punctuation::Semi), ExpectedToken::Semi)?,
-        }))
+        })
     }
 
     /// `print_statement -> "prnt" expression ";"`
-    pub fn print_statement(&mut self) -> Option<Result<Statement<'src>, ContextError<'src>>> {
+    pub fn print_statement(&mut self) -> Option<Result<PrintStmt<'src>, ContextError<'src>>> {
         self.pull_if(match_token!(Keyword::Prnt)).map(|kw| {
-            Ok(Statement::print(PrintStmt {
+            Ok(PrintStmt {
                 kw,
                 group: self
                     .group()
                     .ok_or_else(|| self.error(ExpectedToken::LParen))
                     .flatten()?,
                 semi: self.try_pull(match_token!(Punctuation::Semi), ExpectedToken::Semi)?,
-            }))
-        })
-    }
-
-    /// `if_statement -> if_condition if_body`
-    pub fn if_statement(&mut self) -> Option<Result<Statement<'src>, ContextError<'src>>> {
-        self.if_condition().map(|cond| {
-            Ok(Statement::If(IfStmt {
-                cond: cond?,
-                then: self.if_body()?,
-            }))
-        })
-    }
-
-    /// `if_condition -> "if" expression`
-    pub fn if_condition(&mut self) -> Option<Result<IfCondition<'src>, ContextError<'src>>> {
-        self.pull_if(match_token!(Keyword::If)).map(|if_kw| {
-            Ok(IfCondition {
-                if_kw,
-                pred: self.expression()?,
             })
         })
     }
 
-    /// `or_statement -> "or" ( if_condition )? if_body`
+    /// `if_statement -> "if" expression block_statement ( or_statement )?`
+    pub fn if_statement(&mut self) -> Option<Result<IfStmt<'src>, ContextError<'src>>> {
+        self.pull_if(match_token!(Keyword::If)).map(|if_kw| {
+            Ok(IfStmt {
+                if_kw,
+                pred: self.expression()?,
+                then: self
+                    .block_statement()
+                    .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
+                    .flatten()?,
+                or: self.or_statement().transpose()?.map(Box::new),
+            })
+        })
+    }
+
+    /// `or_statement -> "or" or_body`
     pub fn or_statement(&mut self) -> Option<Result<OrStmt<'src>, ContextError<'src>>> {
         self.pull_if(match_token!(Keyword::Or)).map(|or_kw| {
             Ok(OrStmt {
                 or_kw,
-                cond: self.if_condition().transpose()?,
-                then: self.if_body()?,
+                body: self.or_body()?,
             })
         })
     }
 
-    /// `or_statement -> block_statement ( or_statement )?`
-    pub fn if_body(&mut self) -> Result<IfBody<'src>, ContextError<'src>> {
-        Ok(IfBody {
-            then: self
-                .block_statement()
-                .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
-                .flatten()?,
-            or: self.or_statement().transpose()?.map(Box::new),
-        })
+    /// `or_body -> if_statement | block_statement`
+    pub fn or_body(&mut self) -> Result<OrBody<'src>, ContextError<'src>> {
+        self.if_statement()
+            .map(|res| res.map(OrBody::More))
+            .or_else(|| self.block_statement().map(|res| res.map(OrBody::Last)))
+            .ok_or_else(|| self.error(ExpectedToken::BlockOrIf))
+            .flatten()
     }
 
     /// `block_statement -> "{" ( declaration )* "}"`
@@ -278,7 +301,11 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `assign -> IDENTIFIER ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "[<<]=" | "[>>]=" | "|=" | "&=" | "^=" | "!|=" | "!&=" | "!^=" ) or | or`
     fn assign(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let lhs = self.or()?; // we'll check if this can be assigned to in static analysis
-        if let Some(op) = self.pull_if(match_token!(Punctuation::{Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign | PowAssign | ShlAssign | ShrAssign | RotlAssign | RotrAssign | OrAssign | AndAssign | XorAssign | NorAssign | NandAssign | XnorAssign})) {
+        if let Some(op) = self.pull_if_op(&[
+            Assign, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign, PowAssign, ShlAssign,
+            ShrAssign, RotlAssign, RotrAssign, OrAssign, AndAssign, XorAssign, NorAssign,
+            NandAssign, XnorAssign,
+        ]) {
             let rhs = self.or()?;
             Ok(Expr::binary(Binary { lhs, op, rhs }))
         } else {
@@ -289,7 +316,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `or -> xor ( ("|" | "!|") xor )*`
     fn or(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.xor()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::{Or | Nor})) {
+        while let Some(op) = self.pull_if_op(&[Or, Nor]) {
             let rhs = self.xor()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -299,7 +326,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `xor -> and ( ("^" | "!^") and )*`
     fn xor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.and()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::{Xor | Xnor})) {
+        while let Some(op) = self.pull_if_op(&[Xor, Xnor]) {
             let rhs = self.and()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -309,7 +336,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `and -> equality ( ("&" | "!&") equality )*`
     fn and(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.equality()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::{And | Nand})) {
+        while let Some(op) = self.pull_if_op(&[And, Nand]) {
             let rhs = self.equality()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -319,7 +346,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `equality -> comparison ( ("!=" | "==") comparison )*`
     fn equality(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.comparison()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::{Ne | Eq})) {
+        while let Some(op) = self.pull_if_op(&[Ne, Eq]) {
             let rhs = self.comparison()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -329,7 +356,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `comparison -> shift ( ( ">" | ">=" | "<" | "<=" ) shift )*`
     fn comparison(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.shift()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::{Gt | Ge | Lt | Le})) {
+        while let Some(op) = self.pull_if_op(&[Gt, Ge, Lt, Le]) {
             let rhs = self.shift()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -339,7 +366,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `shift -> term ( ( "<<" | ">>" | "[<<]" | "[>>]" ) term )*`
     fn shift(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.term()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::{Shl | Shr | Rotl | Rotr})) {
+        while let Some(op) = self.pull_if_op(&[Shl, Shr, Rotl, Rotr]) {
             let rhs = self.term()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -349,7 +376,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `term -> factor ( ( "+" | "-" ) factor )*`
     fn term(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.factor()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::{Add | SubNeg})) {
+        while let Some(op) = self.pull_if_op(&[Add, SubNeg]) {
             let rhs = self.factor()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -359,7 +386,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `factor -> unary_postfix ( ( "*" | "/" | "%" ) unary_postfix )*`
     fn factor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.unary_postfix()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::{Mul | Div | Rem})) {
+        while let Some(op) = self.pull_if_op(&[Mul, Div, Rem]) {
             let rhs = self.unary_postfix()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -369,7 +396,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `unary_postfix -> unary_prefix ( "?" )*`
     fn unary_postfix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.unary_prefix()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::Coalesce)) {
+        while let Some(op) = self.pull_if_op(&[Coalesce]) {
             expr = Expr::unary(Unary {
                 operand: expr,
                 op,
@@ -381,7 +408,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     /// `unary_prefix -> ( ( ( "!" | "!!" | "-" ) | "szof" ( type_expression )? ) )* exponent`
     fn unary_prefix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        if let Some(op) = self.pull_if(match_token!(Keyword::Szof)) {
+        if let Some(op) = self.pull_if_op(&[Szof]) {
             let operand = self
                 .type_expression() // TODO: combo error?
                 .map(Expr::type_expr)
@@ -391,7 +418,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 operand,
                 side: OpSide::Right,
             }))
-        } else if let Some(op) = self.pull_if(match_token!(Punctuation::{Not | Exists | SubNeg})) {
+        } else if let Some(op) = self.pull_if_op(&[Not, Exists, SubNeg]) {
             let operand = self.unary_prefix()?;
             Ok(Expr::unary(Unary {
                 op,
@@ -406,7 +433,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `exponent -> conversion ( "**" conversion )*`
     fn exponent(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.conversion()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::Pow)) {
+        while let Some(op) = self.pull_if_op(&[Pow]) {
             let rhs = self.conversion()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
@@ -416,32 +443,35 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `conversion -> primary ( "-:>" | "=:>" ) type_expression`
     fn conversion(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let mut expr = self.primary()?;
-        while let Some(op) = self.pull_if(match_token!(Punctuation::{Convert | Transmute})) {
+        while let Some(op) = self.pull_if_op(&[Convert, Transmute]) {
             let rhs = Expr::type_expr(self.type_expression()?);
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
         Ok(expr)
     }
 
-    /// `primary -> literal | group | IDENTIFIER | type_expression`
+    /// `primary -> literal | group | variable | type_expression`
     ///
     /// `type_expression` is included as a variant of `primary` in order
     /// to allow type errors instead of just "wrong token" errors.
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.literal()
-            .map(Ok)
+            .map(|literal| Ok(Expr::literal(literal)))
             .or_else(|| self.group().map(|res| res.map(Expr::grouping)))
-            .or_else(|| {
-                self.pull_if(match_token!(Identifier))
-                    .map(|ident| Ok(Expr::Variable(Variable { ident })))
-            })
+            .or_else(|| self.variable().map(|var| Ok(Expr::variable(var))))
             .or_else(|| self.type_expression().map(Expr::type_expr).ok().map(Ok))
             .ok_or_else(|| self.error(ExpectedToken::Expr))
             .flatten()
     }
 
+    /// `variable -> IDENTIFIER`
+    fn variable(&mut self) -> Option<Variable<'src>> {
+        self.pull_if(match_token!(Identifier))
+            .map(|ident| Variable { ident })
+    }
+
     /// `literal -> "true" | "fals" | "none" | UINT | SINT | FLPT | CHAR | TEXT | MACRO`
-    fn literal(&mut self) -> Option<Expr<'src>> {
+    fn literal(&mut self) -> Option<Literal<'src>> {
         self.pull_if(match_token!(
             BoolLiteral(_)
                 | Keyword::None
@@ -452,7 +482,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 | TextLiteral(_)
                 | Macro
         ))
-        .map(|value| Expr::literal(Literal { value }))
+        .map(|value| Literal { value })
     }
 
     /// `group -> "(" expression ")"`
@@ -491,22 +521,5 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             name,
             or_ty: or_ty.transpose()?,
         })
-    }
-
-    fn synchronize(&mut self) {
-        while let Some(token) = self.tokens.next() {
-            // end of current statement
-            if token_matches!(token, Punctuation::Semi) {
-                break;
-            }
-
-            // start of new statement/definition
-            if self.tokens.peek().is_some_and(match_token!(Keyword::{
-                Rec | Sup | Cat | Alt | Sub | Def | Fun | Mem | Let | Uni | Pvt | If |
-                Or | Pick | Rep | For | Loop | Cord | Halt | Skip | Give | Fail | Emit
-            })) {
-                break;
-            }
-        }
     }
 }

@@ -14,7 +14,7 @@ use crate::{
             BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, LINE_COMMENT_OPEN, TEXT_DELIM,
         },
         token::{
-            Token,
+            Lexical, Token,
             value::{CharLiteral, Escapes, LexValue, TextLiteral},
         },
     },

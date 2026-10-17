@@ -6,7 +6,7 @@ use crate::{
     },
     scanner::{
         Bracket,
-        token::{ExpansionData, Token, punc::Punctuation, value::LexValue},
+        token::{ExpansionData, Lexical, Token, punc::Punctuation, value::LexValue},
     },
 };
 use std::{collections::VecDeque, range::Range};

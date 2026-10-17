@@ -51,6 +51,13 @@ macro_rules! token {
             mac: None
         }
     };
+    (Operator::$Variant:ident $(,)?) => {
+        $crate::scanner::token::SpecToken {
+            lex: $crate::scanner::token::value::Operator::$Variant.as_str(),
+            val: $crate::scanner::token::value::Operator::$Variant,
+            mac: None
+        }
+    };
 
     ($Variant:ident$(($val:expr))? $(::$SubVariant:ident)? $(, $name:expr)? $(,)?) => {
         $crate::scanner::token::Token {
@@ -62,41 +69,25 @@ macro_rules! token {
 }
 
 macro_rules! syntax_tree {
-    (Ternary(
-        $LhsTy:ident($($lhs:tt)*),
-        Token($($lop:tt)*),
-        $MhsTy:ident($($mhs:tt)*),
-        Token($($rop:tt)*),
-        $RhsTy:ident($($rhs:tt)*)$(,)?
-    )) => {
-        $crate::grammar::ast::Expr::ternary($crate::grammar::ast::Ternary {
-            lhs: syntax_tree!($LhsTy($($lhs)*)),
-            lop: token!($($lop)*),
-            mhs: syntax_tree!($MhsTy($($mhs)*)),
-            rop: token!($($rop)*),
-            rhs: syntax_tree!($RhsTy($($rhs)*)),
-        })
-    };
-
     (Binary(
         $LhsTy:ident($($lhs:tt)*),
-        Token($($op:tt)*),
+        OpToken($($op:tt)*),
         $RhsTy:ident($($rhs:tt)*)$(,)?
     )) => {
         $crate::grammar::ast::Expr::binary($crate::grammar::ast::Binary {
             lhs: syntax_tree!($LhsTy($($lhs)*)),
-            op: token!($($op)*),
+            op: token!(Operator::$($op)*),
             rhs: syntax_tree!($RhsTy($($rhs)*)),
         })
     };
 
     // Prefix
     (Unary(
-        Token($($op:tt)*),
+        OpToken($($op:tt)*),
         $RhsTy:ident($($rhs:tt)*)$(,)?
     )) => {
         $crate::grammar::ast::Expr::unary($crate::grammar::ast::Unary {
-            op: token!($($op)*),
+            op: token!(Operator::$($op)*),
             operand: syntax_tree!($RhsTy($($rhs)*)),
             side: $crate::error::OpSide::Right,
         })
@@ -105,11 +96,11 @@ macro_rules! syntax_tree {
     // Postfix
     (Unary(
         $LhsTy:ident($($lhs:tt)*),
-        Token($($op:tt)*)$(,)?
+        OpToken($($op:tt)*)$(,)?
     )) => {
         $crate::grammar::ast::Expr::unary($crate::grammar::ast::Unary {
             operand: syntax_tree!($LhsTy($($lhs)*)),
-            op: token!($($op)*),
+            op: token!(Operator::$($op)*),
             side: $crate::error::OpSide::Left,
         })
     };
@@ -173,8 +164,8 @@ fn test_ast_printer0() {
     lisp_test!(
         "(* (- 123) (group 45.67))",
         Binary(
-            Unary(Token(Punctuation::SubNeg), Literal(SIntLiteral(123))),
-            Token(Punctuation::Mul),
+            Unary(OpToken(SubNeg), Literal(SIntLiteral(123))),
+            OpToken(Mul),
             Grouping(Literal(FlptLiteral(45.67))),
         )
     );
@@ -186,10 +177,10 @@ fn test_ast_printer_nested_exprs_rhs() {
         "(+ 1 (+ 2 3))",
         Binary(
             Literal(SIntLiteral(1)),
-            Token(Punctuation::Add),
+            OpToken(Add),
             Binary(
                 Literal(SIntLiteral(2)),
-                Token(Punctuation::Add),
+                OpToken(Add),
                 Literal(SIntLiteral(3)),
             ),
         )
@@ -203,10 +194,10 @@ fn test_ast_printer_nested_exprs_lhs() {
         Binary(
             Binary(
                 Literal(SIntLiteral(1)),
-                Token(Punctuation::Add),
+                OpToken(Add),
                 Literal(SIntLiteral(2)),
             ),
-            Token(Punctuation::Add),
+            OpToken(Add),
             Literal(SIntLiteral(3)),
         )
     );
@@ -219,13 +210,13 @@ fn test_ast_printer_nested_exprs_both() {
         Binary(
             Binary(
                 Literal(SIntLiteral(1)),
-                Token(Punctuation::Add),
+                OpToken(Add),
                 Literal(SIntLiteral(2)),
             ),
-            Token(Punctuation::Add),
+            OpToken(Add),
             Binary(
                 Literal(SIntLiteral(3)),
-                Token(Punctuation::Add),
+                OpToken(Add),
                 Literal(SIntLiteral(4)),
             ),
         )
@@ -240,7 +231,7 @@ macro_rules! binary_punc_tests {
                 $expected,
                 Binary(
                     Literal(SIntLiteral($lhs)),
-                    Token(Punctuation::$op),
+                    OpToken($op),
                     Literal(SIntLiteral($rhs)),
                 )
             );
@@ -282,7 +273,7 @@ macro_rules! unary_pre_punc_tests {
             lisp_test!(
                 $expected,
                 Unary(
-                    Token(Punctuation::$op),
+                    OpToken($op),
                     Literal(SIntLiteral($rhs)),
                 )
             );
@@ -304,7 +295,7 @@ macro_rules! unary_post_punc_tests {
                 $expected,
                 Unary(
                     Literal(SIntLiteral($lhs)),
-                    Token(Punctuation::$op),
+                    OpToken($op),
                 )
             );
         }

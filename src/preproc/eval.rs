@@ -1,12 +1,8 @@
 use crate::{
     error::{ContextError, ErrorType, OpSide},
     exec::eval::ValueType,
-    grammar::ast::{AstNodeFinal, Binary, Expr, Literal, Unary},
-    scanner::token::{
-        Token,
-        punc::Punctuation,
-        value::{Keyword, LexValue, TokenEq},
-    },
+    grammar::ast::{AstNodeFinal, Binary, Expr, Literal, OpToken, Unary},
+    scanner::token::value::{Keyword, LexValue, Operator},
     types::fsize,
 };
 
@@ -20,7 +16,7 @@ impl<'src> PpOpError<'src> {
     fn contextualize(
         self,
         source: &'src str,
-        op: &Token<'src>,
+        op: &OpToken<'src>,
         lhs: Option<&Expr<'src>>,
         rhs: Option<&Expr<'src>>,
     ) -> ContextError<'src> {
@@ -29,10 +25,7 @@ impl<'src> PpOpError<'src> {
                 source,
                 Some(op),
                 ErrorType::PreIncompatible {
-                    op: op
-                        .val
-                        .to_token_eq()
-                        .expect("only TokenEq operators supported"),
+                    op: op.val,
                     l_range: lhs.expect("binary should have lhs").range(source),
                     r_range: rhs.expect("binary should have rhs").range(source),
                     l_ty: l.as_type(),
@@ -43,10 +36,7 @@ impl<'src> PpOpError<'src> {
                 source,
                 Some(op),
                 ErrorType::PreUnsupported {
-                    op: op
-                        .val
-                        .to_token_eq()
-                        .expect("only TokenEq operators supported"),
+                    op: op.val,
                     r_ty: x.as_type(),
                     r_range: rhs.expect("unary prefix should have rhs").range(source),
                 },
@@ -303,10 +293,9 @@ pub fn preproc_eval<'src, F>(
 where
     F: FnMut(&str) -> bool,
 {
-    use Keyword::Szof;
-    use Punctuation::{
-        Add, And, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Rem, SubNeg, Xnor,
-        Xor,
+    use Operator::{
+        Add, And, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Rem, SubNeg, Szof,
+        Xnor, Xor,
     };
 
     // TODO: Some operations are valid for Expr but not in preprocessing
@@ -314,89 +303,71 @@ where
         Expr::Binary(inner) => {
             let Binary { lhs, op, rhs } = &**inner;
 
-            let punc = op.val.to_token_eq().expect("only TokenEq ops supported");
-            match punc {
-                TokenEq::Keyword(_keyword) => Err(ContextError::token_error(
-                    source,
-                    Some(op),
-                    ErrorType::InvalidPreOperator,
-                )),
+            match op.val {
+                And => preproc_eval(source, lhs, mexists)?.and(preproc_eval(source, rhs, mexists)?),
 
-                TokenEq::Punctuation(punctuation) => {
-                    match punctuation {
-                        And => preproc_eval(source, lhs, mexists)?
-                            .and(preproc_eval(source, rhs, mexists)?),
+                Or => preproc_eval(source, lhs, mexists)?.or(preproc_eval(source, rhs, mexists)?),
 
-                        Or => preproc_eval(source, lhs, mexists)?
-                            .or(preproc_eval(source, rhs, mexists)?),
+                Xor => preproc_eval(source, lhs, mexists)?.xor(preproc_eval(source, rhs, mexists)?),
 
-                        Xor => preproc_eval(source, lhs, mexists)?
-                            .xor(preproc_eval(source, rhs, mexists)?),
+                Nand => {
+                    preproc_eval(source, lhs, mexists)?.nand(preproc_eval(source, rhs, mexists)?)
+                }
 
-                        Nand => preproc_eval(source, lhs, mexists)?
-                            .nand(preproc_eval(source, rhs, mexists)?),
+                Nor => preproc_eval(source, lhs, mexists)?.nor(preproc_eval(source, rhs, mexists)?),
 
-                        Nor => preproc_eval(source, lhs, mexists)?
-                            .nor(preproc_eval(source, rhs, mexists)?),
+                Xnor => {
+                    preproc_eval(source, lhs, mexists)?.xnor(preproc_eval(source, rhs, mexists)?)
+                }
 
-                        Xnor => preproc_eval(source, lhs, mexists)?
-                            .xnor(preproc_eval(source, rhs, mexists)?),
+                Add => preproc_eval(source, lhs, mexists)?.add(preproc_eval(source, rhs, mexists)?),
 
-                        Add => preproc_eval(source, lhs, mexists)?
-                            .add(preproc_eval(source, rhs, mexists)?),
+                SubNeg => {
+                    preproc_eval(source, lhs, mexists)?.sub(preproc_eval(source, rhs, mexists)?)
+                }
 
-                        SubNeg => preproc_eval(source, lhs, mexists)?
-                            .sub(preproc_eval(source, rhs, mexists)?),
+                Mul => preproc_eval(source, lhs, mexists)?.mul(preproc_eval(source, rhs, mexists)?),
 
-                        Mul => preproc_eval(source, lhs, mexists)?
-                            .mul(preproc_eval(source, rhs, mexists)?),
+                Div => preproc_eval(source, lhs, mexists)?.div(preproc_eval(source, rhs, mexists)?),
 
-                        Div => preproc_eval(source, lhs, mexists)?
-                            .div(preproc_eval(source, rhs, mexists)?),
+                Rem => preproc_eval(source, lhs, mexists)?.rem(preproc_eval(source, rhs, mexists)?),
 
-                        Rem => preproc_eval(source, lhs, mexists)?
-                            .rem(preproc_eval(source, rhs, mexists)?),
+                Eq | Ne => preproc_eval(source, lhs, mexists)?
+                    .eq(preproc_eval(source, rhs, mexists)?)
+                    .map(|is_eq| {
+                        PpValue::BoolLiteral(match op.val {
+                            Eq => is_eq,
+                            Ne => !is_eq,
+                            _ => unreachable!("guarded by outer match arm"),
+                        })
+                    }),
 
-                        Eq | Ne => preproc_eval(source, lhs, mexists)?
-                            .eq(preproc_eval(source, rhs, mexists)?)
-                            .map(|is_eq| {
-                                PpValue::BoolLiteral(match punctuation {
-                                    Eq => is_eq,
-                                    Ne => !is_eq,
-                                    _ => unreachable!("guarded by outer match arm"),
-                                })
-                            }),
+                Lt | Le | Gt | Ge => preproc_eval(source, lhs, mexists)?
+                    .cmp(preproc_eval(source, rhs, mexists)?)
+                    .map(|ord| {
+                        PpValue::BoolLiteral(match op.val {
+                            Ne => ord.is_ne(),
+                            Lt => ord.is_lt(),
+                            Le => ord.is_le(),
+                            Gt => ord.is_gt(),
+                            Ge => ord.is_ge(),
+                            _ => unreachable!("guarded by outer match arm"),
+                        })
+                    }),
 
-                        Lt | Le | Gt | Ge => preproc_eval(source, lhs, mexists)?
-                            .cmp(preproc_eval(source, rhs, mexists)?)
-                            .map(|ord| {
-                                PpValue::BoolLiteral(match punctuation {
-                                    Ne => ord.is_ne(),
-                                    Lt => ord.is_lt(),
-                                    Le => ord.is_le(),
-                                    Gt => ord.is_gt(),
-                                    Ge => ord.is_ge(),
-                                    _ => unreachable!("guarded by outer match arm"),
-                                })
-                            }),
-
-                        _ => {
-                            return Err(ContextError::token_error(
-                                source,
-                                Some(op),
-                                ErrorType::InvalidPreOperator,
-                            ));
-                        }
-                    }
-                    .map_err(|e| e.contextualize(source, op, Some(lhs), Some(rhs)))
+                _ => {
+                    return Err(ContextError::token_error(
+                        source,
+                        Some(op),
+                        ErrorType::InvalidPreOperator,
+                    ));
                 }
             }
+            .map_err(|e| e.contextualize(source, op, Some(lhs), Some(rhs)))
         }
 
         Expr::Unary(inner) => {
             let Unary { op, operand, side } = &**inner;
-
-            let punc = op.val.to_token_eq().expect("only TokenEq ops supported");
 
             match side {
                 OpSide::Left => {
@@ -407,37 +378,26 @@ where
                     ));
                 }
 
-                OpSide::Right => match punc {
-                    TokenEq::Keyword(keyword) => match keyword {
-                        Szof => Ok(PpValue::UIntLiteral(
-                            preproc_eval(source, operand, mexists)?.size(),
-                        )),
+                OpSide::Right => match op.val {
+                    Szof => Ok(PpValue::UIntLiteral(
+                        preproc_eval(source, operand, mexists)?.size(),
+                    )),
 
-                        _ => {
-                            return Err(ContextError::token_error(
-                                source,
-                                Some(op),
-                                ErrorType::InvalidPreOperator,
-                            ));
-                        }
-                    },
-                    TokenEq::Punctuation(punctuation) => match punctuation {
-                        SubNeg => preproc_eval(source, operand, mexists)?.neg(),
+                    SubNeg => preproc_eval(source, operand, mexists)?.neg(),
 
-                        Not => preproc_eval(source, operand, mexists)?.not(),
+                    Not => preproc_eval(source, operand, mexists)?.not(),
 
-                        Exists => preproc_eval(source, operand, mexists)?
-                            .exists(mexists)
-                            .map(PpValue::BoolLiteral),
+                    Exists => preproc_eval(source, operand, mexists)?
+                        .exists(mexists)
+                        .map(PpValue::BoolLiteral),
 
-                        _ => {
-                            return Err(ContextError::token_error(
-                                source,
-                                Some(op),
-                                ErrorType::InvalidPreOperator,
-                            ));
-                        }
-                    },
+                    _ => {
+                        return Err(ContextError::token_error(
+                            source,
+                            Some(op),
+                            ErrorType::InvalidPreOperator,
+                        ));
+                    }
                 },
             }
             .map_err(|e| e.contextualize(source, op, None, Some(operand)))

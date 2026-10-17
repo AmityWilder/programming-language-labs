@@ -13,11 +13,13 @@ const _: () = {
     );
 };
 
+pub type none = ();
+pub type nevr = !;
+pub type fail = crate::exec::error::Failure;
+// bool is already builtin
 pub type byte = u8;
 pub type uint = usize;
 pub type sint = isize;
 pub type flpt = fsize;
-pub type none = ();
-pub type nevr = !;
-pub type fail = crate::exec::error::Failure;
+// char is already builtin
 pub type text = String;

@@ -1,8 +1,10 @@
 use crate::{
     error::OpSide,
-    scanner::token::{ExpansionData, Token},
+    scanner::token::{ExpansionData, Lexical, SpecToken, Token, value::Operator},
 };
 use std::range::Range;
+
+pub type OpToken<'src> = SpecToken<'src, Operator>;
 
 /// Allows the AST to combine the full range of its tokens, for use in errors.
 ///
@@ -247,7 +249,7 @@ where
     }
 }
 
-impl<'src> AstNode<'src> for Token<'src> {
+impl<'src, T> AstNode<'src> for SpecToken<'src, T> {
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
         Some(self.lex_range(source))
     }
@@ -258,37 +260,9 @@ impl<'src> AstNode<'src> for Token<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct Ternary<'src> {
-    pub lhs: Expr<'src>,
-    pub lop: Token<'src>,
-    pub mhs: Expr<'src>,
-    pub rop: Token<'src>,
-    pub rhs: Expr<'src>,
-}
-
-impl<'src> AstNode<'src> for Ternary<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.lhs.get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.rhs.get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.lhs, &self.rhs).get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        // don't need to check op because it's between them, so it must be in the same expansion if the other two are
-        (&self.lhs, &self.rhs).expansion(source)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Binary<'src> {
     pub lhs: Expr<'src>,
-    pub op: Token<'src>,
+    pub op: OpToken<'src>,
     pub rhs: Expr<'src>,
 }
 
@@ -313,7 +287,7 @@ impl<'src> AstNode<'src> for Binary<'src> {
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Unary<'src> {
-    pub op: Token<'src>,
+    pub op: OpToken<'src>,
     pub operand: Expr<'src>,
     pub side: OpSide,
 }
@@ -513,61 +487,17 @@ impl<'src> Expr<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct IfCondition<'src> {
-    /// [`crate::scanner::token::value::Keyword::If`]
-    pub if_kw: Token<'src>,
-    pub pred: Expr<'src>,
-}
-
-impl<'src> AstNode<'src> for IfCondition<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.if_kw.get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.pred.get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.if_kw, &self.pred).get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.if_kw, &self.pred).expansion(source)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct IfBody<'src> {
-    pub then: BlockStmt<'src>,
-    pub or: Option<Box<OrStmt<'src>>>,
-}
-
-impl<'src> AstNode<'src> for IfBody<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.then.get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        (&self.then, &self.or.as_deref()).get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.then, &self.or.as_deref()).get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.then, &self.or.as_deref()).expansion(source)
-    }
+#[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
+pub enum OrBody<'src> {
+    More(IfStmt<'src>),
+    Last(BlockStmt<'src>),
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct OrStmt<'src> {
     /// [`crate::scanner::token::value::Keyword::Or`]
     pub or_kw: Token<'src>,
-    pub cond: Option<IfCondition<'src>>,
-    pub then: IfBody<'src>,
+    pub body: OrBody<'src>,
 }
 
 impl<'src> AstNode<'src> for OrStmt<'src> {
@@ -576,39 +506,42 @@ impl<'src> AstNode<'src> for OrStmt<'src> {
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.then.get_range_end(source)
+        self.body.get_range_end(source)
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.or_kw, &self.then).get_range(source)
+        (&self.or_kw, &self.body).get_range(source)
     }
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.or_kw, &self.then).expansion(source)
+        (&self.or_kw, &self.body).expansion(source)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct IfStmt<'src> {
-    pub cond: IfCondition<'src>,
-    pub then: IfBody<'src>,
+    /// [`crate::scanner::token::value::Keyword::If`]
+    pub if_kw: Token<'src>,
+    pub pred: Expr<'src>,
+    pub then: BlockStmt<'src>,
+    pub or: Option<Box<OrStmt<'src>>>,
 }
 
 impl<'src> AstNode<'src> for IfStmt<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.cond.get_range_start(source)
+        self.if_kw.get_range_start(source)
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.then.get_range_end(source)
+        (&self.then, self.or.as_deref()).get_range_end(source)
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.cond, &self.then).get_range(source)
+        (&self.if_kw, (&self.then, self.or.as_deref())).get_range(source)
     }
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.cond, &self.then).expansion(source)
+        (&self.if_kw, (&self.then, self.or.as_deref())).expansion(source)
     }
 }
 
@@ -666,7 +599,7 @@ impl<'src> AstNode<'src> for ExprStmt<'src> {
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct PrintStmt<'src> {
-    /// `outp`
+    /// `prnt`
     pub kw: Token<'src>,
     pub group: Grouping<'src>,
     /// `;`
@@ -785,7 +718,7 @@ impl<'src> AstNode<'src> for Program<'src> {
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Assignment<'src> {
     /// `=`
-    pub op: Token<'src>,
+    pub op: OpToken<'src>,
     pub expr: Expr<'src>,
 }
 
