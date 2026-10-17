@@ -35,14 +35,179 @@ pub trait Expression<'src> {
     ) -> Option<&'ty AbstractType<'src>>;
 }
 
-const BUILTIN_OPS: [OpOverload<'_>; 1] = [OpOverload {
-    op: Operator::And,
-    operands: OperandTypes::Binary(
-        AbstractType::Concrete(StaticType::Bool),
-        AbstractType::Concrete(StaticType::Bool),
-    ),
-    output: AbstractType::Concrete(StaticType::Bool),
-}];
+macro_rules! prim_op {
+    ($op:ident($lhs:ident, $rhs:ident) -> $output:ident) => {
+        OpOverload {
+            op: Operator::$op,
+            operands: OperandTypes::Binary(
+                AbstractType::Concrete(StaticType::$lhs),
+                AbstractType::Concrete(StaticType::$rhs),
+            ),
+            output: AbstractType::Concrete(StaticType::$output),
+        }
+    };
+
+    ($op:ident($rhs:ident) -> $output:ident) => {
+        OpOverload {
+            op: Operator::$op,
+            operands: OperandTypes::UnaryPre(AbstractType::Concrete(StaticType::$rhs)),
+            output: AbstractType::Concrete(StaticType::$output),
+        }
+    };
+
+    (($lhs:ident)$op:ident -> $output:ident) => {
+        OpOverload {
+            op: Operator::$op,
+            operands: OperandTypes::UnaryPost(AbstractType::Concrete(StaticType::$lhs)),
+            output: AbstractType::Concrete(StaticType::$output),
+        }
+    };
+}
+
+macro_rules! primitive_ops {
+    (
+        $($($pre_bin_op:ident)?($lhs_unary:ident$(, $rhs:ident)?)$($post_op:ident)? -> $output:ident),* $(,)?
+    ) => {
+        const BUILTIN_OPS: [OpOverload<'_>; [$(StaticType::$output),*].len()] = [$(
+            prim_op!($($pre_bin_op)?($lhs_unary$(, $rhs)?)$($post_op)? -> $output)
+        ),*];
+    };
+}
+
+primitive_ops![
+    // none
+    Assign(Bool, Bool) -> None,
+    Assign(Uint, Uint) -> None,
+    Assign(Sint, Sint) -> None,
+    Assign(Flpt, Flpt) -> None,
+    Assign(Char, Char) -> None,
+    Assign(Text, Text) -> None,
+
+    // bool
+    And (Bool, Bool) -> Bool,
+    Or  (Bool, Bool) -> Bool,
+    Xor (Bool, Bool) -> Bool,
+    Nand(Bool, Bool) -> Bool,
+    Nor (Bool, Bool) -> Bool,
+    Xnor(Bool, Bool) -> Bool,
+
+    Eq  (Bool, Bool) -> Bool,
+    Eq  (Uint, Uint) -> Bool,
+    Eq  (Sint, Sint) -> Bool,
+    Eq  (Flpt, Flpt) -> Bool,
+    Eq  (Char, Char) -> Bool,
+    Eq  (Text, Text) -> Bool,
+
+    Ne  (Bool, Bool) -> Bool,
+    Ne  (Uint, Uint) -> Bool,
+    Ne  (Sint, Sint) -> Bool,
+    Ne  (Flpt, Flpt) -> Bool,
+    Ne  (Char, Char) -> Bool,
+    Ne  (Text, Text) -> Bool,
+
+    Gt  (Bool, Bool) -> Bool,
+    Gt  (Uint, Uint) -> Bool,
+    Gt  (Sint, Sint) -> Bool,
+    Gt  (Flpt, Flpt) -> Bool,
+    Gt  (Char, Char) -> Bool,
+    Gt  (Text, Text) -> Bool,
+
+    Lt  (Bool, Bool) -> Bool,
+    Lt  (Uint, Uint) -> Bool,
+    Lt  (Sint, Sint) -> Bool,
+    Lt  (Flpt, Flpt) -> Bool,
+    Lt  (Char, Char) -> Bool,
+    Lt  (Text, Text) -> Bool,
+
+    Ge  (Bool, Bool) -> Bool,
+    Ge  (Uint, Uint) -> Bool,
+    Ge  (Sint, Sint) -> Bool,
+    Ge  (Flpt, Flpt) -> Bool,
+    Ge  (Char, Char) -> Bool,
+    Ge  (Text, Text) -> Bool,
+
+    Le  (Bool, Bool) -> Bool,
+    Le  (Uint, Uint) -> Bool,
+    Le  (Sint, Sint) -> Bool,
+    Le  (Flpt, Flpt) -> Bool,
+    Le  (Char, Char) -> Bool,
+    Le  (Text, Text) -> Bool,
+
+    Not (Bool) -> Bool,
+
+    // uint
+    And   (Uint, Uint) -> Uint,
+    Or    (Uint, Uint) -> Uint,
+    Xor   (Uint, Uint) -> Uint,
+    Nand  (Uint, Uint) -> Uint,
+    Nor   (Uint, Uint) -> Uint,
+    Xnor  (Uint, Uint) -> Uint,
+
+    Add   (Uint, Uint) -> Uint,
+    SubNeg(Uint, Uint) -> Uint,
+    Mul   (Uint, Uint) -> Uint,
+    Pow   (Uint, Uint) -> Uint,
+    Div   (Uint, Uint) -> Uint,
+    Rem   (Uint, Uint) -> Uint,
+
+    Shl   (Uint, Uint) -> Uint,
+    Shr   (Uint, Uint) -> Uint,
+    Rotl  (Uint, Uint) -> Uint,
+    Rotr  (Uint, Uint) -> Uint,
+
+    // sint
+    And   (Sint, Sint) -> Sint,
+    Or    (Sint, Sint) -> Sint,
+    Xor   (Sint, Sint) -> Sint,
+    Nand  (Sint, Sint) -> Sint,
+    Nor   (Sint, Sint) -> Sint,
+    Xnor  (Sint, Sint) -> Sint,
+
+    Add   (Sint, Sint) -> Sint,
+    SubNeg(Sint, Sint) -> Sint,
+    Mul   (Sint, Sint) -> Sint,
+    Pow   (Sint, Sint) -> Sint,
+    Div   (Sint, Sint) -> Sint,
+    Rem   (Sint, Sint) -> Sint,
+
+    Shl   (Sint, Sint) -> Sint,
+    Shr   (Sint, Sint) -> Sint,
+    Rotl  (Sint, Sint) -> Sint,
+    Rotr  (Sint, Sint) -> Sint,
+
+    SubNeg(Sint) -> Sint,
+
+    // flpt
+    Add   (Flpt, Flpt) -> Flpt,
+    SubNeg(Flpt, Flpt) -> Flpt,
+    Mul   (Flpt, Flpt) -> Flpt,
+    Pow   (Flpt, Flpt) -> Flpt,
+    Div   (Flpt, Flpt) -> Flpt,
+    Rem   (Flpt, Flpt) -> Flpt,
+
+    SubNeg(Flpt) -> Flpt,
+
+    // char
+    Add   (Char, Uint) -> Char,
+    SubNeg(Char, Uint) -> Char,
+
+    // text
+    Add  (Text, Text) -> Text,
+
+    Add  (Text, Bool) -> Text,
+    Add  (Text, Uint) -> Text,
+    Add  (Text, Sint) -> Text,
+    Add  (Text, Flpt) -> Text,
+    Add  (Text, Char) -> Text,
+    Add  (Text, Text) -> Text,
+
+    Add  (Bool, Text) -> Text,
+    Add  (Uint, Text) -> Text,
+    Add  (Sint, Text) -> Text,
+    Add  (Flpt, Text) -> Text,
+    Add  (Char, Text) -> Text,
+    Add  (Text, Text) -> Text,
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operands<'src> {
@@ -104,6 +269,7 @@ impl<'src> Expression<'src> for Literal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Variable<'src> {
     pub ident: &'src str,
+    pub _ty: Option<AbstractType<'src>>,
 }
 
 impl<'src> Expression<'src> for Variable<'src> {
@@ -190,7 +356,15 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
         let ident = self.ident.lex;
         env.get(ident)
             // TODO: shouldn't Variable have actual meaning?
-            .map(|_| Expr::Variable(Variable { ident })) // remember: could be a constant
+            .map(|v| {
+                Expr::Variable(Variable {
+                    ident,
+                    _ty: match v {
+                        Var::Run(t) => t.clone(),
+                        Var::Pvt(v) => v.get_type(env).cloned(),
+                    },
+                })
+            }) // remember: could be a constant
             .ok_or_else(|| {
                 vec![ContextError::token_error(
                     source,
@@ -251,12 +425,37 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
-        self.expr.analyze(source, env).and_then(|expr| {
+        self.expr.analyze(source, env).and_then(|mut expr| {
             if let Some(ty) = expr.get_type(env) {
                 if *ty == AbstractType::Concrete(StaticType::None) {
                     Ok(ExprStmt { expr })
                 } else {
                     Err(todo!("error: expected none, found {ty:?}"))
+                }
+            } else if let Expr::Op(x) = &mut expr
+                && let Operation {
+                    op: Operator::Assign,
+                    operands: Operands::Binary(Expr::Variable(lhs), rhs),
+                } = &mut **x
+            {
+                if let Some(rhs_ty) = rhs.get_type(env).cloned() {
+                    if let Some(var) = env.get_mut(lhs.ident) {
+                        match var {
+                            Var::Run(t) => {
+                                *t = Some(rhs_ty);
+                                lhs._ty = t.clone();
+                                println!("late initialization of {} as {t:?}", lhs.ident);
+                                Ok(ExprStmt { expr })
+                            }
+                            Var::Pvt(_) => Err(todo!(
+                                "error: cannot assign to constant after initialization"
+                            )),
+                        }
+                    } else {
+                        Err(todo!("error: no variable named {}", lhs.ident))
+                    }
+                } else {
+                    Err(todo!("error: expression has no type\n expression: {rhs:?}"))
                 }
             } else {
                 Err(todo!(
