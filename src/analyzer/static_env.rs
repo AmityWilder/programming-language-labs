@@ -1,8 +1,18 @@
-use crate::{Todo, analyzer::types::AbstractType};
+use crate::{
+    Todo,
+    analyzer::{Expression, Operands, Operation, types::AbstractType},
+    scanner::token::value::Operator,
+};
 use std::collections::LinkedList;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ConstantValue(Todo);
+
+impl<'src> Expression<'src> for ConstantValue {
+    fn get_type<'ty>(&self, _env: &'ty StaticEnvironment<'src>) -> Option<&'ty AbstractType<'src>> {
+        todo!()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Var<'src> {
@@ -10,11 +20,14 @@ pub enum Var<'src> {
     Pvt(ConstantValue),
 }
 
-impl<'src> Var<'src> {
-    pub const fn get_type(&self) -> Option<&AbstractType<'src>> {
+impl<'src> Expression<'src> for Var<'src> {
+    fn get_type<'ty>(
+        &'ty self,
+        env: &'ty StaticEnvironment<'src>,
+    ) -> Option<&'ty AbstractType<'src>> {
         match self {
-            Var::Run(ty) => ty.as_ref(),
-            Var::Pvt(_) => todo!(),
+            Var::Run(x) => x.as_ref(),
+            Var::Pvt(x) => x.get_type(env),
         }
     }
 }
@@ -64,17 +77,34 @@ impl<'src> Scope<'src> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum OperandTypes<'src> {
+    Binary(AbstractType<'src>, AbstractType<'src>),
+    UnaryPost(AbstractType<'src>),
+    UnaryPre(AbstractType<'src>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpOverload<'src> {
+    pub op: Operator,
+    pub operands: OperandTypes<'src>,
+    pub output: AbstractType<'src>,
+}
+
 /// [`Environment`](crate::exec::env::Environment) specialized for static analysis
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct StaticEnvironment<'src> {
     global: Scope<'src>,
     stack: LinkedList<Scope<'src>>,
+    overloads: Vec<OpOverload<'src>>,
 }
 
 impl<'src> StaticEnvironment<'src> {
-    pub const fn new() -> Self {
+    pub const fn new(init_overloads: Vec<OpOverload<'src>>) -> Self {
         Self {
             global: Scope::new(),
             stack: LinkedList::new(),
+            overloads: init_overloads,
         }
     }
 
@@ -121,6 +151,7 @@ impl<'src> StaticEnvironment<'src> {
     }
 
     /// Returns [`None`] if there is no local scope, or a mutable reference to the undetermined type if there is
+    #[must_use]
     pub fn decl_local_var(
         &mut self,
         name: &'src str,
@@ -135,5 +166,30 @@ impl<'src> StaticEnvironment<'src> {
             .back_mut()
             .unwrap_or(&mut self.global)
             .decl_pvt(name, value);
+    }
+
+    pub fn decl_overload(&mut self, def: OpOverload<'src>) {
+        // TODO: what if the overload already exists?
+        self.overloads.push(def);
+    }
+
+    /// Returns [`None`] if the overload isn't defined
+    pub fn get_overload<'env>(&'env self, k: &Operation) -> Option<&'env OpOverload<'src>> {
+        self.overloads.iter().find(|o| {
+            o.op == k.op
+                && match (&o.operands, &k.operands) {
+                    (OperandTypes::Binary(l1, r1), Operands::Binary(l2, r2)) => {
+                        l2.get_type(self).is_some_and(|l2| l1 == l2)
+                            && r2.get_type(self).is_some_and(|r2| r1 == r2)
+                    }
+
+                    (OperandTypes::UnaryPre(a), Operands::UnaryPre(b))
+                    | (OperandTypes::UnaryPost(a), Operands::UnaryPost(b)) => {
+                        b.get_type(self).is_some_and(|b| a == b)
+                    }
+
+                    _ => false,
+                }
+        })
     }
 }

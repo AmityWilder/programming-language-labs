@@ -66,6 +66,7 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
+    analyzer::analyze,
     error::ContextError,
     grammar::parse,
     highlight::{
@@ -786,29 +787,25 @@ fn run_code(source: &str, config: &Cli) {
         );
     }
 
-    // let StaticAnalysis {
-    //     global_memory_needed,
-    //     stack_memory_needed,
-    //     mut program,
-    // } = match analyze(source, prgm) {
-    //     Ok(prgm) => prgm,
-    //     Err(errs) => {
-    //         // static analysis errors
-    //         let any_err = if config.print_errors {
-    //             println!();
-    //             list_errors("static analysis", errs)
-    //         } else {
-    //             errs.into_iter().next().is_some()
-    //         };
-    //         debug_assert!(
-    //             any_err,
-    //             "static analysis should only error if there is an error (duh)"
-    //         );
-    //         return;
-    //     }
-    // };
+    let program = match analyze(source, &prgm) {
+        Ok(prgm) => prgm,
+        Err(errs) => {
+            // static analysis errors
+            let any_err = if config.print_errors {
+                println!();
+                list_errors("static analysis", errs)
+            } else {
+                errs.into_iter().next().is_some()
+            };
+            debug_assert!(
+                any_err,
+                "static analysis should only error if there is an error (duh)"
+            );
+            return;
+        }
+    };
 
-    // println!("static analysis: {program:#?}");
+    println!("static analysis: {program:#?}");
 
     // // execution
     // if config.do_eval {
