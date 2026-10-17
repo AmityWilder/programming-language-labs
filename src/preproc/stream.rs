@@ -271,7 +271,7 @@ impl<'src> PreprocessorStream<'src> {
     pub fn peek(&self) -> Option<&Result<Token<'src>, ContextError<'src>>> {
         self.tokens
             .iter()
-            .find(|res| !res.is_ok_and(match_token!(Whitespace | Comment)))
+            .find(|res| !res.as_ref().is_ok_and(match_token!(Whitespace | Comment)))
     }
 
     /// Expect a token matching `p` and return [`None`] if it is not found.
@@ -285,7 +285,7 @@ impl<'src> PreprocessorStream<'src> {
         self.tokens
             .iter()
             .enumerate()
-            .map_while(|(i, res)| res.ok().map(|token| (i, token)))
+            .map_while(|(i, res)| res.as_ref().ok().map(|&token| (i, token)))
             .find(|(_, token)| !token_matches!(token, Whitespace | Comment))
             .filter(|(_, token)| p(token))
             .map(|(pos, _)| {
@@ -311,10 +311,16 @@ impl<'src> PreprocessorStream<'src> {
         self.pull_if(p).ok_or_else(|| self.error(expecting))
     }
 
+    /// Consumes the next token if, and only if, it is an error
+    // TODO: review how this change impacts existing code
     pub fn error(&mut self, expecting: ExpectedToken) -> ContextError<'src> {
         match self.peek() {
             Some(Ok(token)) => ContextError::unexpected(token, self.source, expecting),
-            Some(Err(e)) => *e,
+            Some(Err(_)) => self
+                .tokens
+                .pop_front()
+                .and_then(Result::err)
+                .expect("guarded by condition"),
             None => ContextError::missing(self.source, expecting),
         }
     }

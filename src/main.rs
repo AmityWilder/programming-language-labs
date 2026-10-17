@@ -66,7 +66,7 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
-    analyzer::analyze,
+    analyzer::{analyze, eval::execute},
     error::ContextError,
     grammar::parse,
     highlight::{
@@ -807,18 +807,17 @@ fn run_code(source: &str, config: &Cli) {
 
     println!("static analysis: {program:#?}");
 
-    // // execution
-    // if config.do_eval {
-    //     println!("\nrunning...\n----------");
-    //     let mut runtime_env = Environment::with_capacity(global_memory_needed, stack_memory_needed);
-    //     let res = program.exec(&mut runtime_env);
-    //     println!("----------\nfinished\n");
-    //     if let Err(e) = res
-    //         && config.print_errors
-    //     {
-    //         println!("runtime error: {e}");
-    //     }
-    // }
+    // execution
+    if config.do_eval {
+        println!("\nrunning...\n----------");
+        let res = execute(&program);
+        println!("----------\nfinished\n");
+        if let Err(e) = res
+            && config.print_errors
+        {
+            println!("runtime error: {e}");
+        }
+    }
 }
 
 fn pop_trailing_newline(s: &mut String) {
