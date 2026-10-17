@@ -1,0 +1,3 @@
+disallowed-types = [
+    { path = "programming_language_labs::TODO", reason = "`TODO` should not be present in production code" },
+]

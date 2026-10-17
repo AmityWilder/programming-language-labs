@@ -7,7 +7,7 @@ use crate::{
         eval::{PpValue, preproc_eval},
         stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
     },
-    scanner::token::{ExpansionData, Token, value::LexValue},
+    scanner::token::{ExpansionData, Lexical, Token, value::LexValue},
 };
 use std::collections::HashMap;
 

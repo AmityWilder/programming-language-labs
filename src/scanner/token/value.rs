@@ -358,6 +358,202 @@ where
     )
 }
 
+/// Subset of [`TokenEq`] specific to operators
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum Operator {
+    #[default]
+    Assign,
+
+    And,
+    Or,
+    Nand,
+    Nor,
+    Xor,
+    Xnor,
+
+    AndAssign,
+    OrAssign,
+    XorAssign,
+    NandAssign,
+    NorAssign,
+    XnorAssign,
+
+    Not,
+    Exists,
+
+    Add,
+    SubNeg,
+    Mul,
+    Pow,
+    Div,
+    Rem,
+
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    PowAssign,
+    DivAssign,
+    RemAssign,
+
+    Shl,
+    Shr,
+    Rotl,
+    Rotr,
+
+    ShlAssign,
+    ShrAssign,
+    RotlAssign,
+    RotrAssign,
+
+    Lt,
+    Gt,
+    Ne,
+    Le,
+    Eq,
+    Ge,
+
+    Coalesce,
+    Ref,
+
+    Convert,
+    Transmute,
+
+    Szof,
+}
+
+impl Operator {
+    pub const fn as_str(self) -> &'static str {
+        self.to_token_eq().as_str()
+    }
+
+    pub fn op_description(self, operands: &[ValueType]) -> &'static str {
+        self.to_token_eq().op_description(operands)
+    }
+}
+
+impl std::fmt::Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+impl TokenEq {
+    pub const fn to_operator(self) -> Option<Operator> {
+        Operator::from_token_eq(self)
+    }
+}
+
+impl Operator {
+    pub const fn from_token_eq(value: TokenEq) -> Option<Self> {
+        Some(match value {
+            TokenEq::Punctuation(Punctuation::Assign) => Self::Assign,
+            TokenEq::Punctuation(Punctuation::And) => Self::And,
+            TokenEq::Punctuation(Punctuation::Or) => Self::Or,
+            TokenEq::Punctuation(Punctuation::Nand) => Self::Nand,
+            TokenEq::Punctuation(Punctuation::Nor) => Self::Nor,
+            TokenEq::Punctuation(Punctuation::Xor) => Self::Xor,
+            TokenEq::Punctuation(Punctuation::Xnor) => Self::Xnor,
+            TokenEq::Punctuation(Punctuation::AndAssign) => Self::AndAssign,
+            TokenEq::Punctuation(Punctuation::OrAssign) => Self::OrAssign,
+            TokenEq::Punctuation(Punctuation::XorAssign) => Self::XorAssign,
+            TokenEq::Punctuation(Punctuation::NandAssign) => Self::NandAssign,
+            TokenEq::Punctuation(Punctuation::NorAssign) => Self::NorAssign,
+            TokenEq::Punctuation(Punctuation::XnorAssign) => Self::XnorAssign,
+            TokenEq::Punctuation(Punctuation::Not) => Self::Not,
+            TokenEq::Punctuation(Punctuation::Exists) => Self::Exists,
+            TokenEq::Punctuation(Punctuation::Add) => Self::Add,
+            TokenEq::Punctuation(Punctuation::SubNeg) => Self::SubNeg,
+            TokenEq::Punctuation(Punctuation::Mul) => Self::Mul,
+            TokenEq::Punctuation(Punctuation::Pow) => Self::Pow,
+            TokenEq::Punctuation(Punctuation::Div) => Self::Div,
+            TokenEq::Punctuation(Punctuation::Rem) => Self::Rem,
+            TokenEq::Punctuation(Punctuation::AddAssign) => Self::AddAssign,
+            TokenEq::Punctuation(Punctuation::SubAssign) => Self::SubAssign,
+            TokenEq::Punctuation(Punctuation::MulAssign) => Self::MulAssign,
+            TokenEq::Punctuation(Punctuation::PowAssign) => Self::PowAssign,
+            TokenEq::Punctuation(Punctuation::DivAssign) => Self::DivAssign,
+            TokenEq::Punctuation(Punctuation::RemAssign) => Self::RemAssign,
+            TokenEq::Punctuation(Punctuation::Shl) => Self::Shl,
+            TokenEq::Punctuation(Punctuation::Shr) => Self::Shr,
+            TokenEq::Punctuation(Punctuation::Rotl) => Self::Rotl,
+            TokenEq::Punctuation(Punctuation::Rotr) => Self::Rotr,
+            TokenEq::Punctuation(Punctuation::ShlAssign) => Self::ShlAssign,
+            TokenEq::Punctuation(Punctuation::ShrAssign) => Self::ShrAssign,
+            TokenEq::Punctuation(Punctuation::RotlAssign) => Self::RotlAssign,
+            TokenEq::Punctuation(Punctuation::RotrAssign) => Self::RotrAssign,
+            TokenEq::Punctuation(Punctuation::Lt) => Self::Lt,
+            TokenEq::Punctuation(Punctuation::Gt) => Self::Gt,
+            TokenEq::Punctuation(Punctuation::Ne) => Self::Ne,
+            TokenEq::Punctuation(Punctuation::Le) => Self::Le,
+            TokenEq::Punctuation(Punctuation::Eq) => Self::Eq,
+            TokenEq::Punctuation(Punctuation::Ge) => Self::Ge,
+            TokenEq::Punctuation(Punctuation::Coalesce) => Self::Coalesce,
+            TokenEq::Punctuation(Punctuation::Ref) => Self::Ref,
+            TokenEq::Punctuation(Punctuation::Convert) => Self::Convert,
+            TokenEq::Punctuation(Punctuation::Transmute) => Self::Transmute,
+            TokenEq::Keyword(Keyword::Szof) => Self::Szof,
+            _ => return None,
+        })
+    }
+
+    pub const fn to_token_eq(self) -> TokenEq {
+        match self {
+            Self::Assign => TokenEq::Punctuation(Punctuation::Assign),
+            Self::And => TokenEq::Punctuation(Punctuation::And),
+            Self::Or => TokenEq::Punctuation(Punctuation::Or),
+            Self::Nand => TokenEq::Punctuation(Punctuation::Nand),
+            Self::Nor => TokenEq::Punctuation(Punctuation::Nor),
+            Self::Xor => TokenEq::Punctuation(Punctuation::Xor),
+            Self::Xnor => TokenEq::Punctuation(Punctuation::Xnor),
+            Self::AndAssign => TokenEq::Punctuation(Punctuation::AndAssign),
+            Self::OrAssign => TokenEq::Punctuation(Punctuation::OrAssign),
+            Self::XorAssign => TokenEq::Punctuation(Punctuation::XorAssign),
+            Self::NandAssign => TokenEq::Punctuation(Punctuation::NandAssign),
+            Self::NorAssign => TokenEq::Punctuation(Punctuation::NorAssign),
+            Self::XnorAssign => TokenEq::Punctuation(Punctuation::XnorAssign),
+            Self::Not => TokenEq::Punctuation(Punctuation::Not),
+            Self::Exists => TokenEq::Punctuation(Punctuation::Exists),
+            Self::Add => TokenEq::Punctuation(Punctuation::Add),
+            Self::SubNeg => TokenEq::Punctuation(Punctuation::SubNeg),
+            Self::Mul => TokenEq::Punctuation(Punctuation::Mul),
+            Self::Pow => TokenEq::Punctuation(Punctuation::Pow),
+            Self::Div => TokenEq::Punctuation(Punctuation::Div),
+            Self::Rem => TokenEq::Punctuation(Punctuation::Rem),
+            Self::AddAssign => TokenEq::Punctuation(Punctuation::AddAssign),
+            Self::SubAssign => TokenEq::Punctuation(Punctuation::SubAssign),
+            Self::MulAssign => TokenEq::Punctuation(Punctuation::MulAssign),
+            Self::PowAssign => TokenEq::Punctuation(Punctuation::PowAssign),
+            Self::DivAssign => TokenEq::Punctuation(Punctuation::DivAssign),
+            Self::RemAssign => TokenEq::Punctuation(Punctuation::RemAssign),
+            Self::Shl => TokenEq::Punctuation(Punctuation::Shl),
+            Self::Shr => TokenEq::Punctuation(Punctuation::Shr),
+            Self::Rotl => TokenEq::Punctuation(Punctuation::Rotl),
+            Self::Rotr => TokenEq::Punctuation(Punctuation::Rotr),
+            Self::ShlAssign => TokenEq::Punctuation(Punctuation::ShlAssign),
+            Self::ShrAssign => TokenEq::Punctuation(Punctuation::ShrAssign),
+            Self::RotlAssign => TokenEq::Punctuation(Punctuation::RotlAssign),
+            Self::RotrAssign => TokenEq::Punctuation(Punctuation::RotrAssign),
+            Self::Lt => TokenEq::Punctuation(Punctuation::Lt),
+            Self::Gt => TokenEq::Punctuation(Punctuation::Gt),
+            Self::Ne => TokenEq::Punctuation(Punctuation::Ne),
+            Self::Le => TokenEq::Punctuation(Punctuation::Le),
+            Self::Eq => TokenEq::Punctuation(Punctuation::Eq),
+            Self::Ge => TokenEq::Punctuation(Punctuation::Ge),
+            Self::Coalesce => TokenEq::Punctuation(Punctuation::Coalesce),
+            Self::Ref => TokenEq::Punctuation(Punctuation::Ref),
+            Self::Convert => TokenEq::Punctuation(Punctuation::Convert),
+            Self::Transmute => TokenEq::Punctuation(Punctuation::Transmute),
+            Self::Szof => TokenEq::Keyword(Keyword::Szof),
+        }
+    }
+}
+
+impl From<Operator> for TokenEq {
+    fn from(value: Operator) -> Self {
+        value.to_token_eq()
+    }
+}
+
 #[cfg(test)]
 mod escapes_tests {
     use super::*;

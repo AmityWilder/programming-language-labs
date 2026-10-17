@@ -123,40 +123,71 @@ impl<'src> ExpansionData<'src> {
     }
 }
 
-/// A single token - its lexeme ([`Self::lex`]) and value ([`Self::val`]).
-#[derive(Clone, Copy, PartialEq, Default)]
-pub struct Token<'src> {
+pub trait Lexical<'src> {
+    fn lex(&self) -> &'src str;
+    fn mac(&self) -> Option<ExpansionData<'src>>;
+
+    /// Returns the [`Range`] of `self.lex` in `source`
+    /// # Panics
+    /// This method will panic if `source` is not the source string of `self`
+    fn lex_range(&self, source: &'src str) -> Range<usize> {
+        source
+            .substr_range(self.lex())
+            .expect("every lexeme should be a substr of the source code")
+    }
+
+    /// Returns a boolean representing whether the lexeme is the exact same position in source,
+    /// without needing to lookup within the source
+    fn lex_eq<Q>(&self, other: &Q) -> bool
+    where
+        Q: ?Sized + Lexical<'src>,
+    {
+        std::ptr::eq(self.lex(), other.lex())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Lexeme<'src> {
     /// Because this is a pointer into the original source string, we can use pointer arithmetic to find its location.
     /// If a program has a thousand tokens, why allocate a new string and store two additional integers in case of error
     /// when we can just keep the original string around and calculate those integers *on demand*?
     pub lex: &'src str,
 
-    /// The value of the token
-    pub val: LexValue<'src>,
-
     /// The range of the macro this token expanded from
     pub mac: Option<ExpansionData<'src>>,
 }
 
-impl std::fmt::Debug for Token<'_> {
+impl<'src> Lexical<'src> for Lexeme<'src> {
+    fn lex(&self) -> &'src str {
+        self.lex
+    }
+
+    fn mac(&self) -> Option<ExpansionData<'src>> {
+        self.mac
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct SpecToken<'src, T> {
+    /// Because this is a pointer into the original source string, we can use pointer arithmetic to find its location.
+    /// If a program has a thousand tokens, why allocate a new string and store two additional integers in case of error
+    /// when we can just keep the original string around and calculate those integers *on demand*?
+    pub lex: &'src str,
+
+    /// The range of the macro this token expanded from
+    pub mac: Option<ExpansionData<'src>>,
+
+    /// The value of the token
+    pub val: T,
+}
+
+/// A single token - its lexeme ([`Self::lex`]) and value ([`Self::val`]).
+pub type Token<'src> = SpecToken<'src, LexValue<'src>>;
+
+impl<T: std::fmt::Debug> std::fmt::Debug for SpecToken<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { lex, val, mac } = self;
-        let (name, dbg_val): (&str, Option<&dyn std::fmt::Debug>) = match val {
-            LexValue::Whitespace => ("Whitespace", None),
-            LexValue::Comment => ("Comment", None),
-            LexValue::UIntLiteral(x) => ("UIntLiteral", Some(x)),
-            LexValue::SIntLiteral(x) => ("SIntLiteral", Some(x)),
-            LexValue::FlptLiteral(x) => ("FltLiteral", Some(x)),
-            LexValue::CharLiteral(x) => ("CharLiteral", Some(x)),
-            LexValue::TextLiteral(x) => ("StringLiteral", Some(x)),
-            LexValue::BoolLiteral(x) => ("BoolLiteral", Some(x)),
-            LexValue::Identifier | LexValue::Callable => ("Identifier", None),
-            LexValue::Macro => ("Macro", None),
-            LexValue::MacroParam => ("MacroParam", None),
-            LexValue::Keyword(x) => ("Keyword", Some(x)),
-            LexValue::Punctuation(x) => ("Punctuation", Some(x)),
-        };
-        write!(f, "{name}({lex:?}")?;
+        write!(f, "{val:?} [in {lex:?}")?;
         if let Some(ExpansionData {
             range: macro_range,
             arg: argument,
@@ -169,31 +200,122 @@ impl std::fmt::Debug for Token<'_> {
                 write!(f, " from definition")?;
             }
         }
-        write!(f, ")")?;
-        if let Some(dbg_val) = dbg_val {
-            write!(f, ": {dbg_val:?}")
-        } else if !matches!(val, LexValue::Whitespace | LexValue::Comment) {
-            write!(f, ": {lex}") // token value is its lexeme
-        } else {
-            Ok(())
+        write!(f, "]")
+    }
+}
+
+impl<'src, T> Lexical<'src> for SpecToken<'src, T> {
+    fn lex(&self) -> &'src str {
+        self.lex
+    }
+
+    fn mac(&self) -> Option<ExpansionData<'src>> {
+        self.mac
+    }
+}
+
+impl<'src, T> SpecToken<'src, T> {
+    pub fn decompose(self) -> (Lexeme<'src>, T) {
+        let Self { lex, mac, val } = self;
+        (Lexeme { lex, mac }, val)
+    }
+}
+
+impl<'src, T> From<SpecToken<'src, T>> for Lexeme<'src> {
+    fn from(value: SpecToken<'src, T>) -> Self {
+        value.decompose().0
+    }
+}
+
+macro_rules! spec_token_conversions {
+    ($($Variant:ident => $Type:ty),* $(,)?) => {$(
+        impl<'src> TryFrom<Token<'src>> for SpecToken<'src, $Type> {
+            type Error = ();
+
+            fn try_from(Token { lex, mac, val }: Token<'src>) -> Result<Self, Self::Error> {
+                match val {
+                    LexValue::$Variant(val) => Ok(Self { lex, mac, val }),
+                    _ => Err(()),
+                }
+            }
+        }
+    )*};
+}
+
+spec_token_conversions! {
+    BoolLiteral => bool,
+    UIntLiteral => crate::types::uint,
+    SIntLiteral => crate::types::sint,
+    FlptLiteral => crate::types::flpt,
+    CharLiteral => value::CharLiteral,
+    TextLiteral => value::TextLiteral<'src>,
+    Keyword => value::Keyword,
+    Punctuation => value::Punctuation,
+}
+
+impl<'src> From<SpecToken<'src, value::Punctuation>> for SpecToken<'src, value::TokenEq> {
+    fn from(SpecToken { lex, mac, val }: SpecToken<'src, value::Punctuation>) -> Self {
+        Self {
+            lex,
+            mac,
+            val: value::TokenEq::Punctuation(val),
         }
     }
 }
 
-impl<'src> Token<'src> {
-    /// Returns the [`Range`] of `self.lex` in `source`
-    /// # Panics
-    /// This method will panic if `source` is not the source string of `self`
-    pub fn lex_range(&self, source: &'src str) -> Range<usize> {
-        source
-            .substr_range(self.lex)
-            .expect("every lexeme should be a substr of the source code")
+impl<'src> From<SpecToken<'src, value::Keyword>> for SpecToken<'src, value::TokenEq> {
+    fn from(SpecToken { lex, mac, val }: SpecToken<'src, value::Keyword>) -> Self {
+        Self {
+            lex,
+            mac,
+            val: value::TokenEq::Keyword(val),
+        }
     }
+}
 
-    /// Returns a boolean representing whether the lexeme is the exact same position in source,
-    /// without needing to lookup within the source
-    pub fn lex_eq(&self, other: &Self) -> bool {
-        std::ptr::eq(self.lex, other.lex)
+impl<'src> TryFrom<SpecToken<'src, value::Punctuation>> for SpecToken<'src, value::Operator> {
+    type Error = ();
+
+    fn try_from(value: SpecToken<'src, value::Punctuation>) -> Result<Self, Self::Error> {
+        <SpecToken<'src, value::TokenEq>>::from(value).try_into()
+    }
+}
+
+impl<'src> TryFrom<SpecToken<'src, value::Keyword>> for SpecToken<'src, value::Operator> {
+    type Error = ();
+
+    fn try_from(value: SpecToken<'src, value::Keyword>) -> Result<Self, Self::Error> {
+        <SpecToken<'src, value::TokenEq>>::from(value).try_into()
+    }
+}
+
+impl<'src> TryFrom<SpecToken<'src, value::TokenEq>> for SpecToken<'src, value::Operator> {
+    type Error = ();
+
+    fn try_from(
+        SpecToken { lex, mac, val }: SpecToken<'src, value::TokenEq>,
+    ) -> Result<Self, Self::Error> {
+        val.to_operator()
+            .map(|val| Self { lex, mac, val })
+            .ok_or(())
+    }
+}
+
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, value::TokenEq> {
+    type Error = ();
+
+    fn try_from(SpecToken { lex, mac, val }: Token<'src>) -> Result<Self, Self::Error> {
+        val.to_token_eq()
+            .map(|val| Self { lex, mac, val })
+            .ok_or(())
+    }
+}
+
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, value::Operator> {
+    type Error = ();
+
+    fn try_from(value: Token<'src>) -> Result<Self, Self::Error> {
+        <SpecToken<'src, value::TokenEq>>::try_from(value).and_then(TryInto::try_into)
     }
 }
 

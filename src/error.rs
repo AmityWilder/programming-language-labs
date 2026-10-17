@@ -17,7 +17,11 @@ use crate::{
             BIN_PREFIX, BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, HEX_PREFIX,
             OCT_PREFIX, TEXT_DELIM,
         },
-        token::{ExpansionData, Token, escape_char, punc::Punctuation, value::TokenEq},
+        token::{
+            ExpansionData, Lexical, Token, escape_char,
+            punc::Punctuation,
+            value::{Operator, TokenEq},
+        },
     },
 };
 use std::range::Range;
@@ -371,6 +375,7 @@ expected_token! {
         Declaration = "a declaration or statement",
         Ident = "an identifier",
         BlockStmt = "a block statement",
+        BlockOrIf = "an `if` keyword or a block statement",
         Statement = "a statement"
     }
 }
@@ -741,18 +746,17 @@ pub enum ErrorType<'src> {
     /// The operands in a binary operation are of incompatible type
     #[code(PRE, 26)]
     #[err({ op, l_ty, r_ty, .. }, |f| write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"))]
-    #[inlay({ op, l_ty, r_ty, .. }, |f| write!(f, "{} is not supported between operands of these types", op.op_description(&[l_ty.to_value_type(), r_ty.to_value_type()])))]
+    #[inlay({ op, l_ty, r_ty, .. }, |f| write!(f, "{} is not supported between operands of these types", op.to_token_eq().op_description(&[l_ty.to_value_type(), r_ty.to_value_type()])))]
     #[help({ op, l_ty, r_ty, .. }, |f, _src| {
         write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
         match op {
-            TokenEq::Punctuation(
-                Punctuation::And |
-                Punctuation::Xor |
-                Punctuation::Or |
-                Punctuation::Nand |
-                Punctuation::Nor |
-                Punctuation::Xnor
-            ) if matches!(l_ty, PpType::Bool) != matches!(r_ty, PpType::Bool)
+            Operator::And |
+            Operator::Xor |
+            Operator::Or |
+            Operator::Nand |
+            Operator::Nor |
+            Operator::Xnor
+             if matches!(l_ty, PpType::Bool) != matches!(r_ty, PpType::Bool)
                 // TODO: the user might have used a boolean literal/variable, not a comparison; this message might not be helpful in that case
                 => write!(f, "\n\nit looks like you may have been trying to perform a bitwise operation, but one side resolves to a boolean.\n\
                     bitwise/logic operations have lower precedence than comparisons, so you may need to wrap the bitwise operation in parentheses."),
@@ -766,7 +770,7 @@ pub enum ErrorType<'src> {
     ])]
     PreIncompatible {
         /// The binary operator
-        op: TokenEq,
+        op: Operator,
         l_range: Range<usize>,
         r_range: Range<usize>,
         l_ty: PpType,
@@ -776,12 +780,12 @@ pub enum ErrorType<'src> {
     /// The operand in a unary operation is of an unsupported type
     #[code(PRE, 27)]
     #[err({ op, r_ty, .. }, |f| write!(f, "`{op}` is not supported for {r_ty}"))]
-    #[inlay({ op, r_ty, .. }, |f| write!(f, "{} is not supported for operands of this type", op.op_description(&[r_ty.to_value_type()])))]
+    #[inlay({ op, r_ty, .. }, |f| write!(f, "{} is not supported for operands of this type", op.to_token_eq().op_description(&[r_ty.to_value_type()])))]
     #[help({ .. }, |f, _src| write!(f, "try a different operator or convert the type"))]
     #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty.to_value_type() })])]
     PreUnsupported {
         /// The unary operator
-        op: TokenEq,
+        op: Operator,
         /// The type of the value on the right side of the operator
         r_ty: PpType,
         r_range: Range<usize>,
@@ -1119,15 +1123,14 @@ impl<'src> ContextError<'src> {
     }
 
     /// Produce an error on an optional token (the range will be its lexeme)
-    pub fn token_error(
-        source: &'src str,
-        token: Option<&Token<'src>>,
-        err: ErrorType<'src>,
-    ) -> Self {
+    pub fn token_error<T>(source: &'src str, token: Option<&T>, err: ErrorType<'src>) -> Self
+    where
+        T: ?Sized + Lexical<'src>,
+    {
         Self::error(
             source,
             token.map(|token| token.lex_range(source)),
-            token.and_then(|token| token.mac),
+            token.and_then(Lexical::mac),
             err,
         )
     }

@@ -7,7 +7,7 @@ use crate::{
     exec::{env::Environment, error::Failure},
     grammar::ast::{AstNodeFinal, Binary, Expr, Grouping, Literal, TypeExpr, Unary, Variable},
     scanner::token::{
-        Token,
+        Lexical, Token,
         keyword::Keyword,
         punc::Punctuation,
         value::{CharLiteral, LexValue, TokenEq},

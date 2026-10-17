@@ -1,5 +1,11 @@
 use super::*;
-use crate::scanner::{token::punc::Punctuation, tokenize};
+use crate::{
+    grammar::ast::OpToken,
+    scanner::{
+        token::{punc::Punctuation, value::Operator},
+        tokenize,
+    },
+};
 
 #[test]
 fn test_parse0() {
@@ -20,17 +26,17 @@ fn test_parse0() {
                     mac: None
                 }
             }),
-            op: Token {
+            op: OpToken {
                 lex: "+",
-                val: LexValue::Punctuation(Punctuation::Add),
+                val: Operator::Add,
                 mac: None
             },
             rhs: Expr::binary(Binary {
                 lhs: Expr::unary(Unary {
                     side: OpSide::Right,
-                    op: Token {
+                    op: OpToken {
                         lex: "-",
-                        val: LexValue::Punctuation(Punctuation::SubNeg),
+                        val: Operator::SubNeg,
                         mac: None
                     },
                     operand: Expr::grouping(Grouping {
@@ -47,9 +53,9 @@ fn test_parse0() {
                                     mac: None
                                 }
                             }),
-                            op: Token {
+                            op: OpToken {
                                 lex: "/",
-                                val: LexValue::Punctuation(Punctuation::Div),
+                                val: Operator::Div,
                                 mac: None
                             },
                             rhs: Expr::literal(Literal {
@@ -67,9 +73,9 @@ fn test_parse0() {
                         }
                     })
                 }),
-                op: Token {
+                op: OpToken {
                     lex: "*",
-                    val: LexValue::Punctuation(Punctuation::Mul),
+                    val: Operator::Mul,
                     mac: None
                 },
                 rhs: Expr::Literal(Literal {
@@ -111,10 +117,10 @@ fn test_assoc_add() {
         [Ok(Expr::binary(Binary {
             lhs: Expr::binary(Binary {
                 lhs: Expr::literal(Literal { value: a }),
-                op: b,
+                op: b.try_into().expect("+ is an operator"),
                 rhs: Expr::literal(Literal { value: c }),
             }),
-            op: d,
+            op: d.try_into().expect("+ is an operator"),
             rhs: Expr::literal(Literal { value: e }),
         }))]
     );
@@ -134,10 +140,10 @@ fn test_precedence() {
         ast,
         [Ok(Expr::binary(Binary {
             lhs: Expr::literal(Literal { value: a }),
-            op: b,
+            op: b.try_into().expect("+ is an operator"),
             rhs: Expr::binary(Binary {
                 lhs: Expr::literal(Literal { value: c }),
-                op: d,
+                op: d.try_into().expect("* is an operator"),
                 rhs: Expr::literal(Literal { value: e }),
             }),
         }))]
