@@ -1,40 +1,87 @@
 use crate::{
     Todo,
-    analyzer::{Expression, Operands, Operation, types::AbstractType},
+    analyzer::{
+        Expression, FnDef,
+        types::{AbstractType, FunType, TypeCompatible},
+    },
     scanner::token::value::Operator,
 };
-use std::collections::LinkedList;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct ConstantValue(Todo);
 
 impl<'src> Expression<'src> for ConstantValue {
-    fn get_type<'ty>(&self, _env: &'ty StaticEnvironment<'src>) -> Option<&'ty AbstractType<'src>> {
+    type Output<'ty>
+        = &'ty AbstractType<'src>
+    where
+        'src: 'ty;
+
+    fn get_type<'ty>(&self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         todo!()
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Var<'src> {
-    Run(Option<AbstractType<'src>>),
+pub enum VarType<'src, 'ty> {
+    Fun(&'ty FunType<'src>),
+    Abstract(&'ty AbstractType<'src>),
+}
+
+impl<'src> TypeCompatible<'src> for VarType<'src, '_> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        match self {
+            VarType::Fun(ty) => ty.is_compatible(other),
+            VarType::Abstract(ty) => ty.is_compatible(other),
+        }
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<VarType<'src, '_>> for AbstractType<'src> {
+    fn from(value: VarType<'src, '_>) -> Self {
+        match value {
+            VarType::Fun(t) => t.to_abstract(),
+            VarType::Abstract(t) => t.to_abstract(),
+        }
+    }
+}
+impl std::fmt::Display for VarType<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fun(t) => t.fmt(f),
+            Self::Abstract(t) => t.fmt(f),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StaticVar<'src> {
+    Fun(FunType<'src>), // TBD: should this be a shape, or a type?
+    Var(Option<AbstractType<'src>>),
     Pvt(ConstantValue),
 }
 
-impl<'src> Expression<'src> for Var<'src> {
-    fn get_type<'ty>(
-        &'ty self,
-        env: &'ty StaticEnvironment<'src>,
-    ) -> Option<&'ty AbstractType<'src>> {
+impl<'src> Expression<'src> for StaticVar<'src> {
+    type Output<'ty>
+        = VarType<'src, 'ty>
+    where
+        'src: 'ty,
+        Self: 'ty;
+
+    fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         match self {
-            Var::Run(x) => x.as_ref(),
-            Var::Pvt(x) => x.get_type(env),
+            StaticVar::Fun(x) => Some(VarType::Fun(x)),
+            StaticVar::Var(x) => x.as_ref().map(VarType::Abstract),
+            StaticVar::Pvt(x) => x.get_type(env).map(VarType::Abstract),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Scope<'src> {
-    pub vars: Vec<(&'src str, Var<'src>)>,
+    pub vars: Vec<(&'src str, StaticVar<'src>)>,
 }
 
 impl<'src> Scope<'src> {
@@ -43,7 +90,7 @@ impl<'src> Scope<'src> {
     }
 
     /// Returns [`None`] if no item exists by the provided name
-    pub fn get<Q>(&self, name: &Q) -> Option<&Var<'src>>
+    pub fn get<Q>(&self, name: &Q) -> Option<&StaticVar<'src>>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -51,7 +98,7 @@ impl<'src> Scope<'src> {
     }
 
     /// Returns [`None`] if no item exists by the provided name
-    pub fn get_mut<Q>(&mut self, name: &Q) -> Option<&mut Var<'src>>
+    pub fn get_mut<Q>(&mut self, name: &Q) -> Option<&mut StaticVar<'src>>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -66,14 +113,14 @@ impl<'src> Scope<'src> {
         name: &'src str,
         ty: Option<AbstractType<'src>>,
     ) -> &mut Option<AbstractType<'src>> {
-        match &mut self.vars.push_mut((name, Var::Run(ty))).1 {
-            Var::Run(ty) => ty,
+        match &mut self.vars.push_mut((name, StaticVar::Var(ty))).1 {
+            StaticVar::Var(ty) => ty,
             _ => unreachable!("pushed a Var::Run"),
         }
     }
 
     pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) {
-        self.vars.push((name, Var::Pvt(value)));
+        self.vars.push((name, StaticVar::Pvt(value)));
     }
 }
 
@@ -84,32 +131,33 @@ pub enum OperandTypes<'src> {
     UnaryPre(AbstractType<'src>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct OpOverload<'src> {
     pub op: Operator,
     pub operands: OperandTypes<'src>,
     pub output: AbstractType<'src>,
+    pub def: FunType<'src>,
 }
 
 /// [`Environment`](crate::exec::env::Environment) specialized for static analysis
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Default)]
 pub struct StaticEnvironment<'src> {
     global: Scope<'src>,
-    stack: LinkedList<Scope<'src>>,
-    overloads: Vec<OpOverload<'src>>,
+    stack: Vec<Scope<'src>>,
+    overloads: Vec<(OpOverload<'src>, FnDef<'src>)>,
 }
 
 impl<'src> StaticEnvironment<'src> {
-    pub const fn new(init_overloads: Vec<OpOverload<'src>>) -> Self {
+    pub const fn new() -> Self {
         Self {
             global: Scope::new(),
-            stack: LinkedList::new(),
-            overloads: init_overloads,
+            stack: Vec::new(),
+            overloads: Vec::new(),
         }
     }
 
     /// Returns [`None`] if no item exists with the provided name
-    pub fn get<Q>(&self, name: &Q) -> Option<&Var<'src>>
+    pub fn get<Q>(&self, name: &Q) -> Option<&StaticVar<'src>>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -121,7 +169,7 @@ impl<'src> StaticEnvironment<'src> {
     }
 
     /// Returns [`None`] if no item exists with the provided name
-    pub fn get_mut<Q>(&mut self, name: &Q) -> Option<&mut Var<'src>>
+    pub fn get_mut<Q>(&mut self, name: &Q) -> Option<&mut StaticVar<'src>>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -133,12 +181,12 @@ impl<'src> StaticEnvironment<'src> {
     }
 
     pub fn push_scope(&mut self) -> &mut Scope<'src> {
-        self.stack.push_back_mut(Scope::new())
+        self.stack.push_mut(Scope::new())
     }
 
     // TODO: needs to `Drop` all elements in memory (somehow)!!
     pub fn pop_scope(&mut self) {
-        self.stack.pop_back();
+        self.stack.pop();
     }
 
     /// Returns a mutable reference to the undetermined type
@@ -157,39 +205,30 @@ impl<'src> StaticEnvironment<'src> {
         name: &'src str,
         ty: Option<AbstractType<'src>>,
     ) -> Option<&mut Option<AbstractType<'src>>> {
-        self.stack.back_mut().map(|scope| scope.decl_var(name, ty))
+        self.stack.last_mut().map(|scope| scope.decl_var(name, ty))
     }
 
     /// Declares at global scope if there is no local scope
     pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) {
         self.stack
-            .back_mut()
+            .last_mut()
             .unwrap_or(&mut self.global)
             .decl_pvt(name, value);
     }
 
-    pub fn decl_overload(&mut self, def: OpOverload<'src>) {
+    pub fn decl_operator(&mut self, shape: OpOverload<'src>, def: FnDef<'src>) {
         // TODO: what if the overload already exists?
-        self.overloads.push(def);
+        self.overloads.push((shape, def));
     }
 
     /// Returns [`None`] if the overload isn't defined
-    pub fn get_overload<'env>(&'env self, k: &Operation) -> Option<&'env OpOverload<'src>> {
-        self.overloads.iter().find(|o| {
-            o.op == k.op
-                && match (&o.operands, &k.operands) {
-                    (OperandTypes::Binary(l1, r1), Operands::Binary(l2, r2)) => {
-                        l2.get_type(self).is_some_and(|l2| l1 == l2)
-                            && r2.get_type(self).is_some_and(|r2| r1 == r2)
-                    }
-
-                    (OperandTypes::UnaryPre(a), Operands::UnaryPre(b))
-                    | (OperandTypes::UnaryPost(a), Operands::UnaryPost(b)) => {
-                        b.get_type(self).is_some_and(|b| a == b)
-                    }
-
-                    _ => false,
-                }
-        })
+    pub fn get_operator<'env>(
+        &'env self,
+        op: &Operator,
+        operands: &OperandTypes<'src>,
+    ) -> Option<&'env (OpOverload<'src>, FnDef<'src>)> {
+        self.overloads
+            .iter()
+            .rfind(|(shape, _)| shape.op == *op && shape.operands == *operands)
     }
 }

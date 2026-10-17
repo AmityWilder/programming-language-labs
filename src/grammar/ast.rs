@@ -57,6 +57,7 @@ pub trait AstNodeFinal<'src>: AstNode<'src> {
     }
 }
 
+/// For types that are guaranteed to have a range
 macro_rules! final_ast_node {
     derive() {
         $(#[$meta:meta])*
@@ -134,6 +135,32 @@ where
     #[inline]
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         (*self).expansion(source)
+    }
+}
+
+/// Passthrough references
+impl<'src, T: ?Sized> AstNode<'src> for Box<T>
+where
+    T: AstNode<'src>,
+{
+    #[inline]
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        (**self).get_range_start(source)
+    }
+
+    #[inline]
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        (**self).get_range_end(source)
+    }
+
+    #[inline]
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (**self).get_range(source)
+    }
+
+    #[inline]
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (**self).expansion(source)
     }
 }
 
@@ -246,6 +273,16 @@ where
             [only] => only.expansion(source),
             [first, .., last] => (first, last).expansion(source),
         }
+    }
+}
+
+impl<'src> AstNode<'src> for str {
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        source.substr_range(self)
+    }
+
+    fn expansion(&self, _: &'src str) -> Option<ExpansionData<'src>> {
+        None
     }
 }
 

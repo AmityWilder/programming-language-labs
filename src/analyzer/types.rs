@@ -1,18 +1,188 @@
 use crate::{
-    Todo, analyzer::static_env::ConstantValue, error::OpSide, scanner::token::value::TokenEq,
+    Todo,
+    analyzer::static_env::ConstantValue,
+    error::OpSide,
+    grammar::ast::{AstEnum, AstNode, AstNodeF},
+    scanner::token::{ExpansionData, value::TokenEq},
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    range::Range,
+};
+
+/// Display implementation is be how the type will be shown in error messages
+pub trait TypeCompatible<'src>: std::fmt::Display {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool;
+
+    // TODO: change this to return an actual error
+    fn expect_type(&self, expect: &AbstractType<'_>) -> Result<(), !>
+    where
+        Self: std::fmt::Debug,
+    {
+        self.is_compatible(expect)
+            .ok_or_else(|| todo!("type mismatch\n expected: {expect:#?}\n found: {self:#?}"))
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src>;
+}
+
+impl<'src, T: ?Sized + TypeCompatible<'src>> TypeCompatible<'src> for &T {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        (*self).is_compatible(other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        (*self).to_abstract()
+    }
+}
 
 /// Like an [`ArrayType`], but the length is determined at runtime
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
 pub struct ViewType<'src> {
     pub item: StaticType<'src>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+/// Passthrough references
+impl<'src> AstNode<'src> for ViewType<'src> {
+    #[inline]
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.item.get_range_start(source)
+    }
+
+    #[inline]
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.item.get_range_end(source)
+    }
+
+    #[inline]
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.item.get_range(source)
+    }
+
+    #[inline]
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.item.expansion(source)
+    }
+}
+
+impl<'src> TypeCompatible<'src> for ViewType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::View(other)) if *self == **other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<ViewType<'src>> for AbstractType<'src> {
+    fn from(value: ViewType<'src>) -> Self {
+        AbstractType::Concrete(StaticType::View(Box::new(value)))
+    }
+}
+impl std::fmt::Display for ViewType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { item } = self;
+        write!(f, "[{item}]")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
 pub struct ArrayType<'src> {
     pub item: StaticType<'src>,
     pub len: usize, // TODO: constant expression? bounds?
+}
+
+/// Passthrough references
+impl<'src> AstNode<'src> for ArrayType<'src> {
+    #[inline]
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.item.get_range_start(source)
+    }
+
+    #[inline]
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.item.get_range_end(source)
+    }
+
+    #[inline]
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.item.get_range(source)
+    }
+
+    #[inline]
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.item.expansion(source)
+    }
+}
+
+impl<'src> TypeCompatible<'src> for ArrayType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::Arr(other)) if *self == **other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<ArrayType<'src>> for AbstractType<'src> {
+    fn from(value: ArrayType<'src>) -> Self {
+        AbstractType::Concrete(StaticType::Arr(Box::new(value)))
+    }
+}
+impl std::fmt::Display for ArrayType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { item, len } = self;
+        write!(f, "[{item}; {len}]")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
+pub struct Ptr<'src> {
+    pub to: StaticType<'src>,
+}
+
+/// Passthrough references
+impl<'src> AstNode<'src> for Ptr<'src> {
+    #[inline]
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.to.get_range_start(source)
+    }
+
+    #[inline]
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.to.get_range_end(source)
+    }
+
+    #[inline]
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.to.get_range(source)
+    }
+
+    #[inline]
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.to.expansion(source)
+    }
+}
+
+impl<'src> TypeCompatible<'src> for Ptr<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::Ptr(other)) if *self == **other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<Ptr<'src>> for AbstractType<'src> {
+    fn from(value: Ptr<'src>) -> Self {
+        AbstractType::Concrete(StaticType::Ptr(Box::new(value)))
+    }
+}
+impl std::fmt::Display for Ptr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { to } = self;
+        write!(f, "@{to}") // TBD: design
+    }
 }
 
 /// Alternative for operations that can fail
@@ -27,56 +197,353 @@ pub enum OrType {
     Fail,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+impl std::fmt::Display for OrType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::None => "none",
+            Self::Nevr => "nevr",
+            Self::Fail => "fail",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Fallible<'src> {
     pub then: StaticType<'src>,
     pub or: OrType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+/// Passthrough references
+impl<'src> AstNode<'src> for Fallible<'src> {
+    #[inline]
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.then.get_range_start(source)
+    }
+
+    #[inline]
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.then.get_range_end(source)
+    }
+
+    #[inline]
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.then.get_range(source)
+    }
+
+    #[inline]
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.then.expansion(source)
+    }
+}
+
+impl<'src> TypeCompatible<'src> for Fallible<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::OrTy(other)) if *self == **other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<Fallible<'src>> for AbstractType<'src> {
+    fn from(value: Fallible<'src>) -> Self {
+        AbstractType::Concrete(StaticType::OrTy(Box::new(value)))
+    }
+}
+impl std::fmt::Display for Fallible<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { then, or } = self;
+        write!(f, "{then} | {or}")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
 pub struct RecType<'src> {
     pub name: &'src str,
     pub fields: BTreeMap<&'src str, StaticType<'src>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+/// Passthrough references
+impl<'src> AstNode<'src> for RecType<'src> {
+    #[inline]
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_start(source)
+    }
+
+    #[inline]
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_end(source)
+    }
+
+    #[inline]
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.name.get_range(source)
+    }
+
+    #[inline]
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.name.expansion(source)
+    }
+}
+
+impl<'src> TypeCompatible<'src> for RecType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::Rec(other)) if self == other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<RecType<'src>> for AbstractType<'src> {
+    fn from(value: RecType<'src>) -> Self {
+        AbstractType::Concrete(StaticType::Rec(value))
+    }
+}
+impl std::fmt::Display for RecType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name, .. } = self;
+        write!(f, "{name}") // TODO: what if there are multiple with the same name?
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
 pub struct SupType<'src> {
     pub name: &'src str,
     pub variants: BTreeSet<StaticType<'src>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+/// Passthrough references
+impl<'src> AstNode<'src> for SupType<'src> {
+    #[inline]
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_start(source)
+    }
+
+    #[inline]
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_end(source)
+    }
+
+    #[inline]
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.name.get_range(source)
+    }
+
+    #[inline]
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.name.expansion(source)
+    }
+}
+
+impl<'src> TypeCompatible<'src> for SupType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::Sup(other)) if self == other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<SupType<'src>> for AbstractType<'src> {
+    fn from(value: SupType<'src>) -> Self {
+        AbstractType::Concrete(StaticType::Sup(value))
+    }
+}
+impl std::fmt::Display for SupType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name, .. } = self;
+        write!(f, "{name}") // TODO: what if there are multiple with the same name?
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct SubType<'src> {
     pub name: &'src str,
     pub base: StaticType<'src>,
     pub reqs: Vec<TypeBound<'src>>,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+/// Passthrough references
+impl<'src> AstNode<'src> for SubType<'src> {
+    #[inline]
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_start(source)
+    }
+
+    #[inline]
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_end(source)
+    }
+
+    #[inline]
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.name.get_range(source)
+    }
+
+    #[inline]
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.name.expansion(source)
+    }
+}
+
+impl<'src> TypeCompatible<'src> for SubType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::Sub(other)) if *self == **other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<SubType<'src>> for AbstractType<'src> {
+    fn from(value: SubType<'src>) -> Self {
+        AbstractType::Concrete(StaticType::Sub(Box::new(value)))
+    }
+}
+impl std::fmt::Display for SubType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name, .. } = self;
+        write!(f, "{name}") // TODO: what if there are multiple with the same name?
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
 pub struct CatType<'src> {
     pub name: &'src str,
     pub repr: Box<StaticType<'src>>,
     pub values: BTreeSet<ConstantValue>,
 }
 
+impl<'src> AstNode<'src> for CatType<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.name.get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
+        self.name.expansion(source)
+    }
+}
+
+impl<'src> TypeCompatible<'src> for CatType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::Cat(other)) if *self == **other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<CatType<'src>> for AbstractType<'src> {
+    fn from(value: CatType<'src>) -> Self {
+        AbstractType::Concrete(StaticType::Cat(Box::new(value)))
+    }
+}
+impl std::fmt::Display for CatType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name, .. } = self;
+        write!(f, "{name}") // TODO: what if there are multiple with the same name?
+    }
+}
+
 /// A matcher for any function with the specified combination of parameters and return
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
 pub struct FunShape<'src> {
     pub params: Vec<StaticType<'src>>,
     pub ret: StaticType<'src>,
     // TBD: captures?
 }
 
+impl<'src> AstNode<'src> for FunShape<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.params.as_slice().get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.ret.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (self.params.as_slice(), &self.ret).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
+        (self.params.as_slice(), &self.ret).expansion(source)
+    }
+}
+
+impl std::fmt::Display for FunShape<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { params, ret } = self;
+        write!(f, "fn(")?;
+        let mut has_prev = false;
+        for param in params {
+            if has_prev {
+                f.write_str(", ")?;
+            }
+            write!(f, "{param}")?;
+            has_prev = true
+        }
+        write!(f, ") -> {ret}")
+    }
+}
+
 /// A specific, concrete function
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
 pub struct FunType<'src> {
     pub name: &'src str,
     pub shape: FunShape<'src>,
 }
 
-/// Monomorphized or concrete type
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
-pub enum StaticType<'src> {
+impl<'src> AstNode<'src> for FunType<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.shape.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.name, &self.shape).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
+        (&self.name, &self.shape).expansion(source)
+    }
+}
+
+impl<'src> TypeCompatible<'src> for FunType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::Fun(other)) if *self == **other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<FunType<'src>> for AbstractType<'src> {
+    fn from(value: FunType<'src>) -> Self {
+        AbstractType::Concrete(StaticType::Fun(Box::new(value)))
+    }
+}
+impl std::fmt::Display for FunType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { name, shape } = self;
+        write!(f, "{shape}{{{name}}}")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum PrimitiveType {
     /// Return type of a statement
     None,
     /// Return type of an endless loop - not constructable, only usable in analysis
@@ -99,6 +566,62 @@ pub enum StaticType<'src> {
     Char,
     /// String
     Text,
+}
+
+impl<'src> AstNode<'src> for PrimitiveType {
+    fn get_range_start(&self, _source: &'src str) -> Option<usize> {
+        None
+    }
+
+    fn get_range_end(&self, _source: &'src str) -> Option<usize> {
+        None
+    }
+
+    fn get_range(&self, _source: &'src str) -> Option<Range<usize>> {
+        None
+    }
+
+    fn expansion(&self, _source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
+        None
+    }
+}
+
+impl<'src> TypeCompatible<'src> for PrimitiveType {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::Primitive(other)) if self == other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<PrimitiveType> for AbstractType<'src> {
+    fn from(value: PrimitiveType) -> Self {
+        AbstractType::Concrete(StaticType::Primitive(value))
+    }
+}
+impl std::fmt::Display for PrimitiveType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::None => "none",
+            Self::Nevr => "nevr",
+            Self::Fail => "fail",
+            Self::Bool => "bool",
+            Self::Byte => "byte",
+            Self::Uint => "uint",
+            Self::Sint => "sint",
+            Self::Flpt => "flpt",
+            Self::Char => "char",
+            Self::Text => "text",
+        })
+    }
+}
+
+/// Monomorphized or concrete type
+#[derive(Debug, Clone, PartialEq, PartialOrd, AstEnum, AstNodeF)]
+pub enum StaticType<'src> {
+    /// Language-defined
+    Primitive(PrimitiveType),
 
     /// Slice of another type
     View(Box<ViewType<'src>>),
@@ -106,7 +629,7 @@ pub enum StaticType<'src> {
     Arr(Box<ArrayType<'src>>),
 
     /// Reference to another type
-    Ptr(Box<Self>),
+    Ptr(Box<Ptr<'src>>),
     /// Anonymous supertype
     OrTy(Box<Fallible<'src>>),
     /// Structure
@@ -116,12 +639,105 @@ pub enum StaticType<'src> {
     /// Another type, but with runtime restrictions
     Sub(Box<SubType<'src>>),
     /// Constant group
-    Cat(Box<Self>),
+    Cat(Box<CatType<'src>>),
     /// Callable
     Fun(Box<FunType<'src>>),
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
+impl Default for StaticType<'_> {
+    fn default() -> Self {
+        Self::Primitive(PrimitiveType::default())
+    }
+}
+
+impl<'src> TypeCompatible<'src> for StaticType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(other) if self == other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl std::fmt::Display for StaticType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Primitive(t) => write!(f, "{t}"),
+            Self::View(t) => write!(f, "{t}"),
+            Self::Arr(t) => write!(f, "{t}"),
+            Self::Ptr(t) => write!(f, "{t}"),
+            Self::OrTy(t) => write!(f, "{t}"),
+            Self::Rec(t) => write!(f, "{t}"),
+            Self::Sup(t) => write!(f, "{t}"),
+            Self::Sub(t) => write!(f, "{t}"),
+            Self::Cat(t) => write!(f, "{t}"),
+            Self::Fun(t) => write!(f, "{t}"),
+        }
+    }
+}
+
+impl<'src> From<ViewType<'src>> for StaticType<'src> {
+    fn from(value: ViewType<'src>) -> Self {
+        Self::from(Box::new(value))
+    }
+}
+impl<'src> From<Box<ViewType<'src>>> for StaticType<'src> {
+    fn from(value: Box<ViewType<'src>>) -> Self {
+        Self::View(value)
+    }
+}
+impl<'src> From<ArrayType<'src>> for StaticType<'src> {
+    fn from(value: ArrayType<'src>) -> Self {
+        Self::from(Box::new(value))
+    }
+}
+impl<'src> From<Box<ArrayType<'src>>> for StaticType<'src> {
+    fn from(value: Box<ArrayType<'src>>) -> Self {
+        Self::Arr(value)
+    }
+}
+impl<'src> From<Fallible<'src>> for StaticType<'src> {
+    fn from(value: Fallible<'src>) -> Self {
+        Self::from(Box::new(value))
+    }
+}
+impl<'src> From<Box<Fallible<'src>>> for StaticType<'src> {
+    fn from(value: Box<Fallible<'src>>) -> Self {
+        Self::OrTy(value)
+    }
+}
+impl<'src> From<RecType<'src>> for StaticType<'src> {
+    fn from(value: RecType<'src>) -> Self {
+        Self::Rec(value)
+    }
+}
+impl<'src> From<SupType<'src>> for StaticType<'src> {
+    fn from(value: SupType<'src>) -> Self {
+        Self::Sup(value)
+    }
+}
+impl<'src> From<SubType<'src>> for StaticType<'src> {
+    fn from(value: SubType<'src>) -> Self {
+        Self::from(Box::new(value))
+    }
+}
+impl<'src> From<Box<SubType<'src>>> for StaticType<'src> {
+    fn from(value: Box<SubType<'src>>) -> Self {
+        Self::Sub(value)
+    }
+}
+impl<'src> From<FunType<'src>> for StaticType<'src> {
+    fn from(value: FunType<'src>) -> Self {
+        Self::from(Box::new(value))
+    }
+}
+impl<'src> From<Box<FunType<'src>>> for StaticType<'src> {
+    fn from(value: Box<FunType<'src>>) -> Self {
+        Self::Fun(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum TypeBound<'src> {
     /// Matches another type
     Exactly(AbstractType<'src>),
@@ -157,25 +773,101 @@ impl Default for TypeBound<'_> {
 }
 
 /// A type with generic parameters
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct GenericType<'src> {
     pub ident: &'src str,
     pub params: Vec<GenericParam<'src>>,
 }
+impl std::fmt::Display for GenericType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { ident, params } = self;
+        write!(f, "{ident}<")?;
+        let mut has_prev = false;
+        for param in params {
+            if has_prev {
+                f.write_str(", ")?;
+            }
+            write!(f, "{param}")?;
+            has_prev = true;
+        }
+        f.write_str(">")
+    }
+}
+
+impl<'src> TypeCompatible<'src> for GenericType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Generic(other) if self == other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
 
 /// A type that is not yet known
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct GenericParam<'src> {
     pub ident: &'src str,
     pub reqs: Vec<TypeBound<'src>>,
 }
+impl std::fmt::Display for GenericParam<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { ident, .. } = self;
+        write!(f, "{ident}")
+    }
+}
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+impl<'src> TypeCompatible<'src> for GenericParam<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Param(other) if self == other)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum AbstractType<'src> {
     /// All types should be this variant after monomorphization
     Concrete(StaticType<'src>),
     Generic(GenericType<'src>),
     Param(GenericParam<'src>),
+}
+
+impl<'src> TypeCompatible<'src> for AbstractType<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        self == other
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl std::fmt::Display for AbstractType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Concrete(t) => t.fmt(f),
+            Self::Generic(t) => t.fmt(f),
+            Self::Param(t) => t.fmt(f),
+        }
+    }
+}
+
+impl<'src> From<StaticType<'src>> for AbstractType<'src> {
+    fn from(value: StaticType<'src>) -> Self {
+        Self::Concrete(value)
+    }
+}
+impl<'src> From<GenericType<'src>> for AbstractType<'src> {
+    fn from(value: GenericType<'src>) -> Self {
+        Self::Generic(value)
+    }
+}
+impl<'src> From<GenericParam<'src>> for AbstractType<'src> {
+    fn from(value: GenericParam<'src>) -> Self {
+        Self::Param(value)
+    }
 }
 
 impl Default for AbstractType<'_> {

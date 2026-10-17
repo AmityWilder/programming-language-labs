@@ -2,6 +2,7 @@
 
 use crate::{
     SYNTAX_STYLE_ANSI,
+    analyzer::{Expr, types::AbstractType},
     arrayvec::ArrayVec,
     exec::{error::Failure, eval::ValueType},
     grammar::ast::AstNodeFinal,
@@ -495,7 +496,7 @@ macro_rules! CtxErrType {{
 
 CtxErrType! {
 /// The kind of error describing a [`ContextError`]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ErrorType<'src> {
     // ----------------------------
     // lex
@@ -965,11 +966,25 @@ pub enum ErrorType<'src> {
     UnsignedNeg,
 
     // TODO: make this more helpful
-    #[code(RUN, 45)]
+    #[code(CMP, 45)]
     #[err(|f| write!(f, "cannot find variable within this scope"))]
     #[inlay(|f| write!(f, "unknown variable"))]
     #[help(|f, _src| write!(f, "check if the variable is in a tighter scope than where you are trying to use it"))]
     UnknownVar,
+
+    // TODO: make this more helpful
+    #[code(CMP, 46)]
+    #[err((ts), |f| write!(f, "type mismatch: expected {}, found {}", ts.0, ts.1))]
+    #[inlay((_), |f| write!(f, "incorrect type"))]
+    #[help((_), |f, _src| write!(f, ""))]
+    TypeMismatch(Box<(AbstractType<'src>, AbstractType<'src>)>),
+
+    // TODO: make this more helpful
+    #[code(CMP, 47)]
+    #[err((_), |f| write!(f, "type is ambiguous"))]
+    #[inlay((_), |f| write!(f, "type must be known at this point"))]
+    #[help((_), |f, _src| write!(f, "try annotating the type or use an expression with an explicit type"))]
+    TypeAmbiguity(Box<Expr<'src>>),
 
     // TODO: need an error for undefined conversion
 
@@ -979,7 +994,7 @@ pub enum ErrorType<'src> {
     #[code(RUN, 50)]
     #[err((_), |f| write!(f, "unhandled failure"))]
     #[inlay((_), |f| write!(f, "failed operation"))]
-    #[help({ .. }, |f, _src| write!(f, "try handling the error"))] // TODO: make this more helpful
+    #[help((_), |f, _src| write!(f, "try handling the error"))] // TODO: make this more helpful
     Fail(Failure),
 
     /// An operation resulted in overflow
@@ -1071,7 +1086,7 @@ pub enum ErrorType<'src> {
 impl std::error::Error for ErrorType<'_> {}
 
 /// A code error with the range of the error in the source code
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ContextError<'src> {
     /// A string view of the FULL, ENTIRE source code
     pub source: &'src str,
@@ -1145,6 +1160,7 @@ impl<'src> ContextError<'src> {
     }
 
     pub fn to_bracket_mismatch(self, open_bracket: Bracket, open_range: Range<usize>) -> Self {
+        let source = self.source;
         self.map_type(|e| match e {
             ErrorType::UnexpectedToken {
                 actual: actual @ (")" | "]" | "}"), // Sorry this doesn't use Value anymore, Token is huge now...
@@ -1161,8 +1177,7 @@ impl<'src> ContextError<'src> {
                     },
                 )
                 .unwrap_or_else(|| {
-                    let open_lex = self
-                        .source
+                    let open_lex = source
                         .get(open_range)
                         .expect("open_range should be a range in source");
                     panic!(
