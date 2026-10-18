@@ -335,8 +335,12 @@ where
     }
 }
 
-impl Token<'_> {
-    pub fn syntax(&self) -> Syntax {
+pub trait GetSyntax {
+    fn syntax(&self) -> Syntax;
+}
+
+impl GetSyntax for Token<'_> {
+    fn syntax(&self) -> Syntax {
         match self.val {
             LexValue::Comment => Syntax::Comment,
             LexValue::Whitespace => Syntax::Dimmed,

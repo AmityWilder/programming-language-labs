@@ -215,15 +215,15 @@ impl<'src, T> Lexical<'src> for SpecToken<'src, T> {
 }
 
 impl<'src, T> SpecToken<'src, T> {
-    pub fn decompose(self) -> (Lexeme<'src>, T) {
-        let Self { lex, mac, val } = self;
-        (Lexeme { lex, mac }, val)
+    pub fn into_lexeme(self) -> Lexeme<'src> {
+        let Self { lex, mac, val: _ } = self;
+        Lexeme { lex, mac }
     }
 }
 
 impl<'src, T> From<SpecToken<'src, T>> for Lexeme<'src> {
     fn from(value: SpecToken<'src, T>) -> Self {
-        value.decompose().0
+        value.into_lexeme()
     }
 }
 

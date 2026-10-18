@@ -1,10 +1,11 @@
 use crate::{
     error::OpSide,
-    scanner::token::{ExpansionData, Lexical, SpecToken, Token, value::Operator},
+    scanner::token::{
+        ExpansionData, Lexeme, Lexical, SpecToken, Token,
+        value::{Keyword, LexValue, Operator},
+    },
 };
 use std::range::Range;
-
-pub type OpToken<'src> = SpecToken<'src, Operator>;
 
 /// Allows the AST to combine the full range of its tokens, for use in errors.
 ///
@@ -286,6 +287,16 @@ impl<'src> AstNode<'src> for str {
     }
 }
 
+impl<'src> AstNode<'src> for Lexeme<'src> {
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        Some(self.lex_range(source))
+    }
+
+    fn expansion(&self, _: &'src str) -> Option<ExpansionData<'src>> {
+        self.mac
+    }
+}
+
 impl<'src, T> AstNode<'src> for SpecToken<'src, T> {
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
         Some(self.lex_range(source))
@@ -299,7 +310,7 @@ impl<'src, T> AstNode<'src> for SpecToken<'src, T> {
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Binary<'src> {
     pub lhs: Expr<'src>,
-    pub op: OpToken<'src>,
+    pub op: SpecToken<'src, Operator>,
     pub rhs: Expr<'src>,
 }
 
@@ -324,7 +335,7 @@ impl<'src> AstNode<'src> for Binary<'src> {
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Unary<'src> {
-    pub op: OpToken<'src>,
+    pub op: SpecToken<'src, Operator>,
     pub operand: Expr<'src>,
     pub side: OpSide,
 }
@@ -362,10 +373,10 @@ impl<'src> AstNode<'src> for Unary<'src> {
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Grouping<'src> {
     /// `(`
-    pub open: Token<'src>,
+    pub open: Lexeme<'src>,
     pub expr: Expr<'src>,
     /// `)`
-    pub close: Token<'src>,
+    pub close: Lexeme<'src>,
 }
 
 impl<'src> AstNode<'src> for Grouping<'src> {
@@ -389,12 +400,62 @@ impl<'src> AstNode<'src> for Grouping<'src> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum OrTypeKeyword {
+    #[default]
+    None,
+    Nevr,
+    Fail,
+}
+
+impl OrTypeKeyword {
+    pub const fn new(value: Keyword) -> Option<Self> {
+        Some(match value {
+            Keyword::None => Self::None,
+            Keyword::Nevr => Self::Nevr,
+            Keyword::Fail => Self::Fail,
+            _ => return None,
+        })
+    }
+
+    pub const fn to_keyword(self) -> Keyword {
+        match self {
+            Self::None => Keyword::None,
+            Self::Nevr => Keyword::Nevr,
+            Self::Fail => Keyword::Fail,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.to_keyword().as_str()
+    }
+}
+
+impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, OrTypeKeyword> {
+    type Error = ();
+
+    fn try_from(
+        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
+    ) -> Result<Self, Self::Error> {
+        OrTypeKeyword::new(val)
+            .map(|val| Self { lex, mac, val })
+            .ok_or(())
+    }
+}
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, OrTypeKeyword> {
+    type Error = ();
+
+    fn try_from(value: Token<'src>) -> Result<Self, Self::Error> {
+        <SpecToken<'src, Keyword>>::try_from(value)?.try_into()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct OrType<'src> {
     // `|`
-    pub pipe: Token<'src>,
+    pub pipe: Lexeme<'src>,
     // `none`, `fail`, or `nevr`
-    pub ty: Token<'src>,
+    pub ty: SpecToken<'src, OrTypeKeyword>,
 }
 
 impl<'src> AstNode<'src> for OrType<'src> {
@@ -415,11 +476,112 @@ impl<'src> AstNode<'src> for OrType<'src> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum TypenameKeyword {
+    #[default]
+    None,
+    Nevr,
+    Fail,
+    Bool,
+    Uint,
+    Sint,
+    Flpt,
+    Char,
+    Text,
+}
+
+/// TODO: link this to [`Keyword::is_type()`]
+impl TypenameKeyword {
+    pub const fn new(value: Keyword) -> Option<Self> {
+        Some(match value {
+            Keyword::None => Self::None,
+            Keyword::Nevr => Self::Nevr,
+            Keyword::Fail => Self::Fail,
+            Keyword::Bool => Self::Bool,
+            Keyword::Uint => Self::Uint,
+            Keyword::Sint => Self::Sint,
+            Keyword::Flpt => Self::Flpt,
+            Keyword::Char => Self::Char,
+            Keyword::Text => Self::Text,
+            _ => return None,
+        })
+    }
+
+    pub const fn to_keyword(self) -> Keyword {
+        match self {
+            Self::None => Keyword::None,
+            Self::Nevr => Keyword::Nevr,
+            Self::Fail => Keyword::Fail,
+            Self::Bool => Keyword::Bool,
+            Self::Uint => Keyword::Uint,
+            Self::Sint => Keyword::Sint,
+            Self::Flpt => Keyword::Flpt,
+            Self::Char => Keyword::Char,
+            Self::Text => Keyword::Text,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.to_keyword().as_str()
+    }
+}
+
+impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, TypenameKeyword> {
+    type Error = ();
+
+    fn try_from(
+        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
+    ) -> Result<Self, Self::Error> {
+        TypenameKeyword::new(val)
+            .map(|val| Self { lex, mac, val })
+            .ok_or(())
+    }
+}
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, TypenameKeyword> {
+    type Error = ();
+
+    fn try_from(value: Token<'src>) -> Result<Self, Self::Error> {
+        <SpecToken<'src, Keyword>>::try_from(value)?.try_into()
+    }
+}
+impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, Option<TypenameKeyword>> {
+    type Error = ();
+
+    fn try_from(
+        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
+    ) -> Result<Self, Self::Error> {
+        TypenameKeyword::new(val)
+            .map(|val| Self {
+                lex,
+                mac,
+                val: Some(val),
+            })
+            .ok_or(())
+    }
+}
+/// NOTE: Success does not guarantee it is the name of a type! It only guarantees it CAN be!
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, Option<TypenameKeyword>> {
+    type Error = ();
+
+    fn try_from(Token { lex, mac, val }: Token<'src>) -> Result<Self, Self::Error> {
+        match val {
+            LexValue::Identifier => Ok(SpecToken {
+                lex,
+                mac,
+                val: None,
+            }),
+            LexValue::Keyword(val) => SpecToken::<'src, Keyword> { lex, mac, val }.try_into(),
+            _ => Err(()),
+        }
+    }
+}
+
 /// A concrete type
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct TypeExpr<'src> {
     // TODO: namespace?
-    pub name: Token<'src>,
+    /// Identifier
+    pub name: SpecToken<'src, Option<TypenameKeyword>>,
     // TODO: generic arguments?
     pub or_ty: Option<OrType<'src>>,
 }
@@ -467,7 +629,8 @@ impl<'src> AstNode<'src> for Literal<'src> {
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Variable<'src> {
-    pub ident: Token<'src>,
+    /// Identifier
+    pub ident: Lexeme<'src>,
 }
 
 impl<'src> AstNode<'src> for Variable<'src> {
@@ -532,8 +695,8 @@ pub enum OrBody<'src> {
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct OrStmt<'src> {
-    /// [`crate::scanner::token::value::Keyword::Or`]
-    pub or_kw: Token<'src>,
+    /// `or`
+    pub or_kw: Lexeme<'src>,
     pub body: OrBody<'src>,
 }
 
@@ -557,8 +720,8 @@ impl<'src> AstNode<'src> for OrStmt<'src> {
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct IfStmt<'src> {
-    /// [`crate::scanner::token::value::Keyword::If`]
-    pub if_kw: Token<'src>,
+    /// `if`
+    pub if_kw: Lexeme<'src>,
     pub pred: Expr<'src>,
     pub then: BlockStmt<'src>,
     pub or: Option<Box<OrStmt<'src>>>,
@@ -585,10 +748,10 @@ impl<'src> AstNode<'src> for IfStmt<'src> {
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct BlockStmt<'src> {
     /// `{`
-    pub open: Token<'src>,
+    pub open: Lexeme<'src>,
     pub body: Vec<Declaration<'src>>,
     /// `}`
-    pub close: Token<'src>,
+    pub close: Lexeme<'src>,
 }
 
 impl<'src> AstNode<'src> for BlockStmt<'src> {
@@ -613,7 +776,7 @@ impl<'src> AstNode<'src> for BlockStmt<'src> {
 pub struct ExprStmt<'src> {
     pub expr: Expr<'src>,
     /// `;`
-    pub semi: Token<'src>,
+    pub semi: Lexeme<'src>,
 }
 
 impl<'src> AstNode<'src> for ExprStmt<'src> {
@@ -637,10 +800,10 @@ impl<'src> AstNode<'src> for ExprStmt<'src> {
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct PrintStmt<'src> {
     /// `prnt`
-    pub kw: Token<'src>,
+    pub kw: Lexeme<'src>,
     pub group: Grouping<'src>,
     /// `;`
-    pub semi: Token<'src>,
+    pub semi: Lexeme<'src>,
 }
 
 impl<'src> AstNode<'src> for PrintStmt<'src> {
@@ -755,7 +918,7 @@ impl<'src> AstNode<'src> for Program<'src> {
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Assignment<'src> {
     /// `=`
-    pub op: OpToken<'src>,
+    pub op: Lexeme<'src>,
     pub expr: Expr<'src>,
 }
 
@@ -780,7 +943,7 @@ impl<'src> AstNode<'src> for Assignment<'src> {
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct TypeAnnotation<'src> {
     /// `:`
-    pub colon: Token<'src>,
+    pub colon: Lexeme<'src>,
     // TODO: should type annotations be different from type expressions?
     pub ty: TypeExpr<'src>,
 }
@@ -803,16 +966,66 @@ impl<'src> AstNode<'src> for TypeAnnotation<'src> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum VarKeyword {
+    #[default]
+    Let,
+    Uni,
+    Pvt,
+}
+
+impl VarKeyword {
+    pub const fn new(value: Keyword) -> Option<Self> {
+        Some(match value {
+            Keyword::Let => Self::Let,
+            Keyword::Uni => Self::Uni,
+            Keyword::Pvt => Self::Pvt,
+            _ => return None,
+        })
+    }
+
+    pub const fn to_keyword(self) -> Keyword {
+        match self {
+            Self::Let => Keyword::Let,
+            Self::Uni => Keyword::Uni,
+            Self::Pvt => Keyword::Pvt,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.to_keyword().as_str()
+    }
+}
+
+impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, VarKeyword> {
+    type Error = ();
+
+    fn try_from(
+        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
+    ) -> Result<Self, Self::Error> {
+        VarKeyword::new(val)
+            .map(|val| Self { lex, mac, val })
+            .ok_or(())
+    }
+}
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, VarKeyword> {
+    type Error = ();
+
+    fn try_from(value: Token<'src>) -> Result<Self, Self::Error> {
+        <SpecToken<'src, Keyword>>::try_from(value)?.try_into()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct DeclVar<'src> {
-    /// [`uni`](crate::scanner::token::value::Keyword::Uni) | [`let`](crate::scanner::token::value::Keyword::Let) | [`pvt`](crate::scanner::token::value::Keyword::Pvt)
-    pub var_kw: Token<'src>,
-    /// [`IDENTIFIER`](crate::scanner::token::value::LexValue::Identifier)
-    pub ident: Token<'src>,
+    /// `uni`, `let`, or `pvt`
+    pub var_kw: SpecToken<'src, VarKeyword>,
+    /// Identifier
+    pub ident: Lexeme<'src>,
     pub ty: Option<TypeAnnotation<'src>>,
     pub assignment: Option<Assignment<'src>>,
     /// `;`
-    pub semi: Token<'src>,
+    pub semi: Lexeme<'src>,
 }
 
 impl<'src> AstNode<'src> for DeclVar<'src> {

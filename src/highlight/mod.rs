@@ -6,7 +6,7 @@ use crate::{
     error::{ContextError, ErrorType},
     highlight::{
         style::StyleWrapper,
-        syntax::{Syntax, SyntaxStyle},
+        syntax::{GetSyntax, Syntax, SyntaxStyle},
     },
     scanner::{
         Scanner,
