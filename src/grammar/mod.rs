@@ -298,10 +298,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .flatten()
     }
 
-    /// `expression_statement -> expression ";"`
+    /// `expression_statement -> assign ";"`
     pub fn expression_statement(&mut self) -> Result<ExprStmt<'src>, ContextError<'src>> {
         Ok(ExprStmt {
-            expr: self.expression()?,
+            expr: self.assign()?,
             semi: self.try_pull_eq(
                 LexValue::Punctuation(Punctuation::Semi),
                 ExpectedToken::Semi,
@@ -378,24 +378,24 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `expression -> assign`
-    pub fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        self.assign()
-    }
-
-    /// `assign -> IDENTIFIER ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "[<<]=" | "[>>]=" | "|=" | "&=" | "^=" | "!|=" | "!&=" | "!^=" ) or | or`
+    /// `assign -> IDENTIFIER ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "[<<]=" | "[>>]=" | "|=" | "&=" | "^=" | "!|=" | "!&=" | "!^=" ) expression | expression`
     fn assign(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let lhs = self.or()?; // we'll check if this can be assigned to in static analysis
+        let lhs = self.expression()?; // we'll check if this can be assigned to in static analysis
         if let Some(op) = self.pull_into_if_in(&[
             Assign, AddAssign, SubAssign, MulAssign, DivAssign, RemAssign, PowAssign, ShlAssign,
             ShrAssign, RotlAssign, RotrAssign, OrAssign, AndAssign, XorAssign, NorAssign,
             NandAssign, XnorAssign,
         ]) {
-            let rhs = self.or()?;
+            let rhs = self.expression()?;
             Ok(Expr::binary(Binary { lhs, op, rhs }))
         } else {
             Ok(lhs)
         }
+    }
+
+    /// `expression -> assign`
+    pub fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        self.or()
     }
 
     /// `or -> xor ( ("|" | "!|") xor )*`

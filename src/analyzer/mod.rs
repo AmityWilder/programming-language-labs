@@ -1,16 +1,20 @@
 use crate::{
     analyzer::{
         eval::{Value, ValueMut},
-        static_env::{EnvItem, OpOverload, OperandTypes, StaticEnvironment, VarType},
-        types::{AbstractType, FunShape, FunType, PrimitiveType, StaticType, TypeCompatible},
+        static_env::{EnvItem, OpOverload, OperandTypes, ScopeItem, StaticEnvironment, VarType},
+        types::{
+            AbstractType, FunShape, FunType, PrimitiveType, StaticType, TypeCompatible, TypeSize,
+        },
     },
     error::{ContextError, ErrorType, OpSide},
-    exec::env::Environment,
+    exec::{env::Environment, error::Failure},
     grammar::ast::{self, VarKeyword},
     scanner::token::value::{Keyword, LexValue, Operator},
     types::*,
 };
-use std::{marker::PhantomData, range::Range};
+#[cfg(not(debug_assertions))]
+use std::marker::PhantomData;
+use std::{collections::HashMap, range::Range};
 
 pub mod builtin_ops;
 pub mod eval;
@@ -40,18 +44,18 @@ pub trait Expression<'src> {
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>>;
 }
 
+pub trait CementVars<'src> {
+    /// The version of `Self` with [`Operation<'src>, Variable<'src>`] replaced with [`RunOperation< RunVariable<'src>>, RunVariable<'src>`]
+    type Concrete;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete;
+}
+
 #[derive(Debug)]
-pub enum FnDef<'src, Var> {
-    LangOpB(
-        for<'val, 'srcf> fn(
-            &'val mut Environment,
-            Value<'val, 'srcf>,
-            Value<'val, 'srcf>,
-            ValueMut<'val, 'srcf>,
-        ),
-    ),
-    LangOpU(for<'val, 'srcf> fn(&'val mut Environment, Value<'val, 'srcf>, ValueMut<'val, 'srcf>)),
-    UserDef(BlockStmt<'src, Var>),
+pub enum FnDef<O, V> {
+    LangOpB(BinaryOpFn),
+    LangOpU(UnaryOpFn),
+    UserDef(BlockStmt<O, V>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,7 +70,7 @@ impl<'src> Expression<'src> for FnRef<'src> {
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        env.lookup(self.ident).find_map(|var| match var {
+        env.lookup(self.ident).find_map(|x| match &x.val {
             EnvItem::Fun((t, _)) => Some(t), // TBD: we have access to the name here, but should we use it?
             _ => None,
         })
@@ -74,13 +78,13 @@ impl<'src> Expression<'src> for FnRef<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Operands<'src, Var> {
-    Binary(Expr<'src, Var>, Expr<'src, Var>),
-    UnaryPre(Expr<'src, Var>),
-    UnaryPost(Expr<'src, Var>),
+pub enum Operands<O, V> {
+    Binary(Expr<O, V>, Expr<O, V>),
+    UnaryPre(Expr<O, V>),
+    UnaryPost(Expr<O, V>),
 }
 
-impl<'src> Operands<'src, Variable<'src>> {
+impl<'src> Operands<Operation<'src>, Variable<'src>> {
     pub fn get_types(&self, env: &StaticEnvironment<'src>) -> Option<OperandTypes<'src>> {
         Some(match self {
             Self::Binary(lhs, rhs) => OperandTypes::Binary(
@@ -97,20 +101,141 @@ impl<'src> Operands<'src, Variable<'src>> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Operation<'src, Var> {
-    pub def: FunShape<'src>,
-    pub operands: Operands<'src, Var>,
+impl<'src> CementVars<'src> for Operands<Operation<'src>, Variable<'src>> {
+    type Concrete = Operands<RunOperation<'src>, RunVariable<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        match self {
+            Self::Binary(l, r) => Operands::Binary(l.cement_vars(ranges), r.cement_vars(ranges)),
+            Self::UnaryPre(x) => Operands::UnaryPre(x.cement_vars(ranges)),
+            Self::UnaryPost(x) => Operands::UnaryPost(x.cement_vars(ranges)),
+        }
+    }
 }
 
-impl<'src> Expression<'src> for Operation<'src, Variable<'src>> {
+pub type BinaryOpFn = for<'val, 'srcf> fn(
+    &'val Environment,
+    ValueMut<'val, 'srcf>,
+    Value<'val, 'srcf>,
+    Value<'val, 'srcf>,
+) -> std::result::Result<(), Failure>;
+
+pub type UnaryOpFn = for<'val, 'srcf> fn(
+    &'val Environment,
+    ValueMut<'val, 'srcf>,
+    Value<'val, 'srcf>,
+) -> std::result::Result<(), Failure>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Operation<'src> {
+    Binary(
+        (FunShape<'src>, BinaryOpFn),
+        Expr<Self, Variable<'src>>,
+        Expr<Self, Variable<'src>>,
+    ),
+    UnaryPre((FunShape<'src>, UnaryOpFn), Expr<Self, Variable<'src>>),
+    UnaryPost((FunShape<'src>, UnaryOpFn), Expr<Self, Variable<'src>>),
+}
+
+#[derive(Debug, Clone)]
+pub enum RunOperation<'src> {
+    Binary(
+        #[cfg(debug_assertions)] StaticType<'src>,
+        #[cfg(not(debug_assertions))] (),
+        BinaryOpFn,
+        usize,
+        Expr<Self, RunVariable<'src>>,
+        Expr<Self, RunVariable<'src>>,
+    ),
+    UnaryPre(
+        #[cfg(debug_assertions)] StaticType<'src>,
+        #[cfg(not(debug_assertions))] (),
+        UnaryOpFn,
+        usize,
+        Expr<Self, RunVariable<'src>>,
+    ),
+    UnaryPost(
+        #[cfg(debug_assertions)] StaticType<'src>,
+        #[cfg(not(debug_assertions))] (),
+        UnaryOpFn,
+        usize,
+        Expr<Self, RunVariable<'src>>,
+    ),
+}
+
+impl<'src> Expression<'src> for Operation<'src> {
     type Output<'ty>
         = &'ty StaticType<'src>
     where
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        Some(&self.def.ret)
+        Some(
+            &match self {
+                Self::Binary((f, _), _, _)
+                | Self::UnaryPre((f, _), _)
+                | Self::UnaryPost((f, _), _) => f,
+            }
+            .ret,
+        )
+    }
+}
+
+impl<'src> CementVars<'src> for Operation<'src> {
+    type Concrete = RunOperation<'src>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        match self {
+            Self::Binary((f, def), l, r) => {
+                let size = f
+                    .ret
+                    .size()
+                    .unwrap_or_else(|| panic!("size should be known by this point\n type: {f}"))
+                    .unwrap_or_else(|e| panic!("error determining type size: {e}\n type: {f}"));
+                RunOperation::Binary(
+                    #[cfg(debug_assertions)]
+                    f.ret,
+                    #[cfg(not(debug_assertions))]
+                    (),
+                    def,
+                    size,
+                    l.cement_vars(ranges),
+                    r.cement_vars(ranges),
+                )
+            }
+            Self::UnaryPre((f, def), x) => {
+                let size = f
+                    .ret
+                    .size()
+                    .unwrap_or_else(|| panic!("size should be known by this point\n type: {f}"))
+                    .unwrap_or_else(|e| panic!("error determining type size: {e}\n type: {f}"));
+                RunOperation::UnaryPre(
+                    #[cfg(debug_assertions)]
+                    f.ret,
+                    #[cfg(not(debug_assertions))]
+                    (),
+                    def,
+                    size,
+                    x.cement_vars(ranges),
+                )
+            }
+            Self::UnaryPost((f, def), x) => {
+                let size = f
+                    .ret
+                    .size()
+                    .unwrap_or_else(|| panic!("size should be known by this point\n type: {f}"))
+                    .unwrap_or_else(|e| panic!("error determining type size: {e}\n type: {f}"));
+                RunOperation::UnaryPost(
+                    #[cfg(debug_assertions)]
+                    f.ret,
+                    #[cfg(not(debug_assertions))]
+                    (),
+                    def,
+                    size,
+                    x.cement_vars(ranges),
+                )
+            }
+        }
     }
 }
 
@@ -151,22 +276,13 @@ impl<'src> Expression<'src> for Literal {
     }
 }
 
-/// Runtime variable
-#[derive(Debug, Clone, PartialEq)]
-pub struct RunVariable<'src> {
-    range: Range<usize>,
-    #[cfg(debug_assertions)]
-    _ty: StaticType<'src>,
-    #[cfg(not(debug_assertions))]
-    _marker: PhantomData<&'src ()>,
-}
-
-/// Analysis variable
+/// Operation<'src>, Variable<'src> variable
 ///
 /// Has no actual memory location, since its type may not have been determined yet
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable<'src> {
-    pub id: &'src str,
+    pub unique_id: usize,
+    pub ident: &'src str,
     pub is_global: bool,
     #[cfg(debug_assertions)]
     _ty: Option<AbstractType<'src>>,
@@ -179,8 +295,39 @@ impl<'src> Expression<'src> for Variable<'src> {
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        env.lookup(self.id).next().and_then(|v| v.get_type(env))
+        env.lookup(self.ident)
+            .next()
+            .and_then(|x| x.val.get_type(env))
     }
+}
+
+impl<'src> CementVars<'src> for Variable<'src> {
+    type Concrete = RunVariable<'src>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        RunVariable {
+            range: *ranges
+                .get(self.unique_id)
+                .expect("unique_id missing from ranges"),
+            ty_: match self
+                ._ty
+                .expect("all types should be determined by this point")
+            {
+                AbstractType::Concrete(ty) => ty,
+                t => panic!("all variables should be concrete by this point\n type: {t}"),
+            },
+        }
+    }
+}
+
+/// Runtime variable
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunVariable<'src> {
+    range: Range<usize>,
+    #[cfg(debug_assertions)]
+    ty_: StaticType<'src>,
+    #[cfg(not(debug_assertions))]
+    _marker: PhantomData<&'src ()>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -218,13 +365,13 @@ impl std::fmt::Display for ExprType<'_, '_> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Assignment<'src, Var> {
+pub struct Assignment<O, V> {
     /// Must evaluate to mutable
-    pub lvalue: Expr<'src, Var>,
-    pub rhs: Expr<'src, Var>,
+    pub lvalue: Expr<O, V>,
+    pub rhs: Expr<O, V>,
 }
 
-impl<'src> Expression<'src> for Assignment<'src, Variable<'src>> {
+impl<'src> Expression<'src> for Assignment<Operation<'src>, Variable<'src>> {
     type Output<'ty>
         = PrimitiveType
     where
@@ -235,15 +382,26 @@ impl<'src> Expression<'src> for Assignment<'src, Variable<'src>> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Expr<'src, Var> {
-    Assignment(Box<Assignment<'src, Var>>),
-    Op(Box<Operation<'src, Var>>),
-    Literal(Literal),
-    Variable(Var),
+impl<'src> CementVars<'src> for Assignment<Operation<'src>, Variable<'src>> {
+    type Concrete = Assignment<RunOperation<'src>, RunVariable<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        Assignment {
+            lvalue: self.lvalue.cement_vars(ranges),
+            rhs: self.rhs.cement_vars(ranges),
+        }
+    }
 }
 
-impl<'src> Expression<'src> for Expr<'src, Variable<'src>> {
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expr<O, V> {
+    Assignment(Box<Assignment<O, V>>),
+    Op(Box<O>),
+    Literal(Literal),
+    Variable(V),
+}
+
+impl<'src> Expression<'src> for Expr<Operation<'src>, Variable<'src>> {
     type Output<'ty>
         = ExprType<'src, 'ty>
     where
@@ -260,7 +418,7 @@ impl<'src> Expression<'src> for Expr<'src, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::Expr<'src> {
-    type Ouptut = Expr<'src, Variable<'src>>;
+    type Ouptut = Expr<Operation<'src>, Variable<'src>>;
 
     fn analyze(
         &self,
@@ -274,6 +432,19 @@ impl<'src> Analyze<'src> for ast::Expr<'src> {
             Self::Variable(x) => x.analyze(source, env),
             Self::Grouping(x) => x.expr.analyze(source, env),
             Self::Type(_) => todo!(),
+        }
+    }
+}
+
+impl<'src> CementVars<'src> for Expr<Operation<'src>, Variable<'src>> {
+    type Concrete = Expr<RunOperation<'src>, RunVariable<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        match self {
+            Self::Assignment(x) => Expr::Assignment(Box::new(x.cement_vars(ranges))),
+            Self::Op(x) => Expr::Op(Box::new(x.cement_vars(ranges))),
+            Self::Literal(x) => Expr::Literal(x),
+            Self::Variable(x) => Expr::Variable(x.cement_vars(ranges)),
         }
     }
 }
@@ -304,7 +475,7 @@ impl<'src> Analyze<'src> for ast::Literal<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Variable<'src> {
-    type Ouptut = Expr<'src, Variable<'src>>;
+    type Ouptut = Expr<Operation<'src>, Variable<'src>>;
 
     fn analyze(
         &self,
@@ -313,9 +484,10 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
     ) -> Result<'src, Self::Ouptut> {
         let ident = self.ident.lex;
         env.lookup(ident)
-            .find_map(|v| match *v {
+            .find_map(|item| match item.val {
                 EnvItem::Var(ref x, is_global) => Some(Expr::Variable(Variable {
-                    id: ident,
+                    unique_id: item.id,
+                    ident,
                     is_global,
                     #[cfg(debug_assertions)]
                     _ty: x.as_ref().map(TypeCompatible::to_abstract),
@@ -333,7 +505,7 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Unary<'src> {
-    type Ouptut = Operation<'src, Variable<'src>>;
+    type Ouptut = Operation<'src>;
 
     fn analyze(
         &self,
@@ -353,14 +525,25 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                 OpSide::Right => (Operands::UnaryPre(operand), OperandTypes::UnaryPre(ty)),
             };
             env.lookup(&self.op.val)
-                .map(|item| match item {
+                .map(|item| match &item.val {
                     EnvItem::Op(overload) => overload,
                     _ => unreachable!("only operators should be stored with operator keys"),
                 })
                 .find(|overload| overload.operands == operand_types)
-                .map(|overload| Operation {
-                    def: overload.fun.clone(),
-                    operands,
+                .map(|overload| {
+                    let def = match overload.def {
+                        FnDef::LangOpU(def) => def,
+                        FnDef::LangOpB(_) | FnDef::UserDef(_) => unimplemented!(),
+                    };
+                    match operands {
+                        Operands::Binary(_, _) => unreachable!(),
+                        Operands::UnaryPre(r) => {
+                            Operation::UnaryPre((overload.fun.clone(), def), r)
+                        }
+                        Operands::UnaryPost(l) => {
+                            Operation::UnaryPre((overload.fun.clone(), def), l)
+                        }
+                    }
                 })
                 .ok_or_else(|| vec![todo!("error: no such operator defined")])
         })
@@ -368,20 +551,20 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Binary<'src> {
-    type Ouptut = Expr<'src, Variable<'src>>;
+    type Ouptut = Expr<Operation<'src>, Variable<'src>>;
 
     fn analyze(
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
-        let lhs = self.lhs.analyze(source, env)?;
+        let mut lhs = self.lhs.analyze(source, env)?;
         let rhs = self.rhs.analyze(source, env)?;
         let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
         let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
         if self.op.val == Operator::Assign {
             // TODO: cases where lhs is assignable in general, not specifically a variable
-            if let Expr::Variable(var) = &lhs {
+            if let Expr::Variable(var) = &mut lhs {
                 match (l_ty, r_ty) {
                     (Some(l_ty), Some(r_ty)) => {
                         // require rhs to be the same type as lhs
@@ -390,13 +573,30 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                     }
                     (None, Some(r_ty)) => {
                         // update lhs type to match rhs
-                        let Some(EnvItem::Var(var, _is_global)) = env.lookup_mut(var.id).next()
+                        let Some(&mut ScopeItem {
+                            id,
+                            val: EnvItem::Var(ref mut var_ty, _),
+                            ..
+                        }) = env.lookup_mut(var.ident).next()
                         else {
                             unreachable!(
                                 "Expr::Variable should only result from a StaticVar::Var present in `env`"
                             );
                         };
-                        *var = Some(r_ty);
+                        let r_ty_size = r_ty.size();
+                        *var_ty = Some(r_ty);
+                        #[cfg(debug_assertions)]
+                        {
+                            var._ty = var_ty.clone();
+                        }
+                        if let Some(size) = r_ty_size {
+                            match size {
+                                Ok(size) => {
+                                    env.update_size(id, size).expect("guarded by match arm");
+                                }
+                                Err(e) => return Err(vec![todo!("error: {e}")]),
+                            }
+                        }
                     }
                     (Some(_l_ty), None) => todo!("re-analyze rhs knowing its output type"), // TBD: how will this be done?
                     (None, None) => {
@@ -420,19 +620,19 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                     let operand_types = OperandTypes::Binary(l_ty, r_ty);
                     let op = &self.op.val;
                     env.lookup(op)
-                        .map(|item| match item {
+                        .map(|item| match &item.val {
                             EnvItem::Op(overload) => overload,
                             _ => unreachable!("only operators should be stored with operator keys"),
                         })
                         .find(|overload| overload.operands == operand_types)
                         .ok_or_else(|| {
-                            vec![todo!(
+                            todo!(
                                 "error: no such operator defined\n operator: {op:?}\n \
-                            operand types: {operand_types:?}\n \
-                            operands: {operands:?}\n \
-                            supported operands: {:#?}",
+                                operand types: {operand_types:?}\n \
+                                operands: {operands:?}\n \
+                                supported operands: {:#?}",
                                 env.lookup(op)
-                                    .map(|item| match item {
+                                    .map(|item| match &item.val {
                                         EnvItem::Op(overload) => overload,
                                         _ => unreachable!(
                                             "only operators should be stored with operator keys"
@@ -440,12 +640,21 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                                     })
                                     .map(|t| t.fun.to_string())
                                     .collect::<Vec<_>>()
-                            )]
+                            );
+                            Vec::new()
                         })
                         .map(|overload| {
-                            Expr::Op(Box::new(Operation {
-                                def: overload.fun.clone(),
-                                operands,
+                            let def = match &overload.def {
+                                FnDef::LangOpB(def) => *def,
+                                FnDef::LangOpU(_) | FnDef::UserDef(_) => {
+                                    unimplemented!()
+                                }
+                            };
+                            Expr::Op(Box::new(match operands {
+                                Operands::Binary(l, r) => {
+                                    Operation::Binary((overload.fun.clone(), def), l, r)
+                                }
+                                _ => unreachable!(),
                             }))
                         })
                 }
@@ -474,12 +683,12 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
 
 /// An [`Expr`] that returns [`none`]
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExprStmt<'src, Var> {
-    expr: Expr<'src, Var>,
+pub struct ExprStmt<O, V> {
+    expr: Expr<O, V>,
 }
 
 impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
-    type Ouptut = ExprStmt<'src, Variable<'src>>;
+    type Ouptut = ExprStmt<Operation<'src>, Variable<'src>>;
 
     fn analyze(
         &self,
@@ -508,13 +717,23 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
     }
 }
 
+impl<'src> CementVars<'src> for ExprStmt<Operation<'src>, Variable<'src>> {
+    type Concrete = ExprStmt<RunOperation<'src>, RunVariable<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        ExprStmt {
+            expr: self.expr.cement_vars(ranges),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub struct PrintStmt<'src, Var> {
-    expr: Expr<'src, Var>,
+pub struct PrintStmt<O, V> {
+    expr: Expr<O, V>,
 }
 
 impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
-    type Ouptut = PrintStmt<'src, Variable<'src>>;
+    type Ouptut = PrintStmt<Operation<'src>, Variable<'src>>;
 
     fn analyze(
         &self,
@@ -526,7 +745,7 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
                 ty.expect_type(&AbstractType::Concrete(StaticType::Primitive(
                     PrimitiveType::Text,
                 )))
-                .map_err(|e| vec![todo!()])
+                .map_err(|_| vec![todo!()])
                 .map(|()| PrintStmt { expr })
             } else {
                 Err(todo!(
@@ -537,13 +756,23 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum OrStmt<'src, Var> {
-    More(IfStmt<'src, Var>),
-    Last(BlockStmt<'src, Var>),
+impl<'src> CementVars<'src> for PrintStmt<Operation<'src>, Variable<'src>> {
+    type Concrete = PrintStmt<RunOperation<'src>, RunVariable<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        PrintStmt {
+            expr: self.expr.cement_vars(ranges),
+        }
+    }
 }
 
-impl<'src> Expression<'src> for OrStmt<'src, Variable<'src>> {
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrStmt<O, V> {
+    More(IfStmt<O, V>),
+    Last(BlockStmt<O, V>),
+}
+
+impl<'src> Expression<'src> for OrStmt<Operation<'src>, Variable<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -557,8 +786,19 @@ impl<'src> Expression<'src> for OrStmt<'src, Variable<'src>> {
     }
 }
 
+impl<'src> CementVars<'src> for OrStmt<Operation<'src>, Variable<'src>> {
+    type Concrete = OrStmt<RunOperation<'src>, RunVariable<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        match self {
+            Self::More(stmt) => OrStmt::More(stmt.cement_vars(ranges)),
+            Self::Last(stmt) => OrStmt::Last(stmt.cement_vars(ranges)),
+        }
+    }
+}
+
 impl<'src> Analyze<'src> for ast::OrBody<'src> {
-    type Ouptut = OrStmt<'src, Variable<'src>>;
+    type Ouptut = OrStmt<Operation<'src>, Variable<'src>>;
 
     fn analyze(
         &self,
@@ -573,14 +813,14 @@ impl<'src> Analyze<'src> for ast::OrBody<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct IfStmt<'src, Var> {
+pub struct IfStmt<O, V> {
     /// Must output [`bool`]
-    pub pred: Expr<'src, Var>,
-    pub then: BlockStmt<'src, Var>,
-    pub or: Option<Box<OrStmt<'src, Var>>>,
+    pub pred: Expr<O, V>,
+    pub then: BlockStmt<O, V>,
+    pub or: Option<Box<OrStmt<O, V>>>,
 }
 
-impl<'src> Expression<'src> for IfStmt<'src, Variable<'src>> {
+impl<'src> Expression<'src> for IfStmt<Operation<'src>, Variable<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -601,7 +841,7 @@ impl<'src> Expression<'src> for IfStmt<'src, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::IfStmt<'src> {
-    type Ouptut = IfStmt<'src, Variable<'src>>;
+    type Ouptut = IfStmt<Operation<'src>, Variable<'src>>;
 
     fn analyze(
         &self,
@@ -613,7 +853,7 @@ impl<'src> Analyze<'src> for ast::IfStmt<'src> {
             ty.expect_type(&AbstractType::Concrete(StaticType::Primitive(
                 PrimitiveType::Bool,
             )))
-            .map_err(|e| vec![todo!()])
+            .map_err(|_| vec![todo!()])
             .and_then(|()| {
                 Ok(IfStmt {
                     pred,
@@ -632,12 +872,24 @@ impl<'src> Analyze<'src> for ast::IfStmt<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct BlockStmt<'src, Var> {
-    pub stmts: Vec<Statement<'src, Var>>,
+impl<'src> CementVars<'src> for IfStmt<Operation<'src>, Variable<'src>> {
+    type Concrete = IfStmt<RunOperation<'src>, RunVariable<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        IfStmt {
+            pred: self.pred.cement_vars(ranges),
+            then: self.then.cement_vars(ranges),
+            or: self.or.map(|or| Box::new(or.cement_vars(ranges))),
+        }
+    }
 }
 
-impl<'src> Expression<'src> for BlockStmt<'src, Variable<'src>> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockStmt<O, V> {
+    pub stmts: Vec<Statement<O, V>>,
+}
+
+impl<'src> Expression<'src> for BlockStmt<Operation<'src>, Variable<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -658,34 +910,57 @@ impl<'src> Expression<'src> for BlockStmt<'src, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
-    type Ouptut = BlockStmt<'src, Variable<'src>>;
+    type Ouptut = BlockStmt<Operation<'src>, Variable<'src>>;
 
     fn analyze(
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
-        env.push_scope();
+        env.push_scope().unwrap_or_else(|| {
+            // TODO: make this an error when functions are implemented
+            println!("warning: cannot push a scope here, need to be in a function");
+        });
         self.body
             .iter()
             .filter_map(|decl| decl.analyze(source, env).transpose())
             .collect::<Result<'src, Vec<_>>>()
             .map(|stmts| BlockStmt { stmts })
             .inspect(|_| {
-                env.pop_scope();
+                // TODO: make this a panic when functions are implemented
+                // TODO: drop each variable in scope
+                if env.pop_scope().is_none() {
+                    println!(
+                        "scope pushes and pops should be balanced - tried to pop global scope"
+                    );
+                }
             })
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Statement<'src, Var> {
-    Expr(ExprStmt<'src, Var>),
-    Print(PrintStmt<'src, Var>),
-    If(IfStmt<'src, Var>),
-    Block(BlockStmt<'src, Var>),
+impl<'src> CementVars<'src> for BlockStmt<Operation<'src>, Variable<'src>> {
+    type Concrete = BlockStmt<RunOperation<'src>, RunVariable<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        BlockStmt {
+            stmts: self
+                .stmts
+                .into_iter()
+                .map(|stmt| stmt.cement_vars(ranges))
+                .collect(),
+        }
+    }
 }
 
-impl<'src> Expression<'src> for Statement<'src, Variable<'src>> {
+#[derive(Debug, Clone, PartialEq)]
+pub enum Statement<O, V> {
+    Expr(ExprStmt<O, V>),
+    Print(PrintStmt<O, V>),
+    If(IfStmt<O, V>),
+    Block(BlockStmt<O, V>),
+}
+
+impl<'src> Expression<'src> for Statement<Operation<'src>, Variable<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -704,7 +979,7 @@ impl<'src> Expression<'src> for Statement<'src, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::Statement<'src> {
-    type Ouptut = Statement<'src, Variable<'src>>;
+    type Ouptut = Statement<Operation<'src>, Variable<'src>>;
 
     fn analyze(
         &self,
@@ -720,8 +995,21 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
     }
 }
 
+impl<'src> CementVars<'src> for Statement<Operation<'src>, Variable<'src>> {
+    type Concrete = Statement<RunOperation<'src>, RunVariable<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        match self {
+            Self::Expr(stmt) => Statement::Expr(stmt.cement_vars(ranges)),
+            Self::Print(stmt) => Statement::Print(stmt.cement_vars(ranges)),
+            Self::If(stmt) => Statement::If(stmt.cement_vars(ranges)),
+            Self::Block(stmt) => Statement::Block(stmt.cement_vars(ranges)),
+        }
+    }
+}
+
 impl<'src> Analyze<'src> for ast::DeclVar<'src> {
-    type Ouptut = Option<ExprStmt<'src, Variable<'src>>>;
+    type Ouptut = Option<ExprStmt<Operation<'src>, Variable<'src>>>;
 
     fn analyze(
         &self,
@@ -735,32 +1023,32 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
             .transpose()?;
         match self.var_kw.val {
             // Constant
-            VarKeyword::Pvt => {
-                env.decl_pvt(
+            VarKeyword::Pvt => env
+                .decl_pvt(
                     self.ident.lex,
-                    expr.map(|_| todo!())
+                    expr.map(|_| todo!("constant folding"))
                         .ok_or_else(|| vec![todo!("error: missing assignment for constant")])?,
-                );
-                Ok(None)
-            }
+                )
+                .map_err(|e| vec![todo!("error: {e}")])
+                .map(|()| None),
 
             // Variable
-            VarKeyword::Uni | VarKeyword::Let => {
-                env.decl_var(
+            VarKeyword::Uni | VarKeyword::Let => env
+                .decl_var(
                     self.ident.lex,
                     expr.as_ref()
                         .and_then(|x| x.get_type(env))
                         .map(|t| t.to_abstract()),
                     true,
-                );
-                Ok(expr.map(|expr| ExprStmt { expr }))
-            }
+                )
+                .map_err(|e| vec![todo!("error: {e}")])
+                .map(|()| expr.map(|expr| ExprStmt { expr })),
         }
     }
 }
 
 impl<'src> Analyze<'src> for ast::Declaration<'src> {
-    type Ouptut = Option<Statement<'src, Variable<'src>>>;
+    type Ouptut = Option<Statement<Operation<'src>, Variable<'src>>>;
 
     fn analyze(
         &self,
@@ -775,9 +1063,9 @@ impl<'src> Analyze<'src> for ast::Declaration<'src> {
 }
 
 /// A post-analysis program ready for execution
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Program<'src> {
-    stmts: Vec<Statement<'src, RunVariable<'src>>>,
+    stmts: Vec<Statement<RunOperation<'src>, RunVariable<'src>>>,
 }
 
 pub fn analyze<'src>(source: &'src str, prgm: &ast::Program<'src>) -> Result<'src, Program<'src>> {
@@ -789,5 +1077,18 @@ pub fn analyze<'src>(source: &'src str, prgm: &ast::Program<'src>) -> Result<'sr
         .iter()
         .filter_map(|decl| decl.analyze(source, &mut env).transpose())
         .collect::<Result<'src, Vec<_>>>()
-        .map(|stmts| Program { stmts: todo!() }) // TODO: need to convert analysis `Variable`s to `RunVariable`s
+        .and_then(|stmts| {
+            let ranges = env.cement_ranges().map_err(|e| {
+                for item in e {
+                    println!("error: size left indeterminant: {item:?}"); // TODO
+                }
+                Vec::new()
+            })?;
+            Ok(Program {
+                stmts: stmts
+                    .into_iter()
+                    .map(|stmt| stmt.cement_vars(&ranges))
+                    .collect(),
+            })
+        }) // TODO: need to convert analysis `Variable`s to `RunVariable`s
 }

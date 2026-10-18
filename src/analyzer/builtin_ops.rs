@@ -1,7 +1,7 @@
 #![allow(unused, reason = "under construction")]
 use super::{
-    AbstractType, BlockStmt, Environment, FnDef, FunType, OpOverload, OperandTypes, Operator,
-    PrimitiveType, StaticType, Value, ValueMut, types::FunShape,
+    AbstractType, BlockStmt, Environment, Failure, FnDef, FunType, OpOverload, OperandTypes,
+    Operator, PrimitiveType, StaticType, Value, ValueMut, types::FunShape,
 };
 use crate::{
     spec_ops::{BitRotate, BitShift},
@@ -33,11 +33,11 @@ macro_rules! prim_op {
                 },
                 def: {
                     fn fun<'src, 'val>(
-                        $env: &'val mut Environment,
+                        $env: &'val Environment,
+                        out: ValueMut<'val, 'src>,
                         lhs: Value<'val, 'src>,
                         rhs: Value<'val, 'src>,
-                        out: ValueMut<'val, 'src>,
-                    ) {
+                    ) -> Result<(), Failure> {
                         // SAFETY: static analyzer must ensure soundness
                         let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs) };
                         // SAFETY: static analyzer must ensure soundness
@@ -45,6 +45,7 @@ macro_rules! prim_op {
                         let res = $def;
                         // SAFETY: static analyzer must ensure soundness
                         *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
+                        Ok(())
                     }
                     FnDef::LangOpB(fun)
                 },
@@ -72,15 +73,16 @@ macro_rules! prim_op {
                 },
                 def: {
                     fn fun<'src, 'val>(
-                        $env: &'val mut Environment,
-                        rhs: Value<'val, 'src>,
+                        $env: &'val Environment,
                         out: ValueMut<'val, 'src>,
-                    ) {
+                        rhs: Value<'val, 'src>,
+                    ) -> Result<(), Failure> {
                         // SAFETY: static analyzer must ensure soundness
                         let $rhs_name = unsafe { Value::cast_into::<$Rhs>(rhs) };
                         let res = $def;
                         // SAFETY: static analyzer must ensure soundness
                         *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
+                        Ok(())
                     }
                     FnDef::LangOpU(fun)
                 },
@@ -108,15 +110,16 @@ macro_rules! prim_op {
                 },
                 def: {
                     fn fun<'src, 'val>(
-                        $env: &'val mut Environment,
-                        lhs: Value<'val, 'src>,
+                        $env: &'val Environment,
                         out: ValueMut<'val, 'src>,
-                    ) {
+                        lhs: Value<'val, 'src>,
+                    ) -> Result<(), Failure> {
                         // SAFETY: static analyzer must ensure soundness
                         let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs) };
                         let res = $def;
                         // SAFETY: static analyzer must ensure soundness
                         *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
+                        Ok(())
                     }
                     FnDef::LangOpU(fun)
                 },
