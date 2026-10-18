@@ -2,9 +2,58 @@ use crate::{
     Todo,
     analyzer::static_env::ConstantValue,
     error::{ErrorType, OpSide},
+    exec::error::Failure,
     scanner::token::value::TokenEq,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    range::Range,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SizeReq {
+    ArrayElement,
+}
+
+impl std::fmt::Display for SizeReq {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ArrayElement => write!(f, "array elements"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TypeSizeError {
+    #[default]
+    TooBig,
+    IllegalUnsized(SizeReq),
+}
+
+impl std::fmt::Display for TypeSizeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooBig => write!(f, "type size exceeds {} bytes", usize::MAX),
+            Self::IllegalUnsized(x) => write!(f, "{x} must have static size"),
+        }
+    }
+}
+
+impl std::error::Error for TypeSizeError {}
+
+pub trait TypeSize {
+    /// Returns [`None`] if size is determined at runtime
+    ///
+    /// Default implementation assumes an unsized type
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        None
+    }
+}
+
+/// Type has a definitive size known during static analysis, and can be pushed to the stack
+pub trait StaticTypeSize: TypeSize {
+    fn static_size(&self) -> Result<usize, TypeSizeError>;
+}
 
 /// Display implementation is be how the type will be shown in error messages
 pub trait TypeCompatible<'src>: std::fmt::Display {
@@ -31,6 +80,11 @@ impl<'src, T: ?Sized + TypeCompatible<'src>> TypeCompatible<'src> for &T {
         (*self).to_abstract()
     }
 }
+impl<T: ?Sized + TypeSize> TypeSize for &T {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        (*self).size()
+    }
+}
 
 /// Like an [`ArrayType`], but the length is determined at runtime
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
@@ -38,6 +92,7 @@ pub struct ViewType<'src> {
     pub item: StaticType<'src>,
 }
 
+impl TypeSize for ViewType<'_> {}
 impl<'src> TypeCompatible<'src> for ViewType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::View(other)) if *self == **other)
@@ -65,6 +120,23 @@ pub struct ArrayType<'src> {
     pub len: usize, // TODO: constant expression? bounds?
 }
 
+impl StaticTypeSize for ArrayType<'_> {
+    fn static_size(&self) -> Result<usize, TypeSizeError> {
+        // TODO: items should be statically sized
+        // TODO: if the size exceeds what is possible, this should produce an error
+        self.item
+            .size()
+            .ok_or(TypeSizeError::IllegalUnsized(SizeReq::ArrayElement))
+            .flatten()?
+            .checked_mul(self.len)
+            .ok_or(TypeSizeError::TooBig)
+    }
+}
+impl TypeSize for ArrayType<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        Some(self.static_size())
+    }
+}
 impl<'src> TypeCompatible<'src> for ArrayType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Arr(other)) if *self == **other)
@@ -91,6 +163,18 @@ pub struct Ptr<'src> {
     pub to: StaticType<'src>,
 }
 
+impl TypeSize for Ptr<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        Some(self.static_size())
+    }
+}
+impl StaticTypeSize for Ptr<'_> {
+    fn static_size(&self) -> Result<usize, TypeSizeError> {
+        // TODO: what about wide pointers?
+        // TODO: are pointers ALWAYS going to be ranges?
+        Ok(std::mem::size_of::<Range<usize>>())
+    }
+}
 impl<'src> TypeCompatible<'src> for Ptr<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Ptr(other)) if *self == **other)
@@ -140,6 +224,20 @@ pub struct Fallible<'src> {
     pub or: OrType,
 }
 
+impl TypeSize for Fallible<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        match self.then.size() {
+            Some(Ok(then_size)) => {
+                let or_size = match self.or {
+                    OrType::None | OrType::Nevr => 0, // TODO: needs to account for bit used to distinguish then/or!!
+                    OrType::Fail => std::mem::size_of::<Failure>(),
+                };
+                Some(then_size.checked_add(or_size).ok_or(TypeSizeError::TooBig))
+            }
+            res => res,
+        }
+    }
+}
 impl<'src> TypeCompatible<'src> for Fallible<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::OrTy(other)) if *self == **other)
@@ -167,6 +265,11 @@ pub struct RecType<'src> {
     pub fields: BTreeMap<&'src str, StaticType<'src>>,
 }
 
+impl TypeSize for RecType<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        todo!("need to determine layout")
+    }
+}
 impl<'src> TypeCompatible<'src> for RecType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Rec(other)) if self == other)
@@ -194,6 +297,19 @@ pub struct SupType<'src> {
     pub variants: BTreeSet<StaticType<'src>>,
 }
 
+impl TypeSize for SupType<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        // TODO: tag?
+        let mut max_size = 0;
+        for variant in &self.variants {
+            max_size = match variant.size() {
+                Some(Ok(size)) => max_size.max(size),
+                res => return res,
+            };
+        }
+        Some(Ok(max_size))
+    }
+}
 impl<'src> TypeCompatible<'src> for SupType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Sup(other)) if self == other)
@@ -222,6 +338,12 @@ pub struct SubType<'src> {
     pub reqs: Vec<TypeBound<'src>>,
 }
 
+impl TypeSize for SubType<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        // TODO: can unsized types be in subtypes?
+        self.base.size()
+    }
+}
 impl<'src> TypeCompatible<'src> for SubType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Sub(other)) if *self == **other)
@@ -250,6 +372,23 @@ pub struct CatType<'src> {
     pub values: BTreeSet<ConstantValue>,
 }
 
+impl StaticTypeSize for CatType<'_> {
+    fn static_size(&self) -> Result<usize, TypeSizeError> {
+        // TBD: should category types use their value as their discriminant, or a separate integer discriminant?
+
+        // while a constant type can be unsized, its "runtime" is static analysis time,
+        // so it's allowed to have static type even if its type is runtime-sized
+        self.values
+            .iter()
+            .map(StaticTypeSize::static_size)
+            .try_fold(0, |m, v| v.map(|v| m.max(v)))
+    }
+}
+impl TypeSize for CatType<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        Some(self.static_size())
+    }
+}
 impl<'src> TypeCompatible<'src> for CatType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Cat(other)) if *self == **other)
@@ -319,6 +458,11 @@ pub struct FunType<'src> {
     pub shape: FunShape<'src>,
 }
 
+impl TypeSize for FunType<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        todo!("where are functions stored?")
+    }
+}
 impl<'src> TypeCompatible<'src> for FunType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Fun(other)) if *self == **other)
@@ -366,6 +510,28 @@ pub enum PrimitiveType {
     Text,
 }
 
+impl StaticTypeSize for PrimitiveType {
+    fn static_size(&self) -> Result<usize, TypeSizeError> {
+        use crate::types::*;
+        Ok(match self {
+            Self::None => std::mem::size_of::<none>(),
+            Self::Nevr => std::mem::size_of::<nevr>(),
+            Self::Fail => std::mem::size_of::<fail>(),
+            Self::Bool => std::mem::size_of::<bool>(),
+            Self::Byte => std::mem::size_of::<byte>(),
+            Self::Uint => std::mem::size_of::<uint>(),
+            Self::Sint => std::mem::size_of::<sint>(),
+            Self::Flpt => std::mem::size_of::<flpt>(),
+            Self::Char => std::mem::size_of::<char>(),
+            Self::Text => std::mem::size_of::<text>(),
+        })
+    }
+}
+impl TypeSize for PrimitiveType {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        Some(self.static_size())
+    }
+}
 impl<'src> TypeCompatible<'src> for PrimitiveType {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Primitive(other)) if self == other)
@@ -430,6 +596,22 @@ impl Default for StaticType<'_> {
     }
 }
 
+impl TypeSize for StaticType<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        match self {
+            Self::Primitive(t) => t.size(),
+            Self::View(t) => t.size(),
+            Self::Arr(t) => t.size(),
+            Self::Ptr(t) => t.size(),
+            Self::OrTy(t) => t.size(),
+            Self::Rec(t) => t.size(),
+            Self::Sup(t) => t.size(),
+            Self::Sub(t) => t.size(),
+            Self::Cat(t) => t.size(),
+            Self::Fun(t) => t.size(),
+        }
+    }
+}
 impl<'src> TypeCompatible<'src> for StaticType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(other) if self == other)
@@ -615,6 +797,14 @@ pub enum AbstractType<'src> {
     Param(GenericParam<'src>),
 }
 
+impl TypeSize for AbstractType<'_> {
+    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
+        match self {
+            AbstractType::Concrete(t) => t.size(),
+            _ => None, // TBD
+        }
+    }
+}
 impl<'src> TypeCompatible<'src> for AbstractType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         self == other
