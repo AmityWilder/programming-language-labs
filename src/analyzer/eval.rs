@@ -2,7 +2,7 @@ use crate::{
     Todo,
     analyzer::{
         Assignment, BlockStmt, Expr, ExprStmt, IfStmt, Literal, Operands, Operation, OrStmt,
-        PrintStmt, Program, Statement, Variable, types::StaticType,
+        PrintStmt, Program, RunVariable, Statement, types::StaticType,
     },
     exec::{env::Environment, error::Failure},
     types::*,
@@ -157,7 +157,7 @@ pub trait Execute<'src> {
     fn exec(&self, env: &mut Environment) -> Result<(), Failure>;
 }
 
-impl<'src> Evaluate<'src> for Assignment<'src> {
+impl<'src> Evaluate<'src> for Assignment<'src, RunVariable<'src>> {
     fn eval<'val>(&'val self, env: &'val mut Environment) -> Result<Value<'val, 'src>, Failure> {
         let rhs = self.rhs.eval(env);
         let lvalue = &self.lvalue;
@@ -166,7 +166,7 @@ impl<'src> Evaluate<'src> for Assignment<'src> {
     }
 }
 
-impl<'src> Evaluate<'src> for Operation<'src> {
+impl<'src> Evaluate<'src> for Operation<'src, RunVariable<'src>> {
     fn eval<'val>(&'val self, env: &'val mut Environment) -> Result<Value<'val, 'src>, Failure> {
         match &self.operands {
             Operands::Binary(lhs, rhs) => {
@@ -203,13 +203,19 @@ impl<'src> Evaluate<'src> for Literal {
     }
 }
 
-impl<'src> Evaluate<'src> for Variable<'src> {
+impl<'src> Evaluate<'src> for RunVariable<'src> {
     fn eval<'val>(&'val self, env: &'val mut Environment) -> Result<Value<'val, 'src>, Failure> {
-        todo!()
+        Ok(Value::new(
+            env.stack()
+                .get(self.range)
+                .expect("should be guaranteed by static analysis"),
+            #[cfg(debug_assertions)]
+            self._ty.clone(),
+        ))
     }
 }
 
-impl<'src> Evaluate<'src> for Expr<'src> {
+impl<'src> Evaluate<'src> for Expr<'src, RunVariable<'src>> {
     fn eval<'val>(&'val self, env: &'val mut Environment) -> Result<Value<'val, 'src>, Failure> {
         match self {
             Self::Assignment(x) => x.eval(env),
@@ -220,13 +226,13 @@ impl<'src> Evaluate<'src> for Expr<'src> {
     }
 }
 
-impl<'src> Execute<'src> for ExprStmt<'src> {
+impl<'src> Execute<'src> for ExprStmt<'src, RunVariable<'src>> {
     fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         self.expr.eval(env).map(|_| ())
     }
 }
 
-impl<'src> Execute<'src> for PrintStmt<'src> {
+impl<'src> Execute<'src> for PrintStmt<'src, RunVariable<'src>> {
     fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         // SAFETY: static analyzer must ensure soundness
         let msg = unsafe { self.expr.eval(env)?.cast_into::<text>() };
@@ -235,7 +241,7 @@ impl<'src> Execute<'src> for PrintStmt<'src> {
     }
 }
 
-impl<'src> Execute<'src> for IfStmt<'src> {
+impl<'src> Execute<'src> for IfStmt<'src, RunVariable<'src>> {
     fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         let mut if_stmt = self;
         loop {
@@ -258,7 +264,7 @@ impl<'src> Execute<'src> for IfStmt<'src> {
     }
 }
 
-impl<'src> Execute<'src> for BlockStmt<'src> {
+impl<'src> Execute<'src> for BlockStmt<'src, RunVariable<'src>> {
     fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         for stmt in &self.stmts {
             stmt.exec(env)?;
@@ -267,7 +273,7 @@ impl<'src> Execute<'src> for BlockStmt<'src> {
     }
 }
 
-impl<'src> Execute<'src> for Statement<'src> {
+impl<'src> Execute<'src> for Statement<'src, RunVariable<'src>> {
     fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         match self {
             Self::Expr(stmt) => stmt.exec(env),

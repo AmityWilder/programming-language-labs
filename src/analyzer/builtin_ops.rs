@@ -3,7 +3,10 @@ use super::{
     AbstractType, BlockStmt, Environment, FnDef, FunType, OpOverload, OperandTypes, Operator,
     PrimitiveType, StaticType, Value, ValueMut, types::FunShape,
 };
-use crate::types::*;
+use crate::{
+    spec_ops::{BitRotate, BitShift},
+    types::*,
+};
 
 macro_rules! prim_op {
     (
@@ -21,15 +24,12 @@ macro_rules! prim_op {
                     AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$rhs)),
                 ),
                 output: AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$output)),
-                fun: FunType {
-                    name: Operator::$op.as_str(),
-                    shape: FunShape {
-                        params: vec![
-                            StaticType::Primitive(PrimitiveType::$lhs),
-                            StaticType::Primitive(PrimitiveType::$rhs),
-                        ],
-                        ret: StaticType::Primitive(PrimitiveType::$output),
-                    },
+                fun: FunShape {
+                    params: vec![
+                        StaticType::Primitive(PrimitiveType::$lhs),
+                        StaticType::Primitive(PrimitiveType::$rhs),
+                    ],
+                    ret: StaticType::Primitive(PrimitiveType::$output),
                 },
                 def: {
                     fn fun<'src, 'val>(
@@ -66,12 +66,9 @@ macro_rules! prim_op {
                     PrimitiveType::$rhs,
                 ))),
                 output: AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$output)),
-                fun: FunType {
-                    name: Operator::$op.as_str(),
-                    shape: FunShape {
-                        params: vec![StaticType::Primitive(PrimitiveType::$rhs)],
-                        ret: StaticType::Primitive(PrimitiveType::$output),
-                    },
+                fun: FunShape {
+                    params: vec![StaticType::Primitive(PrimitiveType::$rhs)],
+                    ret: StaticType::Primitive(PrimitiveType::$output),
                 },
                 def: {
                     fn fun<'src, 'val>(
@@ -105,12 +102,9 @@ macro_rules! prim_op {
                     PrimitiveType::$lhs,
                 ))),
                 output: AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$output)),
-                fun: FunType {
-                    name: Operator::$op.as_str(),
-                    shape: FunShape {
-                        params: vec![StaticType::Primitive(PrimitiveType::$lhs)],
-                        ret: StaticType::Primitive(PrimitiveType::$output),
-                    },
+                fun: FunShape {
+                    params: vec![StaticType::Primitive(PrimitiveType::$lhs)],
+                    ret: StaticType::Primitive(PrimitiveType::$output),
                 },
                 def: {
                     fn fun<'src, 'val>(
@@ -252,136 +246,136 @@ primitive_ops![
     Exists(Text) -> Bool as fn(env, r: text) -> none { todo!() }
 
     And (Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { l & r }
-    Or  (Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!("l | r") }
-    Xor (Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!("l ^ r") }
-    Nand(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!("!(l & r)") }
-    Nor (Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!("!(l | r)") }
-    Xnor(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!("!(l ^ r)") }
+    Or  (Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { l | r }
+    Xor (Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { l ^ r }
+    Nand(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { !(l & r) }
+    Nor (Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { !(l | r) }
+    Xnor(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { !(l ^ r) }
 
-    Eq(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!() }
-    Eq(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { todo!() }
-    Eq(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { todo!() }
-    Eq(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { todo!() }
-    Eq(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { todo!() }
-    Eq(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { todo!() }
+    Eq(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { l == r }
+    Eq(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { l == r }
+    Eq(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { l == r }
+    Eq(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { l == r }
+    Eq(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { l == r }
+    Eq(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { l == r }
 
-    Ne(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!() }
-    Ne(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { todo!() }
-    Ne(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { todo!() }
-    Ne(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { todo!() }
-    Ne(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { todo!() }
-    Ne(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { todo!() }
+    Ne(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { l != r }
+    Ne(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { l != r }
+    Ne(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { l != r }
+    Ne(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { l != r }
+    Ne(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { l != r }
+    Ne(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { l != r }
 
-    Gt(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!() }
-    Gt(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { todo!() }
-    Gt(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { todo!() }
-    Gt(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { todo!() }
-    Gt(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { todo!() }
-    Gt(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { todo!() }
+    Gt(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { l > r }
+    Gt(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { l > r }
+    Gt(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { l > r }
+    Gt(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { l > r }
+    Gt(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { l > r }
+    Gt(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { l > r }
 
-    Lt(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!() }
-    Lt(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { todo!() }
-    Lt(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { todo!() }
-    Lt(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { todo!() }
-    Lt(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { todo!() }
-    Lt(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { todo!() }
+    Lt(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { l < r }
+    Lt(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { l < r }
+    Lt(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { l < r }
+    Lt(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { l < r }
+    Lt(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { l < r }
+    Lt(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { l < r }
 
-    Ge(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!() }
-    Ge(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { todo!() }
-    Ge(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { todo!() }
-    Ge(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { todo!() }
-    Ge(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { todo!() }
-    Ge(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { todo!() }
+    Ge(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { l >= r }
+    Ge(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { l >= r }
+    Ge(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { l >= r }
+    Ge(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { l >= r }
+    Ge(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { l >= r }
+    Ge(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { l >= r }
 
-    Le(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { todo!() }
-    Le(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { todo!() }
-    Le(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { todo!() }
-    Le(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { todo!() }
-    Le(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { todo!() }
-    Le(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { todo!() }
+    Le(Bool, Bool) -> Bool as fn(env, l: bool, r: bool) -> bool { l <= r }
+    Le(Uint, Uint) -> Bool as fn(env, l: uint, r: uint) -> bool { l <= r }
+    Le(Sint, Sint) -> Bool as fn(env, l: sint, r: sint) -> bool { l <= r }
+    Le(Flpt, Flpt) -> Bool as fn(env, l: flpt, r: flpt) -> bool { l <= r }
+    Le(Char, Char) -> Bool as fn(env, l: char, r: char) -> bool { l <= r }
+    Le(Text, Text) -> Bool as fn(env, l: text, r: text) -> bool { l <= r }
 
-    Not(Bool) -> Bool as fn(env, r: bool) -> bool { todo!() }
+    Not(Bool) -> Bool as fn(env, r: bool) -> bool { !r }
 
     // uint
-    And (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Or  (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Xor (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Nand(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Nor (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Xnor(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
+    And (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l & r }
+    Or  (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l | r }
+    Xor (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l ^ r }
+    Nand(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { !(l & r) }
+    Nor (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { !(l | r) }
+    Xnor(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { !(l ^ r) }
 
-    Add   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    SubNeg(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Mul   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Pow   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Div   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Rem   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
+    Add   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l + r }
+    SubNeg(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l - r }
+    Mul   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l * r }
+    Pow   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l.pow(*r as u32) }
+    Div   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l / r }
+    Rem   (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l % r }
 
-    Shl (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Shr (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Rotl(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
-    Rotr(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { todo!() }
+    Shl (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l.bshl(*r) }
+    Shr (Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l.bshr(*r) }
+    Rotl(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l.rotl(*r) }
+    Rotr(Uint, Uint) -> Uint as fn(env, l: uint, r: uint) -> uint { l.rotr(*r) }
 
-    Shl (Uint, Sint) -> Uint as fn(env, l: uint, r: sint) -> uint { todo!() }
-    Shr (Uint, Sint) -> Uint as fn(env, l: uint, r: sint) -> uint { todo!() }
-    Rotl(Uint, Sint) -> Uint as fn(env, l: uint, r: sint) -> uint { todo!() }
-    Rotr(Uint, Sint) -> Uint as fn(env, l: uint, r: sint) -> uint { todo!() }
+    Shl (Uint, Sint) -> Uint as fn(env, l: uint, r: sint) -> uint { l.bshl(*r) }
+    Shr (Uint, Sint) -> Uint as fn(env, l: uint, r: sint) -> uint { l.bshr(*r) }
+    Rotl(Uint, Sint) -> Uint as fn(env, l: uint, r: sint) -> uint { l.rotl(*r) }
+    Rotr(Uint, Sint) -> Uint as fn(env, l: uint, r: sint) -> uint { l.rotr(*r) }
 
     // sint
-    And (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Or  (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Xor (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Nand(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Nor (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Xnor(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
+    And (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l & r }
+    Or  (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l | r }
+    Xor (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l ^ r }
+    Nand(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { !(l & r) }
+    Nor (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { !(l | r) }
+    Xnor(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { !(l ^ r) }
 
-    Add   (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    SubNeg(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Mul   (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Pow   (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Div   (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Rem   (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
+    Add   (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l + r }
+    SubNeg(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l - r }
+    Mul   (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l * r }
+    Pow   (Sint, Uint) -> Sint as fn(env, l: sint, r: uint) -> sint { l.pow(*r as u32) }
+    Div   (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l / r }
+    Rem   (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l % r }
 
-    Shl (Sint, Uint) -> Sint as fn(env, l: sint, r: uint) -> sint { todo!() }
-    Shr (Sint, Uint) -> Sint as fn(env, l: sint, r: uint) -> sint { todo!() }
-    Rotl(Sint, Uint) -> Sint as fn(env, l: sint, r: uint) -> sint { todo!() }
-    Rotr(Sint, Uint) -> Sint as fn(env, l: sint, r: uint) -> sint { todo!() }
+    Shl (Sint, Uint) -> Sint as fn(env, l: sint, r: uint) -> sint { l.bshl(*r) }
+    Shr (Sint, Uint) -> Sint as fn(env, l: sint, r: uint) -> sint { l.bshr(*r) }
+    Rotl(Sint, Uint) -> Sint as fn(env, l: sint, r: uint) -> sint { l.rotl(*r) }
+    Rotr(Sint, Uint) -> Sint as fn(env, l: sint, r: uint) -> sint { l.rotr(*r) }
 
-    Shl (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Shr (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Rotl(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
-    Rotr(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { todo!() }
+    Shl (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l.bshl(*r) }
+    Shr (Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l.bshr(*r) }
+    Rotl(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l.rotl(*r) }
+    Rotr(Sint, Sint) -> Sint as fn(env, l: sint, r: sint) -> sint { l.rotr(*r) }
 
-    SubNeg(Sint) -> Sint as fn(env, r: sint) -> sint { todo!() }
+    SubNeg(Sint) -> Sint as fn(env, r: sint) -> sint { -r }
 
     // flpt
-    Add   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { todo!() }
-    SubNeg(Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { todo!() }
-    Mul   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { todo!() }
-    Pow   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { todo!() }
-    Div   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { todo!() }
-    Rem   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { todo!() }
+    Add   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { l + r }
+    SubNeg(Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { l - r }
+    Mul   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { l * r }
+    Pow   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { l.powf(*r) }
+    Div   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { l / r }
+    Rem   (Flpt, Flpt) -> Flpt as fn(env, l: flpt, r: flpt) -> flpt { l % r }
 
-    SubNeg(Flpt) -> Flpt as fn(env, r: flpt) -> flpt { todo!() }
+    SubNeg(Flpt) -> Flpt as fn(env, r: flpt) -> flpt { -r }
 
     // char
     Add   (Char, Uint) -> Char as fn(env, l: char, r: uint) -> char { todo!() }
     SubNeg(Char, Uint) -> Char as fn(env, l: char, r: uint) -> char { todo!() }
 
     // text
-    Add(Text, Text) -> Text as fn(env, l: text, r: text) -> text { todo!() }
+    Add(Text, Text) -> Text as fn(env, l: text, r: text) -> text { format!("{l}{r}") }
 
-    Add(Text, Bool) -> Text as fn(env, l: text, r: bool) -> text { todo!() }
-    Add(Text, Uint) -> Text as fn(env, l: text, r: uint) -> text { todo!() }
-    Add(Text, Sint) -> Text as fn(env, l: text, r: sint) -> text { todo!() }
-    Add(Text, Flpt) -> Text as fn(env, l: text, r: flpt) -> text { todo!() }
-    Add(Text, Char) -> Text as fn(env, l: text, r: char) -> text { todo!() }
-    Add(Text, Text) -> Text as fn(env, l: text, r: text) -> text { todo!() }
+    Add(Text, Bool) -> Text as fn(env, l: text, r: bool) -> text { format!("{l}{r}") }
+    Add(Text, Uint) -> Text as fn(env, l: text, r: uint) -> text { format!("{l}{r}") }
+    Add(Text, Sint) -> Text as fn(env, l: text, r: sint) -> text { format!("{l}{r}") }
+    Add(Text, Flpt) -> Text as fn(env, l: text, r: flpt) -> text { format!("{l}{r}") }
+    Add(Text, Char) -> Text as fn(env, l: text, r: char) -> text { format!("{l}{r}") }
+    Add(Text, Text) -> Text as fn(env, l: text, r: text) -> text { format!("{l}{r}") }
 
-    Add(Bool, Text) -> Text as fn(env, l: bool, r: text) -> text { todo!() }
-    Add(Uint, Text) -> Text as fn(env, l: uint, r: text) -> text { todo!() }
-    Add(Sint, Text) -> Text as fn(env, l: sint, r: text) -> text { todo!() }
-    Add(Flpt, Text) -> Text as fn(env, l: flpt, r: text) -> text { todo!() }
-    Add(Char, Text) -> Text as fn(env, l: char, r: text) -> text { todo!() }
-    Add(Text, Text) -> Text as fn(env, l: text, r: text) -> text { todo!() }
+    Add(Bool, Text) -> Text as fn(env, l: bool, r: text) -> text { format!("{l}{r}") }
+    Add(Uint, Text) -> Text as fn(env, l: uint, r: text) -> text { format!("{l}{r}") }
+    Add(Sint, Text) -> Text as fn(env, l: sint, r: text) -> text { format!("{l}{r}") }
+    Add(Flpt, Text) -> Text as fn(env, l: flpt, r: text) -> text { format!("{l}{r}") }
+    Add(Char, Text) -> Text as fn(env, l: char, r: text) -> text { format!("{l}{r}") }
+    Add(Text, Text) -> Text as fn(env, l: text, r: text) -> text { format!("{l}{r}") }
 ];

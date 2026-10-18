@@ -279,6 +279,23 @@ pub struct FunShape<'src> {
     // TBD: captures?
 }
 
+impl<'src> TypeCompatible<'src> for FunShape<'src> {
+    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+        matches!(other, AbstractType::Concrete(StaticType::Fun(other)) if *self == other.shape)
+    }
+
+    fn to_abstract(&self) -> AbstractType<'src> {
+        self.clone().into()
+    }
+}
+impl<'src> From<FunShape<'src>> for AbstractType<'src> {
+    fn from(shape: FunShape<'src>) -> Self {
+        AbstractType::Concrete(StaticType::Fun(Box::new(FunType {
+            name: "", // HACK
+            shape,
+        })))
+    }
+}
 impl std::fmt::Display for FunShape<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { params, ret } = self;

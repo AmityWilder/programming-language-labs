@@ -13,6 +13,6 @@
     }
     prnt(bigger + " is bigger\n");
 
-    let foobar = foo * bar + 5 * (2 - 8 + bar ** 2) / 3;
+    let foobar = foo * bar + 5 * (2 - 8 + bar ** 2u) / 3;
     prnt("foobar = " + foobar + '\n');
 }
