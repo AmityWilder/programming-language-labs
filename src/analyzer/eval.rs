@@ -178,6 +178,7 @@ impl<'val, 'src> Value<'val, 'src> {
     /// `self` must hold a pointer to a legitimate bytestring representation of
     /// a valid instance of `T`, or a type that is safe to cast to `T`.
     pub(super) unsafe fn cast_into<T: PrimitiveType>(self) -> &'val T {
+        #[cfg(debug_assertions)]
         debug_assert_eq!(
             T::STATIC_TY,
             self.tag_,
@@ -235,10 +236,11 @@ impl<'val, 'src> ValueMut<'val, 'src> {
     }
 
     fn as_ref<'subval>(&'subval self) -> Value<'subval, 'src> {
-        Value {
-            data: &*self.data,
-            tag_: self.tag_.clone(),
-        }
+        Value::new(
+            &*self.data,
+            #[cfg(debug_assertions)]
+            self.tag_.clone(),
+        )
     }
 
     pub(super) const fn cast_from<T: PrimitiveType>(value: &'val mut T) -> Self {
@@ -257,6 +259,7 @@ impl<'val, 'src> ValueMut<'val, 'src> {
     /// `self` must hold a pointer to a legitimate bytestring representation of
     /// a valid instance of `T`, or a type that is safe to cast to `T`.
     pub(super) unsafe fn cast_into<T: PrimitiveType>(self) -> &'val mut T {
+        #[cfg(debug_assertions)]
         debug_assert_eq!(
             T::STATIC_TY,
             self.tag_,
@@ -276,6 +279,7 @@ impl<'val, 'src> ValueMut<'val, 'src> {
     }
 
     fn write_from(self, value: Value<'_, '_>) {
+        #[cfg(debug_assertions)]
         debug_assert_eq!(
             value.tag_, self.tag_,
             "SOUNDNESS ERROR: attempting to write a different type (left) into a buffer (right)"

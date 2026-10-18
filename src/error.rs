@@ -1574,6 +1574,7 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
         ) && block_comment_range.start < line_range.start
             && block_comment_range.end >= line_range.start
         {
+            #[cfg(debug_assertions)]
             debug_assert!(
                 block_comment_range.end < first_line_item_start,
                 "error should not overlap block comment"
