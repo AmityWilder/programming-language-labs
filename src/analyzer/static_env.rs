@@ -1,8 +1,8 @@
 use crate::{
     Todo,
     analyzer::{
-        Expression, FnDef,
-        types::{AbstractType, FunType, TypeCompatible},
+        BlockStmt, Expression, FnDef, Variable,
+        types::{AbstractType, FunShape, TypeCompatible},
     },
     scanner::token::value::Operator,
 };
@@ -23,7 +23,7 @@ impl<'src> Expression<'src> for ConstantValue {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum VarType<'src, 'ty> {
-    Fun(&'ty FunType<'src>),
+    Fun(&'ty FunShape<'src>),
     Abstract(&'ty AbstractType<'src>),
 }
 
@@ -59,8 +59,8 @@ impl std::fmt::Display for VarType<'_, '_> {
 #[derive(Debug)]
 pub enum EnvItem<'src> {
     Op(OpOverload<'src>),
-    Fun(FunType<'src>), // TBD: should this be a shape, or a type?
-    Var(Option<AbstractType<'src>>),
+    Fun((FunShape<'src>, BlockStmt<'src, Variable<'src>>)),
+    Var(Option<AbstractType<'src>>, bool),
     Pvt(ConstantValue),
 }
 
@@ -73,9 +73,8 @@ impl<'src> Expression<'src> for EnvItem<'src> {
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         match self {
-            EnvItem::Op(x) => todo!(),
-            EnvItem::Fun(x) => Some(VarType::Fun(x)),
-            EnvItem::Var(x) => x.as_ref().map(VarType::Abstract),
+            EnvItem::Op(OpOverload { fun, .. }) | EnvItem::Fun((fun, _)) => Some(VarType::Fun(fun)),
+            EnvItem::Var(x, _) => x.as_ref().map(VarType::Abstract),
             EnvItem::Pvt(x) => x.get_type(env).map(VarType::Abstract),
         }
     }
@@ -107,32 +106,13 @@ impl EnvKeyEq for Operator {
 }
 
 #[derive(Debug, Default)]
-struct Scope<'src> {
-    items: Vec<(EnvKey<'src>, EnvItem<'src>)>,
+pub struct Scope<'src> {
+    pub items: Vec<(usize, EnvKey<'src>, EnvItem<'src>)>,
 }
 
 impl<'src> Scope<'src> {
     pub const fn new() -> Self {
         Self { items: Vec::new() }
-    }
-
-    pub fn decl_var(
-        &mut self,
-        name: &'src str,
-        ty: Option<AbstractType<'src>>,
-    ) -> &mut Option<AbstractType<'src>> {
-        match &mut self
-            .items
-            .push_mut((EnvKey::Ident(name), EnvItem::Var(ty)))
-            .1
-        {
-            EnvItem::Var(ty) => ty,
-            _ => unreachable!("pushed a Var::Run"),
-        }
-    }
-
-    pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) {
-        self.items.push((EnvKey::Ident(name), EnvItem::Pvt(value)));
     }
 }
 
@@ -147,13 +127,15 @@ pub enum OperandTypes<'src> {
 pub struct OpOverload<'src> {
     pub operands: OperandTypes<'src>,
     pub output: AbstractType<'src>,
-    pub fun: FunType<'src>,
-    pub def: FnDef<'src>,
+    pub fun: FunShape<'src>,
+    pub def: FnDef<'src, Variable<'src>>,
 }
 
 /// [`Environment`](crate::exec::env::Environment) specialized for static analysis
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct StaticEnvironment<'src> {
+    /// Provides a unique ID to each item, even when items pop off the stack and are replaced.
+    unique_id: std::range::RangeFromIter<usize>,
     /// NOTE: this does NOT represent "the scope where all global variables belong",
     /// this is just the scope of all things outside of any function!!
     /// It is used to guarantee the stack is never empty.
@@ -162,8 +144,9 @@ pub struct StaticEnvironment<'src> {
 }
 
 impl<'src> StaticEnvironment<'src> {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
+            unique_id: std::range::RangeFrom { start: 0 }.into_iter(),
             global: Scope::new(),
             stack: Vec::new(),
         }
@@ -179,8 +162,8 @@ impl<'src> StaticEnvironment<'src> {
             .flat_map(|scope| &scope.items)
             .chain(&self.global.items)
             .rev()
-            .filter(|(k, _)| key.is_matching(k))
-            .map(|(_, v)| v)
+            .filter(|(_, k, _)| key.is_matching(k))
+            .map(|(_, _, v)| v)
     }
 
     /// Returns [`None`] if no item exists with the provided name
@@ -193,17 +176,22 @@ impl<'src> StaticEnvironment<'src> {
             .flat_map(|scope| &mut scope.items)
             .chain(&mut self.global.items)
             .rev()
-            .filter(|(k, _)| key.is_matching(k))
-            .map(|(_, v)| v)
+            .filter(|(_, k, _)| key.is_matching(k))
+            .map(|(_, _, v)| v)
     }
 
     pub fn push_scope(&mut self) {
         self.stack.push(Scope::new());
     }
 
-    // TODO: needs to `Drop` all elements in memory (somehow)!!
-    pub fn pop_scope(&mut self) {
-        self.stack.pop();
+    /// Remember to destruct local items when you call this!
+    #[must_use = "items need to be dropped"]
+    pub fn pop_scope(&mut self) -> Option<Scope<'src>> {
+        self.stack.pop()
+    }
+
+    fn generate_id(&mut self) -> usize {
+        self.unique_id.next().expect("out of memory")
     }
 
     fn curr_scope(&mut self) -> &mut Scope<'src> {
@@ -214,26 +202,36 @@ impl<'src> StaticEnvironment<'src> {
     ///
     /// `is_global`: Whether the variable can have its memory overwritten (does not affect visibility)
     pub fn decl_var(&mut self, name: &'src str, ty: Option<AbstractType<'src>>, is_global: bool) {
+        let id = self.generate_id();
         self.curr_scope()
             .items
-            .push((EnvKey::Ident(name), EnvItem::Var(ty)));
+            .push((id, EnvKey::Ident(name), EnvItem::Var(ty, is_global)));
     }
 
     pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) {
+        let id = self.generate_id();
         self.curr_scope()
             .items
-            .push((EnvKey::Ident(name), EnvItem::Pvt(value)));
+            .push((id, EnvKey::Ident(name), EnvItem::Pvt(value)));
     }
 
     /// UNDER CONSTRUCTION
-    pub fn _decl_fun(&mut self, _shape: OpOverload<'src>, _def: FnDef<'src>) {
-        todo!()
+    pub fn decl_fun(
+        &mut self,
+        name: &'src str,
+        shape: FunShape<'src>,
+        def: BlockStmt<'src, Variable<'src>>,
+    ) {
+        let id = self.generate_id();
+        self.curr_scope()
+            .items
+            .push((id, EnvKey::Ident(name), EnvItem::Fun((shape, def))));
     }
 
     pub fn decl_op(&mut self, op: Operator, def: OpOverload<'src>) {
-        // TODO: what if the overload already exists?
+        let id = self.generate_id();
         self.curr_scope()
             .items
-            .push((EnvKey::Op(op), EnvItem::Op(def)));
+            .push((id, EnvKey::Op(op), EnvItem::Op(def)));
     }
 }
