@@ -1,23 +1,14 @@
 use crate::{
     Todo,
     analyzer::{
-        BlockStmt, Expr, ExprStmt, IfStmt, Literal, Operands, Operation, OrStmt, PrintStmt,
-        Program, Statement, Variable, types::StaticType,
+        Assignment, BlockStmt, Expr, ExprStmt, IfStmt, Literal, Operands, Operation, OrStmt,
+        PrintStmt, Program, Statement, Variable, types::StaticType,
     },
     exec::{env::Environment, error::Failure},
     types::*,
 };
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;
-
-macro_rules! debug_ty {
-    ($Type:expr) => {
-        cfg_select! {
-            debug_assertions => $Type,
-            _ => (),
-        }
-    };
-}
 
 pub trait PrimitiveType {
     const STATIC_TY: StaticType<'static>;
@@ -166,6 +157,15 @@ pub trait Execute<'src> {
     fn exec(&self, env: &mut Environment) -> Result<(), Failure>;
 }
 
+impl<'src> Evaluate<'src> for Assignment<'src> {
+    fn eval<'val>(&'val self, env: &'val mut Environment) -> Result<Value<'val, 'src>, Failure> {
+        let rhs = self.rhs.eval(env);
+        let lvalue = &self.lvalue;
+        // TODO
+        Ok(Value::cast_from(&()))
+    }
+}
+
 impl<'src> Evaluate<'src> for Operation<'src> {
     fn eval<'val>(&'val self, env: &'val mut Environment) -> Result<Value<'val, 'src>, Failure> {
         match &self.operands {
@@ -212,6 +212,7 @@ impl<'src> Evaluate<'src> for Variable<'src> {
 impl<'src> Evaluate<'src> for Expr<'src> {
     fn eval<'val>(&'val self, env: &'val mut Environment) -> Result<Value<'val, 'src>, Failure> {
         match self {
+            Self::Assignment(x) => x.eval(env),
             Self::Op(x) => x.eval(env),
             Self::Literal(x) => x.eval(env),
             Self::Variable(x) => x.eval(env),

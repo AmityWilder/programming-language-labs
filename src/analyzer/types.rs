@@ -1,26 +1,22 @@
 use crate::{
     Todo,
     analyzer::static_env::ConstantValue,
-    error::OpSide,
-    grammar::ast::{AstEnum, AstNode, AstNodeF},
-    scanner::token::{ExpansionData, value::TokenEq},
+    error::{ErrorType, OpSide},
+    scanner::token::value::TokenEq,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    range::Range,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Display implementation is be how the type will be shown in error messages
 pub trait TypeCompatible<'src>: std::fmt::Display {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool;
 
     // TODO: change this to return an actual error
-    fn expect_type(&self, expect: &AbstractType<'_>) -> Result<(), !>
+    fn expect_type(&self, expect: &AbstractType<'src>) -> Result<(), ErrorType<'src>>
     where
         Self: std::fmt::Debug,
     {
         self.is_compatible(expect)
-            .ok_or_else(|| todo!("type mismatch\n expected: {expect:#?}\n found: {self:#?}"))
+            .ok_or_else(|| ErrorType::TypeMismatch(Box::new((expect.clone(), self.to_abstract()))))
     }
 
     fn to_abstract(&self) -> AbstractType<'src>;
@@ -37,32 +33,9 @@ impl<'src, T: ?Sized + TypeCompatible<'src>> TypeCompatible<'src> for &T {
 }
 
 /// Like an [`ArrayType`], but the length is determined at runtime
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct ViewType<'src> {
     pub item: StaticType<'src>,
-}
-
-/// Passthrough references
-impl<'src> AstNode<'src> for ViewType<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.item.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.item.get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.item.get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.item.expansion(source)
-    }
 }
 
 impl<'src> TypeCompatible<'src> for ViewType<'src> {
@@ -86,33 +59,10 @@ impl std::fmt::Display for ViewType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct ArrayType<'src> {
     pub item: StaticType<'src>,
     pub len: usize, // TODO: constant expression? bounds?
-}
-
-/// Passthrough references
-impl<'src> AstNode<'src> for ArrayType<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.item.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.item.get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.item.get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.item.expansion(source)
-    }
 }
 
 impl<'src> TypeCompatible<'src> for ArrayType<'src> {
@@ -136,32 +86,9 @@ impl std::fmt::Display for ArrayType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Ptr<'src> {
     pub to: StaticType<'src>,
-}
-
-/// Passthrough references
-impl<'src> AstNode<'src> for Ptr<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.to.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.to.get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.to.get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.to.expansion(source)
-    }
 }
 
 impl<'src> TypeCompatible<'src> for Ptr<'src> {
@@ -213,29 +140,6 @@ pub struct Fallible<'src> {
     pub or: OrType,
 }
 
-/// Passthrough references
-impl<'src> AstNode<'src> for Fallible<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.then.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.then.get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.then.get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.then.expansion(source)
-    }
-}
-
 impl<'src> TypeCompatible<'src> for Fallible<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::OrTy(other)) if *self == **other)
@@ -257,33 +161,10 @@ impl std::fmt::Display for Fallible<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct RecType<'src> {
     pub name: &'src str,
     pub fields: BTreeMap<&'src str, StaticType<'src>>,
-}
-
-/// Passthrough references
-impl<'src> AstNode<'src> for RecType<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.name.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.name.get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.name.get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.name.expansion(source)
-    }
 }
 
 impl<'src> TypeCompatible<'src> for RecType<'src> {
@@ -307,33 +188,10 @@ impl std::fmt::Display for RecType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct SupType<'src> {
     pub name: &'src str,
     pub variants: BTreeSet<StaticType<'src>>,
-}
-
-/// Passthrough references
-impl<'src> AstNode<'src> for SupType<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.name.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.name.get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.name.get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.name.expansion(source)
-    }
 }
 
 impl<'src> TypeCompatible<'src> for SupType<'src> {
@@ -364,29 +222,6 @@ pub struct SubType<'src> {
     pub reqs: Vec<TypeBound<'src>>,
 }
 
-/// Passthrough references
-impl<'src> AstNode<'src> for SubType<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.name.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.name.get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.name.get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.name.expansion(source)
-    }
-}
-
 impl<'src> TypeCompatible<'src> for SubType<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Sub(other)) if *self == **other)
@@ -408,29 +243,11 @@ impl std::fmt::Display for SubType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct CatType<'src> {
     pub name: &'src str,
     pub repr: Box<StaticType<'src>>,
     pub values: BTreeSet<ConstantValue>,
-}
-
-impl<'src> AstNode<'src> for CatType<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.name.get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.name.get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.name.get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
-        self.name.expansion(source)
-    }
 }
 
 impl<'src> TypeCompatible<'src> for CatType<'src> {
@@ -455,29 +272,11 @@ impl std::fmt::Display for CatType<'_> {
 }
 
 /// A matcher for any function with the specified combination of parameters and return
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct FunShape<'src> {
     pub params: Vec<StaticType<'src>>,
     pub ret: StaticType<'src>,
     // TBD: captures?
-}
-
-impl<'src> AstNode<'src> for FunShape<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.params.as_slice().get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.ret.get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (self.params.as_slice(), &self.ret).get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
-        (self.params.as_slice(), &self.ret).expansion(source)
-    }
 }
 
 impl std::fmt::Display for FunShape<'_> {
@@ -490,35 +289,17 @@ impl std::fmt::Display for FunShape<'_> {
                 f.write_str(", ")?;
             }
             write!(f, "{param}")?;
-            has_prev = true
+            has_prev = true;
         }
         write!(f, ") -> {ret}")
     }
 }
 
 /// A specific, concrete function
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct FunType<'src> {
     pub name: &'src str,
     pub shape: FunShape<'src>,
-}
-
-impl<'src> AstNode<'src> for FunType<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.name.get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.shape.get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.name, &self.shape).get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
-        (&self.name, &self.shape).expansion(source)
-    }
 }
 
 impl<'src> TypeCompatible<'src> for FunType<'src> {
@@ -568,34 +349,16 @@ pub enum PrimitiveType {
     Text,
 }
 
-impl<'src> AstNode<'src> for PrimitiveType {
-    fn get_range_start(&self, _source: &'src str) -> Option<usize> {
-        None
-    }
-
-    fn get_range_end(&self, _source: &'src str) -> Option<usize> {
-        None
-    }
-
-    fn get_range(&self, _source: &'src str) -> Option<Range<usize>> {
-        None
-    }
-
-    fn expansion(&self, _source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
-        None
-    }
-}
-
 impl<'src> TypeCompatible<'src> for PrimitiveType {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Primitive(other)) if self == other)
     }
 
     fn to_abstract(&self) -> AbstractType<'src> {
-        self.clone().into()
+        (*self).into()
     }
 }
-impl<'src> From<PrimitiveType> for AbstractType<'src> {
+impl From<PrimitiveType> for AbstractType<'_> {
     fn from(value: PrimitiveType) -> Self {
         AbstractType::Concrete(StaticType::Primitive(value))
     }
@@ -618,7 +381,7 @@ impl std::fmt::Display for PrimitiveType {
 }
 
 /// Monomorphized or concrete type
-#[derive(Debug, Clone, PartialEq, PartialOrd, AstEnum, AstNodeF)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum StaticType<'src> {
     /// Language-defined
     Primitive(PrimitiveType),
@@ -841,7 +604,7 @@ impl<'src> TypeCompatible<'src> for AbstractType<'src> {
     }
 
     fn to_abstract(&self) -> AbstractType<'src> {
-        self.clone().into()
+        self.clone()
     }
 }
 impl std::fmt::Display for AbstractType<'_> {

@@ -14,14 +14,14 @@ macro_rules! prim_op {
         }
     ) => {
         (
+            Operator::$op,
             OpOverload {
-                op: Operator::$op,
                 operands: OperandTypes::Binary(
                     AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$lhs)),
                     AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$rhs)),
                 ),
                 output: AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$output)),
-                def: FunType {
+                fun: FunType {
                     name: Operator::$op.as_str(),
                     shape: FunShape {
                         params: vec![
@@ -31,23 +31,23 @@ macro_rules! prim_op {
                         ret: StaticType::Primitive(PrimitiveType::$output),
                     },
                 },
-            },
-            {
-                fn fun<'src, 'val>(
-                    $env: &'val mut Environment,
-                    lhs: Value<'val, 'src>,
-                    rhs: Value<'val, 'src>,
-                    out: ValueMut<'val, 'src>,
-                ) {
-                    // SAFETY: static analyzer must ensure soundness
-                    let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs) };
-                    // SAFETY: static analyzer must ensure soundness
-                    let $rhs_name = unsafe { Value::cast_into::<$Rhs>(rhs) };
-                    let res = $def;
-                    // SAFETY: static analyzer must ensure soundness
-                    *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
-                }
-                FnDef::LangOpB(fun)
+                def: {
+                    fn fun<'src, 'val>(
+                        $env: &'val mut Environment,
+                        lhs: Value<'val, 'src>,
+                        rhs: Value<'val, 'src>,
+                        out: ValueMut<'val, 'src>,
+                    ) {
+                        // SAFETY: static analyzer must ensure soundness
+                        let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs) };
+                        // SAFETY: static analyzer must ensure soundness
+                        let $rhs_name = unsafe { Value::cast_into::<$Rhs>(rhs) };
+                        let res = $def;
+                        // SAFETY: static analyzer must ensure soundness
+                        *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
+                    }
+                    FnDef::LangOpB(fun)
+                },
             },
         )
     };
@@ -60,33 +60,33 @@ macro_rules! prim_op {
         }
     ) => {
         (
+            Operator::$op,
             OpOverload {
-                op: Operator::$op,
                 operands: OperandTypes::UnaryPre(AbstractType::Concrete(StaticType::Primitive(
                     PrimitiveType::$rhs,
                 ))),
                 output: AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$output)),
-                def: FunType {
+                fun: FunType {
                     name: Operator::$op.as_str(),
                     shape: FunShape {
                         params: vec![StaticType::Primitive(PrimitiveType::$rhs)],
                         ret: StaticType::Primitive(PrimitiveType::$output),
                     },
                 },
-            },
-            {
-                fn fun<'src, 'val>(
-                    $env: &'val mut Environment,
-                    rhs: Value<'val, 'src>,
-                    out: ValueMut<'val, 'src>,
-                ) {
-                    // SAFETY: static analyzer must ensure soundness
-                    let $rhs_name = unsafe { Value::cast_into::<$Rhs>(rhs) };
-                    let res = $def;
-                    // SAFETY: static analyzer must ensure soundness
-                    *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
-                }
-                FnDef::LangOpU(fun)
+                def: {
+                    fn fun<'src, 'val>(
+                        $env: &'val mut Environment,
+                        rhs: Value<'val, 'src>,
+                        out: ValueMut<'val, 'src>,
+                    ) {
+                        // SAFETY: static analyzer must ensure soundness
+                        let $rhs_name = unsafe { Value::cast_into::<$Rhs>(rhs) };
+                        let res = $def;
+                        // SAFETY: static analyzer must ensure soundness
+                        *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
+                    }
+                    FnDef::LangOpU(fun)
+                },
             },
         )
     };
@@ -99,33 +99,33 @@ macro_rules! prim_op {
         }
     ) => {
         (
+            Operator::$op,
             OpOverload {
-                op: Operator::$op,
                 operands: OperandTypes::UnaryPost(AbstractType::Concrete(StaticType::Primitive(
                     PrimitiveType::$lhs,
                 ))),
                 output: AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$output)),
-                def: FunType {
+                fun: FunType {
                     name: Operator::$op.as_str(),
                     shape: FunShape {
                         params: vec![StaticType::Primitive(PrimitiveType::$lhs)],
                         ret: StaticType::Primitive(PrimitiveType::$output),
                     },
                 },
-            },
-            {
-                fn fun<'src, 'val>(
-                    $env: &'val mut Environment,
-                    lhs: Value<'val, 'src>,
-                    out: ValueMut<'val, 'src>,
-                ) {
-                    // SAFETY: static analyzer must ensure soundness
-                    let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs) };
-                    let res = $def;
-                    // SAFETY: static analyzer must ensure soundness
-                    *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
-                }
-                FnDef::LangOpU(fun)
+                def: {
+                    fn fun<'src, 'val>(
+                        $env: &'val mut Environment,
+                        lhs: Value<'val, 'src>,
+                        out: ValueMut<'val, 'src>,
+                    ) {
+                        // SAFETY: static analyzer must ensure soundness
+                        let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs) };
+                        let res = $def;
+                        // SAFETY: static analyzer must ensure soundness
+                        *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
+                    }
+                    FnDef::LangOpU(fun)
+                },
             },
         )
     };
@@ -139,7 +139,7 @@ macro_rules! primitive_ops {
             $def:expr
         }
     )*) => {
-        pub fn builtin_ops() -> impl IntoIterator<IntoIter: ExactSizeIterator + DoubleEndedIterator, Item = (OpOverload<'static>, FnDef<'static>)> {
+        pub fn builtin_ops() -> impl IntoIterator<IntoIter: ExactSizeIterator + DoubleEndedIterator, Item = (Operator, OpOverload<'static>)> {
             vec![$(
                 prim_op!(
                     $($pre_bin_op)?($lhs_unary$(, $rhs)?)$($post_op)? -> $output
@@ -153,18 +153,7 @@ macro_rules! primitive_ops {
     };
 }
 
-// TBD: should assignment be a special case, since it should be defined for *all* types?
 primitive_ops![
-    // direct assignment
-    Assign(None, None) -> None as fn(env, l: none, r: none) -> none { todo!() }
-    Assign(Fail, Fail) -> None as fn(env, l: fail, r: fail) -> none { todo!() }
-    Assign(Bool, Bool) -> None as fn(env, l: bool, r: bool) -> none { todo!() }
-    Assign(Uint, Uint) -> None as fn(env, l: uint, r: uint) -> none { todo!() }
-    Assign(Sint, Sint) -> None as fn(env, l: sint, r: sint) -> none { todo!() }
-    Assign(Flpt, Flpt) -> None as fn(env, l: flpt, r: flpt) -> none { todo!() }
-    Assign(Char, Char) -> None as fn(env, l: char, r: char) -> none { todo!() }
-    Assign(Text, Text) -> None as fn(env, l: text, r: text) -> none { todo!() }
-
     // bool-assign
     AndAssign (Bool, Bool) -> None as fn (env, l: bool, r: bool) -> none { todo!() }
     OrAssign  (Bool, Bool) -> None as fn (env, l: bool, r: bool) -> none { todo!() }

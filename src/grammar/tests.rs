@@ -1,10 +1,7 @@
 use super::*;
-use crate::{
-    grammar::ast::OpToken,
-    scanner::{
-        token::{punc::Punctuation, value::Operator},
-        tokenize,
-    },
+use crate::scanner::{
+    token::{Lexeme, punc::Punctuation, value::Operator},
+    tokenize,
 };
 
 #[test]
@@ -26,7 +23,7 @@ fn test_parse0() {
                     mac: None
                 }
             }),
-            op: OpToken {
+            op: SpecToken {
                 lex: "+",
                 val: Operator::Add,
                 mac: None
@@ -34,15 +31,14 @@ fn test_parse0() {
             rhs: Expr::binary(Binary {
                 lhs: Expr::unary(Unary {
                     side: OpSide::Right,
-                    op: OpToken {
+                    op: SpecToken {
                         lex: "-",
                         val: Operator::SubNeg,
                         mac: None
                     },
                     operand: Expr::grouping(Grouping {
-                        open: Token {
+                        open: Lexeme {
                             lex: "(",
-                            val: LexValue::Punctuation(Punctuation::LParen),
                             mac: None
                         },
                         expr: Expr::binary(Binary {
@@ -53,7 +49,7 @@ fn test_parse0() {
                                     mac: None
                                 }
                             }),
-                            op: OpToken {
+                            op: SpecToken {
                                 lex: "/",
                                 val: Operator::Div,
                                 mac: None
@@ -66,14 +62,13 @@ fn test_parse0() {
                                 }
                             })
                         }),
-                        close: Token {
+                        close: Lexeme {
                             lex: ")",
-                            val: LexValue::Punctuation(Punctuation::RParen),
                             mac: None
                         }
                     })
                 }),
-                op: OpToken {
+                op: SpecToken {
                     lex: "*",
                     val: Operator::Mul,
                     mac: None

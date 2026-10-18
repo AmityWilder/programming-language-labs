@@ -105,7 +105,7 @@ impl LispDisplay for Variable<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { ident } = self;
         if f.alternate() {
-            write_highlight(std::iter::once(ident), f, &SYNTAX_STYLE_ANSI)
+            std::fmt::Display::fmt(&SYNTAX_STYLE_ANSI[Syntax::Variable].style(ident.lex), f)
         } else {
             f.write_str(ident.lex)
         }

@@ -56,14 +56,15 @@ impl std::fmt::Display for VarType<'_, '_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum StaticVar<'src> {
+#[derive(Debug)]
+pub enum EnvItem<'src> {
+    Op(OpOverload<'src>),
     Fun(FunType<'src>), // TBD: should this be a shape, or a type?
     Var(Option<AbstractType<'src>>),
     Pvt(ConstantValue),
 }
 
-impl<'src> Expression<'src> for StaticVar<'src> {
+impl<'src> Expression<'src> for EnvItem<'src> {
     type Output<'ty>
         = VarType<'src, 'ty>
     where
@@ -72,40 +73,47 @@ impl<'src> Expression<'src> for StaticVar<'src> {
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         match self {
-            StaticVar::Fun(x) => Some(VarType::Fun(x)),
-            StaticVar::Var(x) => x.as_ref().map(VarType::Abstract),
-            StaticVar::Pvt(x) => x.get_type(env).map(VarType::Abstract),
+            EnvItem::Op(x) => todo!(),
+            EnvItem::Fun(x) => Some(VarType::Fun(x)),
+            EnvItem::Var(x) => x.as_ref().map(VarType::Abstract),
+            EnvItem::Pvt(x) => x.get_type(env).map(VarType::Abstract),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Scope<'src> {
-    pub vars: Vec<(&'src str, StaticVar<'src>)>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EnvKey<'src> {
+    Ident(&'src str),
+    Op(Operator),
+}
+
+pub trait EnvKeyEq {
+    fn is_matching(&self, key: &EnvKey<'_>) -> bool;
+}
+impl<T: ?Sized + EnvKeyEq> EnvKeyEq for &T {
+    fn is_matching(&self, key: &EnvKey<'_>) -> bool {
+        (*self).is_matching(key)
+    }
+}
+impl EnvKeyEq for str {
+    fn is_matching(&self, key: &EnvKey<'_>) -> bool {
+        matches!(key, EnvKey::Ident(name) if self == *name)
+    }
+}
+impl EnvKeyEq for Operator {
+    fn is_matching(&self, key: &EnvKey<'_>) -> bool {
+        matches!(key, EnvKey::Op(op) if self == op)
+    }
+}
+
+#[derive(Debug, Default)]
+struct Scope<'src> {
+    items: Vec<(EnvKey<'src>, EnvItem<'src>)>,
 }
 
 impl<'src> Scope<'src> {
     pub const fn new() -> Self {
-        Self { vars: Vec::new() }
-    }
-
-    /// Returns [`None`] if no item exists by the provided name
-    pub fn get<Q>(&self, name: &Q) -> Option<&StaticVar<'src>>
-    where
-        Q: ?Sized + PartialEq<str>,
-    {
-        self.vars.iter().rfind(|(k, _)| name == *k).map(|(_, v)| v)
-    }
-
-    /// Returns [`None`] if no item exists by the provided name
-    pub fn get_mut<Q>(&mut self, name: &Q) -> Option<&mut StaticVar<'src>>
-    where
-        Q: ?Sized + PartialEq<str>,
-    {
-        self.vars
-            .iter_mut()
-            .rfind(|(k, _)| name == *k)
-            .map(|(_, v)| v)
+        Self { items: Vec::new() }
     }
 
     pub fn decl_var(
@@ -113,14 +121,18 @@ impl<'src> Scope<'src> {
         name: &'src str,
         ty: Option<AbstractType<'src>>,
     ) -> &mut Option<AbstractType<'src>> {
-        match &mut self.vars.push_mut((name, StaticVar::Var(ty))).1 {
-            StaticVar::Var(ty) => ty,
+        match &mut self
+            .items
+            .push_mut((EnvKey::Ident(name), EnvItem::Var(ty)))
+            .1
+        {
+            EnvItem::Var(ty) => ty,
             _ => unreachable!("pushed a Var::Run"),
         }
     }
 
     pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) {
-        self.vars.push((name, StaticVar::Pvt(value)));
+        self.items.push((EnvKey::Ident(name), EnvItem::Pvt(value)));
     }
 }
 
@@ -131,20 +143,22 @@ pub enum OperandTypes<'src> {
     UnaryPre(AbstractType<'src>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct OpOverload<'src> {
-    pub op: Operator,
     pub operands: OperandTypes<'src>,
     pub output: AbstractType<'src>,
-    pub def: FunType<'src>,
+    pub fun: FunType<'src>,
+    pub def: FnDef<'src>,
 }
 
 /// [`Environment`](crate::exec::env::Environment) specialized for static analysis
 #[derive(Debug, Default)]
 pub struct StaticEnvironment<'src> {
+    /// NOTE: this does NOT represent "the scope where all global variables belong",
+    /// this is just the scope of all things outside of any function!!
+    /// It is used to guarantee the stack is never empty.
     global: Scope<'src>,
     stack: Vec<Scope<'src>>,
-    overloads: Vec<(OpOverload<'src>, FnDef<'src>)>,
 }
 
 impl<'src> StaticEnvironment<'src> {
@@ -152,36 +166,39 @@ impl<'src> StaticEnvironment<'src> {
         Self {
             global: Scope::new(),
             stack: Vec::new(),
-            overloads: Vec::new(),
         }
     }
 
     /// Returns [`None`] if no item exists with the provided name
-    pub fn get<Q>(&self, name: &Q) -> Option<&StaticVar<'src>>
+    pub fn lookup<Q>(&self, key: &Q) -> impl DoubleEndedIterator<Item = &EnvItem<'src>>
     where
-        Q: ?Sized + PartialEq<str>,
+        Q: ?Sized + EnvKeyEq,
     {
         self.stack
             .iter()
+            .flat_map(|scope| &scope.items)
+            .chain(&self.global.items)
             .rev()
-            .find_map(|scope| scope.get(name))
-            .or_else(|| self.global.get(name))
+            .filter(|(k, _)| key.is_matching(k))
+            .map(|(_, v)| v)
     }
 
     /// Returns [`None`] if no item exists with the provided name
-    pub fn get_mut<Q>(&mut self, name: &Q) -> Option<&mut StaticVar<'src>>
+    pub fn lookup_mut<Q>(&mut self, key: &Q) -> impl DoubleEndedIterator<Item = &mut EnvItem<'src>>
     where
-        Q: ?Sized + PartialEq<str>,
+        Q: ?Sized + EnvKeyEq,
     {
         self.stack
             .iter_mut()
+            .flat_map(|scope| &mut scope.items)
+            .chain(&mut self.global.items)
             .rev()
-            .find_map(|scope| scope.get_mut(name))
-            .or_else(|| self.global.get_mut(name))
+            .filter(|(k, _)| key.is_matching(k))
+            .map(|(_, v)| v)
     }
 
-    pub fn push_scope(&mut self) -> &mut Scope<'src> {
-        self.stack.push_mut(Scope::new())
+    pub fn push_scope(&mut self) {
+        self.stack.push(Scope::new());
     }
 
     // TODO: needs to `Drop` all elements in memory (somehow)!!
@@ -189,46 +206,34 @@ impl<'src> StaticEnvironment<'src> {
         self.stack.pop();
     }
 
+    fn curr_scope(&mut self) -> &mut Scope<'src> {
+        self.stack.last_mut().unwrap_or(&mut self.global)
+    }
+
     /// Returns a mutable reference to the undetermined type
-    pub fn decl_global_var(
-        &mut self,
-        name: &'src str,
-        ty: Option<AbstractType<'src>>,
-    ) -> &mut Option<AbstractType<'src>> {
-        self.global.decl_var(name, ty)
+    ///
+    /// `is_global`: Whether the variable can have its memory overwritten (does not affect visibility)
+    pub fn decl_var(&mut self, name: &'src str, ty: Option<AbstractType<'src>>, is_global: bool) {
+        self.curr_scope()
+            .items
+            .push((EnvKey::Ident(name), EnvItem::Var(ty)));
     }
 
-    /// Returns [`None`] if there is no local scope, or a mutable reference to the undetermined type if there is
-    #[must_use]
-    pub fn decl_local_var(
-        &mut self,
-        name: &'src str,
-        ty: Option<AbstractType<'src>>,
-    ) -> Option<&mut Option<AbstractType<'src>>> {
-        self.stack.last_mut().map(|scope| scope.decl_var(name, ty))
-    }
-
-    /// Declares at global scope if there is no local scope
     pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) {
-        self.stack
-            .last_mut()
-            .unwrap_or(&mut self.global)
-            .decl_pvt(name, value);
+        self.curr_scope()
+            .items
+            .push((EnvKey::Ident(name), EnvItem::Pvt(value)));
     }
 
-    pub fn decl_operator(&mut self, shape: OpOverload<'src>, def: FnDef<'src>) {
+    /// UNDER CONSTRUCTION
+    pub fn _decl_fun(&mut self, _shape: OpOverload<'src>, _def: FnDef<'src>) {
+        todo!()
+    }
+
+    pub fn decl_op(&mut self, op: Operator, def: OpOverload<'src>) {
         // TODO: what if the overload already exists?
-        self.overloads.push((shape, def));
-    }
-
-    /// Returns [`None`] if the overload isn't defined
-    pub fn get_operator<'env>(
-        &'env self,
-        op: &Operator,
-        operands: &OperandTypes<'src>,
-    ) -> Option<&'env (OpOverload<'src>, FnDef<'src>)> {
-        self.overloads
-            .iter()
-            .rfind(|(shape, _)| shape.op == *op && shape.operands == *operands)
+        self.curr_scope()
+            .items
+            .push((EnvKey::Op(op), EnvItem::Op(def)));
     }
 }

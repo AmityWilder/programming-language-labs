@@ -1,27 +1,22 @@
 use crate::{
     analyzer::{
         eval::{Value, ValueMut},
-        static_env::{OpOverload, OperandTypes, StaticEnvironment, StaticVar, VarType},
+        static_env::{EnvItem, OpOverload, OperandTypes, StaticEnvironment, VarType},
         types::{AbstractType, FunType, PrimitiveType, StaticType, TypeCompatible},
     },
     error::{ContextError, ErrorType, OpSide},
     exec::env::Environment,
-    grammar::ast::{self, AstEnum, AstNode, AstNodeF},
-    scanner::token::{
-        ExpansionData,
-        value::{Keyword, LexValue, Operator},
-    },
+    grammar::ast::{self, VarKeyword},
+    scanner::token::value::{Keyword, LexValue, Operator},
     types::*,
 };
-use std::range::Range;
 
 pub mod builtin_ops;
 pub mod eval;
 pub mod static_env;
 pub mod types;
 
-pub type Error<'src> = Vec<ContextError<'src>>;
-pub type Result<'src, T> = std::result::Result<T, Error<'src>>;
+pub type Result<'src, T> = std::result::Result<T, Vec<ContextError<'src>>>;
 
 pub trait Analyze<'src> {
     /// May use [`None`] if the statement creates no event (e.g. declaring a variable without assigning it)
@@ -71,50 +66,18 @@ impl<'src> Expression<'src> for FnRef<'src> {
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        env.get(self.ident).map(|var| match var {
-            StaticVar::Fun(t) => t,
-            _ => unimplemented!("not the name of a function"), // TODO: can this be an error?
+        env.lookup(self.ident).find_map(|var| match var {
+            EnvItem::Fun(t) => Some(t),
+            _ => None,
         })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNodeF)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Operands<'src> {
     Binary(Expr<'src>, Expr<'src>),
     UnaryPre(Expr<'src>),
     UnaryPost(Expr<'src>),
-}
-
-impl<'src> AstNode<'src> for Operands<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        match self {
-            Operands::Binary(x, _) | Operands::UnaryPre(x) | Operands::UnaryPost(x) => {
-                x.get_range_start(source)
-            }
-        }
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        match self {
-            Operands::Binary(_, x) | Operands::UnaryPre(x) | Operands::UnaryPost(x) => {
-                x.get_range_end(source)
-            }
-        }
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        match self {
-            Operands::Binary(l, r) => (l, r).get_range(source),
-            Operands::UnaryPre(x) | Operands::UnaryPost(x) => x.get_range(source),
-        }
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
-        match self {
-            Operands::Binary(l, r) => (l, r).expansion(source),
-            Operands::UnaryPre(x) | Operands::UnaryPost(x) => x.expansion(source),
-        }
-    }
 }
 
 impl<'src> Operands<'src> {
@@ -134,28 +97,10 @@ impl<'src> Operands<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNodeF)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Operation<'src> {
     pub def: FunType<'src>,
     pub operands: Operands<'src>,
-}
-
-impl<'src> AstNode<'src> for Operation<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.def.get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.operands.get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.def, &self.operands).get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
-        (&self.def, &self.operands).expansion(source)
-    }
 }
 
 impl<'src> Expression<'src> for Operation<'src> {
@@ -184,29 +129,6 @@ pub enum Literal {
     Text(text),
 }
 
-/// Passthrough references
-impl<'src> AstNode<'src> for Literal {
-    #[inline]
-    fn get_range_start(&self, _: &'src str) -> Option<usize> {
-        None
-    }
-
-    #[inline]
-    fn get_range_end(&self, _: &'src str) -> Option<usize> {
-        None
-    }
-
-    #[inline]
-    fn get_range(&self, _: &'src str) -> Option<Range<usize>> {
-        None
-    }
-
-    #[inline]
-    fn expansion(&self, _: &'src str) -> Option<ExpansionData<'src>> {
-        None
-    }
-}
-
 impl<'src> Expression<'src> for Literal {
     type Output<'ty>
         = PrimitiveType
@@ -233,30 +155,7 @@ impl<'src> Expression<'src> for Literal {
 pub struct Variable<'src> {
     pub id: &'src str,
     #[cfg(debug_assertions)]
-    pub _ty: Option<AbstractType<'src>>,
-}
-
-/// Passthrough references
-impl<'src> AstNode<'src> for Variable<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.id.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.id.get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.id.get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.id.expansion(source)
-    }
+    _ty: Option<AbstractType<'src>>,
 }
 
 impl<'src> Expression<'src> for Variable<'src> {
@@ -266,7 +165,7 @@ impl<'src> Expression<'src> for Variable<'src> {
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        env.get(self.id).and_then(|v| v.get_type(env))
+        env.lookup(self.id).next().and_then(|v| v.get_type(env))
     }
 }
 
@@ -304,8 +203,27 @@ impl std::fmt::Display for ExprType<'_, '_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct Assignment<'src> {
+    /// Must evaluate to mutable
+    pub lvalue: Expr<'src>,
+    pub rhs: Expr<'src>,
+}
+
+impl<'src> Expression<'src> for Assignment<'src> {
+    type Output<'ty>
+        = PrimitiveType
+    where
+        'src: 'ty;
+
+    fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
+        Some(PrimitiveType::None)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'src> {
+    Assignment(Box<Assignment<'src>>),
     Op(Box<Operation<'src>>),
     Literal(Literal),
     Variable(Variable<'src>),
@@ -319,6 +237,7 @@ impl<'src> Expression<'src> for Expr<'src> {
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         match self {
+            Self::Assignment(x) => x.get_type(env).map(ExprType::Literal),
             Self::Op(x) => x.get_type(env).map(ExprType::Static),
             Self::Literal(x) => x.get_type(env).map(ExprType::Literal),
             Self::Variable(x) => x.get_type(env).map(ExprType::Variable),
@@ -335,7 +254,7 @@ impl<'src> Analyze<'src> for ast::Expr<'src> {
         env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
         match self {
-            Self::Binary(x) => x.analyze(source, env).map(Box::new).map(Expr::Op),
+            Self::Binary(x) => x.analyze(source, env),
             Self::Unary(x) => x.analyze(source, env).map(Box::new).map(Expr::Op),
             Self::Literal(x) => x.analyze(source, env).map(Expr::Literal),
             Self::Variable(x) => x.analyze(source, env),
@@ -379,16 +298,18 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
         env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
         let ident = self.ident.lex;
-        env.get(ident)
+        env.lookup(ident)
+            .next()
             // TODO: shouldn't Variable have actual meaning?
             .map(|v| {
                 Expr::Variable(Variable {
                     id: ident,
                     #[cfg(debug_assertions)]
                     _ty: match v {
-                        StaticVar::Fun(f) => Some(f.to_abstract()),
-                        StaticVar::Var(t) => t.as_ref().map(TypeCompatible::to_abstract),
-                        StaticVar::Pvt(v) => v.get_type(env).map(TypeCompatible::to_abstract),
+                        EnvItem::Op(o) => todo!(),
+                        EnvItem::Fun(f) => Some(f.to_abstract()),
+                        EnvItem::Var(t) => t.as_ref().map(TypeCompatible::to_abstract),
+                        EnvItem::Pvt(v) => v.get_type(env).map(TypeCompatible::to_abstract),
                     },
                 })
             }) // remember: could be a constant
@@ -422,9 +343,14 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                 OpSide::Left => (Operands::UnaryPost(operand), OperandTypes::UnaryPost(ty)),
                 OpSide::Right => (Operands::UnaryPre(operand), OperandTypes::UnaryPre(ty)),
             };
-            env.get_operator(&self.op.val, &operand_types)
-                .map(|(shape, _)| Operation {
-                    def: shape.def.clone(),
+            env.lookup(&self.op.val)
+                .map(|item| match item {
+                    EnvItem::Op(overload) => overload,
+                    _ => unreachable!("only operators should be stored with operator keys"),
+                })
+                .find(|overload| overload.operands == operand_types)
+                .map(|overload| Operation {
+                    def: overload.fun.clone(),
                     operands,
                 })
                 .ok_or_else(|| vec![todo!("error: no such operator defined")])
@@ -433,41 +359,88 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Binary<'src> {
-    type Ouptut = Operation<'src>;
+    type Ouptut = Expr<'src>;
 
     fn analyze(
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
-        self.lhs
-            .analyze(source, env)
-            .and_then(|lhs| self.rhs.analyze(source, env).map(|rhs| (lhs, rhs)))
-            .and_then(|(lhs, rhs)| {
-                // TODO: turn this into a function of its own
-                // TBD: this can produce two errors. we should return two errors.
-                let Some(l_ty) = lhs
-                    .get_type(env)
-                    .map(|t| t.to_abstract()) else
-                {
-                    return Err(vec![ContextError::node_error(source, &self.lhs, ErrorType::TypeAmbiguity(Box::new(lhs)))]); // TODO: need ranges
-                };
-                let Some(r_ty) = rhs
-                    .get_type(env)
-                    .map(|t| t.to_abstract()) else
-                {
-                    return Err(vec![ContextError::node_error(source, &self.rhs, ErrorType::TypeAmbiguity(Box::new(rhs)))]); // TODO: need ranges
-                };
-                let operands = Operands::Binary(lhs, rhs);
-                let operand_types = OperandTypes::Binary(l_ty, r_ty);
-                let op = &self.op.val;
-                env.get_operator(op, &operand_types)
-                    .ok_or_else(|| vec![todo!("error: no such operator defined\n operator: {op:?}\n operand types: {operand_types:?}\n operands: {operands:?}")])
-                    .map(|(shape, _)| Operation {
-                        def: shape.def.clone(),
-                        operands,
-                    })
-            })
+        let lhs = self.lhs.analyze(source, env)?;
+        let rhs = self.rhs.analyze(source, env)?;
+        let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
+        let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
+        if self.op.val == Operator::Assign {
+            // TODO: cases where lhs is assignable in general, not specifically a variable
+            if let Expr::Variable(var) = &lhs {
+                match (l_ty, r_ty) {
+                    (Some(l_ty), Some(r_ty)) => {
+                        // require rhs to be the same type as lhs
+                        r_ty.expect_type(&l_ty)
+                            .map_err(|e| vec![ContextError::node_error(source, &self.rhs, e)])?;
+                    }
+                    (None, Some(r_ty)) => {
+                        // update lhs type to match rhs
+                        let Some(EnvItem::Var(var)) = env.lookup_mut(var.id).next() else {
+                            unreachable!(
+                                "Expr::Variable should only result from a StaticVar::Var present in `env`"
+                            );
+                        };
+                        *var = Some(r_ty);
+                    }
+                    (Some(_l_ty), None) => todo!("re-analyze rhs knowing its output type"), // TBD: how will this be done?
+                    (None, None) => {
+                        // type ambiguity error
+                        // TBD: which side should be considered ambiguous here?
+                        return Err(vec![ContextError::node_error(
+                            source,
+                            &self.lhs,
+                            ErrorType::TypeAmbiguity(Box::new(lhs)),
+                        )]);
+                    }
+                }
+                Ok(Expr::Assignment(Box::new(Assignment { lvalue: lhs, rhs })))
+            } else {
+                todo!("error: cannot assign twice to immutable")
+            }
+        } else {
+            match (l_ty, r_ty) {
+                (Some(l_ty), Some(r_ty)) => {
+                    let operands = Operands::Binary(lhs, rhs);
+                    let operand_types = OperandTypes::Binary(l_ty, r_ty);
+                    let op = &self.op.val;
+                    env.lookup(op)
+                        .map(|item| match item {
+                            EnvItem::Op(overload) => overload,
+                            _ => unreachable!("only operators should be stored with operator keys"),
+                        })
+                        .find(|overload| overload.operands == operand_types)
+                        .ok_or_else(|| vec![todo!("error: no such operator defined\n operator: {op:?}\n operand types: {operand_types:?}\n operands: {operands:?}")])
+                        .map(|overload| Expr::Op(Box::new(Operation {
+                            def: overload.fun.clone(),
+                            operands,
+                        })))
+                }
+
+                (l_ty, r_ty) => Err(std::iter::chain(
+                    l_ty.is_none().then(|| {
+                        ContextError::node_error(
+                            source,
+                            &self.lhs,
+                            ErrorType::TypeAmbiguity(Box::new(lhs)),
+                        )
+                    }),
+                    r_ty.is_none().then(|| {
+                        ContextError::node_error(
+                            source,
+                            &self.rhs,
+                            ErrorType::TypeAmbiguity(Box::new(rhs)),
+                        )
+                    }),
+                )
+                .collect::<Vec<ContextError<'src>>>()),
+            }
+        }
     }
 }
 
@@ -475,24 +448,6 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExprStmt<'src> {
     expr: Expr<'src>,
-}
-
-impl<'src> AstNode<'src> for ExprStmt<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.expr.get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.expr.get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.expr.get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
-        self.expr.expansion(source)
-    }
 }
 
 impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
@@ -503,45 +458,24 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
-        self.expr.analyze(source, env).map(|expr| {
-            ExprStmt { expr }
-
-            // if let Some(ty) = expr.get_type(env) {
-            //     if *ty == AbstractType::Concrete(StaticType::None) {
-            //         Ok(ExprStmt { expr })
-            //     } else {
-            //         Err(todo!("error: expected none, found {ty:?}"))
-            //     }
-            // } else if let Expr::Op(x) = &mut expr
-            //     && let Operation {
-            //         def: Operator::Assign,
-            //         operands: Operands::Binary(Expr::Variable(lhs), rhs),
-            //     } = &mut **x
-            // {
-            //     if let Some(rhs_ty) = rhs.get_type(env).cloned() {
-            //         if let Some(var) = env.get_mut(lhs.id) {
-            //             match var {
-            //                 Var::Run(t) => {
-            //                     *t = Some(rhs_ty);
-            //                     lhs._ty = t.clone();
-            //                     println!("late initialization of {} as {t:?}", lhs.id);
-            //                     Ok(ExprStmt { expr })
-            //                 }
-            //                 Var::Pvt(_) => Err(todo!(
-            //                     "error: cannot assign to constant after initialization"
-            //                 )),
-            //             }
-            //         } else {
-            //             Err(todo!("error: no variable named {}", lhs.id))
-            //         }
-            //     } else {
-            //         Err(todo!("error: expression has no type\n expression: {rhs:?}"))
-            //     }
-            // } else {
-            //     Err(todo!(
-            //         "error: expression has no type\n expression: {expr:?}"
-            //     ))
-            // }
+        self.expr.analyze(source, env).and_then(|expr| {
+            if let Some(ty) = expr.get_type(env) {
+                // TBD: can this be a "must_use" lint instead?
+                const REQUIRE_NONE: bool = false;
+                if REQUIRE_NONE {
+                    ty.expect_type(&AbstractType::Concrete(StaticType::Primitive(
+                        PrimitiveType::None,
+                    )))
+                    .map_err(|e| vec![ContextError::node_error(source, &self.expr, e)])?;
+                }
+                Ok(ExprStmt { expr })
+            } else {
+                Err(vec![ContextError::node_error(
+                    source,
+                    &self.expr,
+                    ErrorType::TypeAmbiguity(Box::new(expr)),
+                )])
+            }
         })
     }
 }
@@ -549,29 +483,6 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrintStmt<'src> {
     expr: Expr<'src>,
-}
-
-/// Passthrough references
-impl<'src> AstNode<'src> for PrintStmt<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.expr.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.expr.get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.expr.get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.expr.expansion(source)
-    }
 }
 
 impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
@@ -598,7 +509,7 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstEnum)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum OrStmt<'src> {
     More(IfStmt<'src>),
     Last(BlockStmt<'src>),
@@ -639,29 +550,6 @@ pub struct IfStmt<'src> {
     pub pred: Expr<'src>,
     pub then: BlockStmt<'src>,
     pub or: Option<Box<OrStmt<'src>>>,
-}
-
-/// Passthrough references
-impl<'src> AstNode<'src> for IfStmt<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.pred.get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        (&self.then, self.or.as_deref()).get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.pred, (&self.then, self.or.as_deref())).get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.pred, (&self.then, self.or.as_deref())).expansion(source)
-    }
 }
 
 impl<'src> Expression<'src> for IfStmt<'src> {
@@ -721,29 +609,6 @@ pub struct BlockStmt<'src> {
     pub stmts: Vec<Statement<'src>>,
 }
 
-/// Passthrough references
-impl<'src> AstNode<'src> for BlockStmt<'src> {
-    #[inline]
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.stmts.as_slice().get_range_start(source)
-    }
-
-    #[inline]
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.stmts.as_slice().get_range_end(source)
-    }
-
-    #[inline]
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.stmts.as_slice().get_range(source)
-    }
-
-    #[inline]
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.stmts.as_slice().expansion(source)
-    }
-}
-
 impl<'src> Expression<'src> for BlockStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
@@ -782,7 +647,7 @@ impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement<'src> {
     Expr(ExprStmt<'src>),
     Print(PrintStmt<'src>),
@@ -840,7 +705,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
             .transpose()?;
         match self.var_kw.val {
             // Constant
-            LexValue::Keyword(Keyword::Pvt) => {
+            VarKeyword::Pvt => {
                 env.decl_pvt(
                     self.ident.lex,
                     expr.map(|_| todo!())
@@ -849,29 +714,17 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                 Ok(None)
             }
 
-            // Global
-            LexValue::Keyword(Keyword::Uni) => {
-                env.decl_global_var(
+            // Variable
+            VarKeyword::Uni | VarKeyword::Let => {
+                env.decl_var(
                     self.ident.lex,
                     expr.as_ref()
                         .and_then(|x| x.get_type(env))
                         .map(|t| t.to_abstract()),
+                    true,
                 );
                 Ok(expr.map(|expr| ExprStmt { expr }))
             }
-
-            // Local
-            LexValue::Keyword(Keyword::Let) => env
-                .decl_local_var(
-                    self.ident.lex,
-                    expr.as_ref()
-                        .and_then(|x| x.get_type(env))
-                        .map(|t| t.to_abstract()),
-                )
-                .map(|_| expr.map(|expr| ExprStmt { expr }))
-                .ok_or_else(|| todo!("error: can't use `let` at global scope")),
-
-            _ => unimplemented!("should be caught by grammar"),
         }
     }
 }
@@ -897,28 +750,10 @@ pub struct Program<'src> {
     stmts: Vec<Statement<'src>>,
 }
 
-impl<'src> AstNode<'src> for Program<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.stmts.first().get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.stmts.last().get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.stmts.as_slice().get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<crate::scanner::token::ExpansionData<'src>> {
-        self.stmts.as_slice().expansion(source)
-    }
-}
-
 pub fn analyze<'src>(source: &'src str, prgm: &ast::Program<'src>) -> Result<'src, Program<'src>> {
     let mut env = StaticEnvironment::new();
-    for (overload, def) in builtin_ops::builtin_ops() {
-        env.decl_operator(overload, def);
+    for (op, def) in builtin_ops::builtin_ops() {
+        env.decl_op(op, def);
     }
     prgm.decls
         .iter()

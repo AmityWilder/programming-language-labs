@@ -1,8 +1,11 @@
 use crate::{
     error::{ContextError, ErrorType, OpSide},
     exec::eval::ValueType,
-    grammar::ast::{AstNodeFinal, Binary, Expr, Literal, OpToken, Unary},
-    scanner::token::value::{Keyword, LexValue, Operator},
+    grammar::ast::{AstNodeFinal, Binary, Expr, Literal, TypenameKeyword, Unary},
+    scanner::token::{
+        SpecToken,
+        value::{LexValue, Operator},
+    },
     types::fsize,
 };
 
@@ -16,7 +19,7 @@ impl<'src> PpOpError<'src> {
     fn contextualize(
         self,
         source: &'src str,
-        op: &OpToken<'src>,
+        op: &SpecToken<'src, Operator>,
         lhs: Option<&Expr<'src>>,
         rhs: Option<&Expr<'src>>,
     ) -> ContextError<'src> {
@@ -439,12 +442,12 @@ where
                 ));
             }
             match inner.name.val {
-                LexValue::Keyword(Keyword::Bool) => Ok(PpValue::Bool),
-                LexValue::Keyword(Keyword::Sint) => Ok(PpValue::Sint),
-                LexValue::Keyword(Keyword::Uint) => Ok(PpValue::Uint),
-                LexValue::Keyword(Keyword::Flpt) => Ok(PpValue::Flpt),
-                LexValue::Keyword(Keyword::Char) => Ok(PpValue::Char),
-                LexValue::Keyword(Keyword::Text) => Ok(PpValue::Text),
+                Some(TypenameKeyword::Bool) => Ok(PpValue::Bool),
+                Some(TypenameKeyword::Sint) => Ok(PpValue::Sint),
+                Some(TypenameKeyword::Uint) => Ok(PpValue::Uint),
+                Some(TypenameKeyword::Flpt) => Ok(PpValue::Flpt),
+                Some(TypenameKeyword::Char) => Ok(PpValue::Char),
+                Some(TypenameKeyword::Text) => Ok(PpValue::Text),
                 _ => Err(ContextError::token_error(
                     source,
                     Some(&inner.name),
