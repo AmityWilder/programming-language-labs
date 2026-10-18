@@ -309,6 +309,7 @@ impl<'src> CementVars<'src> for Variable<'src> {
             range: *ranges
                 .get(self.unique_id)
                 .expect("unique_id missing from ranges"),
+            #[cfg(debug_assertions)]
             ty_: match self
                 ._ty
                 .expect("all types should be determined by this point")
@@ -316,6 +317,8 @@ impl<'src> CementVars<'src> for Variable<'src> {
                 AbstractType::Concrete(ty) => ty,
                 t => panic!("all variables should be concrete by this point\n type: {t}"),
             },
+            #[cfg(not(debug_assertions))]
+            _marker: PhantomData,
         }
     }
 }
