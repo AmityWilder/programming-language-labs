@@ -918,8 +918,7 @@ impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
         env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
         env.push_scope().unwrap_or_else(|| {
-            // TODO: make this an error when functions are implemented
-            println!("warning: cannot push a scope here, need to be in a function");
+            todo!("warning: cannot push a scope here, need to be in a function");
         });
         self.body
             .iter()
@@ -927,12 +926,9 @@ impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
             .collect::<Result<'src, Vec<_>>>()
             .map(|stmts| BlockStmt { stmts })
             .inspect(|_| {
-                // TODO: make this a panic when functions are implemented
                 // TODO: drop each variable in scope
                 if env.pop_scope().is_none() {
-                    println!(
-                        "scope pushes and pops should be balanced - tried to pop global scope"
-                    );
+                    todo!("scope pushes and pops should be balanced - tried to pop global scope");
                 }
             })
     }
@@ -1087,6 +1083,7 @@ pub fn analyze<'src>(source: &'src str, prgm: &ast::Program<'src>) -> Result<'sr
     for (op, def) in builtin_ops::builtin_ops() {
         env.decl_op(op, def);
     }
+    env.push_layer(); // HACK: remove this when functions are implemented
     prgm.decls
         .iter()
         .filter_map(|decl| decl.analyze(source, &mut env).transpose())
