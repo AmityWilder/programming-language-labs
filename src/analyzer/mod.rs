@@ -1016,6 +1016,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
+        let ident = self.ident.lex;
         let expr = self
             .assignment
             .as_ref()
@@ -1025,7 +1026,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
             // Constant
             VarKeyword::Pvt => env
                 .decl_pvt(
-                    self.ident.lex,
+                    ident,
                     expr.map(|_| todo!("constant folding"))
                         .ok_or_else(|| vec![todo!("error: missing assignment for constant")])?,
                 )
@@ -1035,14 +1036,27 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
             // Variable
             VarKeyword::Uni | VarKeyword::Let => env
                 .decl_var(
-                    self.ident.lex,
+                    ident,
                     expr.as_ref()
                         .and_then(|x| x.get_type(env))
                         .map(|t| t.to_abstract()),
                     true,
                 )
                 .map_err(|e| vec![todo!("error: {e}")])
-                .map(|()| expr.map(|expr| ExprStmt { expr })),
+                .map(|(unique_id, _ty, is_global)| {
+                    expr.map(|rhs| ExprStmt {
+                        expr: Expr::Assignment(Box::new(Assignment {
+                            lvalue: Expr::Variable(Variable {
+                                unique_id,
+                                ident,
+                                is_global,
+                                #[cfg(debug_assertions)]
+                                _ty: _ty.clone(),
+                            }),
+                            rhs,
+                        })),
+                    })
+                }),
         }
     }
 }

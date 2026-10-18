@@ -346,7 +346,12 @@ impl<'src> StaticEnvironment<'src> {
         self.curr_layer_mut().and_then(|layer| layer.scopes.pop())
     }
 
-    fn decl_item(&mut self, key: EnvKey<'src>, val: EnvItem<'src>, size: Option<usize>) {
+    fn decl_item(
+        &mut self,
+        key: EnvKey<'src>,
+        val: EnvItem<'src>,
+        size: Option<usize>,
+    ) -> &mut ScopeItem<'src> {
         // TBD: should variables, globals, constants, and functions all be stored together?
         // should constants even be stored at runtime at all?
         let atop = self
@@ -359,7 +364,9 @@ impl<'src> StaticEnvironment<'src> {
             key,
             pos: size.map_or(MemPos::Unknown, MemPos::Blocked),
         });
-        self.curr_scope_mut().items.push(ScopeItem { id, key, val });
+        self.curr_scope_mut()
+            .items
+            .push_mut(ScopeItem { id, key, val })
     }
 
     /// `is_global`:
@@ -372,7 +379,7 @@ impl<'src> StaticEnvironment<'src> {
         name: &'src str,
         ty: Option<AbstractType<'src>>,
         is_global: bool,
-    ) -> Result<(), TypeSizeError> {
+    ) -> Result<(usize, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
         let size = ty
             .as_ref()
             .and_then(|t| match t {
@@ -380,8 +387,16 @@ impl<'src> StaticEnvironment<'src> {
                 _ => None, // awaiting monomorphization
             })
             .transpose()?;
-        self.decl_item(EnvKey::Ident(name), EnvItem::Var(ty, is_global), size);
-        Ok(())
+        Ok(
+            match self.decl_item(EnvKey::Ident(name), EnvItem::Var(ty, is_global), size) {
+                ScopeItem {
+                    id,
+                    key: _,
+                    val: EnvItem::Var(ty, is_global),
+                } => (*id, ty, *is_global),
+                _ => unreachable!("pushed a var"),
+            },
+        )
     }
 
     pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) -> Result<(), TypeSizeError> {
