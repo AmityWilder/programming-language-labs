@@ -112,14 +112,12 @@ impl<'src> CementVars<'src> for Operands<Operation<'src>, Variable<'src>> {
 }
 
 pub type BinaryOpFn = for<'val, 'srcf> fn(
-    &'val Environment,
     crate::exec::value::ValueMut<'val, 'srcf>,
     crate::exec::value::Value<'val, 'srcf>,
     crate::exec::value::Value<'val, 'srcf>,
 ) -> std::result::Result<(), Failure>;
 
 pub type UnaryOpFn = for<'val, 'srcf> fn(
-    &'val Environment,
     crate::exec::value::ValueMut<'val, 'srcf>,
     crate::exec::value::Value<'val, 'srcf>,
 ) -> std::result::Result<(), Failure>;
@@ -141,6 +139,7 @@ pub enum RunOperation<'src> {
         #[cfg(debug_assertions)] StaticType<'src>,
         #[cfg(not(debug_assertions))] (),
         BinaryOpFn,
+        // output size
         usize,
         Expr<Self, RunVariable<'src>>,
         Expr<Self, RunVariable<'src>>,
@@ -149,6 +148,7 @@ pub enum RunOperation<'src> {
         #[cfg(debug_assertions)] StaticType<'src>,
         #[cfg(not(debug_assertions))] (),
         UnaryOpFn,
+        // output size
         usize,
         Expr<Self, RunVariable<'src>>,
     ),
@@ -156,6 +156,7 @@ pub enum RunOperation<'src> {
         #[cfg(debug_assertions)] StaticType<'src>,
         #[cfg(not(debug_assertions))] (),
         UnaryOpFn,
+        // output size
         usize,
         Expr<Self, RunVariable<'src>>,
     ),
