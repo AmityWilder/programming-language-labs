@@ -35,55 +35,6 @@ primitive_types! {
 }
 
 #[derive(Clone, PartialEq, PartialOrd, Default)]
-pub struct OwnedValue<'src> {
-    pub data: Box<[u8]>,
-
-    /// For ensuring type checker is sound
-    #[cfg(debug_assertions)]
-    tag_: StaticType<'src>,
-
-    #[cfg(not(debug_assertions))]
-    _marker: PhantomData<&'src ()>,
-}
-
-impl std::fmt::Debug for OwnedValue<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.as_ref().fmt(f)
-    }
-}
-
-impl<'src> OwnedValue<'src> {
-    fn new<T>(data: T, #[cfg(debug_assertions)] tag_: StaticType<'src>) -> Self
-    where
-        T: Into<Box<[u8]>>,
-    {
-        Self {
-            data: data.into(),
-            #[cfg(debug_assertions)]
-            tag_,
-            #[cfg(not(debug_assertions))]
-            _marker: PhantomData,
-        }
-    }
-
-    fn as_ref(&self) -> Value<'_, 'src> {
-        Value::new(
-            &self.data,
-            #[cfg(debug_assertions)]
-            self.tag_.clone(),
-        )
-    }
-
-    fn as_mut(&mut self) -> ValueMut<'_, 'src> {
-        ValueMut::new(
-            &mut self.data,
-            #[cfg(debug_assertions)]
-            self.tag_.clone(),
-        )
-    }
-}
-
-#[derive(Clone, PartialEq, PartialOrd, Default)]
 pub struct Value<'val, 'src> {
     pub data: &'val [u8],
 
@@ -154,14 +105,6 @@ impl<'val, 'src> Value<'val, 'src> {
         }
     }
 
-    fn into_owned(self) -> OwnedValue<'src> {
-        OwnedValue::new(
-            self.data,
-            #[cfg(debug_assertions)]
-            self.tag_,
-        )
-    }
-
     pub(super) const fn cast_from<T: PrimitiveType>(value: &'val T) -> Self {
         let len = std::mem::size_of_val(value);
         let data = (&raw const *value).cast();
@@ -227,14 +170,6 @@ impl<'val, 'src> ValueMut<'val, 'src> {
         }
     }
 
-    fn into_owned(self) -> OwnedValue<'src> {
-        OwnedValue::new(
-            self.data,
-            #[cfg(debug_assertions)]
-            self.tag_,
-        )
-    }
-
     fn as_ref<'subval>(&'subval self) -> Value<'subval, 'src> {
         Value::new(
             &*self.data,
@@ -291,7 +226,7 @@ impl<'val, 'src> ValueMut<'val, 'src> {
 
 /// Yeilds a value, but does not mutate state
 pub trait Evaluate<'src> {
-    fn eval(&self, env: &Environment) -> Result<OwnedValue<'src>, Failure>;
+    fn eval<'val>(&'val self, env: &'val Environment) -> Result<Value<'val, 'src>, Failure>;
 }
 
 /// Mutates state, does not yeild a value
@@ -318,60 +253,41 @@ impl<'src> Execute<'src> for Assignment<RunOperation<'src>, RunVariable<'src>> {
 }
 
 impl<'src> Evaluate<'src> for RunOperation<'src> {
-    fn eval(&self, env: &Environment) -> Result<OwnedValue<'src>, Failure> {
+    fn eval<'val>(&'val self, env: &'val Environment) -> Result<Value<'val, 'src>, Failure> {
         match *self {
             RunOperation::Binary(ref ty_, ref def, out_size, ref lhs, ref rhs) => {
-                let lhs = lhs.eval(env)?;
-                let rhs = rhs.eval(env)?;
-                let mut out = OwnedValue::new(
-                    vec![0xee; out_size],
-                    #[cfg(debug_assertions)]
-                    ty_.clone(),
-                );
-                def(env, out.as_mut(), lhs.as_ref(), rhs.as_ref()).map(|()| out)
+                def(env, out, lhs.eval(env)?, rhs.eval(env)?)
             }
             RunOperation::UnaryPre(ref ty_, ref def, out_size, ref rhs) => {
-                let rhs = rhs.eval(env)?;
-                let mut out = OwnedValue::new(
-                    vec![0xee; out_size],
-                    #[cfg(debug_assertions)]
-                    ty_.clone(),
-                );
-                def(env, out.as_mut(), rhs.as_ref()).map(|()| out)
+                def(env, out, rhs.eval(env)?)
             }
             RunOperation::UnaryPost(ref ty_, ref def, out_size, ref lhs) => {
-                let lhs = lhs.eval(env)?;
-                let mut out = OwnedValue::new(
-                    vec![0xee; out_size],
-                    #[cfg(debug_assertions)]
-                    ty_.clone(),
-                );
-                def(env, out.as_mut(), lhs.as_ref()).map(|()| out)
+                def(env, out, lhs.eval(env)?)
             }
         }
     }
 }
 
 impl<'src> Evaluate<'src> for Literal {
-    fn eval<'val>(&'val self, _env: &'val Environment) -> Result<OwnedValue<'src>, Failure> {
+    fn eval<'val>(&'val self, _env: &'val Environment) -> Result<Value<'val, 'src>, Failure> {
         match self {
             Literal::Nevr => unimplemented!("nevr cannot be accessed"), // TBD: should this be a Failure instead?
-            Literal::None => Ok(Value::cast_from(&()).into_owned()),
-            Literal::Fail(val) => Ok(Value::cast_from(val).into_owned()),
-            Literal::Bool(val) => Ok(Value::cast_from(val).into_owned()),
-            Literal::Byte(val) => Ok(Value::cast_from(val).into_owned()),
-            Literal::Uint(val) => Ok(Value::cast_from(val).into_owned()),
-            Literal::Sint(val) => Ok(Value::cast_from(val).into_owned()),
-            Literal::Flpt(val) => Ok(Value::cast_from(val).into_owned()),
-            Literal::Char(val) => Ok(Value::cast_from(val).into_owned()),
-            Literal::Text(val) => Ok(Value::cast_from(val).into_owned()),
+            Literal::None => Ok(Value::cast_from(&())),
+            Literal::Fail(val) => Ok(Value::cast_from(val)),
+            Literal::Bool(val) => Ok(Value::cast_from(val)),
+            Literal::Byte(val) => Ok(Value::cast_from(val)),
+            Literal::Uint(val) => Ok(Value::cast_from(val)),
+            Literal::Sint(val) => Ok(Value::cast_from(val)),
+            Literal::Flpt(val) => Ok(Value::cast_from(val)),
+            Literal::Char(val) => Ok(Value::cast_from(val)),
+            Literal::Text(val) => Ok(Value::cast_from(val)),
         }
     }
 }
 
 impl<'src> Evaluate<'src> for RunVariable<'src> {
-    fn eval(&self, env: &Environment) -> Result<OwnedValue<'src>, Failure> {
-        Ok(OwnedValue::new(
+    fn eval<'val>(&'val self, env: &'val Environment) -> Result<Value<'val, 'src>, Failure> {
+        Ok(Value::new(
             env.stack()
                 .get(self.range)
                 .expect("should be guaranteed by static analysis"),
@@ -382,7 +298,7 @@ impl<'src> Evaluate<'src> for RunVariable<'src> {
 }
 
 impl<'src> Evaluate<'src> for Expr<RunOperation<'src>, RunVariable<'src>> {
-    fn eval(&self, env: &Environment) -> Result<OwnedValue<'src>, Failure> {
+    fn eval<'val>(&'val self, env: &'val Environment) -> Result<Value<'val, 'src>, Failure> {
         match self {
             Self::Assignment(_) => unreachable!("should be handled by outer statement"),
             Self::Op(x) => x.eval(env),
@@ -417,7 +333,7 @@ impl<'src> Execute<'src> for PrintStmt<RunOperation<'src>, RunVariable<'src>> {
     fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         let res = self.expr.eval(env)?;
         // SAFETY: static analyzer must ensure soundness
-        let msg = unsafe { res.as_ref().cast_into::<text>() };
+        let msg = unsafe { res.cast_into::<text>() };
         print!("{msg}");
         Ok(())
     }
@@ -429,7 +345,7 @@ impl<'src> Execute<'src> for IfStmt<RunOperation<'src>, RunVariable<'src>> {
         loop {
             let res = if_stmt.pred.eval(env)?;
             // SAFETY: static analyzer must ensure soundness
-            break if *unsafe { res.as_ref().cast_into::<bool>() } {
+            break if *unsafe { res.cast_into::<bool>() } {
                 &if_stmt.then
             } else if let Some(or) = if_stmt.or.as_deref() {
                 match or {
