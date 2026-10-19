@@ -4,7 +4,7 @@ use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::{Expr, Operation, Variable, types::AbstractType},
     arrayvec::ArrayVec,
-    exec::{error::Failure, eval::ValueType},
+    exec::error::Failure,
     grammar::ast::AstNodeFinal,
     highlight::{
         style::{Color, Style, StyleWrapper},
@@ -20,7 +20,6 @@ use crate::{
         },
         token::{
             ExpansionData, Lexical, Token, escape_char,
-            punc::Punctuation,
             value::{Operator, TokenEq},
         },
     },
@@ -747,7 +746,7 @@ pub enum ErrorType<'src> {
     /// The operands in a binary operation are of incompatible type
     #[code(PRE, 26)]
     #[err({ op, l_ty, r_ty, .. }, |f| write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"))]
-    #[inlay({ op, l_ty, r_ty, .. }, |f| write!(f, "{} is not supported between operands of these types", op.to_token_eq().op_description(&[l_ty.to_value_type(), r_ty.to_value_type()])))]
+    #[inlay({ .. }, |f| write!(f, "operation is not supported between operands of these types"))]
     #[help({ op, l_ty, r_ty, .. }, |f, _src| {
         write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
         match op {
@@ -765,10 +764,10 @@ pub enum ErrorType<'src> {
             _ => Ok(())
         }
     })]
-    #[info({ l_ty, l_range, r_ty, r_range, .. }, [
-        (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: l_ty.to_value_type() }),
-        (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty.to_value_type() }),
-    ])]
+    // #[info({ l_ty, l_range, r_ty, r_range, .. }, [
+    //     (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: l_ty }),
+    //     (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty }),
+    // ])]
     PreIncompatible {
         /// The binary operator
         op: Operator,
@@ -781,9 +780,8 @@ pub enum ErrorType<'src> {
     /// The operand in a unary operation is of an unsupported type
     #[code(PRE, 27)]
     #[err({ op, r_ty, .. }, |f| write!(f, "`{op}` is not supported for {r_ty}"))]
-    #[inlay({ op, r_ty, .. }, |f| write!(f, "{} is not supported for operands of this type", op.to_token_eq().op_description(&[r_ty.to_value_type()])))]
+    #[inlay({ .. }, |f| write!(f, "operation is not supported for operands of this type"))]
     #[help({ .. }, |f, _src| write!(f, "try a different operator or convert the type"))]
-    #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty.to_value_type() })])]
     PreUnsupported {
         /// The unary operator
         op: Operator,
@@ -912,49 +910,34 @@ pub enum ErrorType<'src> {
     /// The operands in a binary operation are of incompatible type
     #[code(CMP, 42)]
     #[err({ op, l_ty, r_ty, .. }, |f| write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"))]
-    #[inlay({ op, l_ty, r_ty, .. }, |f| write!(f, "{} is not supported between operands of these types", op.op_description(&[*l_ty, *r_ty])))]
-    #[help({ op, l_ty, r_ty, .. }, |f, _src| {
-        write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
-        match op {
-            TokenEq::Punctuation(
-                Punctuation::And |
-                Punctuation::Xor |
-                Punctuation::Or |
-                Punctuation::Nand |
-                Punctuation::Nor |
-                Punctuation::Xnor
-            ) if matches!(l_ty, ValueType::Bool) != matches!(r_ty, ValueType::Bool)
-                // TODO: the user might have used a boolean literal/variable, not a comparison; this message might not be helpful in that case
-                => write!(f, "\n\nit looks like you may have been trying to perform a bitwise operation, but one side resolves to a boolean.\n\
-                    bitwise/logic operations have lower precedence than comparisons, so you may need to wrap the bitwise operation in parentheses."),
-
-            _ => Ok(())
-        }
+    #[inlay({ .. }, |f| write!(f, "operation is not supported between operands of these types"))]
+    #[help({ .. }, |f, _src| {
+        write!(f, "try changing operators, converting types, or wrapping something in parentheses")
     })]
     #[info({ l_ty, l_range, r_ty, r_range, .. }, [
-        (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: *l_ty }),
-        (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty }),
+        (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: l_ty.clone() }),
+        (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty.clone() }),
     ])]
     Incompatible {
         /// The binary operator
         op: TokenEq,
         l_range: Range<usize>,
         r_range: Range<usize>,
-        l_ty: ValueType,
-        r_ty: ValueType,
+        l_ty: AbstractType<'src>,
+        r_ty: AbstractType<'src>,
     },
 
     /// The operand in a unary operation is of an unsupported type
     #[code(CMP, 43)]
     #[err({ op, r_ty, .. }, |f| write!(f, "`{op}` is not supported for {r_ty}"))]
-    #[inlay({ op, r_ty, .. }, |f| write!(f, "{} is not supported for operands of this type", op.op_description(&[*r_ty])))]
+    #[inlay({ .. }, |f| write!(f, "operation is not supported for operands of this type"))]
     #[help({ .. }, |f, _src| write!(f, "try a different operator or convert the type"))]
-    #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: *r_ty })])]
+    #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty.clone() })])]
     Unsupported {
         /// The unary operator
         op: TokenEq,
         /// The type of the value on the right side of the operator
-        r_ty: ValueType,
+        r_ty: AbstractType<'src>,
         r_range: Range<usize>,
     },
 
@@ -1420,7 +1403,7 @@ impl RefStyleKind {
 enum LineRefMsg<'src, 'err> {
     Text(&'static str),
     InlineErr(InlineErrMsg<'src, 'err>),
-    TypeResolution(TypeResolutionMsg),
+    TypeResolution(TypeResolutionMsg<'src>),
     OverflowErrorInfo(OverflowErrorInfoMsg),
     FailedConversion(FailedConversionMsg),
 }
@@ -1431,8 +1414,8 @@ impl From<&'static str> for LineRefMsg<'_, '_> {
     }
 }
 
-impl From<TypeResolutionMsg> for LineRefMsg<'_, '_> {
-    fn from(value: TypeResolutionMsg) -> Self {
+impl<'src> From<TypeResolutionMsg<'src>> for LineRefMsg<'src, '_> {
+    fn from(value: TypeResolutionMsg<'src>) -> Self {
         Self::TypeResolution(value)
     }
 }
@@ -1886,13 +1869,13 @@ impl std::fmt::Display for OpSide {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct TypeResolutionMsg {
+#[derive(Debug, Clone, PartialEq)]
+struct TypeResolutionMsg<'src> {
     side: OpSide,
-    ty: ValueType,
+    ty: AbstractType<'src>,
 }
 
-impl std::fmt::Display for TypeResolutionMsg {
+impl std::fmt::Display for TypeResolutionMsg<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { side, ty } = self;
         write!(f, "{side}: type resolves to {ty}")
@@ -2056,14 +2039,14 @@ impl std::fmt::Display for FailedConversionMsg {
         };
         // HACK: not the actual value types, but correct quantity.
         // should be fine as long as signedness doesn't change the description.
-        let op_desc = op.op_description(if *is_binary {
-            [ValueType::SInt, ValueType::SInt].as_slice()
-        } else {
-            [ValueType::SInt].as_slice()
-        });
+        // let op_desc = op.op_description(if *is_binary {
+        //     [ValueType::SInt, ValueType::SInt].as_slice()
+        // } else {
+        //     [ValueType::SInt].as_slice()
+        // });
         write!(
             f,
-            "expression evaluated to {value:?}; {op_desc} requires {side} to be {target_ty}, \
+            "expression evaluated to {value:?}; {op} requires {side} to be {target_ty}, \
              which must be between {min} and {max} ({n} {ord} {broken_bound})",
         )
     }

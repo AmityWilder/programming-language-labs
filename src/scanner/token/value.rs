@@ -3,7 +3,6 @@
 pub use super::{keyword::Keyword, punc::Punctuation};
 use crate::{
     error::{ErrorType, NumErrorKind},
-    exec::eval::ValueType,
     scanner::{
         symbols::{
             BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX, TEXT_DELIM,
@@ -83,12 +82,12 @@ impl TokenEq {
         }
     }
 
-    pub fn op_description(self, operands: &[ValueType]) -> &'static str {
-        match self {
-            TokenEq::Keyword(kw) => kw.op_description(operands),
-            TokenEq::Punctuation(punc) => punc.op_description(operands),
-        }
-    }
+    // pub fn op_description(self, operands: &[ValueType]) -> &'static str {
+    //     match self {
+    //         TokenEq::Keyword(kw) => kw.op_description(operands),
+    //         TokenEq::Punctuation(punc) => punc.op_description(operands),
+    //     }
+    // }
 }
 
 impl std::fmt::Display for TokenEq {
@@ -426,9 +425,9 @@ impl Operator {
         self.to_token_eq().as_str()
     }
 
-    pub fn op_description(self, operands: &[ValueType]) -> &'static str {
-        self.to_token_eq().op_description(operands)
-    }
+    // pub fn op_description(self, operands: &[ValueType]) -> &'static str {
+    //     self.to_token_eq().op_description(operands)
+    // }
 }
 
 impl std::fmt::Display for Operator {

@@ -51,17 +51,16 @@ macro_rules! define_token_eq {
                 }
             }
 
-            #[allow(unused)]
-            pub fn op_description(self, operands: &[$crate::exec::eval::ValueType]) -> &'static str {
-                use $crate::exec::eval::ValueType::*;
-                match self {
-                    $($(Self::$Variant => match operands {
-                        $($operands_pat => $op_desc,)*
-                        _ => unimplemented!("invalid combination of operands"),
-                    },)?)*
-                    _ =>unimplemented!("not an operator"),
-                }
-            }
+            // #[allow(unused)]
+            // pub fn op_description(self, operands: &[$crate::exec::eval::ValueType]) -> &'static str {
+            //     match self {
+            //         $($(Self::$Variant => match operands {
+            //             $($operands_pat => $op_desc,)*
+            //             _ => unimplemented!("invalid combination of operands"),
+            //         },)?)*
+            //         _ =>unimplemented!("not an operator"),
+            //     }
+            // }
         }
 
         impl std::fmt::Display for $Enum {
