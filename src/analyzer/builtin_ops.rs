@@ -1,9 +1,10 @@
 #![allow(unused, reason = "under construction")]
 use super::{
     AbstractType, BlockStmt, Environment, Failure, FnDef, FunType, OpOverload, OperandTypes,
-    Operator, PrimitiveType, StaticType, Value, ValueMut, types::FunShape,
+    Operator, PrimitiveType, StaticType, types::FunShape,
 };
 use crate::{
+    exec::value::{Value, ValueMut},
     spec_ops::{BitRotate, BitShift},
     types::*,
 };

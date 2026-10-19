@@ -1,6 +1,5 @@
 use crate::{
     analyzer::{
-        eval::{Value, ValueMut},
         static_env::{EnvItem, OpOverload, OperandTypes, ScopeItem, StaticEnvironment, VarType},
         types::{
             AbstractType, FunShape, FunType, PrimitiveType, StaticType, TypeCompatible, TypeSize,
@@ -14,10 +13,9 @@ use crate::{
 };
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;
-use std::{collections::HashMap, range::Range};
+use std::range::Range;
 
 pub mod builtin_ops;
-pub mod eval;
 pub mod static_env;
 pub mod types;
 
@@ -115,15 +113,15 @@ impl<'src> CementVars<'src> for Operands<Operation<'src>, Variable<'src>> {
 
 pub type BinaryOpFn = for<'val, 'srcf> fn(
     &'val Environment,
-    ValueMut<'val, 'srcf>,
-    Value<'val, 'srcf>,
-    Value<'val, 'srcf>,
+    crate::exec::value::ValueMut<'val, 'srcf>,
+    crate::exec::value::Value<'val, 'srcf>,
+    crate::exec::value::Value<'val, 'srcf>,
 ) -> std::result::Result<(), Failure>;
 
 pub type UnaryOpFn = for<'val, 'srcf> fn(
     &'val Environment,
-    ValueMut<'val, 'srcf>,
-    Value<'val, 'srcf>,
+    crate::exec::value::ValueMut<'val, 'srcf>,
+    crate::exec::value::Value<'val, 'srcf>,
 ) -> std::result::Result<(), Failure>;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -326,9 +324,9 @@ impl<'src> CementVars<'src> for Variable<'src> {
 /// Runtime variable
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunVariable<'src> {
-    range: Range<usize>,
+    pub range: Range<usize>,
     #[cfg(debug_assertions)]
-    ty_: StaticType<'src>,
+    pub ty_: StaticType<'src>,
     #[cfg(not(debug_assertions))]
     _marker: PhantomData<&'src ()>,
 }
@@ -687,7 +685,7 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
 /// An [`Expr`] that returns [`none`]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExprStmt<O, V> {
-    expr: Expr<O, V>,
+    pub expr: Expr<O, V>,
 }
 
 impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
@@ -732,7 +730,7 @@ impl<'src> CementVars<'src> for ExprStmt<Operation<'src>, Variable<'src>> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrintStmt<O, V> {
-    expr: Expr<O, V>,
+    pub expr: Expr<O, V>,
 }
 
 impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
@@ -1078,7 +1076,7 @@ impl<'src> Analyze<'src> for ast::Declaration<'src> {
 /// A post-analysis program ready for execution
 #[derive(Debug, Clone, Default)]
 pub struct Program<'src> {
-    stmts: Vec<Statement<RunOperation<'src>, RunVariable<'src>>>,
+    pub stmts: Vec<Statement<RunOperation<'src>, RunVariable<'src>>>,
 }
 
 pub fn analyze<'src>(source: &'src str, prgm: &ast::Program<'src>) -> Result<'src, Program<'src>> {

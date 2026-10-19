@@ -425,6 +425,7 @@ impl<'src> StaticEnvironment<'src> {
     pub fn cement_ranges<'loc>(
         &'loc mut self,
     ) -> Result<Box<[Range<usize>]>, impl Iterator<Item = (VarId, &'loc EnvKey<'src>)>> {
+        // TODO: make a pass and put all the static elements in one contiguous region, then put everything else on top of that
         let mut ranges: Vec<Range<usize>> = Vec::with_capacity(self.locs.len());
         let mut locs = self.locs.iter().enumerate();
         while let Some((id, loc)) = locs.next() {

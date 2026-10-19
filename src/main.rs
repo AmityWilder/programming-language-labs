@@ -66,8 +66,9 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
-    analyzer::{analyze, eval::execute},
+    analyzer::analyze,
     error::ContextError,
+    exec::eval::execute,
     grammar::parse,
     highlight::{
         TokenHighlight, highlight,

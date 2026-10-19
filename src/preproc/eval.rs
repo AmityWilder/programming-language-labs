@@ -1,6 +1,5 @@
 use crate::{
     error::{ContextError, ErrorType, OpSide},
-    exec::eval::ValueType,
     grammar::ast::{AstNodeFinal, Binary, Expr, Literal, TypenameKeyword, Unary},
     scanner::token::{
         SpecToken,
@@ -65,16 +64,6 @@ impl PpType {
             Self::UInt => "uint",
             Self::SInt => "sint",
             Self::Macro => "macro identifier",
-        }
-    }
-
-    pub const fn to_value_type(self) -> ValueType {
-        match self {
-            Self::Typename => ValueType::Type,
-            Self::Bool => ValueType::Bool,
-            Self::UInt => ValueType::UInt,
-            Self::SInt => ValueType::SInt,
-            Self::Macro => ValueType::Macro,
         }
     }
 }
