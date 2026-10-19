@@ -1,6 +1,8 @@
+use super::{debug_info, debug_unsafe, debug_warn};
 #[cfg(debug_assertions)]
 use crate::analyzer::types::{PrimitiveType, StaticType};
 use crate::types::*;
+use std::mem::MaybeUninit;
 
 pub trait AnalogType {
     const STATIC_TY: StaticType<'static>;
@@ -25,9 +27,9 @@ primitive_types! {
     text = Text;
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Default)]
-pub struct Value<'val, 'src> {
-    pub data: &'val [u8],
+#[derive(Clone)]
+pub struct Value<'val, 'src, T: ?Sized = [MaybeUninit<u8>]> {
+    pub data: &'val T,
 
     /// For ensuring type checker is sound
     #[cfg(debug_assertions)]
@@ -51,16 +53,16 @@ impl std::fmt::Debug for Value<'_, '_> {
                         StaticType::Primitive(t) => {
                             use crate::analyzer::types::PrimitiveType;
                             match t {
-                                PrimitiveType::None => self.0.clone().cast_into::<none>(),
-                                PrimitiveType::Nevr => self.0.clone().cast_into::<nevr>(),
-                                PrimitiveType::Fail => self.0.clone().cast_into::<fail>(),
-                                PrimitiveType::Bool => self.0.clone().cast_into::<bool>(),
-                                PrimitiveType::Byte => self.0.clone().cast_into::<byte>(),
-                                PrimitiveType::Uint => self.0.clone().cast_into::<uint>(),
-                                PrimitiveType::Sint => self.0.clone().cast_into::<sint>(),
-                                PrimitiveType::Flpt => self.0.clone().cast_into::<flpt>(),
-                                PrimitiveType::Char => self.0.clone().cast_into::<char>(),
-                                PrimitiveType::Text => self.0.clone().cast_into::<text>(),
+                                PrimitiveType::None => &*self.0.data.as_ptr().cast::<none>(),
+                                PrimitiveType::Nevr => &*self.0.data.as_ptr().cast::<nevr>(),
+                                PrimitiveType::Fail => &*self.0.data.as_ptr().cast::<fail>(),
+                                PrimitiveType::Bool => &*self.0.data.as_ptr().cast::<bool>(),
+                                PrimitiveType::Byte => &*self.0.data.as_ptr().cast::<byte>(),
+                                PrimitiveType::Uint => &*self.0.data.as_ptr().cast::<uint>(),
+                                PrimitiveType::Sint => &*self.0.data.as_ptr().cast::<sint>(),
+                                PrimitiveType::Flpt => &*self.0.data.as_ptr().cast::<flpt>(),
+                                PrimitiveType::Char => &*self.0.data.as_ptr().cast::<char>(),
+                                PrimitiveType::Text => &*self.0.data.as_ptr().cast::<text>(),
                             }
                         }
                         StaticType::View(_)
@@ -71,7 +73,7 @@ impl std::fmt::Debug for Value<'_, '_> {
                         | StaticType::Sup(_)
                         | StaticType::Sub(_)
                         | StaticType::Cat(_)
-                        | StaticType::Fun(_) => &"[unknown]",
+                        | StaticType::Fun(_) => &"[unknown]", // TODO
                     };
                     value.fmt(f)
                 }
@@ -85,8 +87,8 @@ impl std::fmt::Debug for Value<'_, '_> {
     }
 }
 
-impl<'val, 'src> Value<'val, 'src> {
-    pub const fn new(data: &'val [u8], #[cfg(debug_assertions)] tag_: StaticType<'src>) -> Self {
+impl<'val, 'src, T: ?Sized> Value<'val, 'src, T> {
+    pub const fn new(data: &'val T, #[cfg(debug_assertions)] tag_: StaticType<'src>) -> Self {
         Self {
             data,
             #[cfg(debug_assertions)]
@@ -95,10 +97,22 @@ impl<'val, 'src> Value<'val, 'src> {
             _marker: PhantomData,
         }
     }
+}
 
-    pub const fn cast_from<T: AnalogType>(value: &'val T) -> Self {
+impl<'val, 'src, T: AnalogType> Value<'val, 'src, MaybeUninit<T>> {
+    /// # Safety
+    /// See [`MaybeUninit::assume_init_read`]
+    pub unsafe fn assume_init(self) -> T {
+        debug_unsafe!("assuming initialized: {:?}", self.data);
+        // SAFETY: caller must uphold safety contract
+        unsafe { self.data.assume_init_read() }
+    }
+}
+
+impl<'val, 'src> Value<'val, 'src> {
+    pub const fn cast_from<T: ?Sized + AnalogType>(value: &'val T) -> Self {
         let len = std::mem::size_of_val(value);
-        let data = (&raw const *value).cast();
+        let data = (&raw const *value).cast::<MaybeUninit<u8>>();
         // SAFETY: `data` comes from a reference to valid memory of len `len`
         let data = unsafe { std::slice::from_raw_parts(data, len) };
         Self::new(
@@ -111,7 +125,7 @@ impl<'val, 'src> Value<'val, 'src> {
     /// # Safety
     /// `self` must hold a pointer to a legitimate bytestring representation of
     /// a valid instance of `T`, or a type that is safe to cast to `T`.
-    pub unsafe fn cast_into<T: AnalogType>(self) -> &'val T {
+    pub unsafe fn cast_into<T: AnalogType>(self) -> Value<'val, 'src, MaybeUninit<T>> {
         #[cfg(debug_assertions)]
         debug_assert_eq!(
             T::STATIC_TY,
@@ -125,16 +139,24 @@ impl<'val, 'src> Value<'val, 'src> {
             std::mem::size_of::<T>(),
             "type sizes must match in order to cast"
         );
-        let ptr = self.data.as_ptr().cast::<T>();
-        debug_assert!(ptr.is_aligned(), "pointer should be aligned");
-        // SAFETY: caller must uphold safety contract
-        unsafe { &*ptr }
+        let ptr = self.data.as_ptr().cast::<MaybeUninit<T>>();
+        debug_assert!(
+            ptr.is_aligned(),
+            "pointer should be aligned\n expected: {}\n offset: {}",
+            std::mem::align_of::<T>(),
+            ptr.align_offset(std::mem::align_of::<T>())
+        );
+        Value::new(
+            // SAFETY: caller must uphold safety contract
+            unsafe { &*ptr },
+            #[cfg(debug_assertions)]
+            self.tag_,
+        )
     }
 }
 
-#[derive(PartialEq, PartialOrd, Default)]
-pub struct ValueMut<'val, 'src> {
-    pub data: &'val mut [u8],
+pub struct ValueMut<'val, 'src, T: ?Sized = [MaybeUninit<u8>]> {
+    pub data: &'val mut T,
 
     /// For ensuring type checker is sound
     #[cfg(debug_assertions)]
@@ -150,11 +172,8 @@ impl std::fmt::Debug for ValueMut<'_, '_> {
     }
 }
 
-impl<'val, 'src> ValueMut<'val, 'src> {
-    pub const fn new(
-        data: &'val mut [u8],
-        #[cfg(debug_assertions)] tag_: StaticType<'src>,
-    ) -> Self {
+impl<'val, 'src, T: ?Sized> ValueMut<'val, 'src, T> {
+    pub const fn new(data: &'val mut T, #[cfg(debug_assertions)] tag_: StaticType<'src>) -> Self {
         Self {
             data,
             #[cfg(debug_assertions)]
@@ -164,15 +183,31 @@ impl<'val, 'src> ValueMut<'val, 'src> {
         }
     }
 
-    pub fn as_ref<'subval>(&'subval self) -> Value<'subval, 'src> {
+    pub fn as_ref<'subval>(&'subval self) -> Value<'subval, 'src, T> {
         Value::new(
-            &*self.data,
+            self.data,
             #[cfg(debug_assertions)]
             self.tag_.clone(),
         )
     }
+}
 
-    pub const fn cast_from<T: AnalogType>(value: &'val mut T) -> Self {
+impl<'val, 'src, T: AnalogType> ValueMut<'val, 'src, MaybeUninit<T>> {
+    /// # Safety
+    /// See [`MaybeUninit::assume_init_mut`]
+    pub unsafe fn assume_init(self) -> ValueMut<'val, 'src, T> {
+        debug_unsafe!("assuming initialized: {:?}", self.data);
+        ValueMut::new(
+            // SAFETY: caller must uphold safety contract
+            unsafe { self.data.assume_init_mut() },
+            #[cfg(debug_assertions)]
+            self.tag_,
+        )
+    }
+}
+
+impl<'val, 'src> ValueMut<'val, 'src> {
+    pub const fn cast_from<T: ?Sized + AnalogType>(value: &'val mut T) -> Self {
         let len = std::mem::size_of_val(value);
         let data = (&raw mut *value).cast();
         // SAFETY: `data` comes from a reference to valid memory of len `len`
@@ -187,7 +222,7 @@ impl<'val, 'src> ValueMut<'val, 'src> {
     /// # Safety
     /// `self` must hold a pointer to a legitimate bytestring representation of
     /// a valid instance of `T`, or a type that is safe to cast to `T`.
-    pub unsafe fn cast_into<T: AnalogType>(self) -> &'val mut T {
+    pub unsafe fn cast_into<T: AnalogType>(self) -> ValueMut<'val, 'src, MaybeUninit<T>> {
         #[cfg(debug_assertions)]
         debug_assert_eq!(
             T::STATIC_TY,
@@ -201,9 +236,18 @@ impl<'val, 'src> ValueMut<'val, 'src> {
             std::mem::size_of::<T>(),
             "type sizes must match in order to cast"
         );
-        let ptr = self.data.as_mut_ptr().cast::<T>();
-        debug_assert!(ptr.is_aligned(), "pointer should be aligned");
-        // SAFETY: caller must uphold safety contract
-        unsafe { &mut *ptr }
+        let ptr = self.data.as_mut_ptr().cast::<MaybeUninit<T>>();
+        debug_assert!(
+            ptr.is_aligned(),
+            "pointer should be aligned\n expected: {}\n offset: {}",
+            std::mem::align_of::<T>(),
+            ptr.align_offset(std::mem::align_of::<T>())
+        );
+        ValueMut::new(
+            // SAFETY: caller must uphold safety contract
+            unsafe { &mut *ptr },
+            #[cfg(debug_assertions)]
+            self.tag_,
+        )
     }
 }

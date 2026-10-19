@@ -39,12 +39,12 @@ macro_rules! prim_op {
                         rhs: Value<'val, 'src>,
                     ) -> Result<(), Failure> {
                         // SAFETY: static analyzer must ensure soundness
-                        let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs) };
+                        let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs).assume_init() };
                         // SAFETY: static analyzer must ensure soundness
-                        let $rhs_name = unsafe { Value::cast_into::<$Rhs>(rhs) };
+                        let $rhs_name = unsafe { Value::cast_into::<$Rhs>(rhs).assume_init() };
                         let res = $def;
                         // SAFETY: static analyzer must ensure soundness
-                        *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
+                        unsafe { ValueMut::cast_into::<$Out>(out) }.data.write(res);
                         Ok(())
                     }
                     FnDef::LangOpB(fun)
@@ -77,10 +77,10 @@ macro_rules! prim_op {
                         rhs: Value<'val, 'src>,
                     ) -> Result<(), Failure> {
                         // SAFETY: static analyzer must ensure soundness
-                        let $rhs_name = unsafe { Value::cast_into::<$Rhs>(rhs) };
+                        let $rhs_name = unsafe { Value::cast_into::<$Rhs>(rhs).assume_init() };
                         let res = $def;
                         // SAFETY: static analyzer must ensure soundness
-                        *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
+                        unsafe { ValueMut::cast_into::<$Out>(out) }.data.write(res);
                         Ok(())
                     }
                     FnDef::LangOpU(fun)
@@ -114,10 +114,10 @@ macro_rules! prim_op {
                         lhs: Value<'val, 'src>,
                     ) -> Result<(), Failure> {
                         // SAFETY: static analyzer must ensure soundness
-                        let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs) };
+                        let $lhs_name = unsafe { Value::cast_into::<$Lhs>(lhs).assume_init() };
                         let res = $def;
                         // SAFETY: static analyzer must ensure soundness
-                        *unsafe { ValueMut::cast_into::<$Out>(out) } = res;
+                        unsafe { ValueMut::cast_into::<$Out>(out) }.data.write(res);
                         Ok(())
                     }
                     FnDef::LangOpU(fun)
@@ -309,19 +309,19 @@ primitive_ops![
     Add   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l + r }
     SubNeg(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l - r }
     Mul   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l * r }
-    Pow   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.pow(*r as u32) }
+    Pow   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.pow(r as u32) }
     Div   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l / r }
     Rem   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l % r }
 
-    Shl (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.bshl(*r) }
-    Shr (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.bshr(*r) }
-    Rotl(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.rotl(*r) }
-    Rotr(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.rotr(*r) }
+    Shl (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.bshl(r) }
+    Shr (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.bshr(r) }
+    Rotl(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.rotl(r) }
+    Rotr(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.rotr(r) }
 
-    Shl (Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.bshl(*r) }
-    Shr (Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.bshr(*r) }
-    Rotl(Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.rotl(*r) }
-    Rotr(Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.rotr(*r) }
+    Shl (Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.bshl(r) }
+    Shr (Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.bshr(r) }
+    Rotl(Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.rotl(r) }
+    Rotr(Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.rotr(r) }
 
     // sint
     And (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l & r }
@@ -334,19 +334,19 @@ primitive_ops![
     Add   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l + r }
     SubNeg(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l - r }
     Mul   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l * r }
-    Pow   (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.pow(*r as u32) }
+    Pow   (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.pow(r as u32) }
     Div   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l / r }
     Rem   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l % r }
 
-    Shl (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.bshl(*r) }
-    Shr (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.bshr(*r) }
-    Rotl(Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.rotl(*r) }
-    Rotr(Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.rotr(*r) }
+    Shl (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.bshl(r) }
+    Shr (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.bshr(r) }
+    Rotl(Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.rotl(r) }
+    Rotr(Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.rotr(r) }
 
-    Shl (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.bshl(*r) }
-    Shr (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.bshr(*r) }
-    Rotl(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.rotl(*r) }
-    Rotr(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.rotr(*r) }
+    Shl (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.bshl(r) }
+    Shr (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.bshr(r) }
+    Rotl(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.rotl(r) }
+    Rotr(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.rotr(r) }
 
     SubNeg(Sint) -> Sint as fn(r: sint) -> sint { -r }
 
@@ -354,7 +354,7 @@ primitive_ops![
     Add   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l + r }
     SubNeg(Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l - r }
     Mul   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l * r }
-    Pow   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l.powf(*r) }
+    Pow   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l.powf(r) }
     Div   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l / r }
     Rem   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l % r }
 

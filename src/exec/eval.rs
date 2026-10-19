@@ -1,4 +1,7 @@
-use super::value::{Value, ValueMut};
+use super::{
+    debug_info, debug_warn,
+    value::{Value, ValueMut},
+};
 use crate::{
     analyzer::{
         Assignment, BlockStmt, Expr, ExprStmt, IfStmt, Literal, OrStmt, PrintStmt, Program,
@@ -9,18 +12,43 @@ use crate::{
 };
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;
-use std::range::Range;
+use std::{mem::MaybeUninit, range::Range};
 
-#[derive(Debug, Clone, PartialEq)]
-enum EvalValueNoEnv<'lit, 'src> {
-    Lit(Value<'lit, 'src>),
+#[derive(Clone)]
+enum EvalValueNoEnv<'lit, 'src, T: ?Sized = [MaybeUninit<u8>]> {
+    Lit(Value<'lit, 'src, T>),
     Env(Range<usize>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum EvalValue<'lit, 'env, 'src> {
-    Lit(Value<'lit, 'src>),
-    Env(Range<usize>, Value<'env, 'src>),
+impl<'lit, 'src, T: ?Sized> std::fmt::Debug for EvalValueNoEnv<'lit, 'src, T>
+where
+    Value<'lit, 'src, T>: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Lit(arg0) => f.debug_tuple("Lit").field(arg0).finish(),
+            Self::Env(arg0) => f.debug_tuple("Env").field(arg0).finish(),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum EvalValue<'lit, 'env, 'src, T: ?Sized = [MaybeUninit<u8>]> {
+    Lit(Value<'lit, 'src, T>),
+    Env(Range<usize>, Value<'env, 'src, T>),
+}
+
+impl<'lit, 'env, 'src, T: ?Sized> std::fmt::Debug for EvalValue<'lit, 'env, 'src, T>
+where
+    Value<'lit, 'src, T>: std::fmt::Debug,
+    Value<'env, 'src, T>: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Lit(arg0) => f.debug_tuple("Lit").field(arg0).finish(),
+            Self::Env(arg0, arg1) => f.debug_tuple("Env").field(arg0).field(arg1).finish(),
+        }
+    }
 }
 
 impl<'val, 'src> EvalValue<'val, 'val, 'src> {
@@ -76,8 +104,7 @@ impl<'src> RunOperation<'src> {
 
                 env.stack_pop(out_range); // TBD: is it safe to pop it here? will it affect how we dereference them?
 
-                #[cfg(debug_assertions)]
-                println!("evaluating op({lhs_tag_}, {rhs_tag_}) -> {out_ty_}");
+                debug_info!("evaluating op({lhs_tag_}, {rhs_tag_}) -> {out_ty_}");
 
                 let (out, lhs, rhs) = match (lhs, rhs) {
                     (EvalValueNoEnv::Lit(lhs), EvalValueNoEnv::Lit(rhs)) => {
@@ -145,9 +172,11 @@ impl<'src> RunOperation<'src> {
                     ),
                 ))
             }
+
             RunOperation::UnaryPre(ref out_ty_, ref def, out_size, ref rhs) => {
                 todo!()
             }
+
             RunOperation::UnaryPost(ref out_ty_, ref def, out_size, ref lhs) => {
                 todo!()
             }
@@ -246,8 +275,8 @@ impl<'src> ExprStmt<RunOperation<'src>, RunVariable<'src>> {
                 if val.tag_ != StaticType::Primitive(crate::analyzer::types::PrimitiveType::None) {
                     const WARN_MUST_USE: bool = true;
                     if WARN_MUST_USE {
-                        println!(
-                            "warning: expression evaluating to {} is having its output ignored\n value: {val:?}\n expr: {expr:?}",
+                        debug_warn!(
+                            "expression evaluating to {} is having its output ignored\n value: {val:?}\n expr: {expr:?}",
                             val.tag_
                         );
                     }
@@ -262,6 +291,8 @@ impl<'src> PrintStmt<RunOperation<'src>, RunVariable<'src>> {
         let res = self.expr.eval(env)?.value();
         // SAFETY: static analyzer must ensure soundness
         let msg = unsafe { res.cast_into::<text>() };
+        // SAFETY: eval() promises to initialize its return
+        let msg = unsafe { msg.assume_init() };
         print!("{msg}");
         Ok(())
     }
@@ -273,7 +304,9 @@ impl<'src> IfStmt<RunOperation<'src>, RunVariable<'src>> {
         loop {
             let res = if_stmt.pred.eval(env)?.value();
             // SAFETY: static analyzer must ensure soundness
-            break if *unsafe { res.cast_into::<bool>() } {
+            let val = unsafe { res.cast_into::<bool>() };
+            // SAFETY: eval promises to initialize its output
+            break if unsafe { val.assume_init() } {
                 &if_stmt.then
             } else if let Some(or) = if_stmt.or.as_deref() {
                 match or {
@@ -312,8 +345,10 @@ impl<'src> Statement<RunOperation<'src>, RunVariable<'src>> {
 }
 
 pub fn execute(prgm: &Program<'_>) -> Result<(), Failure> {
-    let mut mem = vec![0xeeu8; 1024];
-    let mut env = Environment::new(mem.as_mut_slice()); // TODO: how much memory do we give it?
+    const UNINIT_VALUE: u8 = 0xee;
+    const BUF_SIZE: usize = 1024; // TODO: how much memory do we give it?
+    let mut buf = vec![UNINIT_VALUE; BUF_SIZE].into_boxed_slice();
+    let mut env = Environment::new(buf.as_mut());
     for stmt in &prgm.stmts {
         stmt.exec(&mut env)?;
     }
