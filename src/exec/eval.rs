@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
     analyzer::{
-        Assignment, BlockStmt, Expr, ExprStmt, IfStmt, Literal, OrStmt, PrintStmt, Program,
-        RuntimeOp, RuntimeVar, Statement, types::StaticType,
+        Assignment, BlockStmt, Expr, ExprStmt, IfStmt, Literal, OrStmt, PrintStmt, RuntimeOp,
+        RuntimeProgram, RuntimeVar, Statement, types::StaticType,
     },
     exec::{env::Environment, error::Failure},
     types::*,
@@ -344,7 +344,7 @@ impl<'src> Statement<RuntimeOp<'src>, RuntimeVar<'src>> {
     }
 }
 
-pub fn execute(prgm: &Program<'_>) -> Result<(), Failure> {
+pub fn execute(prgm: &RuntimeProgram<'_>) -> Result<(), Failure> {
     const UNINIT_VALUE: u8 = 0xee;
     const BUF_SIZE: usize = 1024; // TODO: how much memory do we give it?
     let mut buf = vec![UNINIT_VALUE; BUF_SIZE].into_boxed_slice();

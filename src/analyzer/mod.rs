@@ -6,7 +6,11 @@ use crate::{
         },
     },
     error::{ContextError, ErrorType, OpSide},
-    exec::{env::Environment, error::Failure},
+    exec::{
+        env::Environment,
+        error::Failure,
+        interp::{InterpBinaryOpFn, InterpOp, InterpUnaryOpFn, InterpVar},
+    },
     grammar::ast::{self, VarKeyword},
     scanner::token::value::{Keyword, LexValue, Operator},
     types::*,
@@ -51,8 +55,8 @@ pub trait CementVars<'src> {
 
 #[derive(Debug)]
 pub enum FnDef<O, V> {
-    LangOpB(BinaryOpFn),
-    LangOpU(UnaryOpFn),
+    LangOpB(BinaryOpFn, InterpBinaryOpFn),
+    LangOpU(UnaryOpFn, InterpUnaryOpFn),
     UserDef(BlockStmt<O, V>),
 }
 
@@ -111,29 +115,33 @@ impl<'src> CementVars<'src> for Operands<AnalysisOp<'src>, AnalyzerVar<'src>> {
     }
 }
 
-pub type BinaryOpFn = for<'val, 'srcf> fn(
-    crate::exec::value::ValueMut<'val, 'srcf>,
-    crate::exec::value::Value<'val, 'srcf>,
-    crate::exec::value::Value<'val, 'srcf>,
+pub type BinaryOpFn = for<'val, 'src> fn(
+    crate::exec::value::ValueMut<'val, 'src>,
+    crate::exec::value::Value<'val, 'src>,
+    crate::exec::value::Value<'val, 'src>,
 ) -> std::result::Result<(), Failure>;
 
-pub type UnaryOpFn = for<'val, 'srcf> fn(
-    crate::exec::value::ValueMut<'val, 'srcf>,
-    crate::exec::value::Value<'val, 'srcf>,
+pub type UnaryOpFn = for<'val, 'src> fn(
+    crate::exec::value::ValueMut<'val, 'src>,
+    crate::exec::value::Value<'val, 'src>,
 ) -> std::result::Result<(), Failure>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AnalysisOp<'src> {
     Binary(
-        (FunShape<'src>, BinaryOpFn),
+        (FunShape<'src>, BinaryOpFn, InterpBinaryOpFn),
         Expr<Self, AnalyzerVar<'src>>,
         Expr<Self, AnalyzerVar<'src>>,
     ),
-    UnaryPre((FunShape<'src>, UnaryOpFn), Expr<Self, AnalyzerVar<'src>>),
-    UnaryPost((FunShape<'src>, UnaryOpFn), Expr<Self, AnalyzerVar<'src>>),
+    UnaryPre(
+        (FunShape<'src>, UnaryOpFn, InterpUnaryOpFn),
+        Expr<Self, AnalyzerVar<'src>>,
+    ),
+    UnaryPost(
+        (FunShape<'src>, UnaryOpFn, InterpUnaryOpFn),
+        Expr<Self, AnalyzerVar<'src>>,
+    ),
 }
-
-pub use interp::InterpOp;
 
 #[derive(Debug, Clone)]
 pub enum RuntimeOp<'src> {
@@ -173,9 +181,9 @@ impl<'src> GetType<'src> for AnalysisOp<'src> {
     fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         Some(
             &match self {
-                Self::Binary((f, _), _, _)
-                | Self::UnaryPre((f, _), _)
-                | Self::UnaryPost((f, _), _) => f,
+                Self::Binary((f, _, _), _, _)
+                | Self::UnaryPre((f, _, _), _)
+                | Self::UnaryPost((f, _, _), _) => f,
             }
             .ret,
         )
@@ -187,7 +195,7 @@ impl<'src> CementVars<'src> for AnalysisOp<'src> {
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
-            Self::Binary((f, def), l, r) => {
+            Self::Binary((f, def, _), l, r) => {
                 let size = f
                     .ret
                     .size()
@@ -204,7 +212,7 @@ impl<'src> CementVars<'src> for AnalysisOp<'src> {
                     r.cement_vars(ranges),
                 )
             }
-            Self::UnaryPre((f, def), x) => {
+            Self::UnaryPre((f, def, _), x) => {
                 let size = f
                     .ret
                     .size()
@@ -220,7 +228,7 @@ impl<'src> CementVars<'src> for AnalysisOp<'src> {
                     x.cement_vars(ranges),
                 )
             }
-            Self::UnaryPost((f, def), x) => {
+            Self::UnaryPost((f, def, _), x) => {
                 let size = f
                     .ret
                     .size()
@@ -323,10 +331,6 @@ impl<'src> CementVars<'src> for AnalyzerVar<'src> {
         }
     }
 }
-
-pub mod interp;
-
-pub use interp::InterpVar;
 
 /// Runtime variable
 #[derive(Debug, Clone, PartialEq)]
@@ -539,17 +543,17 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                 })
                 .find(|overload| overload.operands == operand_types)
                 .map(|overload| {
-                    let def = match overload.def {
-                        FnDef::LangOpU(def) => def,
-                        FnDef::LangOpB(_) | FnDef::UserDef(_) => unimplemented!(),
+                    let (def, interp_def) = match overload.def {
+                        FnDef::LangOpU(def, interp_def) => (def, interp_def),
+                        FnDef::LangOpB(_, _) | FnDef::UserDef(_) => unimplemented!(),
                     };
                     match operands {
                         Operands::Binary(_, _) => unreachable!(),
                         Operands::UnaryPre(r) => {
-                            AnalysisOp::UnaryPre((overload.fun.clone(), def), r)
+                            AnalysisOp::UnaryPre((overload.fun.clone(), def, interp_def), r)
                         }
                         Operands::UnaryPost(l) => {
-                            AnalysisOp::UnaryPre((overload.fun.clone(), def), l)
+                            AnalysisOp::UnaryPre((overload.fun.clone(), def, interp_def), l)
                         }
                     }
                 })
@@ -652,16 +656,18 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                             Vec::new()
                         })
                         .map(|overload| {
-                            let def = match &overload.def {
-                                FnDef::LangOpB(def) => *def,
-                                FnDef::LangOpU(_) | FnDef::UserDef(_) => {
+                            let (def, interp_def) = match &overload.def {
+                                FnDef::LangOpB(def, interp_def) => (*def, *interp_def),
+                                FnDef::LangOpU(_, _) | FnDef::UserDef(_) => {
                                     unimplemented!()
                                 }
                             };
                             Expr::Op(Box::new(match operands {
-                                Operands::Binary(l, r) => {
-                                    AnalysisOp::Binary((overload.fun.clone(), def), l, r)
-                                }
+                                Operands::Binary(l, r) => AnalysisOp::Binary(
+                                    (overload.fun.clone(), def, interp_def),
+                                    l,
+                                    r,
+                                ),
                                 _ => unreachable!(),
                             }))
                         })
@@ -1082,11 +1088,24 @@ impl<'src> Analyze<'src> for ast::Declaration<'src> {
 
 /// A post-analysis program ready for execution
 #[derive(Debug, Clone, Default)]
-pub struct Program<'src> {
-    pub stmts: Vec<Statement<RuntimeOp<'src>, RuntimeVar<'src>>>,
+pub struct Program<O, V> {
+    pub stmts: Vec<Statement<O, V>>,
 }
 
-pub fn analyze<'src>(source: &'src str, prgm: &ast::Program<'src>) -> Result<'src, Program<'src>> {
+pub type RuntimeProgram<'src> = Program<RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpProgram<'src, 'inr> = Program<InterpOp<'src, 'inr, 'inr>, InterpVar<'src, 'inr>>;
+
+fn analyze_base<'src, O, V, F>(
+    source: &'src str,
+    prgm: &ast::Program<'src>,
+    f: F,
+) -> Result<'src, Program<O, V>>
+where
+    F: FnOnce(
+        StaticEnvironment<'src>,
+        Vec<Statement<AnalysisOp<'src>, AnalyzerVar<'src>>>,
+    ) -> Result<'src, Program<O, V>>,
+{
     let mut env = StaticEnvironment::new();
     for (op, def) in builtin_ops::builtin_ops() {
         env.decl_op(op, def);
@@ -1096,18 +1115,36 @@ pub fn analyze<'src>(source: &'src str, prgm: &ast::Program<'src>) -> Result<'sr
         .iter()
         .filter_map(|decl| decl.analyze(source, &mut env).transpose())
         .collect::<Result<'src, Vec<_>>>()
-        .and_then(|stmts| {
-            let ranges = env.cement_ranges().map_err(|e| {
-                for item in e {
-                    println!("error: size left indeterminant: {item:?}"); // TODO
-                }
-                Vec::new()
-            })?;
-            Ok(Program {
-                stmts: stmts
-                    .into_iter()
-                    .map(|stmt| stmt.cement_vars(&ranges))
-                    .collect(),
-            })
-        }) // TODO: need to convert analysis `Variable`s to `RunVariable`s
+        .and_then(|stmts| f(env, stmts))
+}
+
+pub fn analyze_interp<'src>(
+    source: &'src str,
+    prgm: &ast::Program<'src>,
+) -> Result<'src, InterpProgram<'src, 'static>> {
+    analyze_base(source, prgm, |env, stmts| {
+        Ok(Program {
+            stmts: stmts.into_iter().map(|stmt| todo!()).collect(),
+        })
+    })
+}
+
+pub fn analyze<'src>(
+    source: &'src str,
+    prgm: &ast::Program<'src>,
+) -> Result<'src, RuntimeProgram<'src>> {
+    analyze_base(source, prgm, |env, stmts| {
+        let ranges = env.cement_ranges().map_err(|e| {
+            for item in e {
+                println!("error: size left indeterminant: {item:?}"); // TODO
+            }
+            Vec::new()
+        })?;
+        Ok(Program {
+            stmts: stmts
+                .into_iter()
+                .map(|stmt| stmt.cement_vars(&ranges))
+                .collect(),
+        })
+    })
 }

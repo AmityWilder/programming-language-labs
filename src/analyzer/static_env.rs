@@ -427,12 +427,12 @@ impl<'src> StaticEnvironment<'src> {
         self.decl_item(EnvKey::Op(op), EnvItem::Op(def), None /* TBD */);
     }
 
-    pub fn cement_ranges<'loc>(
-        &'loc mut self,
-    ) -> Result<Box<[Range<usize>]>, impl Iterator<Item = (VarId, &'loc EnvKey<'src>)>> {
+    pub fn cement_ranges(
+        self,
+    ) -> Result<Box<[Range<usize>]>, impl IntoIterator<Item = (VarId, EnvKey<'src>)>> {
         // TODO: make a pass and put all the static elements in one contiguous region, then put everything else on top of that
         let mut ranges: Vec<Range<usize>> = Vec::with_capacity(self.locs.len());
-        let mut locs = self.locs.iter().enumerate();
+        let mut locs = self.locs.into_iter().enumerate();
         while let Some((id, loc)) = locs.next() {
             let range = match loc.pos {
                 MemPos::Unknown => {
@@ -441,9 +441,9 @@ impl<'src> StaticEnvironment<'src> {
                         let start = ranges.last().map_or(0, |range| range.end);
                         Range { start, end: start }
                     } else {
-                        return Err(std::iter::once((id, &loc.key)).chain(
+                        return Err(std::iter::once((id, loc.key)).chain(
                             locs.filter(|(_, loc)| matches!(loc.pos, MemPos::Unknown))
-                                .map(|(id, loc)| (id, &loc.key)),
+                                .map(|(id, loc)| (id, loc.key)),
                         ));
                     }
                 }

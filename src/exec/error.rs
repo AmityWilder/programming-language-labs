@@ -1,3 +1,5 @@
+//! Runtime error
+
 /// Essentially an exception
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Failure {

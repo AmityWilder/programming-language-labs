@@ -1,6 +1,7 @@
 pub mod env;
 pub mod error;
 pub mod eval;
+pub mod interp;
 pub mod value;
 
 macro_rules! debug_info {
