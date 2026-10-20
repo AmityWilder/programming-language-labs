@@ -84,6 +84,8 @@ use crate::{
         tokenize,
     },
 };
+use analyzer::analyze_interp;
+use interp::interpret;
 use std::{path::PathBuf, range::Range};
 
 /// Indicates unfinished code.
@@ -98,6 +100,7 @@ mod error;
 mod exec;
 mod grammar;
 mod highlight;
+mod interp;
 mod preproc;
 mod regex;
 mod scanner;
@@ -788,7 +791,7 @@ fn run_code(source: &str, config: &Cli) {
         );
     }
 
-    let program = match analyze(source, &prgm) {
+    let program = match analyze_interp(source, &prgm) {
         Ok(prgm) => prgm,
         Err(errs) => {
             // static analysis errors
@@ -811,7 +814,7 @@ fn run_code(source: &str, config: &Cli) {
     // execution
     if config.do_eval {
         println!("\nrunning...\n----------");
-        let res = execute(&program);
+        let res = interpret(&program);
         println!("----------\nfinished\n");
         if let Err(e) = res
             && config.print_errors

@@ -4,10 +4,8 @@ use super::{
     Operator, PrimitiveType, StaticType, types::FunShape,
 };
 use crate::{
-    exec::{
-        interp::LangVar,
-        value::{Value, ValueMut},
-    },
+    exec::value::{Value, ValueMut},
+    interp::value::{LangVar, LangVarCast},
     spec_ops::{BitRotate, BitShift},
     types::*,
 };
@@ -36,21 +34,18 @@ macro_rules! prim_op {
                     ret: StaticType::Primitive(PrimitiveType::$output),
                 },
                 def: {
-                    fn interp<'dinr, 'linr, 'rinr>(
-                        out: &mut (dyn 'dinr + LangVar),
-                        lhs: &(dyn 'linr + LangVar),
-                        rhs: &(dyn 'rinr + LangVar),
-                    ) -> Result<(), Failure> {
+                    fn interp<'inr>(
+                        lhs: &(dyn 'inr + LangVar),
+                        rhs: &(dyn 'inr + LangVar),
+                    ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
                         let $lhs_name = lhs
                             .downcast_to::<$Lhs>()
                             .expect("should be guaranteed by static analysis");
                         let $rhs_name = rhs
                             .downcast_to::<$Rhs>()
                             .expect("should be guaranteed by static analysis");
-                        let res = $def;
-                        *out.downcast_to_mut::<$Out>()
-                            .expect("should be guaranteed by static analysis") = res;
-                        Ok(())
+                        let res: $Out = $def;
+                        Ok(Box::new(res.cast_into()))
                     }
                     fn runtime<'src, 'val>(
                         out: ValueMut<'val, 'src>,
@@ -91,17 +86,14 @@ macro_rules! prim_op {
                     ret: StaticType::Primitive(PrimitiveType::$output),
                 },
                 def: {
-                    fn interp<'dinr, 'rinr>(
-                        out: &mut (dyn 'dinr + LangVar),
-                        rhs: &(dyn 'rinr + LangVar),
-                    ) -> Result<(), Failure> {
+                    fn interp<'inr>(
+                        rhs: &(dyn 'inr + LangVar),
+                    ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
                         let $rhs_name = rhs
                             .downcast_to::<$Rhs>()
                             .expect("should be guaranteed by static analysis");
-                        let res = $def;
-                        *out.downcast_to_mut::<$Out>()
-                            .expect("should be guaranteed by static analysis") = res;
-                        Ok(())
+                        let res: $Out = $def;
+                        Ok(Box::new(res.cast_into()))
                     }
                     fn runtime<'src, 'val>(
                         out: ValueMut<'val, 'src>,
@@ -139,17 +131,14 @@ macro_rules! prim_op {
                     ret: StaticType::Primitive(PrimitiveType::$output),
                 },
                 def: {
-                    fn interp<'dinr, 'linr>(
-                        out: &mut (dyn 'dinr + LangVar),
-                        lhs: &(dyn 'linr + LangVar),
-                    ) -> Result<(), Failure> {
+                    fn interp<'inr>(
+                        lhs: &(dyn 'inr + LangVar),
+                    ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
                         let $lhs_name = lhs
                             .downcast_to::<$Lhs>()
                             .expect("should be guaranteed by static analysis");
-                        let res = $def;
-                        *out.downcast_to_mut::<$Out>()
-                            .expect("should be guaranteed by static analysis") = res;
-                        Ok(())
+                        let res: $Out = $def;
+                        Ok(Box::new(res.cast_into()))
                     }
                     fn runtime<'src, 'val>(
                         $env: &'val Environment,

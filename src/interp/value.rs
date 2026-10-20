@@ -1,9 +1,3 @@
-//! UNDER CONSTRUCTION
-//!
-//! Less elegant and less performant than [`crate::exec::eval`], but also does not rely on `unsafe` code.
-
-// TBD: should debug represent runtime debug or internal debug? (currently uses runtime debug)
-
 use crate::{
     analyzer::{Expr, types::StaticType},
     exec::error::Failure,
@@ -16,17 +10,14 @@ use std::{
 };
 
 pub trait LangVarCast {
+    type Upcast: LangVar;
+    fn cast_into(self) -> Self::Upcast;
     fn cast_from(value: &dyn LangVar) -> Option<&Self>;
     fn cast_from_mut(value: &mut dyn LangVar) -> Option<&mut Self>;
 }
 
-pub trait AsPrimitive: Debug {
-    fn as_primitive(&self) -> Option<&PrimitiveVar>;
-    fn as_mut_primitive(&mut self) -> Option<&mut PrimitiveVar>;
-}
-
 macro_rules! impl_lang_var_cast {
-    ($([$fn:ident, $fn_mut:ident] => $Variant:ident($Type:ty, $Object:ty);)*) => {
+    ($([$fn:ident, $fn_mut:ident] => $Variant:ident($Type:ty, $(#[$ctor:meta])* $Object:ident);)*) => {
         pub trait LangVar: Debug {$(
             fn $fn(&self) -> Option<&$Type> {
                 None
@@ -37,6 +28,13 @@ macro_rules! impl_lang_var_cast {
         )*}
 
         $(impl LangVarCast for $Type {
+            type Upcast = $Object;
+
+            fn cast_into(self) -> Self::Upcast {
+                $(#[$ctor])*
+                $Object(self)
+            }
+
             fn cast_from(value: &dyn LangVar) -> Option<&Self> {
                 value.$fn()
             }
@@ -54,16 +52,6 @@ macro_rules! impl_lang_var_cast {
                 Some(&mut self.0)
             }
         })*
-
-        impl<T: AsPrimitive> LangVar for T {$(
-            fn $fn(&self) -> Option<&$Type> {
-                self.as_primitive()?.$fn()
-            }
-
-            fn $fn_mut(&mut self) -> Option<&mut $Type> {
-                self.as_mut_primitive()?.$fn_mut()
-            }
-        )*}
 
         impl LangVar for PrimitiveVar {$(
             fn $fn(&self) -> Option<&$Type> {
@@ -121,12 +109,47 @@ macro_rules! impl_lang_var_cast {
                 self.value.$fn_mut()
             }
         )*}
+
+        impl LangVar for InterpVar<'_, '_> {$(
+            fn $fn(&self) -> Option<&$Type> {
+                match self {
+                    Self::Primitive(x) => x.$fn(),
+                    // Self::View(x) => x.$fn(),
+                    Self::Arr(x) => x.$fn(),
+                    Self::Ptr(x) => x.$fn(),
+                    Self::OrNone(x) => x.$fn(),
+                    Self::OrFail(x) => x.$fn(),
+                    Self::OrNevr(x) => x.$fn(),
+                    Self::Rec(x) => x.$fn(),
+                    Self::Sup(x) => x.$fn(),
+                    Self::Sub(x) => x.$fn(),
+                    Self::Cat(x) => x.$fn(),
+                    Self::Fun(x) => x.$fn(),
+                }
+            }
+            fn $fn_mut(&mut self) -> Option<&mut $Type> {
+                match self {
+                    Self::Primitive(x) => x.$fn_mut(),
+                    // Self::View(x) => x.$fn_mut(),
+                    Self::Arr(x) => x.$fn_mut(),
+                    Self::Ptr(x) => x.$fn_mut(),
+                    Self::OrNone(x) => x.$fn_mut(),
+                    Self::OrFail(x) => x.$fn_mut(),
+                    Self::OrNevr(x) => x.$fn_mut(),
+                    Self::Rec(x) => x.$fn_mut(),
+                    Self::Sup(x) => x.$fn_mut(),
+                    Self::Sub(x) => x.$fn_mut(),
+                    Self::Cat(x) => x.$fn_mut(),
+                    Self::Fun(x) => x.$fn_mut(),
+                }
+            }
+        )*}
     };
 }
 
 impl_lang_var_cast! {
     [as_none, as_mut_none] => None(none, NoneObject);
-    [as_nevr, as_mut_nevr] => Nevr(nevr, NevrObject);
+    [as_nevr, as_mut_nevr] => Nevr(nevr, #[expect(unreachable_code, reason = "not allowed to be constructed")] NevrObject);
     [as_fail, as_mut_fail] => Fail(fail, FailObject);
     [as_bool, as_mut_bool] => Bool(bool, BoolObject);
     [as_byte, as_mut_byte] => Byte(byte, ByteObject);
@@ -148,7 +171,20 @@ impl<'inr> dyn 'inr + LangVar {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct NoneObject(none);
+#[repr(transparent)]
+pub struct NoneObject(pub none);
+
+impl NoneObject {
+    pub const fn new<'a>(value: &'a none) -> &'a Self {
+        // SAFETY: NoneObject is a transparent wrapper for none
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut none) -> &'a mut Self {
+        // SAFETY: NoneObject is a transparent wrapper for none
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for NoneObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -157,7 +193,20 @@ impl Debug for NoneObject {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NevrObject(nevr);
+#[repr(transparent)]
+pub struct NevrObject(pub nevr);
+
+impl NevrObject {
+    pub const fn new<'a>(value: &'a nevr) -> &'a Self {
+        // SAFETY: NevrObject is a transparent wrapper for nevr
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut nevr) -> &'a mut Self {
+        // SAFETY: NevrObject is a transparent wrapper for nevr
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for NevrObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -166,7 +215,20 @@ impl Debug for NevrObject {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct FailObject(fail);
+#[repr(transparent)]
+pub struct FailObject(pub fail);
+
+impl FailObject {
+    pub const fn new<'a>(value: &'a fail) -> &'a Self {
+        // SAFETY: FailObject is a transparent wrapper for fail
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut fail) -> &'a mut Self {
+        // SAFETY: FailObject is a transparent wrapper for fail
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for FailObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -175,7 +237,20 @@ impl Debug for FailObject {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct BoolObject(bool);
+#[repr(transparent)]
+pub struct BoolObject(pub bool);
+
+impl BoolObject {
+    pub const fn new<'a>(value: &'a bool) -> &'a Self {
+        // SAFETY: BoolObject is a transparent wrapper for bool
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut bool) -> &'a mut Self {
+        // SAFETY: BoolObject is a transparent wrapper for bool
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for BoolObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -187,7 +262,20 @@ impl Debug for BoolObject {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct ByteObject(byte);
+#[repr(transparent)]
+pub struct ByteObject(pub byte);
+
+impl ByteObject {
+    pub const fn new<'a>(value: &'a byte) -> &'a Self {
+        // SAFETY: ByteObject is a transparent wrapper for byte
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut byte) -> &'a mut Self {
+        // SAFETY: ByteObject is a transparent wrapper for byte
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for ByteObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -196,7 +284,20 @@ impl Debug for ByteObject {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct UintObject(uint);
+#[repr(transparent)]
+pub struct UintObject(pub uint);
+
+impl UintObject {
+    pub const fn new<'a>(value: &'a uint) -> &'a Self {
+        // SAFETY: UintObject is a transparent wrapper for uint
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut uint) -> &'a mut Self {
+        // SAFETY: UintObject is a transparent wrapper for uint
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for UintObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -205,7 +306,20 @@ impl Debug for UintObject {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct SintObject(sint);
+#[repr(transparent)]
+pub struct SintObject(pub sint);
+
+impl SintObject {
+    pub const fn new<'a>(value: &'a sint) -> &'a Self {
+        // SAFETY: SintObject is a transparent wrapper for sint
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut sint) -> &'a mut Self {
+        // SAFETY: SintObject is a transparent wrapper for sint
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for SintObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -214,7 +328,20 @@ impl Debug for SintObject {
 }
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Default)]
-pub struct FlptObject(flpt);
+#[repr(transparent)]
+pub struct FlptObject(pub flpt);
+
+impl FlptObject {
+    pub const fn new<'a>(value: &'a flpt) -> &'a Self {
+        // SAFETY: FlptObject is a transparent wrapper for flpt
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut flpt) -> &'a mut Self {
+        // SAFETY: FlptObject is a transparent wrapper for flpt
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for FlptObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -223,7 +350,20 @@ impl Debug for FlptObject {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct CharObject(char);
+#[repr(transparent)]
+pub struct CharObject(pub char);
+
+impl CharObject {
+    pub const fn new<'a>(value: &'a char) -> &'a Self {
+        // SAFETY: CharObject is a transparent wrapper for char
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut char) -> &'a mut Self {
+        // SAFETY: CharObject is a transparent wrapper for char
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for CharObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -232,7 +372,20 @@ impl Debug for CharObject {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TextObject(text);
+#[repr(transparent)]
+pub struct TextObject(pub text);
+
+impl TextObject {
+    pub const fn new<'a>(value: &'a text) -> &'a Self {
+        // SAFETY: TextObject is a transparent wrapper for text
+        unsafe { std::mem::transmute(value) }
+    }
+
+    pub const fn new_mut<'a>(value: &'a mut text) -> &'a mut Self {
+        // SAFETY: TextObject is a transparent wrapper for text
+        unsafe { std::mem::transmute(value) }
+    }
+}
 
 impl Debug for TextObject {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -315,10 +468,8 @@ pub struct ArrVar<'inr> {
 }
 
 impl<'inr> ArrVar<'inr> {
-    fn as_view(&self) -> ViewVar<'inr, '_> {
-        ViewVar {
-            data: self.data.as_ref(),
-        }
+    pub const fn as_view(&self) -> ViewVar<'inr, '_> {
+        ViewVar { data: &self.data }
     }
 }
 
@@ -449,6 +600,8 @@ impl Debug for FunVar {
     }
 }
 
+impl LangVar for FunVar {}
+
 pub enum InterpVar<'src, 'inr> {
     /// Language-defined
     Primitive(PrimitiveVar),
@@ -496,18 +649,13 @@ impl Debug for InterpVar<'_, '_> {
     }
 }
 
-impl LangVar for InterpVar<'_, '_> {}
+pub type InterpBinaryOpFn = for<'inr> fn(
+    &(dyn 'inr + LangVar),
+    &(dyn 'inr + LangVar),
+) -> std::result::Result<Box<dyn 'inr + LangVar>, Failure>;
 
-pub type InterpBinaryOpFn = for<'dinr, 'linr, 'rinr> fn(
-    &mut (dyn 'dinr + LangVar),
-    &(dyn 'linr + LangVar),
-    &(dyn 'rinr + LangVar),
-) -> std::result::Result<(), Failure>;
-
-pub type InterpUnaryOpFn = for<'dinr, 'oinr> fn(
-    &mut (dyn 'dinr + LangVar),
-    &(dyn 'oinr + LangVar),
-) -> std::result::Result<(), Failure>;
+pub type InterpUnaryOpFn =
+    for<'inr> fn(&(dyn 'inr + LangVar)) -> std::result::Result<Box<dyn 'inr + LangVar>, Failure>;
 
 pub enum InterpOp<'src, 'linr, 'rinr> {
     Binary(

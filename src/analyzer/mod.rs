@@ -6,12 +6,9 @@ use crate::{
         },
     },
     error::{ContextError, ErrorType, OpSide},
-    exec::{
-        env::Environment,
-        error::Failure,
-        interp::{InterpBinaryOpFn, InterpOp, InterpUnaryOpFn, InterpVar},
-    },
+    exec::{env::Environment, error::Failure},
     grammar::ast::{self, VarKeyword},
+    interp::value::{InterpBinaryOpFn, InterpOp, InterpUnaryOpFn, InterpVar},
     scanner::token::value::{Keyword, LexValue, Operator},
     types::*,
 };
