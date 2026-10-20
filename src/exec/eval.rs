@@ -5,7 +5,7 @@ use super::{
 use crate::{
     analyzer::{
         Assignment, BlockStmt, Expr, ExprStmt, IfStmt, Literal, OrStmt, PrintStmt, Program,
-        RunOperation, RunVariable, Statement, types::StaticType,
+        RuntimeOp, RuntimeVar, Statement, types::StaticType,
     },
     exec::{env::Environment, error::Failure},
     types::*,
@@ -82,13 +82,13 @@ impl<'lit, 'env, 'src> EvalValue<'lit, 'env, 'src> {
     }
 }
 
-impl<'src> RunOperation<'src> {
+impl<'src> RuntimeOp<'src> {
     fn eval<'lit, 'env>(
         &'lit self,
         env: &'env mut Environment<'_>,
     ) -> Result<(Range<usize>, Value<'env, 'src>), Failure> {
         match *self {
-            RunOperation::Binary(ref out_ty_, ref def, out_size, ref lhs, ref rhs) => {
+            RuntimeOp::Binary(ref out_ty_, ref def, out_size, ref lhs, ref rhs) => {
                 // reserve the temporary so it doesn't get trampled by later operations
                 let (out_range, _) = env
                     .temp(out_size)
@@ -173,11 +173,11 @@ impl<'src> RunOperation<'src> {
                 ))
             }
 
-            RunOperation::UnaryPre(ref out_ty_, ref def, out_size, ref rhs) => {
+            RuntimeOp::UnaryPre(ref out_ty_, ref def, out_size, ref rhs) => {
                 todo!()
             }
 
-            RunOperation::UnaryPost(ref out_ty_, ref def, out_size, ref lhs) => {
+            RuntimeOp::UnaryPost(ref out_ty_, ref def, out_size, ref lhs) => {
                 todo!()
             }
         }
@@ -201,7 +201,7 @@ impl<'src> Literal {
     }
 }
 
-impl<'src> RunVariable<'src> {
+impl<'src> RuntimeVar<'src> {
     fn eval<'env>(&self, env: &'env mut Environment<'_>) -> (Range<usize>, Value<'env, 'src>) {
         env.stack_push(self.range);
         let value = Value::new(
@@ -214,7 +214,7 @@ impl<'src> RunVariable<'src> {
     }
 }
 
-impl<'src> Expr<RunOperation<'src>, RunVariable<'src>> {
+impl<'src> Expr<RuntimeOp<'src>, RuntimeVar<'src>> {
     fn eval<'lit, 'env>(
         &'lit self,
         env: &'env mut Environment<'_>,
@@ -235,7 +235,7 @@ impl<'src> Expr<RunOperation<'src>, RunVariable<'src>> {
     }
 }
 
-impl<'src> Assignment<RunOperation<'src>, RunVariable<'src>> {
+impl<'src> Assignment<RuntimeOp<'src>, RuntimeVar<'src>> {
     fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
         let lvalue = match &self.lvalue {
             Expr::Variable(var) => var,
@@ -264,7 +264,7 @@ impl<'src> Assignment<RunOperation<'src>, RunVariable<'src>> {
     }
 }
 
-impl<'src> ExprStmt<RunOperation<'src>, RunVariable<'src>> {
+impl<'src> ExprStmt<RuntimeOp<'src>, RuntimeVar<'src>> {
     fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
         match &self.expr {
             Expr::Assignment(assignment) => assignment.exec(env),
@@ -286,7 +286,7 @@ impl<'src> ExprStmt<RunOperation<'src>, RunVariable<'src>> {
     }
 }
 
-impl<'src> PrintStmt<RunOperation<'src>, RunVariable<'src>> {
+impl<'src> PrintStmt<RuntimeOp<'src>, RuntimeVar<'src>> {
     fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
         let res = self.expr.eval(env)?.value();
         // SAFETY: static analyzer must ensure soundness
@@ -298,7 +298,7 @@ impl<'src> PrintStmt<RunOperation<'src>, RunVariable<'src>> {
     }
 }
 
-impl<'src> IfStmt<RunOperation<'src>, RunVariable<'src>> {
+impl<'src> IfStmt<RuntimeOp<'src>, RuntimeVar<'src>> {
     fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
         let mut if_stmt = self;
         loop {
@@ -324,7 +324,7 @@ impl<'src> IfStmt<RunOperation<'src>, RunVariable<'src>> {
     }
 }
 
-impl<'src> BlockStmt<RunOperation<'src>, RunVariable<'src>> {
+impl<'src> BlockStmt<RuntimeOp<'src>, RuntimeVar<'src>> {
     fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
         for stmt in &self.stmts {
             stmt.exec(env)?;
@@ -333,7 +333,7 @@ impl<'src> BlockStmt<RunOperation<'src>, RunVariable<'src>> {
     }
 }
 
-impl<'src> Statement<RunOperation<'src>, RunVariable<'src>> {
+impl<'src> Statement<RuntimeOp<'src>, RuntimeVar<'src>> {
     fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
         match self {
             Self::Expr(stmt) => stmt.exec(env),
