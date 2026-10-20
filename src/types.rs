@@ -16,10 +16,10 @@ const _: () = {
 pub type none = ();
 pub type nevr = !;
 pub type fail = crate::exec::error::Failure;
-// bool is already builtin
+pub use bool;
 pub type byte = u8;
 pub type uint = usize;
 pub type sint = isize;
 pub type flpt = fsize;
-// char is already builtin
+pub use char;
 pub type text = String;

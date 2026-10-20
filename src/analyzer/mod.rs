@@ -32,7 +32,7 @@ pub trait Analyze<'src> {
     ) -> Result<'src, Self::Ouptut>;
 }
 
-pub trait Expression<'src> {
+pub trait GetType<'src> {
     type Output<'ty>: 'ty + TypeCompatible<'src>
     where
         'src: 'ty,
@@ -61,7 +61,7 @@ pub struct FnRef<'src> {
     pub ident: &'src str,
 }
 
-impl<'src> Expression<'src> for FnRef<'src> {
+impl<'src> GetType<'src> for FnRef<'src> {
     type Output<'ty>
         = &'ty FunShape<'src>
     where
@@ -82,7 +82,7 @@ pub enum Operands<O, V> {
     UnaryPost(Expr<O, V>),
 }
 
-impl<'src> Operands<Operation<'src>, Variable<'src>> {
+impl<'src> Operands<AnalysisOp<'src>, AnalyzerVar<'src>> {
     pub fn get_types(&self, env: &StaticEnvironment<'src>) -> Option<OperandTypes<'src>> {
         Some(match self {
             Self::Binary(lhs, rhs) => OperandTypes::Binary(
@@ -99,8 +99,8 @@ impl<'src> Operands<Operation<'src>, Variable<'src>> {
     }
 }
 
-impl<'src> CementVars<'src> for Operands<Operation<'src>, Variable<'src>> {
-    type Concrete = Operands<RunOperation<'src>, RunVariable<'src>>;
+impl<'src> CementVars<'src> for Operands<AnalysisOp<'src>, AnalyzerVar<'src>> {
+    type Concrete = Operands<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
@@ -123,26 +123,28 @@ pub type UnaryOpFn = for<'val, 'srcf> fn(
 ) -> std::result::Result<(), Failure>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Operation<'src> {
+pub enum AnalysisOp<'src> {
     Binary(
         (FunShape<'src>, BinaryOpFn),
-        Expr<Self, Variable<'src>>,
-        Expr<Self, Variable<'src>>,
+        Expr<Self, AnalyzerVar<'src>>,
+        Expr<Self, AnalyzerVar<'src>>,
     ),
-    UnaryPre((FunShape<'src>, UnaryOpFn), Expr<Self, Variable<'src>>),
-    UnaryPost((FunShape<'src>, UnaryOpFn), Expr<Self, Variable<'src>>),
+    UnaryPre((FunShape<'src>, UnaryOpFn), Expr<Self, AnalyzerVar<'src>>),
+    UnaryPost((FunShape<'src>, UnaryOpFn), Expr<Self, AnalyzerVar<'src>>),
 }
 
+pub use interp::InterpOp;
+
 #[derive(Debug, Clone)]
-pub enum RunOperation<'src> {
+pub enum RuntimeOp<'src> {
     Binary(
         #[cfg(debug_assertions)] StaticType<'src>,
         #[cfg(not(debug_assertions))] (),
         BinaryOpFn,
         // output size
         usize,
-        Expr<Self, RunVariable<'src>>,
-        Expr<Self, RunVariable<'src>>,
+        Expr<Self, RuntimeVar<'src>>,
+        Expr<Self, RuntimeVar<'src>>,
     ),
     UnaryPre(
         #[cfg(debug_assertions)] StaticType<'src>,
@@ -150,7 +152,7 @@ pub enum RunOperation<'src> {
         UnaryOpFn,
         // output size
         usize,
-        Expr<Self, RunVariable<'src>>,
+        Expr<Self, RuntimeVar<'src>>,
     ),
     UnaryPost(
         #[cfg(debug_assertions)] StaticType<'src>,
@@ -158,11 +160,11 @@ pub enum RunOperation<'src> {
         UnaryOpFn,
         // output size
         usize,
-        Expr<Self, RunVariable<'src>>,
+        Expr<Self, RuntimeVar<'src>>,
     ),
 }
 
-impl<'src> Expression<'src> for Operation<'src> {
+impl<'src> GetType<'src> for AnalysisOp<'src> {
     type Output<'ty>
         = &'ty StaticType<'src>
     where
@@ -180,8 +182,8 @@ impl<'src> Expression<'src> for Operation<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for Operation<'src> {
-    type Concrete = RunOperation<'src>;
+impl<'src> CementVars<'src> for AnalysisOp<'src> {
+    type Concrete = RuntimeOp<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
@@ -191,7 +193,7 @@ impl<'src> CementVars<'src> for Operation<'src> {
                     .size()
                     .unwrap_or_else(|| panic!("size should be known by this point\n type: {f}"))
                     .unwrap_or_else(|e| panic!("error determining type size: {e}\n type: {f}"));
-                RunOperation::Binary(
+                RuntimeOp::Binary(
                     #[cfg(debug_assertions)]
                     f.ret,
                     #[cfg(not(debug_assertions))]
@@ -208,7 +210,7 @@ impl<'src> CementVars<'src> for Operation<'src> {
                     .size()
                     .unwrap_or_else(|| panic!("size should be known by this point\n type: {f}"))
                     .unwrap_or_else(|e| panic!("error determining type size: {e}\n type: {f}"));
-                RunOperation::UnaryPre(
+                RuntimeOp::UnaryPre(
                     #[cfg(debug_assertions)]
                     f.ret,
                     #[cfg(not(debug_assertions))]
@@ -224,7 +226,7 @@ impl<'src> CementVars<'src> for Operation<'src> {
                     .size()
                     .unwrap_or_else(|| panic!("size should be known by this point\n type: {f}"))
                     .unwrap_or_else(|e| panic!("error determining type size: {e}\n type: {f}"));
-                RunOperation::UnaryPost(
+                RuntimeOp::UnaryPost(
                     #[cfg(debug_assertions)]
                     f.ret,
                     #[cfg(not(debug_assertions))]
@@ -253,7 +255,7 @@ pub enum Literal {
     Text(text),
 }
 
-impl<'src> Expression<'src> for Literal {
+impl<'src> GetType<'src> for Literal {
     type Output<'ty>
         = PrimitiveType
     where
@@ -279,7 +281,7 @@ impl<'src> Expression<'src> for Literal {
 ///
 /// Has no actual memory location, since its type may not have been determined yet
 #[derive(Debug, Clone, PartialEq)]
-pub struct Variable<'src> {
+pub struct AnalyzerVar<'src> {
     pub unique_id: usize,
     pub ident: &'src str,
     pub is_global: bool,
@@ -287,7 +289,7 @@ pub struct Variable<'src> {
     _ty: Option<AbstractType<'src>>,
 }
 
-impl<'src> Expression<'src> for Variable<'src> {
+impl<'src> GetType<'src> for AnalyzerVar<'src> {
     type Output<'ty>
         = VarType<'src, 'ty>
     where
@@ -300,11 +302,11 @@ impl<'src> Expression<'src> for Variable<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for Variable<'src> {
-    type Concrete = RunVariable<'src>;
+impl<'src> CementVars<'src> for AnalyzerVar<'src> {
+    type Concrete = RuntimeVar<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
-        RunVariable {
+        RuntimeVar {
             range: *ranges
                 .get(self.unique_id)
                 .expect("unique_id missing from ranges"),
@@ -322,9 +324,13 @@ impl<'src> CementVars<'src> for Variable<'src> {
     }
 }
 
+pub mod interp;
+
+pub use interp::InterpVar;
+
 /// Runtime variable
 #[derive(Debug, Clone, PartialEq)]
-pub struct RunVariable<'src> {
+pub struct RuntimeVar<'src> {
     pub range: Range<usize>,
     #[cfg(debug_assertions)]
     pub ty_: StaticType<'src>,
@@ -373,7 +379,7 @@ pub struct Assignment<O, V> {
     pub rhs: Expr<O, V>,
 }
 
-impl<'src> Expression<'src> for Assignment<Operation<'src>, Variable<'src>> {
+impl<'src> GetType<'src> for Assignment<AnalysisOp<'src>, AnalyzerVar<'src>> {
     type Output<'ty>
         = PrimitiveType
     where
@@ -384,8 +390,8 @@ impl<'src> Expression<'src> for Assignment<Operation<'src>, Variable<'src>> {
     }
 }
 
-impl<'src> CementVars<'src> for Assignment<Operation<'src>, Variable<'src>> {
-    type Concrete = Assignment<RunOperation<'src>, RunVariable<'src>>;
+impl<'src> CementVars<'src> for Assignment<AnalysisOp<'src>, AnalyzerVar<'src>> {
+    type Concrete = Assignment<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         Assignment {
@@ -403,7 +409,7 @@ pub enum Expr<O, V> {
     Variable(V),
 }
 
-impl<'src> Expression<'src> for Expr<Operation<'src>, Variable<'src>> {
+impl<'src> GetType<'src> for Expr<AnalysisOp<'src>, AnalyzerVar<'src>> {
     type Output<'ty>
         = ExprType<'src, 'ty>
     where
@@ -420,7 +426,7 @@ impl<'src> Expression<'src> for Expr<Operation<'src>, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::Expr<'src> {
-    type Ouptut = Expr<Operation<'src>, Variable<'src>>;
+    type Ouptut = Expr<AnalysisOp<'src>, AnalyzerVar<'src>>;
 
     fn analyze(
         &self,
@@ -438,8 +444,8 @@ impl<'src> Analyze<'src> for ast::Expr<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for Expr<Operation<'src>, Variable<'src>> {
-    type Concrete = Expr<RunOperation<'src>, RunVariable<'src>>;
+impl<'src> CementVars<'src> for Expr<AnalysisOp<'src>, AnalyzerVar<'src>> {
+    type Concrete = Expr<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
@@ -477,7 +483,7 @@ impl<'src> Analyze<'src> for ast::Literal<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Variable<'src> {
-    type Ouptut = Expr<Operation<'src>, Variable<'src>>;
+    type Ouptut = Expr<AnalysisOp<'src>, AnalyzerVar<'src>>;
 
     fn analyze(
         &self,
@@ -487,7 +493,7 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
         let ident = self.ident.lex;
         env.lookup(ident)
             .find_map(|item| match item.val {
-                EnvItem::Var(ref x, is_global) => Some(Expr::Variable(Variable {
+                EnvItem::Var(ref x, is_global) => Some(Expr::Variable(AnalyzerVar {
                     unique_id: item.id,
                     ident,
                     is_global,
@@ -507,7 +513,7 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Unary<'src> {
-    type Ouptut = Operation<'src>;
+    type Ouptut = AnalysisOp<'src>;
 
     fn analyze(
         &self,
@@ -540,10 +546,10 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                     match operands {
                         Operands::Binary(_, _) => unreachable!(),
                         Operands::UnaryPre(r) => {
-                            Operation::UnaryPre((overload.fun.clone(), def), r)
+                            AnalysisOp::UnaryPre((overload.fun.clone(), def), r)
                         }
                         Operands::UnaryPost(l) => {
-                            Operation::UnaryPre((overload.fun.clone(), def), l)
+                            AnalysisOp::UnaryPre((overload.fun.clone(), def), l)
                         }
                     }
                 })
@@ -553,7 +559,7 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Binary<'src> {
-    type Ouptut = Expr<Operation<'src>, Variable<'src>>;
+    type Ouptut = Expr<AnalysisOp<'src>, AnalyzerVar<'src>>;
 
     fn analyze(
         &self,
@@ -654,7 +660,7 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                             };
                             Expr::Op(Box::new(match operands {
                                 Operands::Binary(l, r) => {
-                                    Operation::Binary((overload.fun.clone(), def), l, r)
+                                    AnalysisOp::Binary((overload.fun.clone(), def), l, r)
                                 }
                                 _ => unreachable!(),
                             }))
@@ -690,7 +696,7 @@ pub struct ExprStmt<O, V> {
 }
 
 impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
-    type Ouptut = ExprStmt<Operation<'src>, Variable<'src>>;
+    type Ouptut = ExprStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
 
     fn analyze(
         &self,
@@ -719,8 +725,8 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for ExprStmt<Operation<'src>, Variable<'src>> {
-    type Concrete = ExprStmt<RunOperation<'src>, RunVariable<'src>>;
+impl<'src> CementVars<'src> for ExprStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+    type Concrete = ExprStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         ExprStmt {
@@ -735,7 +741,7 @@ pub struct PrintStmt<O, V> {
 }
 
 impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
-    type Ouptut = PrintStmt<Operation<'src>, Variable<'src>>;
+    type Ouptut = PrintStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
 
     fn analyze(
         &self,
@@ -758,8 +764,8 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for PrintStmt<Operation<'src>, Variable<'src>> {
-    type Concrete = PrintStmt<RunOperation<'src>, RunVariable<'src>>;
+impl<'src> CementVars<'src> for PrintStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+    type Concrete = PrintStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         PrintStmt {
@@ -774,7 +780,7 @@ pub enum OrStmt<O, V> {
     Last(BlockStmt<O, V>),
 }
 
-impl<'src> Expression<'src> for OrStmt<Operation<'src>, Variable<'src>> {
+impl<'src> GetType<'src> for OrStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -788,8 +794,8 @@ impl<'src> Expression<'src> for OrStmt<Operation<'src>, Variable<'src>> {
     }
 }
 
-impl<'src> CementVars<'src> for OrStmt<Operation<'src>, Variable<'src>> {
-    type Concrete = OrStmt<RunOperation<'src>, RunVariable<'src>>;
+impl<'src> CementVars<'src> for OrStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+    type Concrete = OrStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
@@ -800,7 +806,7 @@ impl<'src> CementVars<'src> for OrStmt<Operation<'src>, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::OrBody<'src> {
-    type Ouptut = OrStmt<Operation<'src>, Variable<'src>>;
+    type Ouptut = OrStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
 
     fn analyze(
         &self,
@@ -822,7 +828,7 @@ pub struct IfStmt<O, V> {
     pub or: Option<Box<OrStmt<O, V>>>,
 }
 
-impl<'src> Expression<'src> for IfStmt<Operation<'src>, Variable<'src>> {
+impl<'src> GetType<'src> for IfStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -843,7 +849,7 @@ impl<'src> Expression<'src> for IfStmt<Operation<'src>, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::IfStmt<'src> {
-    type Ouptut = IfStmt<Operation<'src>, Variable<'src>>;
+    type Ouptut = IfStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
 
     fn analyze(
         &self,
@@ -874,8 +880,8 @@ impl<'src> Analyze<'src> for ast::IfStmt<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for IfStmt<Operation<'src>, Variable<'src>> {
-    type Concrete = IfStmt<RunOperation<'src>, RunVariable<'src>>;
+impl<'src> CementVars<'src> for IfStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+    type Concrete = IfStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         IfStmt {
@@ -891,7 +897,7 @@ pub struct BlockStmt<O, V> {
     pub stmts: Vec<Statement<O, V>>,
 }
 
-impl<'src> Expression<'src> for BlockStmt<Operation<'src>, Variable<'src>> {
+impl<'src> GetType<'src> for BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -912,7 +918,7 @@ impl<'src> Expression<'src> for BlockStmt<Operation<'src>, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
-    type Ouptut = BlockStmt<Operation<'src>, Variable<'src>>;
+    type Ouptut = BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
 
     fn analyze(
         &self,
@@ -936,8 +942,8 @@ impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for BlockStmt<Operation<'src>, Variable<'src>> {
-    type Concrete = BlockStmt<RunOperation<'src>, RunVariable<'src>>;
+impl<'src> CementVars<'src> for BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+    type Concrete = BlockStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         BlockStmt {
@@ -958,7 +964,7 @@ pub enum Statement<O, V> {
     Block(BlockStmt<O, V>),
 }
 
-impl<'src> Expression<'src> for Statement<Operation<'src>, Variable<'src>> {
+impl<'src> GetType<'src> for Statement<AnalysisOp<'src>, AnalyzerVar<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -977,7 +983,7 @@ impl<'src> Expression<'src> for Statement<Operation<'src>, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::Statement<'src> {
-    type Ouptut = Statement<Operation<'src>, Variable<'src>>;
+    type Ouptut = Statement<AnalysisOp<'src>, AnalyzerVar<'src>>;
 
     fn analyze(
         &self,
@@ -993,8 +999,8 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for Statement<Operation<'src>, Variable<'src>> {
-    type Concrete = Statement<RunOperation<'src>, RunVariable<'src>>;
+impl<'src> CementVars<'src> for Statement<AnalysisOp<'src>, AnalyzerVar<'src>> {
+    type Concrete = Statement<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
@@ -1007,7 +1013,7 @@ impl<'src> CementVars<'src> for Statement<Operation<'src>, Variable<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::DeclVar<'src> {
-    type Ouptut = Option<ExprStmt<Operation<'src>, Variable<'src>>>;
+    type Ouptut = Option<ExprStmt<AnalysisOp<'src>, AnalyzerVar<'src>>>;
 
     fn analyze(
         &self,
@@ -1044,7 +1050,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                 .map(|(unique_id, _ty, is_global)| {
                     expr.map(|rhs| ExprStmt {
                         expr: Expr::Assignment(Box::new(Assignment {
-                            lvalue: Expr::Variable(Variable {
+                            lvalue: Expr::Variable(AnalyzerVar {
                                 unique_id,
                                 ident,
                                 is_global,
@@ -1060,7 +1066,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Declaration<'src> {
-    type Ouptut = Option<Statement<Operation<'src>, Variable<'src>>>;
+    type Ouptut = Option<Statement<AnalysisOp<'src>, AnalyzerVar<'src>>>;
 
     fn analyze(
         &self,
@@ -1077,7 +1083,7 @@ impl<'src> Analyze<'src> for ast::Declaration<'src> {
 /// A post-analysis program ready for execution
 #[derive(Debug, Clone, Default)]
 pub struct Program<'src> {
-    pub stmts: Vec<Statement<RunOperation<'src>, RunVariable<'src>>>,
+    pub stmts: Vec<Statement<RuntimeOp<'src>, RuntimeVar<'src>>>,
 }
 
 pub fn analyze<'src>(source: &'src str, prgm: &ast::Program<'src>) -> Result<'src, Program<'src>> {

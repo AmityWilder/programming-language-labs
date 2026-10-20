@@ -1,7 +1,7 @@
 use crate::{
     Todo,
     analyzer::{
-        BlockStmt, Expression, FnDef, Operation, Variable,
+        AnalysisOp, AnalyzerVar, BlockStmt, FnDef, GetType,
         types::{AbstractType, FunShape, StaticTypeSize, TypeCompatible, TypeSize, TypeSizeError},
     },
     scanner::token::value::Operator,
@@ -21,7 +21,7 @@ impl StaticTypeSize for ConstantValue {
         todo!("constants must be statically sized")
     }
 }
-impl<'src> Expression<'src> for ConstantValue {
+impl<'src> GetType<'src> for ConstantValue {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -70,12 +70,17 @@ impl std::fmt::Display for VarType<'_, '_> {
 #[derive(Debug)]
 pub enum EnvItem<'src> {
     Op(OpOverload<'src>),
-    Fun((FunShape<'src>, BlockStmt<Operation<'src>, Variable<'src>>)),
+    Fun(
+        (
+            FunShape<'src>,
+            BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>>,
+        ),
+    ),
     Var(Option<AbstractType<'src>>, bool),
     Pvt(ConstantValue),
 }
 
-impl<'src> Expression<'src> for EnvItem<'src> {
+impl<'src> GetType<'src> for EnvItem<'src> {
     type Output<'ty>
         = VarType<'src, 'ty>
     where
@@ -118,7 +123,7 @@ impl EnvKeyEq for Operator {
 
 #[derive(Debug)]
 pub struct ScopeItem<'src> {
-    pub id: usize,
+    pub id: VarId,
     pub key: EnvKey<'src>,
     pub val: EnvItem<'src>,
 }
@@ -170,7 +175,7 @@ pub struct OpOverload<'src> {
     pub operands: OperandTypes<'src>,
     pub output: AbstractType<'src>,
     pub fun: FunShape<'src>,
-    pub def: FnDef<Operation<'src>, Variable<'src>>,
+    pub def: FnDef<AnalysisOp<'src>, AnalyzerVar<'src>>,
 }
 
 /// A unique [`EnvItem`] ID
@@ -409,7 +414,7 @@ impl<'src> StaticEnvironment<'src> {
         &mut self,
         name: &'src str,
         shape: FunShape<'src>,
-        def: BlockStmt<Operation<'src>, Variable<'src>>,
+        def: BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>>,
     ) {
         self.decl_item(
             EnvKey::Ident(name),
