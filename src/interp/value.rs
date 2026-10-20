@@ -9,167 +9,6 @@ use std::{
     range::Range,
 };
 
-pub trait LangVarCast {
-    type Upcast: LangVar;
-    fn cast_into(self) -> Self::Upcast;
-    fn cast_from(value: &dyn LangVar) -> Option<&Self>;
-    fn cast_from_mut(value: &mut dyn LangVar) -> Option<&mut Self>;
-}
-
-macro_rules! impl_lang_var_cast {
-    ($([$fn:ident, $fn_mut:ident] => $Variant:ident($Type:ty, $(#[$ctor:meta])* $Object:ident);)*) => {
-        pub trait LangVar: Debug {$(
-            fn $fn(&self) -> Option<&$Type> {
-                None
-            }
-            fn $fn_mut(&mut self) -> Option<&mut $Type> {
-                None
-            }
-        )*}
-
-        $(impl LangVarCast for $Type {
-            type Upcast = $Object;
-
-            fn cast_into(self) -> Self::Upcast {
-                $(#[$ctor])*
-                $Object(self)
-            }
-
-            fn cast_from(value: &dyn LangVar) -> Option<&Self> {
-                value.$fn()
-            }
-
-            fn cast_from_mut(value: &mut dyn LangVar) -> Option<&mut Self> {
-                value.$fn_mut()
-            }
-        }
-        impl LangVar for $Object {
-            fn $fn(&self) -> Option<&$Type> {
-                Some(&self.0)
-            }
-
-            fn $fn_mut(&mut self) -> Option<&mut $Type> {
-                Some(&mut self.0)
-            }
-        })*
-
-        impl LangVar for PrimitiveVar {$(
-            fn $fn(&self) -> Option<&$Type> {
-                match self {
-                    Self::$Variant(x) => Some(&x.0),
-                    _ => None,
-                }
-            }
-            fn $fn_mut(&mut self) -> Option<&mut $Type> {
-                match self {
-                    Self::$Variant(x) => Some(&mut x.0),
-                    _ => None,
-                }
-            }
-        )*}
-
-        impl<T: LangVar> LangVar for OrVar<'_, T> {$(
-            fn $fn(&self) -> Option<&$Type> {
-                match self {
-                    Self::Ok(x) => x.$fn(),
-                    Self::Or(x) => x.$fn(),
-                }
-            }
-            fn $fn_mut(&mut self) -> Option<&mut $Type> {
-                match self {
-                    Self::Ok(x) => x.$fn_mut(),
-                    Self::Or(x) => x.$fn_mut(),
-                }
-            }
-        )*}
-
-        impl LangVar for SupVar<'_, '_> {$(
-            fn $fn(&self) -> Option<&$Type> {
-                self.variant.$fn()
-            }
-            fn $fn_mut(&mut self) -> Option<&mut $Type> {
-                self.variant.$fn_mut()
-            }
-        )*}
-
-        impl LangVar for SubVar<'_> {$(
-            fn $fn(&self) -> Option<&$Type> {
-                self.base.$fn()
-            }
-            fn $fn_mut(&mut self) -> Option<&mut $Type> {
-                self.base.$fn_mut()
-            }
-        )*}
-
-        impl LangVar for CatVar<'_, '_> {$(
-            fn $fn(&self) -> Option<&$Type> {
-                self.value.$fn()
-            }
-            fn $fn_mut(&mut self) -> Option<&mut $Type> {
-                self.value.$fn_mut()
-            }
-        )*}
-
-        impl LangVar for InterpVar<'_, '_> {$(
-            fn $fn(&self) -> Option<&$Type> {
-                match self {
-                    Self::Primitive(x) => x.$fn(),
-                    // Self::View(x) => x.$fn(),
-                    Self::Arr(x) => x.$fn(),
-                    Self::Ptr(x) => x.$fn(),
-                    Self::OrNone(x) => x.$fn(),
-                    Self::OrFail(x) => x.$fn(),
-                    Self::OrNevr(x) => x.$fn(),
-                    Self::Rec(x) => x.$fn(),
-                    Self::Sup(x) => x.$fn(),
-                    Self::Sub(x) => x.$fn(),
-                    Self::Cat(x) => x.$fn(),
-                    Self::Fun(x) => x.$fn(),
-                }
-            }
-            fn $fn_mut(&mut self) -> Option<&mut $Type> {
-                match self {
-                    Self::Primitive(x) => x.$fn_mut(),
-                    // Self::View(x) => x.$fn_mut(),
-                    Self::Arr(x) => x.$fn_mut(),
-                    Self::Ptr(x) => x.$fn_mut(),
-                    Self::OrNone(x) => x.$fn_mut(),
-                    Self::OrFail(x) => x.$fn_mut(),
-                    Self::OrNevr(x) => x.$fn_mut(),
-                    Self::Rec(x) => x.$fn_mut(),
-                    Self::Sup(x) => x.$fn_mut(),
-                    Self::Sub(x) => x.$fn_mut(),
-                    Self::Cat(x) => x.$fn_mut(),
-                    Self::Fun(x) => x.$fn_mut(),
-                }
-            }
-        )*}
-    };
-}
-
-impl_lang_var_cast! {
-    [as_none, as_mut_none] => None(none, NoneObject);
-    [as_nevr, as_mut_nevr] => Nevr(nevr, #[expect(unreachable_code, reason = "not allowed to be constructed")] NevrObject);
-    [as_fail, as_mut_fail] => Fail(fail, FailObject);
-    [as_bool, as_mut_bool] => Bool(bool, BoolObject);
-    [as_byte, as_mut_byte] => Byte(byte, ByteObject);
-    [as_uint, as_mut_uint] => Uint(uint, UintObject);
-    [as_sint, as_mut_sint] => Sint(sint, SintObject);
-    [as_flpt, as_mut_flpt] => Flpt(flpt, FlptObject);
-    [as_char, as_mut_char] => Char(char, CharObject);
-    [as_text, as_mut_text] => Text(text, TextObject);
-}
-
-impl<'inr> dyn 'inr + LangVar {
-    pub fn downcast_to<T: LangVarCast>(&self) -> Option<&T> {
-        T::cast_from(self)
-    }
-
-    pub fn downcast_to_mut<T: LangVarCast>(&mut self) -> Option<&mut T> {
-        T::cast_from_mut(self)
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(transparent)]
 pub struct NoneObject(pub none);
@@ -441,11 +280,11 @@ impl Debug for PrimitiveVar {
     }
 }
 
-pub struct ViewVar<'vew, 'inr: 'vew> {
-    pub data: &'vew [Box<dyn 'inr + LangVar>],
+pub struct ViewVar<'brw, T> {
+    pub data: &'brw [T],
 }
 
-impl Debug for ViewVar<'_, '_> {
+impl<T: Debug> Debug for ViewVar<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str("[")?;
         let mut has_prev = false;
@@ -454,34 +293,32 @@ impl Debug for ViewVar<'_, '_> {
                 f.write_str(", ")?;
             }
             has_prev = true;
-            (**item).fmt(f)?;
+            item.fmt(f)?;
         }
         f.write_str("]")
     }
 }
 
-impl LangVar for ViewVar<'_, '_> {}
-
 // TBD: how is this different from `ViewVar`?
-pub struct ArrVar<'inr> {
-    pub data: Box<[Box<dyn 'inr + LangVar>]>,
+#[derive(Clone)]
+pub struct ArrVar<T> {
+    pub data: Box<[T]>,
 }
 
-impl<'inr> ArrVar<'inr> {
-    pub const fn as_view(&self) -> ViewVar<'inr, '_> {
+impl<T> ArrVar<T> {
+    pub const fn as_view(&self) -> ViewVar<'_, T> {
         ViewVar { data: &self.data }
     }
 }
 
-impl Debug for ArrVar<'_> {
+impl<T: Debug> Debug for ArrVar<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.as_view().fmt(f)
     }
 }
 
-impl LangVar for ArrVar<'_> {}
-
 // TBD: how does it know what type it's pointing to?
+#[derive(Clone)]
 pub struct PtrVar {
     pub env_range: Range<usize>,
 }
@@ -498,18 +335,17 @@ impl Debug for PtrVar {
     }
 }
 
-impl LangVar for PtrVar {}
-
-pub enum OrVar<'inr, T> {
-    Ok(Box<dyn 'inr + LangVar>),
-    Or(T),
+#[derive(Clone)]
+pub enum OrVar<T, U> {
+    Ok(T),
+    Or(U),
 }
 
-pub type OrNone<'inr> = OrVar<'inr, NoneObject>;
-pub type OrNevr<'inr> = OrVar<'inr, NevrObject>;
-pub type OrFail<'inr> = OrVar<'inr, FailObject>;
+pub type OrNone<T> = OrVar<T, NoneObject>;
+pub type OrNevr<T> = OrVar<T, NevrObject>;
+pub type OrFail<T> = OrVar<T, FailObject>;
 
-impl<T: Debug> Debug for OrVar<'_, T> {
+impl<T: Debug, U: Debug> Debug for OrVar<T, U> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ok(val) => val.fmt(f),
@@ -518,12 +354,13 @@ impl<T: Debug> Debug for OrVar<'_, T> {
     }
 }
 
-pub struct RecVar<'src, 'inr> {
+#[derive(Clone)]
+pub struct RecVar<'src> {
     pub name: &'src str,
-    pub fields: HashMap<&'src str, Box<dyn 'inr + LangVar>>,
+    pub fields: HashMap<&'src str, InterpVar<'src>>,
 }
 
-impl Debug for RecVar<'_, '_> {
+impl Debug for RecVar<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut f = f.debug_struct(self.name);
         for (key, val) in &self.fields {
@@ -533,30 +370,29 @@ impl Debug for RecVar<'_, '_> {
     }
 }
 
-impl LangVar for RecVar<'_, '_> {}
-
-pub struct SupVar<'src, 'inr> {
+#[derive(Clone)]
+pub struct SupVar<'src> {
     pub name: &'src str,
     pub variant_ty: StaticType<'src>,
-    pub variant: Box<dyn 'inr + LangVar>,
+    pub variant: InterpVar<'src>,
 }
 
-impl Debug for SupVar<'_, '_> {
+impl Debug for SupVar<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         #[repr(transparent)]
-        struct SupInner<'a, 'b>(SupVar<'a, 'b>);
+        struct SupInner<'a>(SupVar<'a>);
 
-        impl<'a, 'b> SupInner<'a, 'b> {
-            const fn new<'c>(value: &'c SupVar<'a, 'b>) -> &'c Self {
+        impl<'a> SupInner<'a> {
+            const fn new<'b>(value: &'b SupVar<'a>) -> &'b Self {
                 // SAFETY: SupInner is a transparent wrapper for SupVar
                 unsafe { std::mem::transmute(value) }
             }
         }
 
-        impl Debug for SupInner<'_, '_> {
+        impl Debug for SupInner<'_> {
             fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
                 f.debug_tuple(&self.0.variant_ty.to_string())
-                    .field(&*self.0.variant)
+                    .field(&self.0.variant)
                     .finish()
             }
         }
@@ -568,8 +404,9 @@ impl Debug for SupVar<'_, '_> {
 }
 
 /// Identical to its inner type; the requirements are only enforced during static analysis.
-pub struct SubVar<'inr> {
-    pub base: Box<dyn 'inr + LangVar>,
+#[derive(Clone)]
+pub struct SubVar<'src> {
+    pub base: InterpVar<'src>,
 }
 
 impl Debug for SubVar<'_> {
@@ -578,17 +415,19 @@ impl Debug for SubVar<'_> {
     }
 }
 
-pub struct CatVar<'src, 'inr> {
+#[derive(Clone)]
+pub struct CatVar<'src> {
     pub discriminant: &'src str,
-    pub value: Box<dyn 'inr + LangVar>,
+    pub value: InterpVar<'src>,
 }
 
-impl Debug for CatVar<'_, '_> {
+impl Debug for CatVar<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(self.discriminant)
     }
 }
 
+#[derive(Clone)]
 pub struct FunVar {
     // TODO
 }
@@ -600,37 +439,85 @@ impl Debug for FunVar {
     }
 }
 
-impl LangVar for FunVar {}
-
-pub enum InterpVar<'src, 'inr> {
+#[derive(Clone)]
+pub enum InterpVar<'src> {
     /// Language-defined
     Primitive(PrimitiveVar),
 
     // /// Slice of another type
     // View(ViewVar<'vew, 'inr>), // TODO: is this a slice reference, or the actual slice?
     /// Array of another type
-    Arr(ArrVar<'inr>),
+    Arr(ArrVar<Self>),
 
     /// Reference to another type
     Ptr(PtrVar),
 
-    OrNone(OrVar<'inr, NoneObject>),
-    OrFail(OrVar<'inr, FailObject>),
-    OrNevr(OrVar<'inr, NevrObject>),
+    OrNone(Box<OrVar<Self, NoneObject>>),
+    OrFail(Box<OrVar<Self, FailObject>>),
+    OrNevr(Box<OrVar<Self, NevrObject>>),
 
     /// Structure
-    Rec(RecVar<'src, 'inr>),
+    Rec(RecVar<'src>),
     /// Union
-    Sup(SupVar<'src, 'inr>),
+    Sup(Box<SupVar<'src>>),
     /// Another type, but with runtime restrictions
-    Sub(SubVar<'inr>),
+    Sub(Box<SubVar<'src>>),
     /// Constant group
-    Cat(CatVar<'src, 'inr>),
+    Cat(Box<CatVar<'src>>),
     /// Callable
     Fun(FunVar),
 }
 
-impl Debug for InterpVar<'_, '_> {
+macro_rules! convert_interp_primitive {
+    ($($(#[$ctor:meta])? $Primitive:ident($Object:ident($Type:ty))),* $(,)?) => {$(
+        impl TryFrom<InterpVar<'_>> for $Type {
+            type Error = ();
+
+            fn try_from(value: InterpVar<'_>) -> Result<Self, Self::Error> {
+                match value {
+                    $(#[$ctor])?
+                    InterpVar::Primitive(PrimitiveVar::$Primitive($Object(value))) => Ok(value),
+                    _ => Err(()),
+                }
+            }
+        }
+
+        impl<'a> TryFrom<&'a InterpVar<'_>> for &'a $Type {
+            type Error = ();
+
+            fn try_from(value: &'a InterpVar<'_>) -> Result<Self, Self::Error> {
+                match value {
+                    $(#[$ctor])?
+                    InterpVar::Primitive(PrimitiveVar::$Primitive($Object(value))) => Ok(value),
+                    _ => Err(()),
+                }
+            }
+        }
+
+        impl From<$Type> for InterpVar<'_> {
+            fn from(value: $Type) -> Self {
+                $(#[$ctor])?
+                InterpVar::Primitive(PrimitiveVar::$Primitive($Object(value)))
+            }
+        }
+    )*};
+}
+
+convert_interp_primitive! {
+    None(NoneObject(none)),
+    #[expect(unreachable_code, reason = "nevr is not constructable")]
+    Nevr(NevrObject(nevr)),
+    Fail(FailObject(fail)),
+    Bool(BoolObject(bool)),
+    Byte(ByteObject(byte)),
+    Uint(UintObject(uint)),
+    Sint(SintObject(sint)),
+    Flpt(FlptObject(flpt)),
+    Char(CharObject(char)),
+    Text(TextObject(text)),
+}
+
+impl Debug for InterpVar<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Primitive(val) => val.fmt(f),
@@ -649,34 +536,34 @@ impl Debug for InterpVar<'_, '_> {
     }
 }
 
-pub type InterpBinaryOpFn = for<'inr> fn(
-    &(dyn 'inr + LangVar),
-    &(dyn 'inr + LangVar),
-) -> std::result::Result<Box<dyn 'inr + LangVar>, Failure>;
+pub type InterpBinaryOpFn = for<'src> fn(
+    &InterpVar<'src>,
+    &InterpVar<'src>,
+) -> std::result::Result<InterpVar<'src>, Failure>;
 
 pub type InterpUnaryOpFn =
-    for<'inr> fn(&(dyn 'inr + LangVar)) -> std::result::Result<Box<dyn 'inr + LangVar>, Failure>;
+    for<'src> fn(&InterpVar<'src>) -> std::result::Result<InterpVar<'src>, Failure>;
 
-pub enum InterpOp<'src, 'linr, 'rinr> {
+pub enum InterpOp<'src> {
     Binary(
         StaticType<'src>,
         InterpBinaryOpFn,
-        Expr<Self, InterpVar<'src, 'linr>>,
-        Expr<Self, InterpVar<'src, 'rinr>>,
+        Expr<Self, InterpVar<'src>>,
+        Expr<Self, InterpVar<'src>>,
     ),
     UnaryPre(
         StaticType<'src>,
         InterpUnaryOpFn,
-        Expr<Self, InterpVar<'src, 'rinr>>,
+        Expr<Self, InterpVar<'src>>,
     ),
     UnaryPost(
         StaticType<'src>,
         InterpUnaryOpFn,
-        Expr<Self, InterpVar<'src, 'linr>>,
+        Expr<Self, InterpVar<'src>>,
     ),
 }
 
-impl Debug for InterpOp<'_, '_, '_> {
+impl Debug for InterpOp<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Binary(o, fun, l, r) => write!(f, "{fun:?}({l:?}, {r:?}) -> {o:?}"),

@@ -19,6 +19,7 @@
     impl_trait_in_bindings,
     impl_trait_in_fn_trait_return,
     macro_derive,
+    char_to_u32,
 )]
 #![forbid(
     clippy::missing_safety_doc,
@@ -814,7 +815,7 @@ fn run_code(source: &str, config: &Cli) {
     // execution
     if config.do_eval {
         println!("\nrunning...\n----------");
-        let res = interpret(&program);
+        let res = interpret(program);
         println!("----------\nfinished\n");
         if let Err(e) = res
             && config.print_errors

@@ -333,7 +333,9 @@ impl<'src> PreprocessorStream<'src> {
                     match_token!(Punctuation::RParen),
                     ExpectedToken::MacroParamOrRParen,
                 )
-                .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))?;
+                .map_err(|e| {
+                    e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source))
+                })?;
             Ok(ParamGroup {
                 open,
                 list: params,
@@ -400,7 +402,7 @@ impl<'src> PreprocessorStream<'src> {
                 // HACK: we don't actually want an ExpectedToken error, we're going to replace it.
                 ExpectedToken::MacroIdent,
             )
-            .map_err(|e| e.to_bracket_mismatch(Bracket::Brace, open.lex_range(self.source)))?;
+            .map_err(|e| e.into_bracket_mismatch(Bracket::Brace, open.lex_range(self.source)))?;
         Ok(MacroReplacer {
             open,
             content,

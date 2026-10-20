@@ -654,14 +654,14 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                         })
                         .map(|overload| {
                             let (def, interp_def) = match &overload.def {
-                                FnDef::LangOpB(def, interp_def) => (*def, *interp_def),
+                                FnDef::LangOpB(def, interp_def) => (def, interp_def),
                                 FnDef::LangOpU(_, _) | FnDef::UserDef(_) => {
                                     unimplemented!()
                                 }
                             };
                             Expr::Op(Box::new(match operands {
                                 Operands::Binary(l, r) => AnalysisOp::Binary(
-                                    (overload.fun.clone(), def, interp_def),
+                                    (overload.fun.clone(), *def, *interp_def),
                                     l,
                                     r,
                                 ),
@@ -1090,7 +1090,7 @@ pub struct Program<O, V> {
 }
 
 pub type RuntimeProgram<'src> = Program<RuntimeOp<'src>, RuntimeVar<'src>>;
-pub type InterpProgram<'src, 'inr> = Program<InterpOp<'src, 'inr, 'inr>, InterpVar<'src, 'inr>>;
+pub type InterpProgram<'src> = Program<InterpOp<'src>, InterpVar<'src>>;
 
 fn analyze_base<'src, O, V, F>(
     source: &'src str,
@@ -1118,10 +1118,13 @@ where
 pub fn analyze_interp<'src>(
     source: &'src str,
     prgm: &ast::Program<'src>,
-) -> Result<'src, InterpProgram<'src, 'static>> {
+) -> Result<'src, InterpProgram<'src>> {
     analyze_base(source, prgm, |env, stmts| {
         Ok(Program {
-            stmts: stmts.into_iter().map(|stmt| todo!()).collect(),
+            stmts: stmts
+                .into_iter()
+                .map(|stmt| todo!("convert analysis into interp"))
+                .collect(),
         })
     })
 }

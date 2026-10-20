@@ -6,24 +6,24 @@
 
 use crate::{
     analyzer::{
-        Assignment, BlockStmt, Expr, ExprStmt, IfStmt, InterpProgram, Literal, PrintStmt, Statement,
+        Assignment, BlockStmt, Expr, ExprStmt, IfStmt, InterpProgram, Literal, OrStmt, PrintStmt,
+        Statement,
     },
     exec::error::Failure,
+    types::text,
 };
 use env::Environment;
+use std::borrow::Cow;
 use value::{
-    BoolObject, ByteObject, CharObject, FailObject, FlptObject, InterpOp, InterpVar, LangVar,
-    NoneObject, SintObject, TextObject, UintObject,
+    BoolObject, ByteObject, CharObject, FailObject, FlptObject, InterpOp, InterpVar, NoneObject,
+    PrimitiveVar, SintObject, TextObject, UintObject,
 };
 
 pub mod env;
 pub mod value;
 
-impl<'src> InterpOp<'src, '_, '_> {
-    fn interp_eval<'env>(
-        &'inr self,
-        env: &'env Environment,
-    ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
+impl<'src> InterpOp<'src> {
+    fn interp_eval<'env>(&self, env: &'env Environment) -> Result<InterpVar<'src>, Failure> {
         match self {
             Self::Binary(_, fun, lhs, rhs) => {
                 let lhs = lhs.interp_eval(env)?;
@@ -43,67 +43,57 @@ impl<'src> InterpOp<'src, '_, '_> {
 }
 
 impl<'src> Literal {
-    fn interp_eval<'inr>(&'inr self) -> &'inr (dyn 'inr + LangVar) {
+    fn interp_eval(&self) -> InterpVar<'src> {
         // yuck, boxes for things we have a reference to :(
         match self {
-            Self::None => value::NoneObject::new(const { &() }),
+            Self::None => InterpVar::Primitive(value::PrimitiveVar::None(NoneObject(()))),
             Self::Nevr => unreachable!("cannot have nevr literal"), // TBD: will this change?
-            Self::Fail(x) => FailObject::new(x),
-            Self::Bool(x) => BoolObject::new(x),
-            Self::Byte(x) => ByteObject::new(x),
-            Self::Uint(x) => UintObject::new(x),
-            Self::Sint(x) => SintObject::new(x),
-            Self::Flpt(x) => FlptObject::new(x),
-            Self::Char(x) => CharObject::new(x),
-            Self::Text(x) => TextObject::new(x),
+            Self::Fail(x) => InterpVar::Primitive(value::PrimitiveVar::Fail(FailObject(*x))),
+            Self::Bool(x) => InterpVar::Primitive(value::PrimitiveVar::Bool(BoolObject(*x))),
+            Self::Byte(x) => InterpVar::Primitive(value::PrimitiveVar::Byte(ByteObject(*x))),
+            Self::Uint(x) => InterpVar::Primitive(value::PrimitiveVar::Uint(UintObject(*x))),
+            Self::Sint(x) => InterpVar::Primitive(value::PrimitiveVar::Sint(SintObject(*x))),
+            Self::Flpt(x) => InterpVar::Primitive(value::PrimitiveVar::Flpt(FlptObject(*x))),
+            Self::Char(x) => InterpVar::Primitive(value::PrimitiveVar::Char(CharObject(*x))),
+            Self::Text(x) => InterpVar::Primitive(value::PrimitiveVar::Text(TextObject(x.clone()))),
         }
     }
 }
 
-impl<'src, 'inr> InterpVar<'src, 'inr> {
-    fn interp_eval(&'inr self) -> &(dyn 'inr + LangVar) {
-        // TBD: what is env even for??
-        self
-    }
-}
-
-impl<'src> Expr<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
-    fn interp_eval<'inr>(
-        &'inr self,
-        env: &'inr Environment,
-    ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
+impl<'src> Expr<InterpOp<'src>, InterpVar<'src>> {
+    fn interp_eval<'val>(
+        &'val self,
+        env: &'val Environment,
+    ) -> Result<Cow<'val, InterpVar<'src>>, Failure> {
         match self {
             Expr::Assignment(_) => unimplemented!("should be handled by outer statement"),
-            Expr::Op(expr) => expr.interp_eval(env),
-            Expr::Literal(expr) => Ok(expr.interp_eval()),
-            Expr::Variable(expr) => Ok(Box::from(expr.interp_eval(env))),
+            Expr::Op(expr) => expr.interp_eval(env).map(Cow::Owned),
+            Expr::Literal(expr) => Ok(Cow::Owned(expr.interp_eval())),
+            Expr::Variable(x) => Ok(Cow::Borrowed(x)),
         }
     }
 }
 
-impl<'src> Assignment<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
-    fn interp_exec<'inr>(
-        &'inr mut self,
-        env: &'inr mut Environment,
-    ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
+impl<'src> Assignment<InterpOp<'src>, InterpVar<'src>> {
+    fn interp_exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         let var = match &mut self.lvalue {
             Expr::Variable(var) => var,
             Expr::Literal(_) => todo!("error: cannot assign to literal"),
             _ => todo!("mutable expression"),
         };
         let tmp = self.rhs.interp_eval(env)?;
-        *var = tmp;
-        todo!()
+        tmp.as_ref().clone_into(var);
+        Ok(())
     }
 }
 
-impl<'src> ExprStmt<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
+impl<'src> ExprStmt<InterpOp<'src>, InterpVar<'src>> {
     fn interp_exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         if let Expr::Assignment(assignment) = &mut self.expr {
             assignment.interp_exec(env);
         } else {
             let res = self.expr.interp_eval(env)?;
-            if res.as_none().is_none() {
+            if !matches!(res.as_ref(), InterpVar::Primitive(PrimitiveVar::None(_))) {
                 // lint
                 println!("WARNING: non-none expression result ignored: {res:?}");
             }
@@ -112,22 +102,46 @@ impl<'src> ExprStmt<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
     }
 }
 
-impl<'src> PrintStmt<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
+impl<'src> PrintStmt<InterpOp<'src>, InterpVar<'src>> {
     fn interp_exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
-        let val = self.expr.interp_eval(env)?;
-        let txt = val.as_text().expect("should be caught by static analysis");
-        print!("{txt}");
+        let buf = self.expr.interp_eval(env)?;
+        let val: &text = buf
+            .as_ref()
+            .try_into()
+            .expect("should be guaranteed by static analysis");
+        print!("{val}");
         Ok(())
     }
 }
 
-impl<'src> IfStmt<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
+impl<'src> IfStmt<InterpOp<'src>, InterpVar<'src>> {
     fn interp_exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
-        todo!()
+        let mut cond = self;
+        loop {
+            let buf = cond.pred.interp_eval(env)?;
+            let val: &bool = buf
+                .as_ref()
+                .try_into()
+                .expect("should be guaranteed by static analysis");
+            break if *val {
+                &mut cond.then
+            } else if let Some(or) = cond.or.as_deref_mut() {
+                match or {
+                    OrStmt::More(more) => {
+                        cond = more;
+                        continue;
+                    }
+                    OrStmt::Last(last) => last,
+                }
+            } else {
+                break Ok(());
+            }
+            .interp_exec(env);
+        }
     }
 }
 
-impl<'src> BlockStmt<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
+impl<'src> BlockStmt<InterpOp<'src>, InterpVar<'src>> {
     fn interp_exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         for stmt in &mut self.stmts {
             stmt.interp_exec(env)?;
@@ -136,7 +150,7 @@ impl<'src> BlockStmt<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
     }
 }
 
-impl<'src> Statement<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
+impl<'src> Statement<InterpOp<'src>, InterpVar<'src>> {
     fn interp_exec(&mut self, env: &mut Environment) -> Result<(), Failure> {
         match self {
             Self::Expr(stmt) => stmt.interp_exec(env),
@@ -147,7 +161,7 @@ impl<'src> Statement<InterpOp<'src, '_, '_>, InterpVar<'src, '_>> {
     }
 }
 
-pub fn interpret(mut prgm: InterpProgram<'_, '_>) -> Result<(), Failure> {
+pub fn interpret(mut prgm: InterpProgram<'_>) -> Result<(), Failure> {
     let mut env = Environment::new();
     for stmt in &mut prgm.stmts {
         stmt.interp_exec(&mut env)?;

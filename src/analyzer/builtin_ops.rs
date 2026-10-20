@@ -5,10 +5,12 @@ use super::{
 };
 use crate::{
     exec::value::{Value, ValueMut},
-    interp::value::{LangVar, LangVarCast},
+    interp::value::InterpVar,
     spec_ops::{BitRotate, BitShift},
     types::*,
 };
+
+// TBD: how does Batscript handle overflow?
 
 macro_rules! prim_op {
     (
@@ -34,18 +36,20 @@ macro_rules! prim_op {
                     ret: StaticType::Primitive(PrimitiveType::$output),
                 },
                 def: {
-                    fn interp<'inr>(
-                        lhs: &(dyn 'inr + LangVar),
-                        rhs: &(dyn 'inr + LangVar),
-                    ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
-                        let $lhs_name = lhs
-                            .downcast_to::<$Lhs>()
+                    fn interp<'src>(
+                        lhs: &InterpVar<'src>,
+                        rhs: &InterpVar<'src>,
+                    ) -> Result<InterpVar<'src>, Failure> {
+                        let $lhs_name: &$Lhs = lhs
+                            .try_into()
                             .expect("should be guaranteed by static analysis");
-                        let $rhs_name = rhs
-                            .downcast_to::<$Rhs>()
+                        let $rhs_name: &$Rhs = rhs
+                            .try_into()
                             .expect("should be guaranteed by static analysis");
                         let res: $Out = $def;
-                        Ok(Box::new(res.cast_into()))
+                        Ok(res
+                            .try_into()
+                            .expect("should be guaranteed by static analysis"))
                     }
                     fn runtime<'src, 'val>(
                         out: ValueMut<'val, 'src>,
@@ -86,14 +90,14 @@ macro_rules! prim_op {
                     ret: StaticType::Primitive(PrimitiveType::$output),
                 },
                 def: {
-                    fn interp<'inr>(
-                        rhs: &(dyn 'inr + LangVar),
-                    ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
-                        let $rhs_name = rhs
-                            .downcast_to::<$Rhs>()
+                    fn interp<'src>(rhs: &InterpVar<'src>) -> Result<InterpVar<'src>, Failure> {
+                        let $rhs_name: &$Rhs = rhs
+                            .try_into()
                             .expect("should be guaranteed by static analysis");
                         let res: $Out = $def;
-                        Ok(Box::new(res.cast_into()))
+                        Ok(res
+                            .try_into()
+                            .expect("should be guaranteed by static analysis"))
                     }
                     fn runtime<'src, 'val>(
                         out: ValueMut<'val, 'src>,
@@ -132,13 +136,15 @@ macro_rules! prim_op {
                 },
                 def: {
                     fn interp<'inr>(
-                        lhs: &(dyn 'inr + LangVar),
+                        lhs: &InterpVar<'src>,
                     ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
-                        let $lhs_name = lhs
-                            .downcast_to::<$Lhs>()
+                        let $lhs_name: &$Lhs = lhs
+                            .try_into()
                             .expect("should be guaranteed by static analysis");
                         let res: $Out = $def;
-                        Ok(Box::new(res.cast_into()))
+                        Ok(res
+                            .try_into()
+                            .expect("should be guaranteed by static analysis"))
                     }
                     fn runtime<'src, 'val>(
                         $env: &'val Environment,
@@ -167,7 +173,7 @@ macro_rules! primitive_ops {
             $def:expr
         }
     )*) => {
-        pub fn builtin_ops() -> impl IntoIterator<IntoIter: ExactSizeIterator + DoubleEndedIterator, Item = (Operator, OpOverload<'static>)> {
+        pub fn builtin_ops<'src>() -> impl IntoIterator<IntoIter: ExactSizeIterator + DoubleEndedIterator, Item = (Operator, OpOverload<'src>)> {
             vec![$(
                 prim_op!(
                     $($pre_bin_op)?($lhs_unary$(, $rhs)?)$($post_op)? -> $output
@@ -182,102 +188,15 @@ macro_rules! primitive_ops {
 }
 
 primitive_ops![
-    // bool-assign
-    AndAssign (Bool, Bool) -> None as fn(l: bool, r: bool) -> none { todo!() }
-    OrAssign  (Bool, Bool) -> None as fn(l: bool, r: bool) -> none { todo!() }
-    XorAssign (Bool, Bool) -> None as fn(l: bool, r: bool) -> none { todo!() }
-    NandAssign(Bool, Bool) -> None as fn(l: bool, r: bool) -> none { todo!() }
-    NorAssign (Bool, Bool) -> None as fn(l: bool, r: bool) -> none { todo!() }
-    XnorAssign(Bool, Bool) -> None as fn(l: bool, r: bool) -> none { todo!() }
-
-    // uint-assign
-    AndAssign (Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    OrAssign  (Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    XorAssign (Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    NandAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    NorAssign (Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    XnorAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-
-    AddAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    SubAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    MulAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    PowAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    DivAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    RemAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-
-    ShlAssign (Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    ShrAssign (Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    RotlAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-    RotrAssign(Uint, Uint) -> None as fn(l: uint, r: uint) -> none { todo!() }
-
-    ShlAssign (Uint, Sint) -> None as fn(l: uint, r: sint) -> none { todo!() }
-    ShrAssign (Uint, Sint) -> None as fn(l: uint, r: sint) -> none { todo!() }
-    RotlAssign(Uint, Sint) -> None as fn(l: uint, r: sint) -> none { todo!() }
-    RotrAssign(Uint, Sint) -> None as fn(l: uint, r: sint) -> none { todo!() }
-
-    // sint-assign
-    AndAssign (Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l &= r") }
-    OrAssign  (Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l |= r") }
-    XorAssign (Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l ^= r") }
-    NandAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l = !(l & r)") }
-    NorAssign (Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l = !(l | r)") }
-    XnorAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l = !(l ^ r)") }
-
-    AddAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l += r") }
-    SubAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l -= r") }
-    MulAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l *= r") }
-    PowAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l = l.pow(r)") }
-    DivAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l /= r") }
-    RemAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l %= r") }
-
-    ShlAssign (Sint, Uint) -> None as fn(l: sint, r: uint) -> none { todo!("l = l.bshl(r)") }
-    ShrAssign (Sint, Uint) -> None as fn(l: sint, r: uint) -> none { todo!("l = l.bshr(r)") }
-    RotlAssign(Sint, Uint) -> None as fn(l: sint, r: uint) -> none { todo!("l = l.rotl(r)") }
-    RotrAssign(Sint, Uint) -> None as fn(l: sint, r: uint) -> none { todo!("l = l.rotr(r)") }
-
-    ShlAssign (Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l = l.bshl(r)") }
-    ShrAssign (Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l = l.bshr(r)") }
-    RotlAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l = l.rotl(r)") }
-    RotrAssign(Sint, Sint) -> None as fn(l: sint, r: sint) -> none { todo!("l = l.rotr(r)") }
-
-    // flpt-assign
-    AddAssign(Flpt, Flpt) -> None as fn(l: flpt, r: flpt) -> none { todo!() }
-    SubAssign(Flpt, Flpt) -> None as fn(l: flpt, r: flpt) -> none { todo!() }
-    MulAssign(Flpt, Flpt) -> None as fn(l: flpt, r: flpt) -> none { todo!() }
-    PowAssign(Flpt, Flpt) -> None as fn(l: flpt, r: flpt) -> none { todo!() }
-    DivAssign(Flpt, Flpt) -> None as fn(l: flpt, r: flpt) -> none { todo!() }
-    RemAssign(Flpt, Flpt) -> None as fn(l: flpt, r: flpt) -> none { todo!() }
-
-    // char-assign
-    AddAssign(Char, Uint) -> None as fn(l: char, r: uint) -> none { todo!() }
-    SubAssign(Char, Uint) -> None as fn(l: char, r: uint) -> none { todo!() }
-
-    // text-assign
-    AddAssign(Text, Text) -> None as fn(l: text, r: text) -> none { todo!() }
-
-    AddAssign(Text, Bool) -> None as fn(l: text, r: bool) -> none { todo!() }
-    AddAssign(Text, Uint) -> None as fn(l: text, r: uint) -> none { todo!() }
-    AddAssign(Text, Sint) -> None as fn(l: text, r: sint) -> none { todo!() }
-    AddAssign(Text, Flpt) -> None as fn(l: text, r: flpt) -> none { todo!() }
-    AddAssign(Text, Char) -> None as fn(l: text, r: char) -> none { todo!() }
-    AddAssign(Text, Text) -> None as fn(l: text, r: text) -> none { todo!() }
-
-    AddAssign(Bool, Text) -> None as fn(l: bool, r: text) -> none { todo!() }
-    AddAssign(Uint, Text) -> None as fn(l: uint, r: text) -> none { todo!() }
-    AddAssign(Sint, Text) -> None as fn(l: sint, r: text) -> none { todo!() }
-    AddAssign(Flpt, Text) -> None as fn(l: flpt, r: text) -> none { todo!() }
-    AddAssign(Char, Text) -> None as fn(l: char, r: text) -> none { todo!() }
-    AddAssign(Text, Text) -> None as fn(l: text, r: text) -> none { todo!() }
-
     // bool
-    Exists(None) -> Bool as fn(r: none) -> none { todo!() }
-    Exists(Fail) -> Bool as fn(r: fail) -> none { todo!() }
-    Exists(Bool) -> Bool as fn(r: bool) -> none { todo!() }
-    Exists(Uint) -> Bool as fn(r: uint) -> none { todo!() }
-    Exists(Sint) -> Bool as fn(r: sint) -> none { todo!() }
-    Exists(Flpt) -> Bool as fn(r: flpt) -> none { todo!() }
-    Exists(Char) -> Bool as fn(r: char) -> none { todo!() }
-    Exists(Text) -> Bool as fn(r: text) -> none { todo!() }
+    Exists(None) -> Bool as fn(r: none) -> bool { false }
+    Exists(Fail) -> Bool as fn(r: fail) -> bool { false }
+    Exists(Bool) -> Bool as fn(r: bool) -> bool { *r } // TBD: should !!bool be equivalent to !(!bool)? or does it definitively represent "not error"?
+    Exists(Uint) -> Bool as fn(r: uint) -> bool { true }
+    Exists(Sint) -> Bool as fn(r: sint) -> bool { true }
+    Exists(Flpt) -> Bool as fn(r: flpt) -> bool { !r.is_nan() }
+    Exists(Char) -> Bool as fn(r: char) -> bool { *r != '\0' }
+    Exists(Text) -> Bool as fn(r: text) -> bool { !r.is_empty() }
 
     And (Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l & r }
     Or  (Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l | r }
@@ -392,9 +311,19 @@ primitive_ops![
 
     SubNeg(Flpt) -> Flpt as fn(r: flpt) -> flpt { -r }
 
-    // char
-    Add   (Char, Uint) -> Char as fn(l: char, r: uint) -> char { todo!() }
-    SubNeg(Char, Uint) -> Char as fn(l: char, r: uint) -> char { todo!() }
+    // char.ok()
+    Add   (Char, Uint) -> Char as fn(l: char, r: uint) -> char {
+        u32::try_from(*r)
+            .ok()
+            .and_then(|r| char::from_u32(l.to_u32() + r))
+            .ok_or(Failure::Utf8Error)?
+    }
+    SubNeg(Char, Uint) -> Char as fn(l: char, r: uint) -> char {
+        u32::try_from(*r)
+            .ok()
+            .and_then(|r| char::from_u32(l.to_u32() + r))
+            .ok_or(Failure::Utf8Error)?
+    }
 
     // text
     Add(Text, Text) -> Text as fn(l: text, r: text) -> text { format!("{l}{r}") }

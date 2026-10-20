@@ -2,7 +2,7 @@
 
 use crate::{
     SYNTAX_STYLE_ANSI,
-    analyzer::{AnalyzerVar, Expr, AnalysisOp, types::AbstractType},
+    analyzer::{AnalysisOp, AnalyzerVar, Expr, types::AbstractType},
     arrayvec::ArrayVec,
     exec::error::Failure,
     grammar::ast::AstNodeFinal,
@@ -1145,7 +1145,7 @@ impl<'src> ContextError<'src> {
         self
     }
 
-    pub fn to_bracket_mismatch(self, open_bracket: Bracket, open_range: Range<usize>) -> Self {
+    pub fn into_bracket_mismatch(self, open_bracket: Bracket, open_range: Range<usize>) -> Self {
         let source = self.source;
         self.map_type(|e| match e {
             ErrorType::UnexpectedToken {

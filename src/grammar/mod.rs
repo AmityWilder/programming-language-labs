@@ -580,7 +580,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                     ExpectedToken::ExprOrRParen,
                 )
                 .map(move |close| Grouping { open, expr, close })
-                .map_err(|e| e.to_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))
+                .map_err(|e| e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))
             })
     }
 
