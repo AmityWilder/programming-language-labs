@@ -169,6 +169,17 @@ pub enum OperandTypes<'src> {
     UnaryPre(AbstractType<'src>),
 }
 
+impl std::fmt::Display for OperandTypes<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Binary(lhs, rhs) => write!(f, "({lhs}, {rhs})"),
+            // TBD: style
+            Self::UnaryPost(lhs) => write!(f, "({lhs}, _)"),
+            Self::UnaryPre(rhs) => write!(f, "(_, {rhs})"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct OpOverload<'src> {
     pub operands: OperandTypes<'src>,

@@ -65,7 +65,7 @@ pub trait TypeCompatible<'src>: std::fmt::Display {
     where
         Self: std::fmt::Debug,
     {
-        // HACK: potentially expensive, but is_compatible isn't reflexive yet (due to OrType)
+        // HACK: potentially expensive, but `is_compatible` isn't reflexive yet (due to `OrType`)
         (self.is_compatible(expect) || expect.is_compatible(&expect.to_abstract()))
             .ok_or_else(|| ErrorType::TypeMismatch(Box::new((expect.clone(), self.to_abstract()))))
     }
@@ -716,6 +716,15 @@ impl<'src> From<Box<FunType<'src>>> for StaticType<'src> {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum TypeBound<'src> {
+    /// Satisfies all of the conditions
+    All(Vec<TypeBound<'src>>),
+
+    /// Satisfies at least one of the conditions
+    Any(Vec<TypeBound<'src>>),
+
+    /// Does not satisfy the condition
+    Not(Box<TypeBound<'src>>),
+
     /// Matches another type
     Exactly(AbstractType<'src>),
 
@@ -724,7 +733,7 @@ pub enum TypeBound<'src> {
         /// Name of the member
         member: &'src str,
         /// Requirements the member must satisfy
-        reqs: Vec<TypeBound<'src>>,
+        reqs: Option<Box<TypeBound<'src>>>,
     },
 
     /// Fits a function shape
@@ -746,6 +755,50 @@ pub enum TypeBound<'src> {
 impl Default for TypeBound<'_> {
     fn default() -> Self {
         Self::Exactly(AbstractType::default())
+    }
+}
+
+impl std::fmt::Display for TypeBound<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::All(bounds) => {
+                f.write_str("(")?;
+                let mut has_prev = false;
+                for bound in bounds {
+                    if has_prev {
+                        f.write_str(" & ")?;
+                    }
+                    has_prev = true;
+                    bound.fmt(f)?;
+                }
+                f.write_str(")")
+            }
+            Self::Any(bounds) => {
+                f.write_str("(")?;
+                let mut has_prev = false;
+                for bound in bounds {
+                    if has_prev {
+                        f.write_str(" | ")?;
+                    }
+                    has_prev = true;
+                    bound.fmt(f)?;
+                }
+                f.write_str(")")
+            }
+            Self::Not(bound) => write!(f, "!{bound}"),
+            Self::Exactly(ty) => write!(f, "{ty}"),
+            Self::Has { member, reqs } => {
+                write!(f, "has {member}")?;
+                if let Some(req) = reqs {
+                    write!(f, ": {req}")
+                } else {
+                    Ok(())
+                }
+            }
+            Self::Shape(shape) => shape.fmt(f),
+            Self::Supports { .. } => todo!(),
+            Self::Satisfies(_) => todo!(),
+        }
     }
 }
 
@@ -785,7 +838,7 @@ impl<'src> TypeCompatible<'src> for GenericType<'src> {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct GenericParam<'src> {
     pub ident: &'src str,
-    pub reqs: Vec<TypeBound<'src>>,
+    pub reqs: Box<TypeBound<'src>>,
 }
 impl std::fmt::Display for GenericParam<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -808,6 +861,8 @@ impl<'src> TypeCompatible<'src> for GenericParam<'src> {
 pub enum AbstractType<'src> {
     /// All types should be this variant after monomorphization
     Concrete(StaticType<'src>),
+    /// Select a concrete type based on where it's going; but it must meet these requirements
+    Opaque(Box<TypeBound<'src>>),
     Generic(GenericType<'src>),
     Param(GenericParam<'src>),
 }
@@ -833,6 +888,7 @@ impl std::fmt::Display for AbstractType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Concrete(t) => t.fmt(f),
+            Self::Opaque(t) => write!(f, "opaque {t}"),
             Self::Generic(t) => t.fmt(f),
             Self::Param(t) => t.fmt(f),
         }
