@@ -2,7 +2,7 @@
 {
     let foo = 7;
     foo = 9;
-    foo = "x"; // error: can't reassign
+    //foo = "x"; // error: can't reassign
     let bar = 8;
 
     let bigger;
