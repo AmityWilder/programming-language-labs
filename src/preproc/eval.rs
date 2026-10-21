@@ -362,7 +362,7 @@ where
             let Unary { op, operand, side } = &**inner;
 
             match side {
-                OpSide::Left => {
+                OpSide::Postfix => {
                     return Err(ContextError::token_error(
                         source,
                         Some(op),
@@ -370,7 +370,7 @@ where
                     ));
                 }
 
-                OpSide::Right => match op.val {
+                OpSide::Prefix => match op.val {
                     Szof => Ok(PpValue::UIntLiteral(
                         preproc_eval(source, operand, mexists)?.size(),
                     )),

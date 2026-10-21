@@ -57,6 +57,7 @@ pub trait StaticTypeSize: TypeSize {
 
 /// Display implementation is be how the type will be shown in error messages
 pub trait TypeCompatible<'src>: std::fmt::Display {
+    /// TODO: this is not currently reflexive!! check both ways until this is fixed!
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool;
 
     // TODO: change this to return an actual error
@@ -64,7 +65,8 @@ pub trait TypeCompatible<'src>: std::fmt::Display {
     where
         Self: std::fmt::Debug,
     {
-        self.is_compatible(expect)
+        // HACK: potentially expensive, but is_compatible isn't reflexive yet (due to OrType)
+        (self.is_compatible(expect) || expect.is_compatible(&expect.to_abstract()))
             .ok_or_else(|| ErrorType::TypeMismatch(Box::new((expect.clone(), self.to_abstract()))))
     }
 
@@ -240,7 +242,20 @@ impl TypeSize for Fallible<'_> {
 }
 impl<'src> TypeCompatible<'src> for Fallible<'src> {
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
-        matches!(other, AbstractType::Concrete(StaticType::OrTy(other)) if *self == **other)
+        match other {
+            AbstractType::Concrete(StaticType::OrTy(other)) => {
+                *self == **other
+                    || self.is_compatible(&AbstractType::Concrete(StaticType::Primitive(
+                        match other.or {
+                            OrType::None => PrimitiveType::None,
+                            OrType::Nevr => PrimitiveType::Nevr,
+                            OrType::Fail => PrimitiveType::Fail,
+                        },
+                    )))
+                    || self.is_compatible(&other.then.to_abstract())
+            }
+            _ => false,
+        }
     }
 
     fn to_abstract(&self) -> AbstractType<'src> {

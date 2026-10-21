@@ -915,8 +915,8 @@ pub enum ErrorType<'src> {
         write!(f, "try changing operators, converting types, or wrapping something in parentheses")
     })]
     #[info({ l_ty, l_range, r_ty, r_range, .. }, [
-        (*l_range, TypeResolutionMsg { side: OpSide::Left, ty: l_ty.clone() }),
-        (*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty.clone() }),
+        (*l_range, TypeResolutionMsg { side: OpSide::Postfix, ty: l_ty.clone() }),
+        (*r_range, TypeResolutionMsg { side: OpSide::Prefix, ty: r_ty.clone() }),
     ])]
     Incompatible {
         /// The binary operator
@@ -932,7 +932,7 @@ pub enum ErrorType<'src> {
     #[err({ op, r_ty, .. }, |f| write!(f, "`{op}` is not supported for {r_ty}"))]
     #[inlay({ .. }, |f| write!(f, "operation is not supported for operands of this type"))]
     #[help({ .. }, |f, _src| write!(f, "try a different operator or convert the type"))]
-    #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Right, ty: r_ty.clone() })])]
+    #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Prefix, ty: r_ty.clone() })])]
     Unsupported {
         /// The unary operator
         op: TokenEq,
@@ -1058,7 +1058,7 @@ pub enum ErrorType<'src> {
     #[inlay({ .. }, |f| write!(f, "integer conversion failed"))]
     #[help({ .. }, |f, _src| write!(f, "ensure the expression fits in the target type"))]
     #[info({ op, op_range, failure, is_binary }, [
-        (*op_range, FailedConversionMsg::new(*op, OpSide::Right, *failure, *is_binary)),
+        (*op_range, FailedConversionMsg::new(*op, OpSide::Prefix, *failure, *is_binary)),
     ])]
     FailedConvert {
         op: TokenEq,
@@ -1848,17 +1848,15 @@ struct InlineErrMsg<'src, 'err>(&'err ErrorType<'src>);
 /// Which side of the operator the operand is on
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OpSide {
-    /// Postfix
-    Left,
-    /// Prefix
-    Right,
+    Postfix,
+    Prefix,
 }
 
 impl OpSide {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Left => "lhs",
-            Self::Right => "rhs",
+            Self::Postfix => "lhs",
+            Self::Prefix => "rhs",
         }
     }
 }

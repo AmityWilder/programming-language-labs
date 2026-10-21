@@ -101,7 +101,7 @@ macro_rules! syntax_tree {
         $crate::grammar::ast::Expr::unary($crate::grammar::ast::Unary {
             op: token!(Operator::$($op)*),
             operand: syntax_tree!($RhsTy($($rhs)*)),
-            side: $crate::error::OpSide::Right,
+            side: $crate::error::OpSide::Prefix,
         })
     };
 
@@ -113,7 +113,7 @@ macro_rules! syntax_tree {
         $crate::grammar::ast::Expr::unary($crate::grammar::ast::Unary {
             operand: syntax_tree!($LhsTy($($lhs)*)),
             op: token!(Operator::$($op)*),
-            side: $crate::error::OpSide::Left,
+            side: $crate::error::OpSide::Postfix,
         })
     };
 

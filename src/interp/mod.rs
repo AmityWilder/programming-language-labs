@@ -40,6 +40,34 @@ pub enum ControlFlow<E = Failure, T = ()> {
     Fail(E),
 }
 
+impl InterpVal<'_> {
+    pub fn ensure_ok(&self) -> Result<&Self, Failure> {
+        match self {
+            Self::Uninit(_) => panic!("reading uninitialized memory!"),
+
+            Self::OrNone(x) => match x.as_ref() {
+                value::OrVal::Ok(x) => x.ensure_ok(),
+                value::OrVal::Or(_) => Err(Failure::UnhandledOrNone),
+            },
+            Self::OrFail(x) => match x.as_ref() {
+                value::OrVal::Ok(x) => x.ensure_ok(),
+                value::OrVal::Or(e) => Err(e.0),
+            },
+            Self::OrNevr(x) => match x.as_ref() {
+                value::OrVal::Ok(x) => x.ensure_ok(),
+                value::OrVal::Or(_) => Err(Failure::UnhandledOrNevr),
+            },
+
+            // TBD: is this the right way to do this?
+            Self::Primitive(PrimitiveVal::None(_)) => Err(Failure::UnhandledOrNone),
+            Self::Primitive(PrimitiveVal::Fail(e)) => Err(e.0),
+            Self::Primitive(PrimitiveVal::Nevr(_)) => Err(Failure::UnhandledOrNevr),
+
+            x => Ok(x),
+        }
+    }
+}
+
 impl<'src> InterpOp<'src> {
     fn interp_eval<'env>(
         &self,
@@ -160,6 +188,7 @@ impl<'src> PrintStmt<InterpOp<'src>, InterpVar<'src>> {
         let buf = self.expr.interp_eval(env)?;
         let val: &text = buf
             .as_ref()
+            .ensure_ok()?
             .try_into()
             .expect("should be guaranteed by static analysis");
         print!("{val}");
@@ -172,10 +201,13 @@ impl<'src> IfStmt<InterpOp<'src>, InterpVar<'src>> {
         let mut cond = self;
         loop {
             let buf = cond.pred.interp_eval(env)?;
-            let val: &bool = buf
-                .as_ref()
-                .try_into()
-                .expect("should be guaranteed by static analysis");
+            let val: &bool = buf.as_ref().ensure_ok()?.try_into().unwrap_or_else(|()| {
+                panic!(
+                    "should be guaranteed by static analysis\
+                \n expected: bool\
+                \n    found: {buf:?}"
+                )
+            });
             break if *val {
                 &cond.then
             } else if let Some(or) = cond.or.as_deref() {

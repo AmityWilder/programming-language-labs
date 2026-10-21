@@ -343,29 +343,29 @@ pub struct Unary<'src> {
 impl<'src> AstNode<'src> for Unary<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
         match self.side {
-            OpSide::Left => self.operand.get_range_start(source),
-            OpSide::Right => self.op.get_range_start(source),
+            OpSide::Postfix => self.operand.get_range_start(source),
+            OpSide::Prefix => self.op.get_range_start(source),
         }
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
         match self.side {
-            OpSide::Left => self.op.get_range_end(source),
-            OpSide::Right => self.operand.get_range_end(source),
+            OpSide::Postfix => self.op.get_range_end(source),
+            OpSide::Prefix => self.operand.get_range_end(source),
         }
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
         match self.side {
-            OpSide::Left => (&self.operand, &self.op).get_range(source),
-            OpSide::Right => (&self.op, &self.operand).get_range(source),
+            OpSide::Postfix => (&self.operand, &self.op).get_range(source),
+            OpSide::Prefix => (&self.op, &self.operand).get_range(source),
         }
     }
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         match self.side {
-            OpSide::Left => (&self.operand, &self.op).expansion(source),
-            OpSide::Right => (&self.op, &self.operand).expansion(source),
+            OpSide::Postfix => (&self.operand, &self.op).expansion(source),
+            OpSide::Prefix => (&self.op, &self.operand).expansion(source),
         }
     }
 }

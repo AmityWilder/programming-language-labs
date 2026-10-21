@@ -691,31 +691,88 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                 )]);
             };
             let (operands, operand_types) = match self.side {
-                OpSide::Left => (Operands::UnaryPost(operand), OperandTypes::UnaryPost(ty)),
-                OpSide::Right => (Operands::UnaryPre(operand), OperandTypes::UnaryPre(ty)),
+                OpSide::Postfix => (Operands::UnaryPost(operand), OperandTypes::UnaryPost(ty)),
+                OpSide::Prefix => (Operands::UnaryPre(operand), OperandTypes::UnaryPre(ty)),
             };
-            env.lookup(&self.op.val)
+            let overload = env
+                .lookup(&self.op.val)
                 .map(|(_, item)| match &item.val {
                     EnvItem::Op(overload) => overload,
                     _ => unreachable!("only operators should be stored with operator keys"),
                 })
-                .find(|overload| overload.operands == operand_types)
-                .map(|overload| {
-                    let (def, interp_def) = match overload.def {
-                        FnDef::LangOpU(def, interp_def) => (def, interp_def),
-                        FnDef::LangOpB(_, _) | FnDef::UserDef(_) => unimplemented!(),
-                    };
-                    match operands {
-                        Operands::Binary(_, _) => unreachable!(),
-                        Operands::UnaryPre(r) => {
-                            AnalysisOp::UnaryPre((overload.fun.clone(), def, interp_def), r)
-                        }
-                        Operands::UnaryPost(l) => {
-                            AnalysisOp::UnaryPre((overload.fun.clone(), def, interp_def), l)
-                        }
+                .find(|overload| overload.operands == operand_types);
+
+            if let Some(overload) = overload {
+                let (def, interp_def) = match overload.def {
+                    FnDef::LangOpU(def, interp_def) => (def, interp_def),
+                    FnDef::LangOpB(_, _) | FnDef::UserDef(_) => unimplemented!(),
+                };
+                Some(match operands {
+                    Operands::Binary(_, _) => unreachable!(),
+                    Operands::UnaryPre(r) => {
+                        AnalysisOp::UnaryPre((overload.fun.clone(), def, interp_def), r)
+                    }
+                    Operands::UnaryPost(l) => {
+                        AnalysisOp::UnaryPost((overload.fun.clone(), def, interp_def), l)
                     }
                 })
-                .ok_or_else(|| vec![todo!("error: no such operator defined")])
+            }
+            // HACK: `Exists` should be generic
+            else if let Operands::UnaryPre(operand) = operands
+                && matches!(self.op.val, Operator::Exists)
+            {
+                let Some(ty) = operand.get_type(env) else {
+                    return Err(vec![ContextError::node_error(
+                        source,
+                        self,
+                        ErrorType::TypeAmbiguity(Box::new(operand)),
+                    )]);
+                };
+
+                fn def<'val, 'src>(
+                    _out: crate::exec::value::ValueMut<'val, 'src>,
+                    _lhs: crate::exec::value::Value<'val, 'src>,
+                ) -> std::result::Result<(), Failure> {
+                    todo!()
+                }
+
+                #[expect(
+                    clippy::unnecessary_wraps,
+                    reason = "needs to fit the function pointer shape"
+                )]
+                fn interp_def<'src>(
+                    lhs: &InterpVal<'src>,
+                ) -> std::result::Result<InterpVal<'src>, Failure> {
+                    Ok(InterpVal::Primitive(
+                        crate::interp::value::PrimitiveVal::Bool(crate::interp::value::BoolObject(
+                            lhs.ensure_ok().is_ok(),
+                        )),
+                    ))
+                }
+
+                let ty = match ty {
+                    ExprType::Static(ty)
+                    | ExprType::Variable(VarType::Abstract(AbstractType::Concrete(ty))) => {
+                        ty.clone()
+                    }
+                    ExprType::Literal(ty) => StaticType::Primitive(ty),
+                    _ => todo!("generic `exists`"),
+                };
+                Some(AnalysisOp::UnaryPost(
+                    (
+                        FunShape {
+                            params: [ty].to_vec(),
+                            ret: StaticType::Primitive(PrimitiveType::Bool),
+                        },
+                        def,
+                        interp_def,
+                    ),
+                    operand,
+                ))
+            } else {
+                None
+            }
+            .ok_or_else(|| vec![todo!("error: no such operator defined")])
         })
     }
 }

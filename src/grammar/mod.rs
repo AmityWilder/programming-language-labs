@@ -554,7 +554,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             expr = Expr::unary(Unary {
                 operand: expr,
                 op,
-                side: OpSide::Left,
+                side: OpSide::Postfix,
             });
         }
         Ok(expr)
@@ -570,14 +570,14 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             Ok(Expr::unary(Unary {
                 op,
                 operand,
-                side: OpSide::Right,
+                side: OpSide::Prefix,
             }))
         } else if let Some(op) = self.pull_into_if_in(&[Not, Exists, SubNeg]) {
             let operand = self.unary_prefix()?;
             Ok(Expr::unary(Unary {
                 op,
                 operand,
-                side: OpSide::Right,
+                side: OpSide::Prefix,
             }))
         } else {
             self.exponent()

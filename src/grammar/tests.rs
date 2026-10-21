@@ -30,7 +30,7 @@ fn test_parse0() {
             },
             rhs: Expr::binary(Binary {
                 lhs: Expr::unary(Unary {
-                    side: OpSide::Right,
+                    side: OpSide::Prefix,
                     op: SpecToken {
                         lex: "-",
                         val: Operator::SubNeg,

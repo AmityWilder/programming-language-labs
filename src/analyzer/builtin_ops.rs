@@ -10,8 +10,6 @@ use crate::{
     types::*,
 };
 
-// TBD: how does Batscript handle overflow?
-
 macro_rules! prim_op {
     (
         $op:ident($lhs:ident, $rhs:ident) -> $output:ident
@@ -40,7 +38,7 @@ macro_rules! prim_op {
                         lhs: &InterpVal<'src>,
                         rhs: &InterpVal<'src>,
                     ) -> Result<InterpVal<'src>, Failure> {
-                        let $lhs_name: &$Lhs = lhs.try_into().unwrap_or_else(|_| {
+                        let $lhs_name: &$Lhs = lhs.ensure_ok()?.try_into().unwrap_or_else(|_| {
                             panic!(
                                 "{}<{}, {}> lhs type mismatch should be caught by static analysis\
                                 \n expected: {}\
@@ -51,7 +49,7 @@ macro_rules! prim_op {
                                 stringify!($Lhs),
                             )
                         });
-                        let $rhs_name: &$Rhs = rhs.try_into().unwrap_or_else(|_| {
+                        let $rhs_name: &$Rhs = rhs.ensure_ok()?.try_into().unwrap_or_else(|_| {
                             panic!(
                                 "{}<{}, {}> rhs type mismatch should be caught by static analysis\
                                 \n expected: {}\
@@ -105,14 +103,14 @@ macro_rules! prim_op {
                 },
                 def: {
                     fn interp<'src>(rhs: &InterpVal<'src>) -> Result<InterpVal<'src>, Failure> {
-                        let $rhs_name: &$Rhs = rhs.try_into().unwrap_or_else(|_| {
+                        let $rhs_name: &$Rhs = rhs.ensure_ok()?.try_into().unwrap_or_else(|_| {
                             panic!(
                                 "{}<{}> rhs type mismatch should be caught by static analysis\
                                 \n expected: {}\
                                 \n    found: {rhs:?}",
                                 stringify!($op),
-                                stringify!($Lhs),
-                                stringify!($Lhs),
+                                stringify!($Rhs),
+                                stringify!($Rhs),
                             )
                         });
                         let res: $Out = $def;
@@ -157,7 +155,7 @@ macro_rules! prim_op {
                     fn interp<'inr>(
                         lhs: &InterpVal<'src>,
                     ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
-                        let $lhs_name: &$Lhs = lhs.try_into().unwrap_or_else(|_| {
+                        let $lhs_name: &$Lhs = lhs.ensure_ok()?.try_into().unwrap_or_else(|_| {
                             panic!(
                                 "{}<{}> lhs type mismatch should be caught by static analysis\
                                 \n expected: {}\
@@ -198,23 +196,23 @@ macro_rules! primitive_ops {
         }
     )*) => {
         pub fn builtin_ops<'src>() -> impl IntoIterator<IntoIter: ExactSizeIterator + DoubleEndedIterator, Item = (Operator, OpOverload<'src>)> {
-            vec![$(
-                prim_op!(
-                    $($pre_bin_op)?($lhs_unary$(, $rhs)?)$($post_op)? -> $output
+            vec![
+                $(
+                    prim_op!(
+                        $($pre_bin_op)?($lhs_unary$(, $rhs)?)$($post_op)? -> $output
 
-                    as fn($lhs_unary_name: $Lhs$(, $rhs_name: $Rhs)?) -> $Out {
-                        $def
-                    }
-                )
-            ),*]
+                        as fn($lhs_unary_name: $Lhs$(, $rhs_name: $Rhs)?) -> $Out {
+                            $def
+                        }
+                    )
+                ),*
+            ]
         }
     };
 }
 
 primitive_ops![
     // bool
-    Exists(None) -> Bool as fn(r: none) -> bool { false }
-    Exists(Fail) -> Bool as fn(r: fail) -> bool { false }
     Exists(Bool) -> Bool as fn(r: bool) -> bool { *r } // TBD: should !!bool be equivalent to !(!bool)? or does it definitively represent "success"?
     Exists(Uint) -> Bool as fn(r: uint) -> bool { true }
     Exists(Sint) -> Bool as fn(r: sint) -> bool { true }

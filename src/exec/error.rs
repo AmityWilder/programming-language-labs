@@ -11,6 +11,8 @@ pub enum Failure {
     Utf8Error,
     OutOfBounds,
     DivByZero,
+    UnhandledOrNone,
+    UnhandledOrNevr,
 }
 
 impl From<std::str::ParseBoolError> for Failure {
@@ -58,6 +60,8 @@ impl std::fmt::Display for Failure {
                 "attempted to access a location outside the bounds of available memory"
             ),
             Self::DivByZero => write!(f, "tried to divide by zero"),
+            Self::UnhandledOrNone => write!(f, "tried to perform an operation with none"),
+            Self::UnhandledOrNevr => write!(f, "tried to perform an operation with nevr"),
         }
     }
 }
