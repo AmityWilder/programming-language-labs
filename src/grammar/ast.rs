@@ -746,6 +746,58 @@ impl<'src> AstNode<'src> for IfStmt<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct LoopStmt<'src> {
+    /// `loop`
+    pub loop_kw: Lexeme<'src>,
+    pub block: BlockStmt<'src>,
+}
+
+impl<'src> AstNode<'src> for LoopStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.loop_kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.block.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.loop_kw, &self.block).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.loop_kw, &self.block).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct HaltStmt<'src> {
+    /// `halt`
+    pub halt_kw: Lexeme<'src>,
+    // TBD: should `halt value;` be supported?
+    /// `;`
+    pub semi: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for HaltStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.halt_kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.semi.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.halt_kw, &self.semi).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.halt_kw, &self.semi).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct BlockStmt<'src> {
     /// `{`
     pub open: Lexeme<'src>,
@@ -830,6 +882,8 @@ pub enum Statement<'src> {
     // TODO: im not too fond of the print keyword
     Print(PrintStmt<'src>),
     If(IfStmt<'src>),
+    Loop(LoopStmt<'src>),
+    Halt(HaltStmt<'src>),
     Block(BlockStmt<'src>),
 }
 
@@ -842,8 +896,16 @@ impl<'src> Statement<'src> {
         Self::Print(inner)
     }
 
+    pub const fn halt(inner: HaltStmt<'src>) -> Self {
+        Self::Halt(inner)
+    }
+
     pub const fn if_stmt(inner: IfStmt<'src>) -> Self {
         Self::If(inner)
+    }
+
+    pub const fn loop_stmt(inner: LoopStmt<'src>) -> Self {
+        Self::Loop(inner)
     }
 
     pub const fn block(inner: BlockStmt<'src>) -> Self {

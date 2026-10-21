@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
     analyzer::{
-        Assignment, BlockStmt, Expr, ExprStmt, IfStmt, Literal, OrStmt, PrintStmt, RuntimeOp,
-        RuntimeProgram, RuntimeVar, Statement, types::StaticType,
+        Assignment, BlockStmt, BreakStmt, Expr, ExprStmt, IfStmt, Literal, LoopStmt, OrStmt,
+        PrintStmt, RuntimeOp, RuntimeProgram, RuntimeVar, Statement, types::StaticType,
     },
     exec::{env::Environment, error::Failure},
     types::*,
@@ -324,6 +324,20 @@ impl<'src> IfStmt<RuntimeOp<'src>, RuntimeVar<'src>> {
     }
 }
 
+impl<'src> LoopStmt<RuntimeOp<'src>, RuntimeVar<'src>> {
+    fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
+        loop {
+            self.block.exec(env)?;
+        }
+    }
+}
+
+impl BreakStmt {
+    fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
+        todo!()
+    }
+}
+
 impl<'src> BlockStmt<RuntimeOp<'src>, RuntimeVar<'src>> {
     fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
         for stmt in &self.stmts {
@@ -339,6 +353,8 @@ impl<'src> Statement<RuntimeOp<'src>, RuntimeVar<'src>> {
             Self::Expr(stmt) => stmt.exec(env),
             Self::Print(stmt) => stmt.exec(env),
             Self::If(stmt) => stmt.exec(env),
+            Self::Loop(stmt) => stmt.exec(env),
+            Self::Break(stmt) => stmt.exec(env),
             Self::Block(stmt) => stmt.exec(env),
         }
     }

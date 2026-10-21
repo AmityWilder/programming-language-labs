@@ -4,12 +4,24 @@
     foo = 9;
     //foo = "x"; // error: can't reassign
     let bar = 8;
+    bar = 9;
+
+    let i = 0;
+    loop {
+        if i >= 10 {
+            halt;
+        }
+        prnt(i + "\n");
+        i = i + 1;
+    }
 
     let bigger;
     if foo > bar {
         bigger = "foo";
-    } or {
+    } or if foo < bar {
         bigger = "bar";
+    } or {
+        bigger = "neither";
     }
     prnt(bigger + " is bigger\n");
 

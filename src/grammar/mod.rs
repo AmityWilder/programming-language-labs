@@ -3,8 +3,8 @@
 use crate::{
     error::{ContextError, ExpectedToken, OpSide},
     grammar::ast::{
-        Assignment, BlockStmt, DeclVar, Declaration, ExprStmt, IfStmt, OrBody, OrStmt, PrintStmt,
-        Program, Statement, Variable,
+        Assignment, BlockStmt, DeclVar, Declaration, ExprStmt, HaltStmt, IfStmt, LoopStmt, OrBody,
+        OrStmt, PrintStmt, Program, Statement, Variable,
     },
     scanner::{
         Bracket,
@@ -287,12 +287,17 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `statement -> block_statement | print_statement | if_statement | expression_statement`
+    /// `statement -> block_statement | print_statement | halt_statement | if_statement | loop_statement | expression_statement`
     pub fn statement(&mut self) -> Result<Statement<'src>, ContextError<'src>> {
         self.block_statement()
             .map(|res| res.map(Statement::block))
             .or_else(|| self.print_statement().map(|res| res.map(Statement::print)))
+            .or_else(|| self.halt_statement().map(|res| res.map(Statement::halt)))
             .or_else(|| self.if_statement().map(|res| res.map(Statement::if_stmt)))
+            .or_else(|| {
+                self.loop_statement()
+                    .map(|res| res.map(Statement::loop_stmt))
+            })
             .or_else(|| Some(self.expression_statement().map(Statement::expr)))
             .ok_or_else(|| self.error(ExpectedToken::Statement))
             .flatten()
@@ -360,6 +365,34 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .or_else(|| self.block_statement().map(|res| res.map(OrBody::Last)))
             .ok_or_else(|| self.error(ExpectedToken::BlockOrIf))
             .flatten()
+    }
+
+    /// `loop_statement -> "loop" block_statement`
+    pub fn loop_statement(&mut self) -> Option<Result<LoopStmt<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Loop))
+            .map(|loop_kw| {
+                Ok(LoopStmt {
+                    loop_kw,
+                    block: self
+                        .block_statement()
+                        .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
+                        .flatten()?,
+                })
+            })
+    }
+
+    /// `halt_statement -> "halt" block_statement`
+    pub fn halt_statement(&mut self) -> Option<Result<HaltStmt<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Halt))
+            .map(|halt_kw| {
+                Ok(HaltStmt {
+                    halt_kw,
+                    semi: self.try_pull_eq(
+                        LexValue::Punctuation(Punctuation::Semi),
+                        ExpectedToken::Semi,
+                    )?,
+                })
+            })
     }
 
     /// `block_statement -> "{" ( declaration )* "}"`

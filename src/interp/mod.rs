@@ -6,15 +6,15 @@
 
 use crate::{
     analyzer::{
-        Assignment, BlockStmt, Expr, ExprStmt, IfStmt, InterpProgram, Literal, OrStmt, PrintStmt,
-        Statement,
+        Assignment, BlockStmt, BreakStmt, Expr, ExprStmt, IfStmt, InterpProgram, Literal, LoopStmt,
+        OrStmt, PrintStmt, Statement,
     },
     exec::error::Failure,
     interp::env::InterpVar,
     types::text,
 };
 use env::InterpEnvironment;
-use std::borrow::Cow;
+use std::{borrow::Cow, ops::ControlFlow};
 use value::{
     BoolObject, ByteObject, CharObject, FailObject, FlptObject, InterpOp, InterpVal, NoneObject,
     PrimitiveVal, SintObject, TextObject, UintObject,
@@ -83,7 +83,7 @@ impl<'src> Expr<InterpOp<'src>, InterpVar<'src>> {
 }
 
 impl<'src> Assignment<InterpOp<'src>, InterpVar<'src>> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<(), Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<()>, Failure> {
         let var = match &self.lvalue {
             Expr::Variable(var) => var,
             Expr::Assignment(_) | Expr::Literal(_) => {
@@ -99,12 +99,12 @@ impl<'src> Assignment<InterpOp<'src>, InterpVar<'src>> {
         // println!("assigning {rhs:?} to {} ({lvalue:?})", var.ident);
         *lvalue = rhs;
         // println!("{} is now {lvalue:?}", var.ident);
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 }
 
 impl<'src> ExprStmt<InterpOp<'src>, InterpVar<'src>> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<(), Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<()>, Failure> {
         if let Expr::Assignment(assignment) = &self.expr {
             assignment.interp_exec(env)
         } else {
@@ -113,25 +113,25 @@ impl<'src> ExprStmt<InterpOp<'src>, InterpVar<'src>> {
                 // lint
                 println!("WARNING: non-none expression result ignored: {res:?}");
             }
-            Ok(())
+            Ok(ControlFlow::Continue(()))
         }
     }
 }
 
 impl<'src> PrintStmt<InterpOp<'src>, InterpVar<'src>> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<(), Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<()>, Failure> {
         let buf = self.expr.interp_eval(env)?;
         let val: &text = buf
             .as_ref()
             .try_into()
             .expect("should be guaranteed by static analysis");
         print!("{val}");
-        Ok(())
+        Ok(ControlFlow::Continue(()))
     }
 }
 
 impl<'src> IfStmt<InterpOp<'src>, InterpVar<'src>> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<(), Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<()>, Failure> {
         let mut cond = self;
         loop {
             let buf = cond.pred.interp_eval(env)?;
@@ -150,28 +150,44 @@ impl<'src> IfStmt<InterpOp<'src>, InterpVar<'src>> {
                     OrStmt::Last(last) => last,
                 }
             } else {
-                break Ok(());
+                break Ok(ControlFlow::Continue(()));
             }
             .interp_exec(env);
         }
     }
 }
 
-impl<'src> BlockStmt<InterpOp<'src>, InterpVar<'src>> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<(), Failure> {
-        for stmt in &self.stmts {
-            stmt.interp_exec(env)?;
+impl<'src> LoopStmt<InterpOp<'src>, InterpVar<'src>> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<()>, Failure> {
+        loop {
+            match self.block.interp_exec(env)? {
+                ControlFlow::Continue(()) => (),
+                ControlFlow::Break(()) => break Ok(ControlFlow::Continue(())),
+            }
         }
-        Ok(())
+    }
+}
+
+impl<'src> BlockStmt<InterpOp<'src>, InterpVar<'src>> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<()>, Failure> {
+        for stmt in &self.stmts {
+            match stmt.interp_exec(env)? {
+                ControlFlow::Continue(()) => (),
+                ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+            }
+        }
+        Ok(ControlFlow::Continue(()))
     }
 }
 
 impl<'src> Statement<InterpOp<'src>, InterpVar<'src>> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<(), Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<()>, Failure> {
         match self {
             Self::Expr(stmt) => stmt.interp_exec(env),
             Self::Print(stmt) => stmt.interp_exec(env),
             Self::If(stmt) => stmt.interp_exec(env),
+            Self::Loop(stmt) => stmt.interp_exec(env),
+            Self::Break(BreakStmt {}) => Ok(ControlFlow::Break(())),
             Self::Block(stmt) => stmt.interp_exec(env),
         }
     }
@@ -182,7 +198,12 @@ pub fn interpret<'src>(
     mut env: InterpEnvironment<'src>,
 ) -> Result<(), Failure> {
     for stmt in &prgm.stmts {
-        stmt.interp_exec(&mut env)?;
+        let flow = stmt.interp_exec(&mut env)?;
+        assert_eq!(
+            flow,
+            ControlFlow::Continue(()),
+            "should not halt without a loop or cord"
+        );
     }
     Ok(())
 }
