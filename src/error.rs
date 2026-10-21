@@ -959,7 +959,7 @@ pub enum ErrorType<'src> {
     #[code(CMP, 46)]
     #[err((ts), |f| write!(f, "type mismatch: expected {}, found {}", ts.0, ts.1))]
     #[inlay((_), |f| write!(f, "incorrect type"))]
-    #[help((_), |f, _src| write!(f, ""))]
+    #[help((_), |f, _src| write!(f, "check if you are using a different type from what you intended, or create a new variable to shadow this one"))]
     TypeMismatch(Box<(
         AbstractType<'src>, // expected
         AbstractType<'src>, // actual
