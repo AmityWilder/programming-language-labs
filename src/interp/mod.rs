@@ -6,8 +6,8 @@
 
 use crate::{
     analyzer::{
-        Assignment, BlockStmt, Directive, Expr, ExprStmt, HaltStmt, IfStmt, InterpProgram, Literal,
-        LoopStmt, OrStmt, PrintStmt, SkipStmt, Statement,
+        Assignment, BlockStmt, CordStmt, Directive, Expr, ExprStmt, HaltStmt, IfStmt,
+        InterpProgram, Literal, LoopStmt, OrStmt, PrintStmt, SkipStmt, Statement,
     },
     exec::error::Failure,
     interp::env::InterpVar,
@@ -208,6 +208,20 @@ impl<'src> LoopStmt<InterpOp<'src>, InterpVar<'src>> {
     }
 }
 
+impl<'src> CordStmt<InterpOp<'src>, InterpVar<'src>> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow, Failure> {
+        loop {
+            let res = self.block.interp_exec(env)?;
+            match res {
+                // ControlFlow::Skip is the only case in which the cord repeats
+                ControlFlow::Skip => (),
+                ControlFlow::Continue | ControlFlow::Halt => break Ok(ControlFlow::Continue),
+                flow @ (ControlFlow::Give(()) | ControlFlow::Fail(_)) => break Ok(flow),
+            }
+        }
+    }
+}
+
 impl<'src> BlockStmt<InterpOp<'src>, InterpVar<'src>> {
     fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow, Failure> {
         for stmt in &self.stmts {
@@ -227,6 +241,7 @@ impl<'src> Statement<InterpOp<'src>, InterpVar<'src>> {
             Self::Print(stmt) => stmt.interp_exec(env),
             Self::If(stmt) => stmt.interp_exec(env),
             Self::Loop(stmt) => stmt.interp_exec(env),
+            Self::Cord(stmt) => stmt.interp_exec(env),
             Self::Halt(HaltStmt {}) => Ok(ControlFlow::Halt),
             Self::Skip(SkipStmt {}) => Ok(ControlFlow::Skip),
             Self::Block(stmt) => stmt.interp_exec(env),

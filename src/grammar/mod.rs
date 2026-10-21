@@ -17,8 +17,8 @@ use crate::{
 };
 use Operator::*;
 use ast::{
-    Binary, Directive, DirectiveKw, Expr, Grouping, Literal, OrType, SkipStmt, TypeAnnotation,
-    TypeExpr, Unary,
+    Binary, CordStmt, Directive, DirectiveKw, Expr, Grouping, Literal, OrType, SkipStmt,
+    TypeAnnotation, TypeExpr, Unary,
 };
 
 pub mod ast;
@@ -302,6 +302,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 self.loop_statement()
                     .map(|res| res.map(Statement::loop_stmt))
             })
+            .or_else(|| {
+                self.cord_statement()
+                    .map(|res| res.map(Statement::cord_stmt))
+            })
             .or_else(|| Some(self.expression_statement().map(Statement::expr)))
             .ok_or_else(|| self.error(ExpectedToken::Statement))
             .flatten()
@@ -377,6 +381,20 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .map(|loop_kw| {
                 Ok(LoopStmt {
                     loop_kw,
+                    block: self
+                        .block_statement()
+                        .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
+                        .flatten()?,
+                })
+            })
+    }
+
+    /// `cord_statement -> "cord" block_statement`
+    pub fn cord_statement(&mut self) -> Option<Result<CordStmt<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Cord))
+            .map(|cord_kw| {
+                Ok(CordStmt {
+                    cord_kw,
                     block: self
                         .block_statement()
                         .ok_or_else(|| self.error(ExpectedToken::BlockStmt))

@@ -224,7 +224,7 @@ impl<'src> Expr<RuntimeOp<'src>, RuntimeVar<'src>> {
 
             Self::Literal(x) => Ok(EvalValue::Lit(x.eval())),
 
-            Self::Directive(x) => todo!(),
+            Self::Directive(_) => todo!(),
 
             Self::Variable(x) => {
                 let (range, val) = x.eval(env);
@@ -356,6 +356,7 @@ impl<'src> Statement<RuntimeOp<'src>, RuntimeVar<'src>> {
             Self::Print(stmt) => stmt.exec(env),
             Self::If(stmt) => stmt.exec(env),
             Self::Loop(stmt) => stmt.exec(env),
+            Self::Cord(_) => todo!(),
             Self::Halt(_) => todo!(),
             Self::Skip(_) => todo!(),
             Self::Block(stmt) => stmt.exec(env),

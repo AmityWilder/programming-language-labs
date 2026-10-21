@@ -1175,6 +1175,63 @@ impl<'src> CoagulateVars<'src> for LoopStmt<AnalysisOp<'src>, AnalysisVar<'src>>
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct CordStmt<O, V> {
+    pub block: BlockStmt<O, V>,
+}
+
+impl<'src> GetType<'src> for CordStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Output<'ty>
+        = &'ty AbstractType<'src>
+    where
+        'src: 'ty;
+
+    fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
+        // TBD: should loops be expressions or just statements?
+        Some(&AbstractType::Concrete(StaticType::Primitive(
+            PrimitiveType::Nevr,
+        )))
+    }
+}
+
+impl<'src> Analyze<'src> for ast::CordStmt<'src> {
+    type Ouptut = CordStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+
+    fn analyze(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+    ) -> Result<'src, Self::Ouptut> {
+        self.block
+            .analyze(source, env)
+            .map(|block| CordStmt { block })
+    }
+}
+
+impl<'src> CementVars for CordStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Concrete = CordStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        CordStmt {
+            block: self.block.cement_vars(ranges),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for CordStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = CordStmt<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        CordStmt {
+            block: self.block.coagulate_vars(s_env, i_env),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct HaltStmt {
     // TBD: should `break value;` be supported?
 }
@@ -1322,6 +1379,7 @@ pub enum Statement<O, V> {
     Print(PrintStmt<O, V>),
     If(IfStmt<O, V>),
     Loop(LoopStmt<O, V>),
+    Cord(CordStmt<O, V>),
     Halt(HaltStmt),
     Skip(SkipStmt),
     Block(BlockStmt<O, V>),
@@ -1341,6 +1399,7 @@ impl<'src> GetType<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
             ))),
             Self::If(stmt) => stmt.get_type(env),
             Self::Loop(stmt) => stmt.get_type(env),
+            Self::Cord(stmt) => stmt.get_type(env),
             Self::Halt(stmt) => stmt.get_type(env),
             Self::Skip(stmt) => stmt.get_type(env),
             Self::Block(stmt) => stmt.get_type(env),
@@ -1361,6 +1420,7 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
             Self::Print(stmt) => stmt.analyze(source, env).map(Statement::Print),
             Self::If(stmt) => stmt.analyze(source, env).map(Statement::If),
             Self::Loop(stmt) => stmt.analyze(source, env).map(Statement::Loop),
+            Self::Cord(stmt) => stmt.analyze(source, env).map(Statement::Cord),
             Self::Halt(stmt) => stmt.analyze(source, env).map(Statement::Halt),
             Self::Skip(stmt) => stmt.analyze(source, env).map(Statement::Skip),
             Self::Block(stmt) => stmt.analyze(source, env).map(Statement::Block),
@@ -1377,6 +1437,7 @@ impl<'src> CementVars for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
             Self::Print(stmt) => Statement::Print(stmt.cement_vars(ranges)),
             Self::If(stmt) => Statement::If(stmt.cement_vars(ranges)),
             Self::Loop(stmt) => Statement::Loop(stmt.cement_vars(ranges)),
+            Self::Cord(stmt) => Statement::Cord(stmt.cement_vars(ranges)),
             Self::Halt(stmt) => Statement::Halt(stmt),
             Self::Skip(stmt) => Statement::Skip(stmt),
             Self::Block(stmt) => Statement::Block(stmt.cement_vars(ranges)),
@@ -1397,6 +1458,7 @@ impl<'src> CoagulateVars<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>
             Self::Print(stmt) => Statement::Print(stmt.coagulate_vars(s_env, i_env)),
             Self::If(stmt) => Statement::If(stmt.coagulate_vars(s_env, i_env)),
             Self::Loop(stmt) => Statement::Loop(stmt.coagulate_vars(s_env, i_env)),
+            Self::Cord(stmt) => Statement::Cord(stmt.coagulate_vars(s_env, i_env)),
             Self::Halt(stmt) => Statement::Halt(stmt),
             Self::Skip(stmt) => Statement::Skip(stmt),
             Self::Block(stmt) => Statement::Block(stmt.coagulate_vars(s_env, i_env)),

@@ -848,6 +848,31 @@ impl<'src> AstNode<'src> for LoopStmt<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct CordStmt<'src> {
+    /// `cord`
+    pub cord_kw: Lexeme<'src>,
+    pub block: BlockStmt<'src>,
+}
+
+impl<'src> AstNode<'src> for CordStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.cord_kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.block.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.cord_kw, &self.block).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.cord_kw, &self.block).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct HaltStmt<'src> {
     /// `halt`
     pub halt_kw: Lexeme<'src>,
@@ -987,6 +1012,7 @@ pub enum Statement<'src> {
     Print(PrintStmt<'src>),
     If(IfStmt<'src>),
     Loop(LoopStmt<'src>),
+    Cord(CordStmt<'src>),
     Halt(HaltStmt<'src>),
     Skip(SkipStmt<'src>),
     Block(BlockStmt<'src>),
@@ -1015,6 +1041,10 @@ impl<'src> Statement<'src> {
 
     pub const fn loop_stmt(inner: LoopStmt<'src>) -> Self {
         Self::Loop(inner)
+    }
+
+    pub const fn cord_stmt(inner: CordStmt<'src>) -> Self {
+        Self::Cord(inner)
     }
 
     pub const fn block(inner: BlockStmt<'src>) -> Self {
