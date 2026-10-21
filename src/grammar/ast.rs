@@ -627,6 +627,78 @@ impl<'src> AstNode<'src> for Literal<'src> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DirectiveKw {
+    Inpt,
+}
+
+impl DirectiveKw {
+    pub const fn new(value: Keyword) -> Option<Self> {
+        match value {
+            Keyword::Inpt => Some(Self::Inpt),
+            _ => None,
+        }
+    }
+
+    pub const fn to_keyword(self) -> Keyword {
+        match self {
+            Self::Inpt => Keyword::Inpt,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.to_keyword().as_str()
+    }
+}
+
+impl std::fmt::Display for DirectiveKw {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, DirectiveKw> {
+    type Error = ();
+
+    fn try_from(
+        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
+    ) -> Result<Self, Self::Error> {
+        DirectiveKw::new(val)
+            .map(|val| Self { lex, mac, val })
+            .ok_or(())
+    }
+}
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, DirectiveKw> {
+    type Error = ();
+
+    fn try_from(value: Token<'src>) -> Result<Self, Self::Error> {
+        <SpecToken<'src, Keyword>>::try_from(value)?.try_into()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct Directive<'src> {
+    pub kw: SpecToken<'src, DirectiveKw>,
+}
+
+impl<'src> AstNode<'src> for Directive<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.kw.get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.kw.expansion(source)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Variable<'src> {
     /// Identifier
@@ -656,6 +728,7 @@ pub enum Expr<'src> {
     Binary(Box<Binary<'src>>),
     Unary(Box<Unary<'src>>),
     Literal(Literal<'src>),
+    Directive(Directive<'src>),
     Variable(Variable<'src>),
     Grouping(Box<Grouping<'src>>),
     Type(Box<TypeExpr<'src>>),
@@ -672,6 +745,10 @@ impl<'src> Expr<'src> {
 
     pub const fn literal(inner: Literal<'src>) -> Self {
         Self::Literal(inner)
+    }
+
+    pub const fn directive(inner: Directive<'src>) -> Self {
+        Self::Directive(inner)
     }
 
     pub const fn variable(inner: Variable<'src>) -> Self {

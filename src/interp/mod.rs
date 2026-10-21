@@ -6,8 +6,8 @@
 
 use crate::{
     analyzer::{
-        Assignment, BlockStmt, Expr, ExprStmt, HaltStmt, IfStmt, InterpProgram, Literal, LoopStmt,
-        OrStmt, PrintStmt, SkipStmt, Statement,
+        Assignment, BlockStmt, Directive, Expr, ExprStmt, HaltStmt, IfStmt, InterpProgram, Literal,
+        LoopStmt, OrStmt, PrintStmt, SkipStmt, Statement,
     },
     exec::error::Failure,
     interp::env::InterpVar,
@@ -65,7 +65,6 @@ impl<'src> InterpOp<'src> {
 
 impl Literal {
     fn interp_eval(&self) -> InterpVal<'static> {
-        // yuck, boxes for things we have a reference to :(
         match self {
             Self::None => InterpVal::Primitive(value::PrimitiveVal::None(NoneObject(()))),
             Self::Nevr => unreachable!("cannot have nevr literal"), // TBD: will this change?
@@ -81,6 +80,26 @@ impl Literal {
     }
 }
 
+impl Directive {
+    fn interp_eval(self) -> InterpVal<'static> {
+        match self {
+            Self::Inpt => {
+                let mut buf = String::new();
+                // TODO: what if we want to receive just a character instead of an entire line?
+                // TODO: handle error
+                std::io::stdin().read_line(&mut buf);
+                if buf.ends_with('\n') {
+                    buf.pop();
+                    if buf.ends_with('\r') {
+                        buf.pop();
+                    }
+                }
+                InterpVal::Primitive(PrimitiveVal::Text(TextObject(buf)))
+            }
+        }
+    }
+}
+
 impl<'src> Expr<InterpOp<'src>, InterpVar<'src>> {
     fn interp_eval<'val>(
         &'val self,
@@ -90,6 +109,7 @@ impl<'src> Expr<InterpOp<'src>, InterpVar<'src>> {
             Expr::Assignment(_) => unimplemented!("should be handled by outer statement"),
             Expr::Op(expr) => expr.interp_eval(env).map(Cow::Owned),
             Expr::Literal(expr) => Ok(Cow::Owned(expr.interp_eval())),
+            Expr::Directive(expr) => Ok(Cow::Owned(expr.interp_eval())),
             Expr::Variable(x) => Ok(Cow::Borrowed(
                 env.vars
                     .get(&x.id)
@@ -106,7 +126,7 @@ impl<'src> Assignment<InterpOp<'src>, InterpVar<'src>> {
             Expr::Assignment(_) | Expr::Literal(_) => {
                 unreachable!("static analysis should prevent assignment to assignment/literal")
             }
-            Expr::Op(_) => todo!("mutable expressions"),
+            _ => todo!("mutable expressions"),
         };
         let rhs = self.rhs.interp_eval(env)?.into_owned();
         let lvalue = env

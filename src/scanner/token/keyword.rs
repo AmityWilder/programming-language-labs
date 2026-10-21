@@ -453,8 +453,11 @@ define_token_eq! {
         #[op_desc([_] => "size of")]
         Szof = "szof",
 
-        /// Outputs the value to stdout (TODO: DEPRECATE)
+        /// Outputs the value to stdout (TODO: REPLACE)
         Prnt = "prnt",
+
+        /// Input from the console (TODO: REPLACE)
+        Inpt = "inpt",
     }
 }
 

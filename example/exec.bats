@@ -6,6 +6,10 @@
     let bar = 8;
     bar = 9;
 
+    prnt("write something\n");
+    let input = inpt;
+    prnt("I read: \"" + input + "\"\n");
+
     let i = -5;
     loop {
         if i > 5 { halt; }

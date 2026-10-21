@@ -1,6 +1,6 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    grammar::ast::{Binary, Expr, Grouping, Literal, OrType, TypeExpr, Unary, Variable},
+    grammar::ast::{Binary, Directive, Expr, Grouping, Literal, OrType, TypeExpr, Unary, Variable},
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
 };
 
@@ -101,6 +101,17 @@ impl LispDisplay for Literal<'_> {
     }
 }
 
+impl LispDisplay for Directive<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { kw } = self;
+        if f.alternate() {
+            std::fmt::Display::fmt(&SYNTAX_STYLE_ANSI[Syntax::Keyword].style(self.kw.lex), f)
+        } else {
+            f.write_str(kw.lex)
+        }
+    }
+}
+
 impl LispDisplay for Variable<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { ident } = self;
@@ -119,6 +130,7 @@ impl LispDisplay for Expr<'_> {
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
             // TBD: should this use val instead of lex?
             Self::Literal(inner) => LispDisplay::fmt(inner, f),
+            Self::Directive(inner) => LispDisplay::fmt(inner, f),
             Self::Variable(inner) => LispDisplay::fmt(inner, f),
             Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
             Self::Type(inner) => LispDisplay::fmt(&**inner, f),

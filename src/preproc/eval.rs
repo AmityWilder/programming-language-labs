@@ -411,6 +411,12 @@ where
             }
         }
 
+        Expr::Directive(inner) => Err(ContextError::token_error(
+            source,
+            Some(&inner.kw),
+            ErrorType::InvalidPreOperator, // TODO: this isn't an operator
+        )),
+
         // TBD: should `pvt` variables be allowed?
         Expr::Variable(inner) => {
             return Err(ContextError::node_error(

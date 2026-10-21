@@ -16,7 +16,10 @@ use crate::{
     },
 };
 use Operator::*;
-use ast::{Binary, Expr, Grouping, Literal, OrType, SkipStmt, TypeAnnotation, TypeExpr, Unary};
+use ast::{
+    Binary, Directive, DirectiveKw, Expr, Grouping, Literal, OrType, SkipStmt, TypeAnnotation,
+    TypeExpr, Unary,
+};
 
 pub mod ast;
 // pub mod ast_iter; // TODO: FIX THIS
@@ -591,10 +594,16 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.literal()
             .map(|literal| Ok(Expr::literal(literal)))
             .or_else(|| self.group().map(|res| res.map(Expr::grouping)))
+            .or_else(|| self.directive().map(|var| Ok(Expr::directive(var))))
             .or_else(|| self.variable().map(|var| Ok(Expr::variable(var))))
             .or_else(|| self.type_expression().map(Expr::type_expr).ok().map(Ok))
             .ok_or_else(|| self.error(ExpectedToken::Expr))
             .flatten()
+    }
+
+    /// `directive -> "inpt"`
+    fn directive(&mut self) -> Option<Directive<'src>> {
+        self.pull_into::<DirectiveKw>().map(|kw| Directive { kw })
     }
 
     /// `variable -> IDENTIFIER`

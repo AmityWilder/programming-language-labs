@@ -340,6 +340,38 @@ impl<'src> GetType<'src> for Literal {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Directive {
+    Inpt,
+}
+
+impl<'src> GetType<'src> for Directive {
+    type Output<'ty>
+        = PrimitiveType
+    where
+        'src: 'ty;
+
+    fn get_type<'ty>(&'ty self, _: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
+        Some(match self {
+            Self::Inpt => PrimitiveType::Text,
+        })
+    }
+}
+
+impl<'src> Analyze<'src> for ast::Directive<'src> {
+    type Ouptut = Directive;
+
+    fn analyze(
+        &self,
+        _source: &'src str,
+        _env: &mut StaticEnvironment<'src>,
+    ) -> Result<'src, Self::Ouptut> {
+        match self.kw.val {
+            ast::DirectiveKw::Inpt => Ok(Directive::Inpt),
+        }
+    }
+}
+
 /// Operation<'src>, Variable<'src> variable
 ///
 /// Has no actual memory location, since its type may not have been determined yet
@@ -434,7 +466,7 @@ pub struct RuntimeVar<'src> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType<'src, 'ty> {
     Static(&'ty StaticType<'src>),
-    Literal(PrimitiveType),
+    Literal(PrimitiveType), // TODO: if Directive ever produces non-primitive types, add a Directive variant
     Variable(VarType<'src, 'ty>),
 }
 
@@ -514,6 +546,7 @@ pub enum Expr<O, V> {
     Assignment(Box<Assignment<O, V>>),
     Op(Box<O>),
     Literal(Literal),
+    Directive(Directive),
     Variable(V),
 }
 
@@ -528,6 +561,7 @@ impl<'src> GetType<'src> for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
             Self::Assignment(x) => x.get_type(env).map(ExprType::Literal),
             Self::Op(x) => x.get_type(env).map(ExprType::Static),
             Self::Literal(x) => x.get_type(env).map(ExprType::Literal),
+            Self::Directive(x) => x.get_type(env).map(ExprType::Literal),
             Self::Variable(x) => x.get_type(env).map(ExprType::Variable),
         }
     }
@@ -545,6 +579,7 @@ impl<'src> Analyze<'src> for ast::Expr<'src> {
             Self::Binary(x) => x.analyze(source, env),
             Self::Unary(x) => x.analyze(source, env).map(Box::new).map(Expr::Op),
             Self::Literal(x) => x.analyze(source, env).map(Expr::Literal),
+            Self::Directive(x) => x.analyze(source, env).map(Expr::Directive),
             Self::Variable(x) => x.analyze(source, env),
             Self::Grouping(x) => x.expr.analyze(source, env),
             Self::Type(_) => todo!(),
@@ -560,6 +595,7 @@ impl<'src> CementVars for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
             Self::Assignment(x) => Expr::Assignment(Box::new(x.cement_vars(ranges))),
             Self::Op(x) => Expr::Op(Box::new(x.cement_vars(ranges))),
             Self::Literal(x) => Expr::Literal(x),
+            Self::Directive(x) => Expr::Directive(x),
             Self::Variable(x) => Expr::Variable(x.cement_vars(ranges)),
         }
     }
@@ -577,6 +613,7 @@ impl<'src> CoagulateVars<'src> for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
             Self::Assignment(x) => Expr::Assignment(Box::new(x.coagulate_vars(s_env, i_env))),
             Self::Op(x) => Expr::Op(Box::new(x.coagulate_vars(s_env, i_env))),
             Self::Literal(x) => Expr::Literal(x),
+            Self::Directive(x) => Expr::Directive(x),
             Self::Variable(x) => Expr::Variable(x.coagulate_vars(s_env, i_env)),
         }
     }
