@@ -2,7 +2,7 @@
 
 use crate::{
     SYNTAX_STYLE_ANSI,
-    analyzer::{AnalysisOp, AnalyzerVar, Expr, types::AbstractType},
+    analyzer::{AnalysisOp, AnalysisVar, Expr, types::AbstractType},
     arrayvec::ArrayVec,
     exec::error::Failure,
     grammar::ast::AstNodeFinal,
@@ -970,7 +970,7 @@ pub enum ErrorType<'src> {
     #[err((_), |f| write!(f, "type is ambiguous"))]
     #[inlay((_), |f| write!(f, "type must be known at this point"))]
     #[help((_), |f, _src| write!(f, "try annotating the type or use an expression with an explicit type"))]
-    TypeAmbiguity(Box<Expr<AnalysisOp<'src>, AnalyzerVar<'src>>>),
+    TypeAmbiguity(Box<Expr<AnalysisOp<'src>, AnalysisVar<'src>>>),
 
     // TODO: need an error for undefined conversion
 

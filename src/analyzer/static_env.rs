@@ -1,7 +1,7 @@
 use crate::{
     Todo,
     analyzer::{
-        AnalysisOp, AnalyzerVar, BlockStmt, FnDef, GetType,
+        AnalysisOp, AnalysisVar, BlockStmt, FnDef, GetType,
         types::{AbstractType, FunShape, StaticTypeSize, TypeCompatible, TypeSize, TypeSizeError},
     },
     scanner::token::value::Operator,
@@ -73,7 +73,7 @@ pub enum EnvItem<'src> {
     Fun(
         (
             FunShape<'src>,
-            BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>>,
+            BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>>,
         ),
     ),
     Var(Option<AbstractType<'src>>, bool),
@@ -122,15 +122,14 @@ impl EnvKeyEq for Operator {
 }
 
 #[derive(Debug)]
-pub struct ScopeItem<'src> {
-    pub id: VarId,
+pub struct StaticItem<'src> {
     pub key: EnvKey<'src>,
     pub val: EnvItem<'src>,
 }
 
 #[derive(Debug, Default)]
 pub struct Scope<'src> {
-    pub items: Vec<ScopeItem<'src>>,
+    pub items: Vec<(EnvKey<'src>, VarId)>,
 }
 
 impl Scope<'_> {
@@ -175,7 +174,7 @@ pub struct OpOverload<'src> {
     pub operands: OperandTypes<'src>,
     pub output: AbstractType<'src>,
     pub fun: FunShape<'src>,
-    pub def: FnDef<AnalysisOp<'src>, AnalyzerVar<'src>>,
+    pub def: FnDef<AnalysisOp<'src>, AnalysisVar<'src>>,
 }
 
 /// A unique [`EnvItem`] ID
@@ -223,10 +222,17 @@ pub struct MemLoc<'src> {
     pub pos: MemPos,
 }
 
+#[derive(Debug)]
+pub struct DeclItem<'src> {
+    loc: MemLoc<'src>,
+    item: StaticItem<'src>,
+}
+
 /// [`Environment`](crate::exec::env::Environment) specialized for static analysis
 #[derive(Debug)]
 pub struct StaticEnvironment<'src> {
-    locs: Vec<MemLoc<'src>>,
+    /// Actual storage for the definitions, independent of visibility
+    decls: Vec<DeclItem<'src>>,
     /// NOTE: this does NOT represent "the scope where all global variables belong",
     /// this is just the scope of all things outside of any function!!
     /// It is used to guarantee the stack is never empty.
@@ -237,10 +243,14 @@ pub struct StaticEnvironment<'src> {
 impl<'src> StaticEnvironment<'src> {
     pub const fn new() -> Self {
         Self {
-            locs: Vec::new(),
+            decls: Vec::new(),
             global: Scope::new(),
             layers: Vec::new(),
         }
+    }
+
+    pub fn get_decl(&self, id: VarId) -> Option<&StaticItem<'src>> {
+        self.decls.get(id).map(|decl| &decl.item)
     }
 
     /// Returns [`None`] if not currently in a function
@@ -253,66 +263,102 @@ impl<'src> StaticEnvironment<'src> {
         self.layers.last_mut()
     }
 
-    fn curr_scope(&self) -> &Scope<'src> {
-        if let Some(scope) = self.curr_layer().map(Layer::curr_scope) {
-            scope
-        } else {
-            &self.global
-        }
-    }
-
-    fn curr_scope_mut(&mut self) -> &mut Scope<'src> {
-        if let Some(scope) = self.curr_layer_mut().map(Layer::curr_scope_mut) {
-            scope
-        } else {
-            &mut self.global
-        }
-    }
-
-    fn search(&self) -> impl DoubleEndedIterator<Item = &ScopeItem<'src>> {
-        self.layers
+    /// Returns an iterator over item IDs in order of newest to oldest
+    fn visible_ids<'env>(
+        global: &'env Scope<'src>,
+        layers: &'env Vec<Layer<'src>>,
+    ) -> impl DoubleEndedIterator<Item = VarId> {
+        let g_it = global.items.iter();
+        let l_it = layers
             .last()
             .into_iter()
-            .flat_map(|layer| layer.scopes.iter().flat_map(|scope| &scope.items))
-            .chain(&self.global.items)
-            .rev()
+            .flat_map(|layer| layer.scopes.iter().flat_map(|scope| &scope.items));
+
+        g_it.chain(l_it).map(|(_, id)| *id).rev()
     }
 
-    fn search_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut ScopeItem<'src>> {
-        self.layers
-            .last_mut()
-            .into_iter()
-            .flat_map(|layer| layer.scopes.iter_mut().flat_map(|scope| &mut scope.items))
-            .chain(&mut self.global.items)
-            .rev()
+    fn id_offset(num_items: usize) -> impl FnMut(VarId) -> usize {
+        // items: 1, ids: [0]: [0]
+        // items: 2, ids: [0]: [1]
+        // items: 2, ids: [1, 0]: [0, 0]
+        // items: 3, ids: [2, 0]: [0, 1]
+        let mut prev = num_items;
+        move |id| {
+            let prev = std::mem::replace(&mut prev, id);
+            assert!(
+                prev > id,
+                "IDs should be in strictly increasing order (and iterated in reverse (decreasing) order)\
+                \n prev: {prev}\
+                \n next: {id}\
+                \n num_items: {num_items}"
+            );
+            #[expect(clippy::arithmetic_side_effects, reason = "asserted")]
+            {
+                prev - id - 1
+            }
+        }
     }
 
-    /// Returns [`None`] if no item exists with the provided name
-    pub fn lookup<Q>(&self, key: &Q) -> impl DoubleEndedIterator<Item = &ScopeItem<'src>>
+    fn search(&self) -> impl Iterator<Item = (VarId, &StaticItem<'src>)> {
+        // Relies on the assumption that IDs increase monotonically along the stack
+        let StaticEnvironment {
+            decls: items,
+            global,
+            layers,
+        } = self;
+        let mut f = Self::id_offset(items.len());
+        let mut items = items.iter().rev();
+
+        Self::visible_ids(global, layers)
+            .map(move |id| (id, f(id)))
+            .map(move |(id, diff)| {
+                (
+                    id,
+                    &items
+                        .nth(diff)
+                        .unwrap_or_else(|| panic!("ID should be valid\n ID: {id}\n diff: {diff}"))
+                        .item,
+                )
+            })
+    }
+
+    fn search_mut(&mut self) -> impl Iterator<Item = (VarId, &mut StaticItem<'src>)> {
+        // Relies on the assumption that IDs increase monotonically along the stack
+        let StaticEnvironment {
+            decls: items,
+            global,
+            layers,
+        } = self;
+        let mut items = items.iter_mut().rev();
+        let mut f = Self::id_offset(items.len());
+
+        Self::visible_ids(global, layers)
+            .map(move |id| (id, f(id)))
+            .map(move |(id, diff)| (id, &mut items.nth(diff).expect("ID should be valid").item))
+    }
+
+    pub fn lookup<Q>(&self, key: &Q) -> impl Iterator<Item = (VarId, &StaticItem<'src>)>
     where
         Q: ?Sized + EnvKeyEq,
     {
-        self.search().filter(|item| key.is_matching(&item.key))
+        self.search().filter(|(_, item)| key.is_matching(&item.key))
     }
 
-    /// Returns [`None`] if no item exists with the provided name
-    pub fn lookup_mut<Q>(
-        &mut self,
-        key: &Q,
-    ) -> impl DoubleEndedIterator<Item = &mut ScopeItem<'src>>
+    pub fn lookup_mut<Q>(&mut self, key: &Q) -> impl Iterator<Item = (VarId, &mut StaticItem<'src>)>
     where
         Q: ?Sized + EnvKeyEq,
     {
-        self.search_mut().filter(|item| key.is_matching(&item.key))
+        self.search_mut()
+            .filter(|(_, item)| key.is_matching(&item.key))
     }
 
     /// # Panics
     /// This method may panic if `id` is not a valid ID
     #[must_use = "represents success"]
     pub fn update_size(&mut self, id: VarId, size: usize) -> Result<(), SizeUpdateError> {
-        let item = self.locs.get_mut(id).expect("ID should be valid");
-        match item.pos {
-            MemPos::Unknown => item.pos = MemPos::Blocked(size),
+        let decl = self.decls.get_mut(id).expect("ID should be valid");
+        match decl.loc.pos {
+            MemPos::Unknown => decl.loc.pos = MemPos::Blocked(size),
             MemPos::Blocked(n) => return Err(SizeUpdateError::AlreadySized(n)),
             MemPos::Fixed(range) => {
                 return Err(SizeUpdateError::AlreadySized(
@@ -356,22 +402,29 @@ impl<'src> StaticEnvironment<'src> {
         key: EnvKey<'src>,
         val: EnvItem<'src>,
         size: Option<usize>,
-    ) -> &mut ScopeItem<'src> {
+    ) -> (VarId, &mut StaticItem<'src>) {
         // TBD: should variables, globals, constants, and functions all be stored together?
         // should constants even be stored at runtime at all?
         let atop = self
             .search()
-            .find(|item| matches!(item.val, EnvItem::Var(_, _) | EnvItem::Pvt(_)))
-            .map(|scope| scope.id);
-        let id = self.locs.len();
-        self.locs.push(MemLoc {
-            atop,
-            key,
-            pos: size.map_or(MemPos::Unknown, MemPos::Blocked),
+            .find(|(_, item)| matches!(item.val, EnvItem::Var(_, _) | EnvItem::Pvt(_)))
+            .map(|(id, _)| id);
+        let id = self.decls.len();
+        let decl = self.decls.push_mut(DeclItem {
+            loc: MemLoc {
+                atop,
+                key,
+                pos: size.map_or(MemPos::Unknown, MemPos::Blocked),
+            },
+            item: StaticItem { key, val },
         });
-        self.curr_scope_mut()
-            .items
-            .push_mut(ScopeItem { id, key, val })
+        let local_scope = if let Some(scope) = self.layers.last_mut().map(Layer::curr_scope_mut) {
+            scope
+        } else {
+            &mut self.global
+        };
+        local_scope.items.push((decl.item.key, id));
+        (id, &mut decl.item)
     }
 
     /// `is_global`:
@@ -384,7 +437,7 @@ impl<'src> StaticEnvironment<'src> {
         name: &'src str,
         ty: Option<AbstractType<'src>>,
         is_global: bool,
-    ) -> Result<(usize, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
+    ) -> Result<(VarId, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
         let size = ty
             .as_ref()
             .and_then(|t| match t {
@@ -394,11 +447,14 @@ impl<'src> StaticEnvironment<'src> {
             .transpose()?;
         Ok(
             match self.decl_item(EnvKey::Ident(name), EnvItem::Var(ty, is_global), size) {
-                ScopeItem {
+                (
                     id,
-                    key: _,
-                    val: EnvItem::Var(ty, is_global),
-                } => (*id, ty, *is_global),
+                    StaticItem {
+                        key: _,
+                        val: EnvItem::Var(ty, is_global),
+                    },
+                ) => (id, ty, *is_global),
+
                 _ => unreachable!("pushed a var"),
             },
         )
@@ -414,7 +470,7 @@ impl<'src> StaticEnvironment<'src> {
         &mut self,
         name: &'src str,
         shape: FunShape<'src>,
-        def: BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>>,
+        def: BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>>,
     ) {
         self.decl_item(
             EnvKey::Ident(name),
@@ -431,8 +487,8 @@ impl<'src> StaticEnvironment<'src> {
         self,
     ) -> Result<Box<[Range<usize>]>, impl IntoIterator<Item = (VarId, EnvKey<'src>)>> {
         // TODO: make a pass and put all the static elements in one contiguous region, then put everything else on top of that
-        let mut ranges: Vec<Range<usize>> = Vec::with_capacity(self.locs.len());
-        let mut locs = self.locs.into_iter().enumerate();
+        let mut ranges: Vec<Range<usize>> = Vec::with_capacity(self.decls.len());
+        let mut locs = self.decls.into_iter().map(|decl| decl.loc).enumerate();
         while let Some((id, loc)) = locs.next() {
             let range = match loc.pos {
                 MemPos::Unknown => {

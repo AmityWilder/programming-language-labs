@@ -1,6 +1,10 @@
 use crate::{
-    analyzer::{Expr, types::StaticType},
+    analyzer::{
+        Expr,
+        types::{FunShape, StaticType},
+    },
     exec::error::Failure,
+    interp::env::InterpVar,
     types::*,
 };
 use std::{
@@ -233,7 +237,7 @@ impl Debug for TextObject {
 }
 
 #[derive(Clone, PartialEq)]
-pub enum PrimitiveVar {
+pub enum PrimitiveVal {
     /// Return type of a statement
     None(NoneObject),
     /// Return type of an endless loop - not constructable, only usable in analysis
@@ -257,13 +261,13 @@ pub enum PrimitiveVar {
     Text(TextObject),
 }
 
-impl Default for PrimitiveVar {
+impl Default for PrimitiveVal {
     fn default() -> Self {
         Self::None(NoneObject(()))
     }
 }
 
-impl Debug for PrimitiveVar {
+impl Debug for PrimitiveVal {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::None(x) => x.fmt(f),
@@ -280,11 +284,11 @@ impl Debug for PrimitiveVar {
     }
 }
 
-pub struct ViewVar<'brw, T> {
+pub struct ViewVal<'brw, T> {
     pub data: &'brw [T],
 }
 
-impl<T: Debug> Debug for ViewVar<'_, T> {
+impl<T: Debug> Debug for ViewVal<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str("[")?;
         let mut has_prev = false;
@@ -301,17 +305,17 @@ impl<T: Debug> Debug for ViewVar<'_, T> {
 
 // TBD: how is this different from `ViewVar`?
 #[derive(Clone)]
-pub struct ArrVar<T> {
+pub struct ArrVal<T> {
     pub data: Box<[T]>,
 }
 
-impl<T> ArrVar<T> {
-    pub const fn as_view(&self) -> ViewVar<'_, T> {
-        ViewVar { data: &self.data }
+impl<T> ArrVal<T> {
+    pub const fn as_view(&self) -> ViewVal<'_, T> {
+        ViewVal { data: &self.data }
     }
 }
 
-impl<T: Debug> Debug for ArrVar<T> {
+impl<T: Debug> Debug for ArrVal<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.as_view().fmt(f)
     }
@@ -319,11 +323,11 @@ impl<T: Debug> Debug for ArrVar<T> {
 
 // TBD: how does it know what type it's pointing to?
 #[derive(Clone)]
-pub struct PtrVar {
+pub struct PtrVal {
     pub env_range: Range<usize>,
 }
 
-impl Debug for PtrVar {
+impl Debug for PtrVal {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         const PREFIX_LEN: usize = "0x".len();
         #[expect(
@@ -336,16 +340,16 @@ impl Debug for PtrVar {
 }
 
 #[derive(Clone)]
-pub enum OrVar<T, U> {
+pub enum OrVal<T, U> {
     Ok(T),
     Or(U),
 }
 
-pub type OrNone<T> = OrVar<T, NoneObject>;
-pub type OrNevr<T> = OrVar<T, NevrObject>;
-pub type OrFail<T> = OrVar<T, FailObject>;
+pub type OrNone<T> = OrVal<T, NoneObject>;
+pub type OrNevr<T> = OrVal<T, NevrObject>;
+pub type OrFail<T> = OrVal<T, FailObject>;
 
-impl<T: Debug, U: Debug> Debug for OrVar<T, U> {
+impl<T: Debug, U: Debug> Debug for OrVal<T, U> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ok(val) => val.fmt(f),
@@ -355,12 +359,12 @@ impl<T: Debug, U: Debug> Debug for OrVar<T, U> {
 }
 
 #[derive(Clone)]
-pub struct RecVar<'src> {
+pub struct RecVal<'src> {
     pub name: &'src str,
-    pub fields: HashMap<&'src str, InterpVar<'src>>,
+    pub fields: HashMap<&'src str, InterpVal<'src>>,
 }
 
-impl Debug for RecVar<'_> {
+impl Debug for RecVal<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut f = f.debug_struct(self.name);
         for (key, val) in &self.fields {
@@ -371,19 +375,19 @@ impl Debug for RecVar<'_> {
 }
 
 #[derive(Clone)]
-pub struct SupVar<'src> {
+pub struct SupVal<'src> {
     pub name: &'src str,
     pub variant_ty: StaticType<'src>,
-    pub variant: InterpVar<'src>,
+    pub variant: InterpVal<'src>,
 }
 
-impl Debug for SupVar<'_> {
+impl Debug for SupVal<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         #[repr(transparent)]
-        struct SupInner<'a>(SupVar<'a>);
+        struct SupInner<'a>(SupVal<'a>);
 
         impl<'a> SupInner<'a> {
-            const fn new<'b>(value: &'b SupVar<'a>) -> &'b Self {
+            const fn new<'b>(value: &'b SupVal<'a>) -> &'b Self {
                 // SAFETY: SupInner is a transparent wrapper for SupVar
                 unsafe { std::mem::transmute(value) }
             }
@@ -405,99 +409,101 @@ impl Debug for SupVar<'_> {
 
 /// Identical to its inner type; the requirements are only enforced during static analysis.
 #[derive(Clone)]
-pub struct SubVar<'src> {
-    pub base: InterpVar<'src>,
+pub struct SubVal<'src> {
+    pub base: InterpVal<'src>,
 }
 
-impl Debug for SubVar<'_> {
+impl Debug for SubVal<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.base.fmt(f)
     }
 }
 
 #[derive(Clone)]
-pub struct CatVar<'src> {
+pub struct CatVal<'src> {
     pub discriminant: &'src str,
-    pub value: InterpVar<'src>,
+    pub value: InterpVal<'src>,
 }
 
-impl Debug for CatVar<'_> {
+impl Debug for CatVal<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str(self.discriminant)
     }
 }
 
 #[derive(Clone)]
-pub struct FunVar {
+pub struct FunVal {
     // TODO
 }
 
 // TBD: can a function debug its definition?
-impl Debug for FunVar {
+impl Debug for FunVal {
     fn fmt(&self, _f: &mut Formatter<'_>) -> fmt::Result {
         todo!()
     }
 }
 
 #[derive(Clone)]
-pub enum InterpVar<'src> {
+pub enum InterpVal<'src> {
+    Uninit(StaticType<'src>),
+
     /// Language-defined
-    Primitive(PrimitiveVar),
+    Primitive(PrimitiveVal),
 
     // /// Slice of another type
     // View(ViewVar<'vew, 'inr>), // TODO: is this a slice reference, or the actual slice?
     /// Array of another type
-    Arr(ArrVar<Self>),
+    Arr(ArrVal<Self>),
 
     /// Reference to another type
-    Ptr(PtrVar),
+    Ptr(PtrVal),
 
-    OrNone(Box<OrVar<Self, NoneObject>>),
-    OrFail(Box<OrVar<Self, FailObject>>),
-    OrNevr(Box<OrVar<Self, NevrObject>>),
+    OrNone(Box<OrVal<Self, NoneObject>>),
+    OrFail(Box<OrVal<Self, FailObject>>),
+    OrNevr(Box<OrVal<Self, NevrObject>>),
 
     /// Structure
-    Rec(RecVar<'src>),
+    Rec(RecVal<'src>),
     /// Union
-    Sup(Box<SupVar<'src>>),
+    Sup(Box<SupVal<'src>>),
     /// Another type, but with runtime restrictions
-    Sub(Box<SubVar<'src>>),
+    Sub(Box<SubVal<'src>>),
     /// Constant group
-    Cat(Box<CatVar<'src>>),
+    Cat(Box<CatVal<'src>>),
     /// Callable
-    Fun(FunVar),
+    Fun(FunVal),
 }
 
 macro_rules! convert_interp_primitive {
     ($($(#[$ctor:meta])? $Primitive:ident($Object:ident($Type:ty))),* $(,)?) => {$(
-        impl TryFrom<InterpVar<'_>> for $Type {
+        impl TryFrom<InterpVal<'_>> for $Type {
             type Error = ();
 
-            fn try_from(value: InterpVar<'_>) -> Result<Self, Self::Error> {
+            fn try_from(value: InterpVal<'_>) -> Result<Self, Self::Error> {
                 match value {
                     $(#[$ctor])?
-                    InterpVar::Primitive(PrimitiveVar::$Primitive($Object(value))) => Ok(value),
+                    InterpVal::Primitive(PrimitiveVal::$Primitive($Object(value))) => Ok(value),
                     _ => Err(()),
                 }
             }
         }
 
-        impl<'a> TryFrom<&'a InterpVar<'_>> for &'a $Type {
+        impl<'a> TryFrom<&'a InterpVal<'_>> for &'a $Type {
             type Error = ();
 
-            fn try_from(value: &'a InterpVar<'_>) -> Result<Self, Self::Error> {
+            fn try_from(value: &'a InterpVal<'_>) -> Result<Self, Self::Error> {
                 match value {
                     $(#[$ctor])?
-                    InterpVar::Primitive(PrimitiveVar::$Primitive($Object(value))) => Ok(value),
+                    InterpVal::Primitive(PrimitiveVal::$Primitive($Object(value))) => Ok(value),
                     _ => Err(()),
                 }
             }
         }
 
-        impl From<$Type> for InterpVar<'_> {
+        impl From<$Type> for InterpVal<'_> {
             fn from(value: $Type) -> Self {
                 $(#[$ctor])?
-                InterpVar::Primitive(PrimitiveVar::$Primitive($Object(value)))
+                InterpVal::Primitive(PrimitiveVal::$Primitive($Object(value)))
             }
         }
     )*};
@@ -517,9 +523,10 @@ convert_interp_primitive! {
     Text(TextObject(text)),
 }
 
-impl Debug for InterpVar<'_> {
+impl Debug for InterpVal<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Uninit(ty) => write!(f, "uninitialized {ty}"),
             Self::Primitive(val) => val.fmt(f),
             // Self::View(val) => val.fmt(f),
             Self::Arr(val) => val.fmt(f),
@@ -537,30 +544,22 @@ impl Debug for InterpVar<'_> {
 }
 
 pub type InterpBinaryOpFn = for<'src> fn(
-    &InterpVar<'src>,
-    &InterpVar<'src>,
-) -> std::result::Result<InterpVar<'src>, Failure>;
+    &InterpVal<'src>,
+    &InterpVal<'src>,
+) -> std::result::Result<InterpVal<'src>, Failure>;
 
 pub type InterpUnaryOpFn =
-    for<'src> fn(&InterpVar<'src>) -> std::result::Result<InterpVar<'src>, Failure>;
+    for<'src> fn(&InterpVal<'src>) -> std::result::Result<InterpVal<'src>, Failure>;
 
 pub enum InterpOp<'src> {
     Binary(
-        StaticType<'src>,
+        FunShape<'src>,
         InterpBinaryOpFn,
         Expr<Self, InterpVar<'src>>,
         Expr<Self, InterpVar<'src>>,
     ),
-    UnaryPre(
-        StaticType<'src>,
-        InterpUnaryOpFn,
-        Expr<Self, InterpVar<'src>>,
-    ),
-    UnaryPost(
-        StaticType<'src>,
-        InterpUnaryOpFn,
-        Expr<Self, InterpVar<'src>>,
-    ),
+    UnaryPre(FunShape<'src>, InterpUnaryOpFn, Expr<Self, InterpVar<'src>>),
+    UnaryPost(FunShape<'src>, InterpUnaryOpFn, Expr<Self, InterpVar<'src>>),
 }
 
 impl Debug for InterpOp<'_> {

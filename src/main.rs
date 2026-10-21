@@ -792,7 +792,7 @@ fn run_code(source: &str, config: &Cli) {
         );
     }
 
-    let program = match analyze_interp(source, &prgm) {
+    let (program, env) = match analyze_interp(source, &prgm) {
         Ok(prgm) => prgm,
         Err(errs) => {
             // static analysis errors
@@ -815,7 +815,7 @@ fn run_code(source: &str, config: &Cli) {
     // execution
     if config.do_eval {
         println!("\nrunning...\n----------");
-        let res = interpret(program);
+        let res = interpret(&program, env);
         println!("----------\nfinished\n");
         if let Err(e) = res
             && config.print_errors

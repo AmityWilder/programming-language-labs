@@ -1,6 +1,6 @@
 use crate::{
     analyzer::{
-        static_env::{EnvItem, OpOverload, OperandTypes, ScopeItem, StaticEnvironment, VarType},
+        static_env::{EnvItem, OpOverload, OperandTypes, StaticEnvironment, StaticItem, VarType},
         types::{
             AbstractType, FunShape, FunType, PrimitiveType, StaticType, TypeCompatible, TypeSize,
         },
@@ -8,7 +8,10 @@ use crate::{
     error::{ContextError, ErrorType, OpSide},
     exec::{env::Environment, error::Failure},
     grammar::ast::{self, VarKeyword},
-    interp::value::{InterpBinaryOpFn, InterpOp, InterpUnaryOpFn, InterpVar},
+    interp::{
+        env::{InterpEnvironment, InterpVar},
+        value::{InterpBinaryOpFn, InterpOp, InterpUnaryOpFn, InterpVal},
+    },
     scanner::token::value::{Keyword, LexValue, Operator},
     types::*,
 };
@@ -43,11 +46,22 @@ pub trait GetType<'src> {
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>>;
 }
 
-pub trait CementVars<'src> {
-    /// The version of `Self` with [`Operation<'src>, Variable<'src>`] replaced with [`RunOperation< RunVariable<'src>>, RunVariable<'src>`]
+pub trait CementVars {
+    /// The version of `Self` where [`AnalysisOp`]/[`AnalysisVar`] is replaced with [`RuntimeOp`]/[`RuntimeVar`]
     type Concrete;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete;
+}
+
+pub trait CoagulateVars<'src> {
+    /// The version of `Self` where [`AnalysisOp`]/[`AnalysisVar`] is replaced with [`InterpOp`]/[`InterpVar`]
+    type Interp;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp;
 }
 
 #[derive(Debug)]
@@ -69,7 +83,7 @@ impl<'src> GetType<'src> for FnRef<'src> {
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        env.lookup(self.ident).find_map(|x| match &x.val {
+        env.lookup(self.ident).find_map(|(_, x)| match &x.val {
             EnvItem::Fun((t, _)) => Some(t), // TBD: we have access to the name here, but should we use it?
             _ => None,
         })
@@ -83,7 +97,7 @@ pub enum Operands<O, V> {
     UnaryPost(Expr<O, V>),
 }
 
-impl<'src> Operands<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> Operands<AnalysisOp<'src>, AnalysisVar<'src>> {
     pub fn get_types(&self, env: &StaticEnvironment<'src>) -> Option<OperandTypes<'src>> {
         Some(match self {
             Self::Binary(lhs, rhs) => OperandTypes::Binary(
@@ -100,7 +114,7 @@ impl<'src> Operands<AnalysisOp<'src>, AnalyzerVar<'src>> {
     }
 }
 
-impl<'src> CementVars<'src> for Operands<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> CementVars for Operands<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Concrete = Operands<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
@@ -108,6 +122,25 @@ impl<'src> CementVars<'src> for Operands<AnalysisOp<'src>, AnalyzerVar<'src>> {
             Self::Binary(l, r) => Operands::Binary(l.cement_vars(ranges), r.cement_vars(ranges)),
             Self::UnaryPre(x) => Operands::UnaryPre(x.cement_vars(ranges)),
             Self::UnaryPost(x) => Operands::UnaryPost(x.cement_vars(ranges)),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for Operands<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = Operands<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        match self {
+            Self::Binary(l, r) => Operands::Binary(
+                l.coagulate_vars(s_env, i_env),
+                r.coagulate_vars(s_env, i_env),
+            ),
+            Self::UnaryPre(x) => Operands::UnaryPre(x.coagulate_vars(s_env, i_env)),
+            Self::UnaryPost(x) => Operands::UnaryPost(x.coagulate_vars(s_env, i_env)),
         }
     }
 }
@@ -127,16 +160,16 @@ pub type UnaryOpFn = for<'val, 'src> fn(
 pub enum AnalysisOp<'src> {
     Binary(
         (FunShape<'src>, BinaryOpFn, InterpBinaryOpFn),
-        Expr<Self, AnalyzerVar<'src>>,
-        Expr<Self, AnalyzerVar<'src>>,
+        Expr<Self, AnalysisVar<'src>>,
+        Expr<Self, AnalysisVar<'src>>,
     ),
     UnaryPre(
         (FunShape<'src>, UnaryOpFn, InterpUnaryOpFn),
-        Expr<Self, AnalyzerVar<'src>>,
+        Expr<Self, AnalysisVar<'src>>,
     ),
     UnaryPost(
         (FunShape<'src>, UnaryOpFn, InterpUnaryOpFn),
-        Expr<Self, AnalyzerVar<'src>>,
+        Expr<Self, AnalysisVar<'src>>,
     ),
 }
 
@@ -187,7 +220,7 @@ impl<'src> GetType<'src> for AnalysisOp<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for AnalysisOp<'src> {
+impl<'src> CementVars for AnalysisOp<'src> {
     type Concrete = RuntimeOp<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
@@ -245,6 +278,31 @@ impl<'src> CementVars<'src> for AnalysisOp<'src> {
     }
 }
 
+impl<'src> CoagulateVars<'src> for AnalysisOp<'src> {
+    type Interp = InterpOp<'src>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        match self {
+            Self::Binary((shape, _run_fun, interp_fun), lhs, rhs) => InterpOp::Binary(
+                shape,
+                interp_fun,
+                lhs.coagulate_vars(s_env, i_env),
+                rhs.coagulate_vars(s_env, i_env),
+            ),
+            Self::UnaryPre((shape, _run_fun, interp_fun), rhs) => {
+                InterpOp::UnaryPre(shape, interp_fun, rhs.coagulate_vars(s_env, i_env))
+            }
+            Self::UnaryPost((shape, _run_fun, interp_fun), lhs) => {
+                InterpOp::UnaryPost(shape, interp_fun, lhs.coagulate_vars(s_env, i_env))
+            }
+        }
+    }
+}
+
 // TODO: what about literals for custom types and arrays?
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
@@ -286,7 +344,7 @@ impl<'src> GetType<'src> for Literal {
 ///
 /// Has no actual memory location, since its type may not have been determined yet
 #[derive(Debug, Clone, PartialEq)]
-pub struct AnalyzerVar<'src> {
+pub struct AnalysisVar<'src> {
     pub unique_id: usize,
     pub ident: &'src str,
     pub is_global: bool,
@@ -294,7 +352,7 @@ pub struct AnalyzerVar<'src> {
     _ty: Option<AbstractType<'src>>,
 }
 
-impl<'src> GetType<'src> for AnalyzerVar<'src> {
+impl<'src> GetType<'src> for AnalysisVar<'src> {
     type Output<'ty>
         = VarType<'src, 'ty>
     where
@@ -303,11 +361,11 @@ impl<'src> GetType<'src> for AnalyzerVar<'src> {
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         env.lookup(self.ident)
             .next()
-            .and_then(|x| x.val.get_type(env))
+            .and_then(|(_, x)| x.val.get_type(env))
     }
 }
 
-impl<'src> CementVars<'src> for AnalyzerVar<'src> {
+impl<'src> CementVars for AnalysisVar<'src> {
     type Concrete = RuntimeVar<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
@@ -325,6 +383,40 @@ impl<'src> CementVars<'src> for AnalyzerVar<'src> {
             },
             #[cfg(not(debug_assertions))]
             _marker: PhantomData,
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for AnalysisVar<'src> {
+    type Interp = InterpVar<'src>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        let item = s_env
+            .get_decl(self.unique_id)
+            .expect("unique_id missing from ranges");
+        match &item.val {
+            EnvItem::Var(ty, _) => {
+                match ty
+                    .as_ref()
+                    .expect("all types should be determined by this point")
+                {
+                    AbstractType::Concrete(ty) => {
+                        i_env
+                            .vars
+                            .insert(self.unique_id, InterpVal::Uninit(ty.clone()));
+                        InterpVar {
+                            ident: self.ident,
+                            id: self.unique_id,
+                        }
+                    }
+                    t => panic!("all variables should be concrete by this point\n type: {t}"),
+                }
+            }
+            _ => panic!("AnalysisVar should represent EnvItem::Var"),
         }
     }
 }
@@ -380,7 +472,7 @@ pub struct Assignment<O, V> {
     pub rhs: Expr<O, V>,
 }
 
-impl<'src> GetType<'src> for Assignment<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> GetType<'src> for Assignment<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Output<'ty>
         = PrimitiveType
     where
@@ -391,13 +483,28 @@ impl<'src> GetType<'src> for Assignment<AnalysisOp<'src>, AnalyzerVar<'src>> {
     }
 }
 
-impl<'src> CementVars<'src> for Assignment<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> CementVars for Assignment<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Concrete = Assignment<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         Assignment {
             lvalue: self.lvalue.cement_vars(ranges),
             rhs: self.rhs.cement_vars(ranges),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for Assignment<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = Assignment<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        Assignment {
+            lvalue: self.lvalue.coagulate_vars(s_env, i_env),
+            rhs: self.rhs.coagulate_vars(s_env, i_env),
         }
     }
 }
@@ -410,7 +517,7 @@ pub enum Expr<O, V> {
     Variable(V),
 }
 
-impl<'src> GetType<'src> for Expr<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> GetType<'src> for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Output<'ty>
         = ExprType<'src, 'ty>
     where
@@ -427,7 +534,7 @@ impl<'src> GetType<'src> for Expr<AnalysisOp<'src>, AnalyzerVar<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::Expr<'src> {
-    type Ouptut = Expr<AnalysisOp<'src>, AnalyzerVar<'src>>;
+    type Ouptut = Expr<AnalysisOp<'src>, AnalysisVar<'src>>;
 
     fn analyze(
         &self,
@@ -445,7 +552,7 @@ impl<'src> Analyze<'src> for ast::Expr<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for Expr<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> CementVars for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Concrete = Expr<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
@@ -454,6 +561,23 @@ impl<'src> CementVars<'src> for Expr<AnalysisOp<'src>, AnalyzerVar<'src>> {
             Self::Op(x) => Expr::Op(Box::new(x.cement_vars(ranges))),
             Self::Literal(x) => Expr::Literal(x),
             Self::Variable(x) => Expr::Variable(x.cement_vars(ranges)),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = Expr<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        match self {
+            Self::Assignment(x) => Expr::Assignment(Box::new(x.coagulate_vars(s_env, i_env))),
+            Self::Op(x) => Expr::Op(Box::new(x.coagulate_vars(s_env, i_env))),
+            Self::Literal(x) => Expr::Literal(x),
+            Self::Variable(x) => Expr::Variable(x.coagulate_vars(s_env, i_env)),
         }
     }
 }
@@ -484,7 +608,7 @@ impl<'src> Analyze<'src> for ast::Literal<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Variable<'src> {
-    type Ouptut = Expr<AnalysisOp<'src>, AnalyzerVar<'src>>;
+    type Ouptut = Expr<AnalysisOp<'src>, AnalysisVar<'src>>;
 
     fn analyze(
         &self,
@@ -493,9 +617,9 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
     ) -> Result<'src, Self::Ouptut> {
         let ident = self.ident.lex;
         env.lookup(ident)
-            .find_map(|item| match item.val {
-                EnvItem::Var(ref x, is_global) => Some(Expr::Variable(AnalyzerVar {
-                    unique_id: item.id,
+            .find_map(|(unique_id, item)| match item.val {
+                EnvItem::Var(ref x, is_global) => Some(Expr::Variable(AnalysisVar {
+                    unique_id,
                     ident,
                     is_global,
                     #[cfg(debug_assertions)]
@@ -534,7 +658,7 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                 OpSide::Right => (Operands::UnaryPre(operand), OperandTypes::UnaryPre(ty)),
             };
             env.lookup(&self.op.val)
-                .map(|item| match &item.val {
+                .map(|(_, item)| match &item.val {
                     EnvItem::Op(overload) => overload,
                     _ => unreachable!("only operators should be stored with operator keys"),
                 })
@@ -560,7 +684,7 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Binary<'src> {
-    type Ouptut = Expr<AnalysisOp<'src>, AnalyzerVar<'src>>;
+    type Ouptut = Expr<AnalysisOp<'src>, AnalysisVar<'src>>;
 
     fn analyze(
         &self,
@@ -582,11 +706,13 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                     }
                     (None, Some(r_ty)) => {
                         // update lhs type to match rhs
-                        let Some(&mut ScopeItem {
+                        let Some((
                             id,
-                            val: EnvItem::Var(ref mut var_ty, _),
-                            ..
-                        }) = env.lookup_mut(var.ident).next()
+                            &mut StaticItem {
+                                val: EnvItem::Var(ref mut var_ty, _),
+                                ..
+                            },
+                        )) = env.lookup_mut(var.ident).next()
                         else {
                             unreachable!(
                                 "Expr::Variable should only result from a StaticVar::Var present in `env`"
@@ -629,7 +755,7 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                     let operand_types = OperandTypes::Binary(l_ty, r_ty);
                     let op = &self.op.val;
                     env.lookup(op)
-                        .map(|item| match &item.val {
+                        .map(|(_, item)| match &item.val {
                             EnvItem::Op(overload) => overload,
                             _ => unreachable!("only operators should be stored with operator keys"),
                         })
@@ -641,7 +767,7 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                                 operands: {operands:?}\n \
                                 supported operands: {:#?}",
                                 env.lookup(op)
-                                    .map(|item| match &item.val {
+                                    .map(|(_, item)| match &item.val {
                                         EnvItem::Op(overload) => overload,
                                         _ => unreachable!(
                                             "only operators should be stored with operator keys"
@@ -699,7 +825,7 @@ pub struct ExprStmt<O, V> {
 }
 
 impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
-    type Ouptut = ExprStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
+    type Ouptut = ExprStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
 
     fn analyze(
         &self,
@@ -728,12 +854,26 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for ExprStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> CementVars for ExprStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Concrete = ExprStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         ExprStmt {
             expr: self.expr.cement_vars(ranges),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for ExprStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = ExprStmt<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        ExprStmt {
+            expr: self.expr.coagulate_vars(s_env, i_env),
         }
     }
 }
@@ -744,7 +884,7 @@ pub struct PrintStmt<O, V> {
 }
 
 impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
-    type Ouptut = PrintStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
+    type Ouptut = PrintStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
 
     fn analyze(
         &self,
@@ -767,12 +907,26 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for PrintStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> CementVars for PrintStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Concrete = PrintStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         PrintStmt {
             expr: self.expr.cement_vars(ranges),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for PrintStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = PrintStmt<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        PrintStmt {
+            expr: self.expr.coagulate_vars(s_env, i_env),
         }
     }
 }
@@ -783,7 +937,7 @@ pub enum OrStmt<O, V> {
     Last(BlockStmt<O, V>),
 }
 
-impl<'src> GetType<'src> for OrStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> GetType<'src> for OrStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -797,7 +951,7 @@ impl<'src> GetType<'src> for OrStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
     }
 }
 
-impl<'src> CementVars<'src> for OrStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> CementVars for OrStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Concrete = OrStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
@@ -808,8 +962,23 @@ impl<'src> CementVars<'src> for OrStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
     }
 }
 
+impl<'src> CoagulateVars<'src> for OrStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = OrStmt<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        match self {
+            Self::More(stmt) => OrStmt::More(stmt.coagulate_vars(s_env, i_env)),
+            Self::Last(stmt) => OrStmt::Last(stmt.coagulate_vars(s_env, i_env)),
+        }
+    }
+}
+
 impl<'src> Analyze<'src> for ast::OrBody<'src> {
-    type Ouptut = OrStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
+    type Ouptut = OrStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
 
     fn analyze(
         &self,
@@ -831,7 +1000,7 @@ pub struct IfStmt<O, V> {
     pub or: Option<Box<OrStmt<O, V>>>,
 }
 
-impl<'src> GetType<'src> for IfStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> GetType<'src> for IfStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -852,7 +1021,7 @@ impl<'src> GetType<'src> for IfStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::IfStmt<'src> {
-    type Ouptut = IfStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
+    type Ouptut = IfStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
 
     fn analyze(
         &self,
@@ -883,7 +1052,7 @@ impl<'src> Analyze<'src> for ast::IfStmt<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for IfStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> CementVars for IfStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Concrete = IfStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
@@ -895,12 +1064,28 @@ impl<'src> CementVars<'src> for IfStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
     }
 }
 
+impl<'src> CoagulateVars<'src> for IfStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = IfStmt<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        IfStmt {
+            pred: self.pred.coagulate_vars(s_env, i_env),
+            then: self.then.coagulate_vars(s_env, i_env),
+            or: self.or.map(|or| Box::new(or.coagulate_vars(s_env, i_env))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockStmt<O, V> {
     pub stmts: Vec<Statement<O, V>>,
 }
 
-impl<'src> GetType<'src> for BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> GetType<'src> for BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -921,7 +1106,7 @@ impl<'src> GetType<'src> for BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
-    type Ouptut = BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>>;
+    type Ouptut = BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
 
     fn analyze(
         &self,
@@ -945,7 +1130,7 @@ impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> CementVars for BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Concrete = BlockStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
@@ -959,6 +1144,24 @@ impl<'src> CementVars<'src> for BlockStmt<AnalysisOp<'src>, AnalyzerVar<'src>> {
     }
 }
 
+impl<'src> CoagulateVars<'src> for BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = BlockStmt<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        BlockStmt {
+            stmts: self
+                .stmts
+                .into_iter()
+                .map(|stmt| stmt.coagulate_vars(s_env, i_env))
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement<O, V> {
     Expr(ExprStmt<O, V>),
@@ -967,7 +1170,7 @@ pub enum Statement<O, V> {
     Block(BlockStmt<O, V>),
 }
 
-impl<'src> GetType<'src> for Statement<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> GetType<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -986,7 +1189,7 @@ impl<'src> GetType<'src> for Statement<AnalysisOp<'src>, AnalyzerVar<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::Statement<'src> {
-    type Ouptut = Statement<AnalysisOp<'src>, AnalyzerVar<'src>>;
+    type Ouptut = Statement<AnalysisOp<'src>, AnalysisVar<'src>>;
 
     fn analyze(
         &self,
@@ -1002,7 +1205,7 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
     }
 }
 
-impl<'src> CementVars<'src> for Statement<AnalysisOp<'src>, AnalyzerVar<'src>> {
+impl<'src> CementVars for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
     type Concrete = Statement<RuntimeOp<'src>, RuntimeVar<'src>>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
@@ -1015,8 +1218,25 @@ impl<'src> CementVars<'src> for Statement<AnalysisOp<'src>, AnalyzerVar<'src>> {
     }
 }
 
+impl<'src> CoagulateVars<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = Statement<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        match self {
+            Self::Expr(stmt) => Statement::Expr(stmt.coagulate_vars(s_env, i_env)),
+            Self::Print(stmt) => Statement::Print(stmt.coagulate_vars(s_env, i_env)),
+            Self::If(stmt) => Statement::If(stmt.coagulate_vars(s_env, i_env)),
+            Self::Block(stmt) => Statement::Block(stmt.coagulate_vars(s_env, i_env)),
+        }
+    }
+}
+
 impl<'src> Analyze<'src> for ast::DeclVar<'src> {
-    type Ouptut = Option<ExprStmt<AnalysisOp<'src>, AnalyzerVar<'src>>>;
+    type Ouptut = Option<ExprStmt<AnalysisOp<'src>, AnalysisVar<'src>>>;
 
     fn analyze(
         &self,
@@ -1053,7 +1273,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                 .map(|(unique_id, _ty, is_global)| {
                     expr.map(|rhs| ExprStmt {
                         expr: Expr::Assignment(Box::new(Assignment {
-                            lvalue: Expr::Variable(AnalyzerVar {
+                            lvalue: Expr::Variable(AnalysisVar {
                                 unique_id,
                                 ident,
                                 is_global,
@@ -1069,7 +1289,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Declaration<'src> {
-    type Ouptut = Option<Statement<AnalysisOp<'src>, AnalyzerVar<'src>>>;
+    type Ouptut = Option<Statement<AnalysisOp<'src>, AnalysisVar<'src>>>;
 
     fn analyze(
         &self,
@@ -1100,7 +1320,7 @@ fn analyze_base<'src, O, V, F>(
 where
     F: FnOnce(
         StaticEnvironment<'src>,
-        Vec<Statement<AnalysisOp<'src>, AnalyzerVar<'src>>>,
+        Vec<Statement<AnalysisOp<'src>, AnalysisVar<'src>>>,
     ) -> Result<'src, Program<O, V>>,
 {
     let mut env = StaticEnvironment::new();
@@ -1118,15 +1338,17 @@ where
 pub fn analyze_interp<'src>(
     source: &'src str,
     prgm: &ast::Program<'src>,
-) -> Result<'src, InterpProgram<'src>> {
-    analyze_base(source, prgm, |env, stmts| {
-        Ok(Program {
+) -> Result<'src, (InterpProgram<'src>, InterpEnvironment<'src>)> {
+    let mut i_env = InterpEnvironment::new();
+    analyze_base(source, prgm, |s_env, stmts| {
+        Ok(InterpProgram {
             stmts: stmts
                 .into_iter()
-                .map(|stmt| todo!("convert analysis into interp"))
+                .map(|stmt| stmt.coagulate_vars(&s_env, &mut i_env))
                 .collect(),
         })
     })
+    .map(|prgm| (prgm, i_env))
 }
 
 pub fn analyze<'src>(
@@ -1140,7 +1362,7 @@ pub fn analyze<'src>(
             }
             Vec::new()
         })?;
-        Ok(Program {
+        Ok(RuntimeProgram {
             stmts: stmts
                 .into_iter()
                 .map(|stmt| stmt.cement_vars(&ranges))

@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     exec::value::{Value, ValueMut},
-    interp::value::InterpVar,
+    interp::value::InterpVal,
     spec_ops::{BitRotate, BitShift},
     types::*,
 };
@@ -37,19 +37,33 @@ macro_rules! prim_op {
                 },
                 def: {
                     fn interp<'src>(
-                        lhs: &InterpVar<'src>,
-                        rhs: &InterpVar<'src>,
-                    ) -> Result<InterpVar<'src>, Failure> {
-                        let $lhs_name: &$Lhs = lhs
-                            .try_into()
-                            .expect("should be guaranteed by static analysis");
-                        let $rhs_name: &$Rhs = rhs
-                            .try_into()
-                            .expect("should be guaranteed by static analysis");
+                        lhs: &InterpVal<'src>,
+                        rhs: &InterpVal<'src>,
+                    ) -> Result<InterpVal<'src>, Failure> {
+                        let $lhs_name: &$Lhs = lhs.try_into().unwrap_or_else(|_| {
+                            panic!(
+                                "{}<{}, {}> lhs type mismatch should be caught by static analysis\
+                                \n expected: {}\
+                                \n    found: {lhs:?}",
+                                stringify!($op),
+                                stringify!($Lhs),
+                                stringify!($Rhs),
+                                stringify!($Lhs),
+                            )
+                        });
+                        let $rhs_name: &$Rhs = rhs.try_into().unwrap_or_else(|_| {
+                            panic!(
+                                "{}<{}, {}> rhs type mismatch should be caught by static analysis\
+                                \n expected: {}\
+                                \n    found: {rhs:?}",
+                                stringify!($op),
+                                stringify!($Lhs),
+                                stringify!($Rhs),
+                                stringify!($Rhs),
+                            )
+                        });
                         let res: $Out = $def;
-                        Ok(res
-                            .try_into()
-                            .expect("should be guaranteed by static analysis"))
+                        Ok(res.into())
                     }
                     fn runtime<'src, 'val>(
                         out: ValueMut<'val, 'src>,
@@ -90,14 +104,19 @@ macro_rules! prim_op {
                     ret: StaticType::Primitive(PrimitiveType::$output),
                 },
                 def: {
-                    fn interp<'src>(rhs: &InterpVar<'src>) -> Result<InterpVar<'src>, Failure> {
-                        let $rhs_name: &$Rhs = rhs
-                            .try_into()
-                            .expect("should be guaranteed by static analysis");
+                    fn interp<'src>(rhs: &InterpVal<'src>) -> Result<InterpVal<'src>, Failure> {
+                        let $rhs_name: &$Rhs = rhs.try_into().unwrap_or_else(|_| {
+                            panic!(
+                                "{}<{}> rhs type mismatch should be caught by static analysis\
+                                \n expected: {}\
+                                \n    found: {rhs:?}",
+                                stringify!($op),
+                                stringify!($Lhs),
+                                stringify!($Lhs),
+                            )
+                        });
                         let res: $Out = $def;
-                        Ok(res
-                            .try_into()
-                            .expect("should be guaranteed by static analysis"))
+                        Ok(res.into())
                     }
                     fn runtime<'src, 'val>(
                         out: ValueMut<'val, 'src>,
@@ -136,15 +155,20 @@ macro_rules! prim_op {
                 },
                 def: {
                     fn interp<'inr>(
-                        lhs: &InterpVar<'src>,
+                        lhs: &InterpVal<'src>,
                     ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
-                        let $lhs_name: &$Lhs = lhs
-                            .try_into()
-                            .expect("should be guaranteed by static analysis");
+                        let $lhs_name: &$Lhs = lhs.try_into().unwrap_or_else(|_| {
+                            panic!(
+                                "{}<{}> lhs type mismatch should be caught by static analysis\
+                                \n expected: {}\
+                                \n    found: {lhs:?}",
+                                stringify!($op),
+                                stringify!($Lhs),
+                                stringify!($Lhs),
+                            )
+                        });
                         let res: $Out = $def;
-                        Ok(res
-                            .try_into()
-                            .expect("should be guaranteed by static analysis"))
+                        Ok(res.into())
                     }
                     fn runtime<'src, 'val>(
                         $env: &'val Environment,
