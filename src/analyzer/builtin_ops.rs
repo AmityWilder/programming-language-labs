@@ -215,7 +215,7 @@ primitive_ops![
     // bool
     Exists(None) -> Bool as fn(r: none) -> bool { false }
     Exists(Fail) -> Bool as fn(r: fail) -> bool { false }
-    Exists(Bool) -> Bool as fn(r: bool) -> bool { *r } // TBD: should !!bool be equivalent to !(!bool)? or does it definitively represent "not error"?
+    Exists(Bool) -> Bool as fn(r: bool) -> bool { *r } // TBD: should !!bool be equivalent to !(!bool)? or does it definitively represent "success"?
     Exists(Uint) -> Bool as fn(r: uint) -> bool { true }
     Exists(Sint) -> Bool as fn(r: sint) -> bool { true }
     Exists(Flpt) -> Bool as fn(r: flpt) -> bool { !r.is_nan() }
@@ -232,14 +232,14 @@ primitive_ops![
     Eq(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l == r }
     Eq(Uint, Uint) -> Bool as fn(l: uint, r: uint) -> bool { l == r }
     Eq(Sint, Sint) -> Bool as fn(l: sint, r: sint) -> bool { l == r }
-    Eq(Flpt, Flpt) -> Bool as fn(l: flpt, r: flpt) -> bool { l == r }
+    Eq(Flpt, Flpt) -> Bool as fn(l: flpt, r: flpt) -> bool { l == r } // TBD: should float equality be allowed?
     Eq(Char, Char) -> Bool as fn(l: char, r: char) -> bool { l == r }
     Eq(Text, Text) -> Bool as fn(l: text, r: text) -> bool { l == r }
 
     Ne(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l != r }
     Ne(Uint, Uint) -> Bool as fn(l: uint, r: uint) -> bool { l != r }
     Ne(Sint, Sint) -> Bool as fn(l: sint, r: sint) -> bool { l != r }
-    Ne(Flpt, Flpt) -> Bool as fn(l: flpt, r: flpt) -> bool { l != r }
+    Ne(Flpt, Flpt) -> Bool as fn(l: flpt, r: flpt) -> bool { l != r } // TBD: should float equality be allowed?
     Ne(Char, Char) -> Bool as fn(l: char, r: char) -> bool { l != r }
     Ne(Text, Text) -> Bool as fn(l: text, r: text) -> bool { l != r }
 
@@ -281,12 +281,12 @@ primitive_ops![
     Nor (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { !(l | r) }
     Xnor(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { !(l ^ r) }
 
-    Add   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l + r }
-    SubNeg(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l - r }
-    Mul   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l * r }
-    Pow   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.pow(*r as u32) }
-    Div   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l / r }
-    Rem   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l % r }
+    Add   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l + r } // TBD: should overflow result in a failure?
+    SubNeg(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l - r } // TBD: should overflow result in a failure?
+    Mul   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l * r } // TBD: should overflow result in a failure?
+    Pow   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.pow(*r as u32) } // TBD: should overflow result in a failure?
+    Div   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.checked_div(*r).ok_or(Failure::DivByZero)? }
+    Rem   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.checked_rem(*r).ok_or(Failure::DivByZero)? }
 
     Shl (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.bshl(*r) }
     Shr (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.bshr(*r) }
@@ -306,12 +306,12 @@ primitive_ops![
     Nor (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { !(l | r) }
     Xnor(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { !(l ^ r) }
 
-    Add   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l + r }
-    SubNeg(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l - r }
-    Mul   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l * r }
-    Pow   (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.pow(*r as u32) }
-    Div   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l / r }
-    Rem   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l % r }
+    Add   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l + r } // TBD: should overflow result in a failure?
+    SubNeg(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l - r } // TBD: should overflow result in a failure?
+    Mul   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l * r } // TBD: should overflow result in a failure?
+    Pow   (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.pow(*r as u32) } // TBD: should overflow result in a failure?
+    Div   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.checked_div(*r).ok_or(Failure::DivByZero)? }
+    Rem   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.checked_rem(*r).ok_or(Failure::DivByZero)? }
 
     Shl (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.bshl(*r) }
     Shr (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.bshr(*r) }
@@ -323,7 +323,7 @@ primitive_ops![
     Rotl(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.rotl(*r) }
     Rotr(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.rotr(*r) }
 
-    SubNeg(Sint) -> Sint as fn(r: sint) -> sint { -r }
+    SubNeg(Sint) -> Sint as fn(r: sint) -> sint { -r } // TBD: should overflow result in a failure?
 
     // flpt
     Add   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l + r }
@@ -335,17 +335,19 @@ primitive_ops![
 
     SubNeg(Flpt) -> Flpt as fn(r: flpt) -> flpt { -r }
 
-    // char.ok()
-    Add   (Char, Uint) -> Char as fn(l: char, r: uint) -> char {
+    // char
+    Add(Char, Uint) -> Char as fn(l: char, r: uint) -> char {
         u32::try_from(*r)
             .ok()
-            .and_then(|r| char::from_u32(l.to_u32() + r))
+            .and_then(|r| l.to_u32().checked_add(r))
+            .and_then(char::from_u32)
             .ok_or(Failure::Utf8Error)?
     }
     SubNeg(Char, Uint) -> Char as fn(l: char, r: uint) -> char {
         u32::try_from(*r)
             .ok()
-            .and_then(|r| char::from_u32(l.to_u32() + r))
+            .and_then(|r| l.to_u32().checked_add(r))
+            .and_then(char::from_u32)
             .ok_or(Failure::Utf8Error)?
     }
 

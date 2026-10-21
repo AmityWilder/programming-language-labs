@@ -798,6 +798,33 @@ impl<'src> AstNode<'src> for HaltStmt<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct SkipStmt<'src> {
+    /// `skip`
+    pub skip_kw: Lexeme<'src>,
+    // TBD: should `skip value;` be supported?
+    /// `;`
+    pub semi: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for SkipStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.skip_kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.semi.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.skip_kw, &self.semi).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.skip_kw, &self.semi).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct BlockStmt<'src> {
     /// `{`
     pub open: Lexeme<'src>,
@@ -884,6 +911,7 @@ pub enum Statement<'src> {
     If(IfStmt<'src>),
     Loop(LoopStmt<'src>),
     Halt(HaltStmt<'src>),
+    Skip(SkipStmt<'src>),
     Block(BlockStmt<'src>),
 }
 
@@ -898,6 +926,10 @@ impl<'src> Statement<'src> {
 
     pub const fn halt(inner: HaltStmt<'src>) -> Self {
         Self::Halt(inner)
+    }
+
+    pub const fn skip(inner: SkipStmt<'src>) -> Self {
+        Self::Skip(inner)
     }
 
     pub const fn if_stmt(inner: IfStmt<'src>) -> Self {

@@ -16,7 +16,7 @@ use crate::{
     },
 };
 use Operator::*;
-use ast::{Binary, Expr, Grouping, Literal, OrType, TypeAnnotation, TypeExpr, Unary};
+use ast::{Binary, Expr, Grouping, Literal, OrType, SkipStmt, TypeAnnotation, TypeExpr, Unary};
 
 pub mod ast;
 // pub mod ast_iter; // TODO: FIX THIS
@@ -287,12 +287,13 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `statement -> block_statement | print_statement | halt_statement | if_statement | loop_statement | expression_statement`
+    /// `statement -> block_statement | print_statement | halt_statement | skip_statement | if_statement | loop_statement | expression_statement`
     pub fn statement(&mut self) -> Result<Statement<'src>, ContextError<'src>> {
         self.block_statement()
             .map(|res| res.map(Statement::block))
             .or_else(|| self.print_statement().map(|res| res.map(Statement::print)))
             .or_else(|| self.halt_statement().map(|res| res.map(Statement::halt)))
+            .or_else(|| self.skip_statement().map(|res| res.map(Statement::skip)))
             .or_else(|| self.if_statement().map(|res| res.map(Statement::if_stmt)))
             .or_else(|| {
                 self.loop_statement()
@@ -387,6 +388,20 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .map(|halt_kw| {
                 Ok(HaltStmt {
                     halt_kw,
+                    semi: self.try_pull_eq(
+                        LexValue::Punctuation(Punctuation::Semi),
+                        ExpectedToken::Semi,
+                    )?,
+                })
+            })
+    }
+
+    /// `skip_statement -> "skip" block_statement`
+    pub fn skip_statement(&mut self) -> Option<Result<SkipStmt<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Skip))
+            .map(|skip_kw| {
+                Ok(SkipStmt {
+                    skip_kw,
                     semi: self.try_pull_eq(
                         LexValue::Punctuation(Punctuation::Semi),
                         ExpectedToken::Semi,

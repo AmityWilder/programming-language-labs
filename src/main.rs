@@ -816,11 +816,12 @@ fn run_code(source: &str, config: &Cli) {
     if config.do_eval {
         println!("\nrunning...\n----------");
         let res = interpret(&program, env);
-        println!("----------\nfinished\n");
         if let Err(e) = res
             && config.print_errors
         {
-            println!("runtime error: {e}");
+            println!("----------\nruntime error: {e}");
+        } else {
+            println!("----------\nfinished\n");
         }
     }
 }

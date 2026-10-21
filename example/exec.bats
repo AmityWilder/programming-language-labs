@@ -6,13 +6,15 @@
     let bar = 8;
     bar = 9;
 
-    let i = 0;
+    let i = -5;
     loop {
-        if i >= 10 {
-            halt;
-        }
-        prnt(i + "\n");
+        if i > 5 { halt; }
+        let temp = i;
         i = i + 1;
+        let i = temp;
+        if i == 0 { skip; } // prevent div/0 error
+        let x = 10/i;
+        prnt(x + "\n");
     }
 
     let bigger;

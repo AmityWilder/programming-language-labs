@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     analyzer::{
-        Assignment, BlockStmt, BreakStmt, Expr, ExprStmt, IfStmt, Literal, LoopStmt, OrStmt,
+        Assignment, BlockStmt, Expr, ExprStmt, HaltStmt, IfStmt, Literal, LoopStmt, OrStmt,
         PrintStmt, RuntimeOp, RuntimeProgram, RuntimeVar, Statement, types::StaticType,
     },
     exec::{env::Environment, error::Failure},
@@ -332,7 +332,7 @@ impl<'src> LoopStmt<RuntimeOp<'src>, RuntimeVar<'src>> {
     }
 }
 
-impl BreakStmt {
+impl HaltStmt {
     fn exec(&self, env: &mut Environment<'_>) -> Result<(), Failure> {
         todo!()
     }
@@ -354,7 +354,8 @@ impl<'src> Statement<RuntimeOp<'src>, RuntimeVar<'src>> {
             Self::Print(stmt) => stmt.exec(env),
             Self::If(stmt) => stmt.exec(env),
             Self::Loop(stmt) => stmt.exec(env),
-            Self::Break(stmt) => stmt.exec(env),
+            Self::Halt(stmt) => todo!(),
+            Self::Skip(stmt) => todo!(),
             Self::Block(stmt) => stmt.exec(env),
         }
     }

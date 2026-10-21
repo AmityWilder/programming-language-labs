@@ -1138,11 +1138,11 @@ impl<'src> CoagulateVars<'src> for LoopStmt<AnalysisOp<'src>, AnalysisVar<'src>>
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BreakStmt {
+pub struct HaltStmt {
     // TBD: should `break value;` be supported?
 }
 
-impl<'src> GetType<'src> for BreakStmt {
+impl<'src> GetType<'src> for HaltStmt {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1157,14 +1157,43 @@ impl<'src> GetType<'src> for BreakStmt {
 }
 
 impl<'src> Analyze<'src> for ast::HaltStmt<'src> {
-    type Ouptut = BreakStmt;
+    type Ouptut = HaltStmt;
 
     fn analyze(
         &self,
         _source: &'src str,
         _env: &mut StaticEnvironment<'src>,
     ) -> Result<'src, Self::Ouptut> {
-        Ok(BreakStmt {})
+        Ok(HaltStmt {})
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkipStmt {}
+
+impl<'src> GetType<'src> for SkipStmt {
+    type Output<'ty>
+        = &'ty AbstractType<'src>
+    where
+        'src: 'ty;
+
+    fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
+        // TBD: should loops be expressions or just statements?
+        Some(&AbstractType::Concrete(StaticType::Primitive(
+            PrimitiveType::Nevr,
+        )))
+    }
+}
+
+impl<'src> Analyze<'src> for ast::SkipStmt<'src> {
+    type Ouptut = SkipStmt;
+
+    fn analyze(
+        &self,
+        _source: &'src str,
+        _env: &mut StaticEnvironment<'src>,
+    ) -> Result<'src, Self::Ouptut> {
+        Ok(SkipStmt {})
     }
 }
 
@@ -1256,7 +1285,8 @@ pub enum Statement<O, V> {
     Print(PrintStmt<O, V>),
     If(IfStmt<O, V>),
     Loop(LoopStmt<O, V>),
-    Break(BreakStmt),
+    Halt(HaltStmt),
+    Skip(SkipStmt),
     Block(BlockStmt<O, V>),
 }
 
@@ -1274,7 +1304,8 @@ impl<'src> GetType<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
             ))),
             Self::If(stmt) => stmt.get_type(env),
             Self::Loop(stmt) => stmt.get_type(env),
-            Self::Break(stmt) => stmt.get_type(env),
+            Self::Halt(stmt) => stmt.get_type(env),
+            Self::Skip(stmt) => stmt.get_type(env),
             Self::Block(stmt) => stmt.get_type(env),
         }
     }
@@ -1293,7 +1324,8 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
             Self::Print(stmt) => stmt.analyze(source, env).map(Statement::Print),
             Self::If(stmt) => stmt.analyze(source, env).map(Statement::If),
             Self::Loop(stmt) => stmt.analyze(source, env).map(Statement::Loop),
-            Self::Halt(stmt) => stmt.analyze(source, env).map(Statement::Break),
+            Self::Halt(stmt) => stmt.analyze(source, env).map(Statement::Halt),
+            Self::Skip(stmt) => stmt.analyze(source, env).map(Statement::Skip),
             Self::Block(stmt) => stmt.analyze(source, env).map(Statement::Block),
         }
     }
@@ -1308,7 +1340,8 @@ impl<'src> CementVars for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
             Self::Print(stmt) => Statement::Print(stmt.cement_vars(ranges)),
             Self::If(stmt) => Statement::If(stmt.cement_vars(ranges)),
             Self::Loop(stmt) => Statement::Loop(stmt.cement_vars(ranges)),
-            Self::Break(stmt) => Statement::Break(stmt),
+            Self::Halt(stmt) => Statement::Halt(stmt),
+            Self::Skip(stmt) => Statement::Skip(stmt),
             Self::Block(stmt) => Statement::Block(stmt.cement_vars(ranges)),
         }
     }
@@ -1327,7 +1360,8 @@ impl<'src> CoagulateVars<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>
             Self::Print(stmt) => Statement::Print(stmt.coagulate_vars(s_env, i_env)),
             Self::If(stmt) => Statement::If(stmt.coagulate_vars(s_env, i_env)),
             Self::Loop(stmt) => Statement::Loop(stmt.coagulate_vars(s_env, i_env)),
-            Self::Break(stmt) => Statement::Break(stmt),
+            Self::Halt(stmt) => Statement::Halt(stmt),
+            Self::Skip(stmt) => Statement::Skip(stmt),
             Self::Block(stmt) => Statement::Block(stmt.coagulate_vars(s_env, i_env)),
         }
     }

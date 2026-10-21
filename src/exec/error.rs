@@ -10,6 +10,7 @@ pub enum Failure {
     TryFromInt,
     Utf8Error,
     OutOfBounds,
+    DivByZero,
 }
 
 impl From<std::str::ParseBoolError> for Failure {
@@ -56,6 +57,7 @@ impl std::fmt::Display for Failure {
                 f,
                 "attempted to access a location outside the bounds of available memory"
             ),
+            Self::DivByZero => write!(f, "tried to divide by zero"),
         }
     }
 }
