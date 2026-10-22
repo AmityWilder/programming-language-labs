@@ -327,6 +327,8 @@ primitive_ops![
     Rotl(Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.rotl(*r) }
     Rotr(Uint, Sint) -> Uint as fn(l: uint, r: sint) -> uint { l.rotr(*r) }
 
+    Not(Uint) -> Uint as fn(r: uint) -> uint { !r }
+
     // sint
     And (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l & r }
     Or  (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l | r }
@@ -353,6 +355,7 @@ primitive_ops![
     Rotr(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.rotr(*r) }
 
     SubNeg(Sint) -> Sint as fn(r: sint) -> sint { -r } // TBD: should overflow result in a failure?
+    Not   (Sint) -> Bool as fn(r: sint) -> sint { !r }
 
     // flpt
     Add   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l + r }
