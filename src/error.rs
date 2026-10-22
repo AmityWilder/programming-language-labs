@@ -20,11 +20,20 @@ use crate::{
         },
         token::{
             ExpansionData, Lexical, Token, escape_char,
-            value::{Operator, TokenEq},
+            value::{Keyword, Operator, TokenEq},
         },
     },
 };
 use std::range::Range;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ImmutableAssignment {
+    #[default]
+    Expression,
+    Assignment,
+    Literal,
+    Keyword(Keyword),
+}
 
 /// The standard library is allergic to letting me construct its error types, so I've made my own version
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -967,10 +976,23 @@ pub enum ErrorType<'src> {
 
     // TODO: make this more helpful
     #[code(CMP, 47)]
-    #[err((_), |f| write!(f, "type is ambiguous"))]
-    #[inlay((_), |f| write!(f, "type must be known at this point"))]
-    #[help((_), |f, _src| write!(f, "try annotating the type or use an expression with an explicit type"))]
-    TypeAmbiguity(Box<Expr<AnalysisOp<'src>, AnalysisVar<'src>>>),
+    #[err(|f| write!(f, "type is ambiguous"))]
+    #[inlay(|f| write!(f, "type must be known at this point"))]
+    #[help(|f, _src| write!(f, "try annotating the type or use an expression with an explicit type"))]
+    TypeAmbiguity,
+
+    #[code(CMP, 48)]
+    #[err((_), |f| write!(f, "cannot assign to immutable"))]
+    #[inlay((_), |f| write!(f, "does not resolve to a mutable value"))]
+    #[help((x), |f, _src| {
+        match x {
+            ImmutableAssignment::Expression => write!(f, "try replacing this with an expression that resolves to a mutable reference"),
+            ImmutableAssignment::Assignment => write!(f, "assignments cannot be chained, try breaking them up into separate statements"),
+            ImmutableAssignment::Literal => write!(f, "literals cannot be assigned, perhaps you meant to put this on the right side?"),
+            ImmutableAssignment::Keyword(kw) => write!(f, "`{kw}` is a reserved keyword, and doesn't resolve to a mutable value"),
+        }
+    })]
+    AssignImmutable(ImmutableAssignment),
 
     // TODO: need an error for undefined conversion
 

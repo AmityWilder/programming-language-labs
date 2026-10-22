@@ -1,8 +1,9 @@
 use crate::{
     Todo,
     analyzer::static_env::ConstantValue,
-    error::{ErrorType, OpSide},
+    error::{ContextError, ErrorType, OpSide},
     exec::error::Failure,
+    grammar::ast,
     scanner::token::value::TokenEq,
 };
 use std::{
@@ -57,17 +58,28 @@ pub trait StaticTypeSize: TypeSize {
 
 /// Display implementation is be how the type will be shown in error messages
 pub trait TypeCompatible<'src>: std::fmt::Display {
-    /// TODO: this is not currently reflexive!! check both ways until this is fixed!
+    /// TODO: this is not currently commutative!! check both ways until this is fixed!
     fn is_compatible(&self, other: &AbstractType<'_>) -> bool;
 
     // TODO: change this to return an actual error
-    fn expect_type(&self, expect: &AbstractType<'src>) -> Result<(), ErrorType<'src>>
+    fn expect_type<T: ast::AstNodeFinal<'src>>(
+        &self,
+        expect: &AbstractType<'src>,
+        source: &'src str,
+        node: &T,
+    ) -> Result<(), ContextError<'src>>
     where
         Self: std::fmt::Debug,
     {
-        // HACK: potentially expensive, but `is_compatible` isn't reflexive yet (due to `OrType`)
-        (self.is_compatible(expect) || expect.is_compatible(&expect.to_abstract()))
-            .ok_or_else(|| ErrorType::TypeMismatch(Box::new((expect.clone(), self.to_abstract()))))
+        if self.is_compatible(expect) {
+            Ok(())
+        } else {
+            Err(ContextError::node_error(
+                source,
+                node,
+                ErrorType::TypeMismatch(Box::new((expect.clone(), self.to_abstract()))),
+            ))
+        }
     }
 
     fn to_abstract(&self) -> AbstractType<'src>;

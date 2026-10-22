@@ -4,6 +4,7 @@ use crate::{
         AnalysisOp, AnalysisVar, BlockStmt, FnDef, GetType,
         types::{AbstractType, FunShape, StaticTypeSize, TypeCompatible, TypeSize, TypeSizeError},
     },
+    grammar::ast::AstNodeFinal,
     scanner::token::value::Operator,
 };
 use std::range::Range;
@@ -121,10 +122,20 @@ impl EnvKeyEq for Operator {
     }
 }
 
-#[derive(Debug)]
 pub struct StaticItem<'src> {
     pub key: EnvKey<'src>,
     pub val: EnvItem<'src>,
+    pub node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
+}
+
+impl std::fmt::Debug for StaticItem<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StaticItem")
+            .field("key", &self.key)
+            .field("val", &self.val)
+            .field("decl", &self.node.as_ref().map(|_| ()))
+            .finish()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -210,32 +221,18 @@ impl std::fmt::Display for SizeUpdateError {
 impl std::error::Error for SizeUpdateError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MemPos {
-    //// Type unknown, should be stacked on top of the variable with the `atop` ID
-    Unknown,
-    /// Type known; waiting on the the variable with the `atop` ID variable to be sized,
-    /// as this variable should stack on top of it
-    Blocked(usize),
-    /// Type and position known; if the variable is within a function,
-    /// this will be **relative** to the stack pointer
-    Fixed(Range<usize>),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MemLoc<'src> {
+pub struct MemLoc {
     /// Item will stack atop this variable
     ///
     /// [`None`] if this is the first item in either a function or global scope
     pub atop: Option<VarId>,
-    /// Allows errors to be provided for the item even after it has popped
-    pub key: EnvKey<'src>,
     /// Where the variable will actually be stored in the runtime environment
-    pub pos: MemPos,
+    pub range: Option<Range<usize>>,
 }
 
 #[derive(Debug)]
 pub struct DeclItem<'src> {
-    loc: MemLoc<'src>,
+    loc: MemLoc,
     item: StaticItem<'src>,
 }
 
@@ -363,21 +360,46 @@ impl<'src> StaticEnvironment<'src> {
             .filter(|(_, item)| key.is_matching(&item.key))
     }
 
-    /// # Panics
-    /// This method may panic if `id` is not a valid ID
-    #[must_use = "represents success"]
-    pub fn update_size(&mut self, id: VarId, size: usize) -> Result<(), SizeUpdateError> {
-        let decl = self.decls.get_mut(id).expect("ID should be valid");
-        match decl.loc.pos {
-            MemPos::Unknown => decl.loc.pos = MemPos::Blocked(size),
-            MemPos::Blocked(n) => return Err(SizeUpdateError::AlreadySized(n)),
-            MemPos::Fixed(range) => {
-                return Err(SizeUpdateError::AlreadySized(
-                    range.end.strict_sub(range.start),
-                ));
-            }
+    pub fn finalize_vars(&mut self) -> Result<(), Vec<VarId>> {
+        let mut unresolved = Vec::new();
+        for id in 0..self.decls.len() {
+            let prev_end = if let Some(atop) = self.decls[id].loc.atop {
+                if let Some(range) = self.decls[atop].loc.range {
+                    range.end
+                } else {
+                    println!("ambiguous type position cascade");
+                    continue;
+                }
+            } else {
+                0
+            };
+            let size = match self.decls[id].item.val.get_type(self) {
+                Some(VarType::Fun(_)) => {
+                    // TODO: function sizes
+                    0
+                }
+                Some(VarType::Abstract(AbstractType::Concrete(ty))) => {
+                    // TODO: what about constants?
+                    ty.size()
+                        .expect("variable sizes must be static")
+                        .map_err(|e| vec![todo!("error: {e}")])? // TODO: how do we report this?
+                }
+                _ => {
+                    println!("error: type never resolved for {:?}", self.decls[id]);
+                    unresolved.push(id);
+                    continue;
+                }
+            };
+            self.decls[id].loc.range = Some(Range {
+                start: prev_end,
+                end: prev_end + size,
+            });
         }
-        Ok(())
+        if unresolved.is_empty() {
+            Ok(())
+        } else {
+            Err(unresolved)
+        }
     }
 
     /// Entering a function definition
@@ -412,7 +434,7 @@ impl<'src> StaticEnvironment<'src> {
         &mut self,
         key: EnvKey<'src>,
         val: EnvItem<'src>,
-        size: Option<usize>,
+        node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
     ) -> (VarId, &mut StaticItem<'src>) {
         // TBD: should variables, globals, constants, and functions all be stored together?
         // should constants even be stored at runtime at all?
@@ -422,12 +444,8 @@ impl<'src> StaticEnvironment<'src> {
             .map(|(id, _)| id);
         let id = self.decls.len();
         let decl = self.decls.push_mut(DeclItem {
-            loc: MemLoc {
-                atop,
-                key,
-                pos: size.map_or(MemPos::Unknown, MemPos::Blocked),
-            },
-            item: StaticItem { key, val },
+            loc: MemLoc { atop, range: None },
+            item: StaticItem { key, val, node },
         });
         let local_scope = if let Some(scope) = self.layers.last_mut().map(Layer::curr_scope_mut) {
             scope
@@ -448,6 +466,7 @@ impl<'src> StaticEnvironment<'src> {
         name: &'src str,
         ty: Option<AbstractType<'src>>,
         is_global: bool,
+        node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
     ) -> Result<(VarId, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
         let size = ty
             .as_ref()
@@ -457,12 +476,13 @@ impl<'src> StaticEnvironment<'src> {
             })
             .transpose()?;
         Ok(
-            match self.decl_item(EnvKey::Ident(name), EnvItem::Var(ty, is_global), size) {
+            match self.decl_item(EnvKey::Ident(name), EnvItem::Var(ty, is_global), node) {
                 (
                     id,
                     StaticItem {
                         key: _,
                         val: EnvItem::Var(ty, is_global),
+                        node,
                     },
                 ) => (id, ty, *is_global),
 
@@ -471,9 +491,14 @@ impl<'src> StaticEnvironment<'src> {
         )
     }
 
-    pub fn decl_pvt(&mut self, name: &'src str, value: ConstantValue) -> Result<(), TypeSizeError> {
-        let size = value.static_size()?;
-        self.decl_item(EnvKey::Ident(name), EnvItem::Pvt(value), Some(size));
+    pub fn decl_pvt(
+        &mut self,
+        name: &'src str,
+        value: ConstantValue,
+        node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
+    ) -> Result<(), TypeSizeError> {
+        // TODO: apply size since we know it here
+        self.decl_item(EnvKey::Ident(name), EnvItem::Pvt(value), node);
         Ok(())
     }
 
@@ -482,61 +507,30 @@ impl<'src> StaticEnvironment<'src> {
         name: &'src str,
         shape: FunShape<'src>,
         def: BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>>,
+        node: Option<Box<dyn AstNodeFinal<'src>>>,
     ) {
-        self.decl_item(
-            EnvKey::Ident(name),
-            EnvItem::Fun((shape, def)),
-            None, // TBD
-        );
+        self.decl_item(EnvKey::Ident(name), EnvItem::Fun((shape, def)), node);
     }
 
-    pub fn decl_op(&mut self, op: Operator, def: OpOverload<'src>) {
-        self.decl_item(EnvKey::Op(op), EnvItem::Op(def), None /* TBD */);
+    pub fn decl_op(
+        &mut self,
+        op: Operator,
+        def: OpOverload<'src>,
+        node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
+    ) {
+        self.decl_item(EnvKey::Op(op), EnvItem::Op(def), node);
     }
 
-    pub fn cement_ranges(
-        self,
-    ) -> Result<Box<[Range<usize>]>, impl IntoIterator<Item = (VarId, EnvKey<'src>)>> {
-        // TODO: make a pass and put all the static elements in one contiguous region, then put everything else on top of that
-        let mut ranges: Vec<Range<usize>> = Vec::with_capacity(self.decls.len());
-        let mut locs = self.decls.into_iter().map(|decl| decl.loc).enumerate();
-        while let Some((id, loc)) = locs.next() {
-            let range = match loc.pos {
-                MemPos::Unknown => {
-                    if let EnvKey::Op(_) = loc.key {
-                        // TODO: where are functions stored?
-                        let start = ranges.last().map_or(0, |range| range.end);
-                        Range { start, end: start }
-                    } else {
-                        return Err(std::iter::once((id, loc.key)).chain(
-                            locs.filter(|(_, loc)| matches!(loc.pos, MemPos::Unknown))
-                                .map(|(id, loc)| (id, loc.key)),
-                        ));
-                    }
-                }
-
-                MemPos::Blocked(size) => {
-                    let start = loc
-                        .atop
-                        // relative range when in function calls
-                        .map_or(0, |atop| {
-                            assert!(atop < id, "`atop` should always be an earlier element");
-                            ranges
-                                .get(atop)
-                                .expect("`atop` should be present in `ranges`")
-                                .end
-                        });
-
-                    Range {
-                        start,
-                        end: start.strict_add(size),
-                    }
-                }
-
-                MemPos::Fixed(range) => range,
-            };
-            ranges.push(range);
-        }
-        Ok(ranges.into_boxed_slice())
+    pub fn cement_ranges(mut self) -> Result<Box<[Range<usize>]>, impl IntoIterator<Item = VarId>> {
+        self.finalize_vars().map(|()| {
+            self.decls
+                .iter()
+                .map(|item| {
+                    item.loc
+                        .range
+                        .expect("all ranges should be confirmed if finalize_vars didn't error")
+                })
+                .collect()
+        })
     }
 }

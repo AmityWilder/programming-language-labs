@@ -1,5 +1,8 @@
 // todo: make this a function
 {
+    //let x: uint = none;
+    //let y: uint = 'a';
+
     let foo = 7;
     foo = 9;
     //foo = "x"; // error: can't reassign
@@ -7,7 +10,7 @@
     bar = 9;
 
     prnt("write something\n");
-    let input = inpt;
+    let input: text = inpt;
     prnt("I read: \"" + input + "\"\n");
 
     let i = -5;

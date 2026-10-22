@@ -2,7 +2,8 @@
     cord {
         prnt("input a number between 0 and 99 (inclusive)\n");
         let x = inpt;
-        let is_odd: bool | none = none;
+        let success = fals;
+        let is_odd;
         cord {
             // trivial case
             if x == "0" | x == "1" {
@@ -18,14 +19,14 @@
                 if !(i < 100u) { halt; }
                 if x == "" + i {
                     n = i;
-                    prnt("your number is " + n + '\n');
+                    success = true;
                     is_odd = (i & 1u) == 1u;
                     halt; // exits the loop, and then the cord ends naturally
                 }
                 i = i + 1u;
             }
         }
-        if !(!!is_odd) {
+        if !success {
             prnt("try again\n");
             skip;
         }

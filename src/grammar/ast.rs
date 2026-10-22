@@ -296,6 +296,7 @@ impl<'src> AstNode<'src> for Lexeme<'src> {
         self.mac
     }
 }
+impl<'src> AstNodeFinal<'src> for Lexeme<'src> {}
 
 impl<'src, T> AstNode<'src> for SpecToken<'src, T> {
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
@@ -306,6 +307,7 @@ impl<'src, T> AstNode<'src> for SpecToken<'src, T> {
         self.mac
     }
 }
+impl<'src, T> AstNodeFinal<'src> for SpecToken<'src, T> {}
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Binary<'src> {

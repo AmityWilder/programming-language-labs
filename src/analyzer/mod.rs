@@ -2,12 +2,13 @@ use crate::{
     analyzer::{
         static_env::{EnvItem, OpOverload, OperandTypes, StaticEnvironment, StaticItem, VarType},
         types::{
-            AbstractType, FunShape, FunType, PrimitiveType, StaticType, TypeCompatible, TypeSize,
+            AbstractType, Fallible, FunShape, FunType, OrType, PrimitiveType, StaticType,
+            TypeCompatible, TypeSize,
         },
     },
-    error::{ContextError, ErrorType, OpSide},
+    error::{ContextError, ErrorType, ImmutableAssignment, OpSide},
     exec::{env::Environment, error::Failure},
-    grammar::ast::{self, VarKeyword},
+    grammar::ast::{self, AstNodeFinal, VarKeyword},
     interp::{
         env::{InterpEnvironment, InterpVar},
         value::{InterpBinaryOpFn, InterpOp, InterpUnaryOpFn, InterpVal},
@@ -355,14 +356,19 @@ impl<'src> GetType<'src> for Directive {
 
     fn get_type<'ty>(&'ty self, _: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         Some(match self {
-            Self::Inpt => AbstractType::Opaque(Box::new(TypeBound::Any(vec![
-                TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
-                    PrimitiveType::Text,
-                ))),
-                TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
-                    PrimitiveType::Char,
-                ))),
-            ]))),
+            Self::Inpt => cfg_select! {
+                // needs fleshing out
+                false => AbstractType::Opaque(Box::new(TypeBound::Any(vec![
+                    TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
+                        PrimitiveType::Text,
+                    ))),
+                    TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
+                        PrimitiveType::Char,
+                    ))),
+                ]))),
+
+                _ => AbstractType::Concrete(StaticType::Primitive(PrimitiveType::Text)),
+            },
         })
     }
 }
@@ -374,7 +380,7 @@ impl<'src> Analyze<'src> for ast::Directive<'src> {
         &self,
         _source: &'src str,
         _env: &mut StaticEnvironment<'src>,
-        _ret: Option<&AbstractType<'src>>,
+        _ret: Option<&AbstractType<'src>>, // TODO: how can we use this to specialize?
     ) -> Result<'src, Self::Ouptut> {
         match self.kw.val {
             ast::DirectiveKw::Inpt => Ok(Directive::Inpt),
@@ -555,6 +561,45 @@ impl<'src> CoagulateVars<'src> for Assignment<AnalysisOp<'src>, AnalysisVar<'src
     }
 }
 
+impl<'src> ast::TypeExpr<'src> {
+    fn analyze(
+        &self,
+        _source: &'src str,
+        _env: &StaticEnvironment<'src>,
+    ) -> Result<'src, AbstractType<'src>> {
+        let ok_ty = if let Some(name) = self.name.val {
+            StaticType::Primitive(match name {
+                ast::TypenameKeyword::None => PrimitiveType::None,
+                ast::TypenameKeyword::Nevr => PrimitiveType::Nevr,
+                ast::TypenameKeyword::Fail => PrimitiveType::Fail,
+                ast::TypenameKeyword::Bool => PrimitiveType::Bool,
+                ast::TypenameKeyword::Uint => PrimitiveType::Uint,
+                ast::TypenameKeyword::Sint => PrimitiveType::Sint,
+                ast::TypenameKeyword::Flpt => PrimitiveType::Flpt,
+                ast::TypenameKeyword::Char => PrimitiveType::Char,
+                ast::TypenameKeyword::Text => PrimitiveType::Text,
+            })
+        } else {
+            todo!("custom types")
+        };
+
+        Ok(AbstractType::Concrete(
+            if let Some(or_ty) = self.or_ty.as_ref() {
+                StaticType::OrTy(Box::new(Fallible {
+                    then: ok_ty,
+                    or: match or_ty.ty.val {
+                        ast::OrTypeKeyword::None => OrType::None,
+                        ast::OrTypeKeyword::Nevr => OrType::Nevr,
+                        ast::OrTypeKeyword::Fail => OrType::Fail,
+                    },
+                }))
+            } else {
+                ok_ty
+            },
+        ))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr<O, V> {
     Assignment(Box<Assignment<O, V>>),
@@ -640,26 +685,36 @@ impl<'src> Analyze<'src> for ast::Literal<'src> {
     fn analyze(
         &self,
         source: &'src str,
-        _env: &mut StaticEnvironment<'src>,
-        _ret: Option<&AbstractType<'src>>,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
-        match self.value.val {
-            LexValue::UIntLiteral(x) => Ok(Literal::Uint(x)),
-            LexValue::SIntLiteral(x) => Ok(Literal::Sint(x)),
-            LexValue::FlptLiteral(x) => Ok(Literal::Flpt(x)),
-            LexValue::CharLiteral(x) => Ok(Literal::Char(x.ch)),
-            LexValue::TextLiteral(x) => Ok(Literal::Text(
+        let val = match self.value.val {
+            LexValue::UIntLiteral(x) => Literal::Uint(x),
+            LexValue::SIntLiteral(x) => Literal::Sint(x),
+            LexValue::FlptLiteral(x) => Literal::Flpt(x),
+            LexValue::CharLiteral(x) => Literal::Char(x.ch),
+            LexValue::TextLiteral(x) => Literal::Text(
                 x.process()
                     .map_err(|e| vec![ContextError::token_error(source, Some(&self.value), e)])?
                     .to_string(),
-            )),
-            LexValue::BoolLiteral(x) => Ok(Literal::Bool(x)),
-            LexValue::Keyword(Keyword::None) => Ok(Literal::None),
+            ),
+            LexValue::BoolLiteral(x) => Literal::Bool(x),
+            LexValue::Keyword(Keyword::None) => Literal::None,
             _ => unimplemented!("should be handled by grammar"),
+        };
+        if let Some(ret) = ret {
+            val.get_type(env)
+                .expect("literals do not support implicit typing")
+                .expect_type(ret, source, self)
+                .map_err(|e| vec![e])
+                .map(|()| val)
+        } else {
+            Ok(val)
         }
     }
 }
 
+/// Variable access, not assignment
 impl<'src> Analyze<'src> for ast::Variable<'src> {
     type Ouptut = Expr<AnalysisOp<'src>, AnalysisVar<'src>>;
 
@@ -670,15 +725,10 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
         ret: Option<&AbstractType<'src>>, // TODO
     ) -> Result<'src, Self::Ouptut> {
         let ident = self.ident.lex;
-        env.lookup(ident)
-            .find_map(|(unique_id, item)| match item.val {
-                EnvItem::Var(ref x, is_global) => Some(Expr::Variable(AnalysisVar {
-                    unique_id,
-                    ident,
-                    is_global,
-                    #[cfg(debug_assertions)]
-                    _ty: x.as_ref().map(TypeCompatible::to_abstract),
-                })),
+        let (unique_id, ty, is_global) = env
+            .lookup_mut(ident)
+            .find_map(|(unique_id, item)| match &mut item.val {
+                EnvItem::Var(ty, is_global) => Some((unique_id, ty, *is_global)),
                 _ => None,
             })
             .ok_or_else(|| {
@@ -687,7 +737,29 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
                     Some(&self.ident),
                     ErrorType::UnknownVar,
                 )]
-            })
+            })?;
+        // infer variable type
+        if let Some(ret) = ret {
+            if let Some(ty) = ty
+                && !matches!(ty, AbstractType::Opaque(_))
+            {
+                if let Err(e) = ty.expect_type(ret, source, self) {
+                    return Err(vec![e]);
+                }
+            } else {
+                // TODO: apply opaque restraints
+                #[cfg(debug_assertions)]
+                println!("<inferrence> {ident}: {ret}");
+                *ty = Some(ret.clone());
+            }
+        }
+        Ok(Expr::Variable(AnalysisVar {
+            unique_id,
+            ident,
+            is_global,
+            #[cfg(debug_assertions)]
+            _ty: ty.as_ref().map(TypeCompatible::to_abstract),
+        }))
     }
 }
 
@@ -700,12 +772,12 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
-        self.operand.analyze(source, env, ret).and_then(|operand| {
+        self.operand.analyze(source, env, None).and_then(|operand| {
             let Some(ty) = operand.get_type(env).map(|t| t.to_abstract()) else {
                 return Err(vec![ContextError::node_error(
                     source,
                     &self.operand,
-                    ErrorType::TypeAmbiguity(Box::new(operand)),
+                    ErrorType::TypeAmbiguity,
                 )]);
             };
             let (operands, operand_types) = match self.side {
@@ -718,6 +790,7 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                     EnvItem::Op(overload) => overload,
                     _ => unreachable!("only operators should be stored with operator keys"),
                 })
+                .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)))
                 .find(|overload| overload.operands == operand_types);
 
             if let Some(overload) = overload {
@@ -725,7 +798,7 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                     FnDef::LangOpU(def, interp_def) => (def, interp_def),
                     FnDef::LangOpB(_, _) | FnDef::UserDef(_) => unimplemented!(),
                 };
-                Some(match operands {
+                Ok(match operands {
                     Operands::Binary(_, _) => unreachable!(),
                     Operands::UnaryPre(r) => {
                         AnalysisOp::UnaryPre((overload.fun.clone(), def, interp_def), r)
@@ -736,18 +809,10 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                 })
             }
             // HACK: `Exists` should be generic
-            else if let Operands::UnaryPre(operand) = operands
+            else if let Operands::UnaryPre(operand) = &operands
                 && matches!(self.op.val, Operator::Exists)
             {
-                let Some(ty) = operand.get_type(env) else {
-                    return Err(vec![ContextError::node_error(
-                        source,
-                        self,
-                        ErrorType::TypeAmbiguity(Box::new(operand)),
-                    )]);
-                };
-
-                fn def<'val, 'src>(
+                fn exists_def<'val, 'src>(
                     _out: crate::exec::value::ValueMut<'val, 'src>,
                     _lhs: crate::exec::value::Value<'val, 'src>,
                 ) -> std::result::Result<(), Failure> {
@@ -758,7 +823,7 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                     clippy::unnecessary_wraps,
                     reason = "needs to fit the function pointer shape"
                 )]
-                fn interp_def<'src>(
+                fn interp_exists_def<'src>(
                     lhs: &InterpVal<'src>,
                 ) -> std::result::Result<InterpVal<'src>, Failure> {
                     Ok(InterpVal::Primitive(
@@ -768,6 +833,14 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                     ))
                 }
 
+                let Some(ty) = operand.get_type(env) else {
+                    return Err(vec![ContextError::node_error(
+                        source,
+                        &self.operand,
+                        ErrorType::TypeAmbiguity,
+                    )]);
+                };
+
                 let ty = match ty {
                     ExprType::Static(ty)
                     | ExprType::Variable(VarType::Abstract(AbstractType::Concrete(ty))) => {
@@ -776,21 +849,35 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                     ExprType::Literal(ty) => StaticType::Primitive(ty),
                     _ => todo!("generic `exists`"),
                 };
-                Some(AnalysisOp::UnaryPost(
+                Ok(AnalysisOp::UnaryPost(
                     (
                         FunShape {
-                            params: [ty].to_vec(),
+                            params: vec![ty],
                             ret: StaticType::Primitive(PrimitiveType::Bool),
                         },
-                        def,
-                        interp_def,
+                        exists_def,
+                        interp_exists_def,
                     ),
-                    operand,
+                    match operands {
+                        Operands::UnaryPre(operand) => operand,
+                        _ => unreachable!("guarded by branch condition"),
+                    },
                 ))
             } else {
-                None
+                let r_ty = match operand_types {
+                    OperandTypes::UnaryPost(ty) | OperandTypes::UnaryPre(ty) => ty,
+                    OperandTypes::Binary(_, _) => unreachable!(),
+                };
+                Err(vec![ContextError::node_error(
+                    source,
+                    self,
+                    ErrorType::Unsupported {
+                        op: self.op.val.to_token_eq(),
+                        r_ty,
+                        r_range: self.operand.range(source),
+                    },
+                )])
             }
-            .ok_or_else(|| vec![todo!("error: no such operator defined")])
         })
     }
 }
@@ -804,26 +891,27 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
-        // TBD: is ret the output of the lhs/rhs, or of the entire operation?
-        let mut lhs = self.lhs.analyze(source, env, None)?;
-        let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
-        let rhs = self.rhs.analyze(source, env, l_ty.as_ref())?;
-        let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
         if self.op.val == Operator::Assign {
+            let mut lhs = self.lhs.analyze(source, env, None)?;
+            let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
+            let rhs = self.rhs.analyze(source, env, l_ty.as_ref())?;
+            let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
             if let Some(ret) = ret
-                && let Err(e) = ret.expect_type(&AbstractType::Concrete(StaticType::Primitive(
-                    PrimitiveType::None,
-                )))
+                && let Err(e) = ret.expect_type(
+                    &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::None)),
+                    source,
+                    self,
+                )
             {
-                return Err(vec![ContextError::node_error(source, self, e)]);
+                return Err(vec![e]);
             }
             // TODO: cases where lhs is assignable in general, not specifically a variable
             if let Expr::Variable(var) = &mut lhs {
                 match (l_ty, r_ty) {
                     (Some(l_ty), Some(r_ty)) => {
                         // require rhs to be the same type as lhs
-                        r_ty.expect_type(&l_ty)
-                            .map_err(|e| vec![ContextError::node_error(source, &self.rhs, e)])?;
+                        r_ty.expect_type(&l_ty, source, &self.rhs)
+                            .map_err(|e| vec![e])?;
                     }
 
                     (None, Some(r_ty)) => {
@@ -844,38 +932,38 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                         {
                             var._ty = var_ty.clone();
                         }
-                        if let Some(size) = r_ty_size {
-                            match size {
-                                Ok(size) => {
-                                    env.update_size(id, size).expect("guarded by match arm");
-                                }
-                                Err(e) => return Err(vec![todo!("error: {e}")]),
-                            }
-                        }
                     }
 
                     (_, None) => {
                         // failed type deduction twice; type ambiguity error
                         return Err(vec![
-                            ContextError::node_error(
-                                source,
-                                &self.lhs,
-                                ErrorType::TypeAmbiguity(Box::new(lhs)),
-                            ),
-                            ContextError::node_error(
-                                source,
-                                &self.rhs,
-                                ErrorType::TypeAmbiguity(Box::new(rhs)),
-                            ),
+                            ContextError::node_error(source, &self.lhs, ErrorType::TypeAmbiguity),
+                            ContextError::node_error(source, &self.rhs, ErrorType::TypeAmbiguity),
                         ]);
                     }
                 }
 
                 Ok(Expr::Assignment(Box::new(Assignment { lvalue: lhs, rhs })))
             } else {
-                todo!("error: cannot assign twice to immutable")
+                Err(vec![ContextError::node_error(
+                    source,
+                    &self.lhs,
+                    ErrorType::AssignImmutable(match &lhs {
+                        Expr::Variable(_) => unreachable!(),
+                        Expr::Op(_) => ImmutableAssignment::Expression,
+                        Expr::Assignment(_) => ImmutableAssignment::Assignment,
+                        Expr::Literal(_) => ImmutableAssignment::Literal,
+                        Expr::Directive(directive) => match directive {
+                            Directive::Inpt => ImmutableAssignment::Keyword(Keyword::Inpt),
+                        },
+                    }),
+                )])
             }
         } else {
+            let lhs = self.lhs.analyze(source, env, None)?;
+            let rhs = self.rhs.analyze(source, env, None)?;
+            let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
+            let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
             match (l_ty, r_ty) {
                 (Some(l_ty), Some(r_ty)) => {
                     let operands = Operands::Binary(lhs, rhs);
@@ -886,9 +974,12 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                             EnvItem::Op(overload) => overload,
                             _ => unreachable!("only operators should be stored with operator keys"),
                         })
+                        .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)))
                         .find(|overload| overload.operands == operand_types)
                         .ok_or_else(|| {
-                            todo!(
+                            // TODO: give the actual error this much info
+                            #[cfg(debug_assertions)]
+                            println!(
                                 "error: no such operator defined\n operator: {op:?}\n \
                                 operand types: {operand_types}\n \
                                 operands: {operands:?}\n \
@@ -903,7 +994,20 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
                                     .map(|t| t.fun.to_string())
                                     .collect::<Vec<_>>()
                             );
-                            Vec::new()
+                            let OperandTypes::Binary(l_ty, r_ty) = operand_types else {
+                                unreachable!();
+                            };
+                            vec![ContextError::node_error(
+                                source,
+                                &self.op,
+                                ErrorType::Incompatible {
+                                    op: op.to_token_eq(),
+                                    l_range: self.lhs.range(source),
+                                    r_range: self.rhs.range(source),
+                                    l_ty,
+                                    r_ty,
+                                },
+                            )]
                         })
                         .map(|overload| {
                             let (def, interp_def) = match &overload.def {
@@ -925,18 +1029,10 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
 
                 (l_ty, r_ty) => Err(std::iter::chain(
                     l_ty.is_none().then(|| {
-                        ContextError::node_error(
-                            source,
-                            &self.lhs,
-                            ErrorType::TypeAmbiguity(Box::new(lhs)),
-                        )
+                        ContextError::node_error(source, &self.lhs, ErrorType::TypeAmbiguity)
                     }),
                     r_ty.is_none().then(|| {
-                        ContextError::node_error(
-                            source,
-                            &self.rhs,
-                            ErrorType::TypeAmbiguity(Box::new(rhs)),
-                        )
+                        ContextError::node_error(source, &self.rhs, ErrorType::TypeAmbiguity)
                     }),
                 )
                 .collect::<Vec<ContextError<'src>>>()),
@@ -965,17 +1061,19 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
                 // TBD: can this be a "must_use" lint instead?
                 const REQUIRE_NONE: bool = false;
                 if REQUIRE_NONE {
-                    ty.expect_type(&AbstractType::Concrete(StaticType::Primitive(
-                        PrimitiveType::None,
-                    )))
-                    .map_err(|e| vec![ContextError::node_error(source, &self.expr, e)])?;
+                    ty.expect_type(
+                        &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::None)),
+                        source,
+                        &self.expr,
+                    )
+                    .map_err(|e| vec![e])?;
                 }
                 Ok(ExprStmt { expr })
             } else {
                 Err(vec![ContextError::node_error(
                     source,
                     &self.expr,
-                    ErrorType::TypeAmbiguity(Box::new(expr)),
+                    ErrorType::TypeAmbiguity,
                 )])
             }
         })
@@ -1018,21 +1116,26 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>,
+        _ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
-        self.group.expr.analyze(source, env, ret).and_then(|expr| {
-            if let Some(ty) = expr.get_type(env) {
-                ty.expect_type(&AbstractType::Concrete(StaticType::Primitive(
-                    PrimitiveType::Text,
-                )))
-                .map_err(|e| vec![todo!("error: {e}")])
-                .map(|()| PrintStmt { expr })
-            } else {
-                Err(todo!(
-                    "error: expression has no type\n expression: {expr:?}"
-                ))
-            }
-        })
+        const EXPR_TY: &AbstractType =
+            &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::Text));
+        self.group
+            .expr
+            .analyze(source, env, Some(EXPR_TY))
+            .and_then(|expr| {
+                if let Some(ty) = expr.get_type(env) {
+                    ty.expect_type(EXPR_TY, source, &self.group.expr)
+                        .map_err(|e| vec![e])
+                        .map(|()| PrintStmt { expr })
+                } else {
+                    Err(vec![ContextError::node_error(
+                        source,
+                        &self.group.expr,
+                        ErrorType::TypeAmbiguity,
+                    )])
+                }
+            })
     }
 }
 
@@ -1113,11 +1216,11 @@ impl<'src> Analyze<'src> for ast::OrBody<'src> {
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>,
+        ret: Option<&AbstractType<'src>>, // TBD: does `or` return a value?
     ) -> Result<'src, Self::Ouptut> {
         match self {
-            Self::More(stmt) => stmt.analyze(source, env, ret).map(OrStmt::More),
-            Self::Last(stmt) => stmt.analyze(source, env, ret).map(OrStmt::Last),
+            Self::More(stmt) => stmt.analyze(source, env, None).map(OrStmt::More),
+            Self::Last(stmt) => stmt.analyze(source, env, None).map(OrStmt::Last),
         }
     }
 }
@@ -1157,28 +1260,34 @@ impl<'src> Analyze<'src> for ast::IfStmt<'src> {
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>,
+        ret: Option<&AbstractType<'src>>, // TBD: does `if` return a value?
     ) -> Result<'src, Self::Ouptut> {
-        let pred = self.pred.analyze(source, env, ret)?;
+        let pred = self.pred.analyze(source, env, None)?;
         if let Some(ty) = pred.get_type(env) {
-            ty.expect_type(&AbstractType::Concrete(StaticType::Primitive(
-                PrimitiveType::Bool,
-            )))
-            .map_err(|e| vec![ContextError::node_error(source, &self.pred, e)])
+            ty.expect_type(
+                &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::Bool)),
+                source,
+                &self.pred,
+            )
+            .map_err(|e| vec![e])
             .and_then(|()| {
                 Ok(IfStmt {
                     pred,
-                    then: self.then.analyze(source, env, ret)?,
+                    then: self.then.analyze(source, env, None)?,
                     or: self
                         .or
                         .as_ref()
-                        .map(|x| x.body.analyze(source, env, ret))
+                        .map(|x| x.body.analyze(source, env, None))
                         .transpose()?
                         .map(Box::new),
                 })
             })
         } else {
-            Err(todo!("error: predicate has no type\n predicate: {pred:?}"))
+            Err(vec![ContextError::node_error(
+                source,
+                &self.pred,
+                ErrorType::TypeAmbiguity,
+            )])
         }
     }
 }
@@ -1237,10 +1346,10 @@ impl<'src> Analyze<'src> for ast::LoopStmt<'src> {
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>,
+        ret: Option<&AbstractType<'src>>, // TBD: does `loop` return a value?
     ) -> Result<'src, Self::Ouptut> {
         self.block
-            .analyze(source, env, ret)
+            .analyze(source, env, None)
             .map(|block| LoopStmt { block })
     }
 }
@@ -1295,10 +1404,10 @@ impl<'src> Analyze<'src> for ast::CordStmt<'src> {
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>,
+        ret: Option<&AbstractType<'src>>, // TBD: does `cord` return a value?
     ) -> Result<'src, Self::Ouptut> {
         self.block
-            .analyze(source, env, ret)
+            .analyze(source, env, None)
             .map(|block| CordStmt { block })
     }
 }
@@ -1421,14 +1530,14 @@ impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>,
+        ret: Option<&AbstractType<'src>>, // TBD: does `block` return a value?
     ) -> Result<'src, Self::Ouptut> {
         env.push_scope().unwrap_or_else(|| {
             todo!("warning: cannot push a scope here, need to be in a function");
         });
         self.body
             .iter()
-            .filter_map(|decl| decl.analyze(source, env, ret).transpose())
+            .filter_map(|decl| decl.analyze(source, env, None).transpose())
             .collect::<Result<'src, Vec<_>>>()
             .map(|stmts| BlockStmt { stmts })
             .inspect(|_| {
@@ -1513,17 +1622,18 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>,
+        _ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
+        // NOTE: need to change here if the statements get return values!
         match self {
-            Self::Expr(stmt) => stmt.analyze(source, env, ret).map(Statement::Expr),
-            Self::Print(stmt) => stmt.analyze(source, env, ret).map(Statement::Print),
-            Self::If(stmt) => stmt.analyze(source, env, ret).map(Statement::If),
-            Self::Loop(stmt) => stmt.analyze(source, env, ret).map(Statement::Loop),
-            Self::Cord(stmt) => stmt.analyze(source, env, ret).map(Statement::Cord),
-            Self::Halt(stmt) => stmt.analyze(source, env, ret).map(Statement::Halt),
-            Self::Skip(stmt) => stmt.analyze(source, env, ret).map(Statement::Skip),
-            Self::Block(stmt) => stmt.analyze(source, env, ret).map(Statement::Block),
+            Self::Expr(stmt) => stmt.analyze(source, env, None).map(Statement::Expr),
+            Self::Print(stmt) => stmt.analyze(source, env, None).map(Statement::Print),
+            Self::If(stmt) => stmt.analyze(source, env, None).map(Statement::If),
+            Self::Loop(stmt) => stmt.analyze(source, env, None).map(Statement::Loop),
+            Self::Cord(stmt) => stmt.analyze(source, env, None).map(Statement::Cord),
+            Self::Halt(stmt) => stmt.analyze(source, env, None).map(Statement::Halt),
+            Self::Skip(stmt) => stmt.analyze(source, env, None).map(Statement::Skip),
+            Self::Block(stmt) => stmt.analyze(source, env, None).map(Statement::Block),
         }
     }
 }
@@ -1575,12 +1685,59 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
+        if let Some(ret) = ret
+            && let Err(e) = ret.expect_type(
+                &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::None)),
+                source,
+                self,
+            )
+        {
+            return Err(vec![e]);
+        }
         let ident = self.ident.lex;
+        let annotated_type = self.ty.as_ref().map(|annotation| {
+            annotation
+                .ty
+                .analyze(source, env)
+                .expect("infallible at the time of writing")
+        });
         let expr = self
             .assignment
             .as_ref()
-            .map(|x| x.expr.analyze(source, env, ret))
+            .map(|x| x.expr.analyze(source, env, annotated_type.as_ref()))
             .transpose()?;
+
+        #[cfg(debug_assertions)]
+        {
+            print!("{}: ", self.ident.lex);
+            if let Some(annotated_type) = &annotated_type {
+                print!("{annotated_type}");
+            } else {
+                print!("<implicit>");
+            }
+            print!(" = ");
+            if let Some(expr_ty) = expr.as_ref().and_then(|x| x.get_type(env)) {
+                println!("{expr_ty}");
+            } else {
+                println!("<late>");
+            }
+        }
+
+        if let Some(annotated_type) = annotated_type.as_ref()
+            && let Some(expr_ty) = expr.as_ref().and_then(|x| x.get_type(env))
+            && let Err(e) = expr_ty.expect_type(
+                annotated_type,
+                source,
+                &self
+                    .assignment
+                    .as_ref()
+                    .expect("guarded by if condition")
+                    .expr,
+            )
+        {
+            return Err(vec![e]);
+        }
+
         match self.var_kw.val {
             // Constant
             VarKeyword::Pvt => env
@@ -1588,6 +1745,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                     ident,
                     expr.map(|_| todo!("constant folding"))
                         .ok_or_else(|| vec![todo!("error: missing assignment for constant")])?,
+                    Some(Box::new(self.ident)),
                 )
                 .map_err(|e| vec![todo!("error: {e}")])
                 .map(|()| None),
@@ -1600,22 +1758,33 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                         .and_then(|x| x.get_type(env))
                         .map(|t| t.to_abstract()),
                     true,
+                    Some(Box::new(self.ident)),
                 )
-                .map_err(|e| vec![todo!("error: {e}")])
-                .map(|(unique_id, _ty, is_global)| {
-                    expr.map(|rhs| ExprStmt {
+                .map_err(|e| todo!("error: {e}"))
+                .and_then(|(unique_id, ty, is_global)| {
+                    if let Some(t) = annotated_type {
+                        if let Some(ty) = ty.as_ref() {
+                            ty.expect_type(&t, source, self)?;
+                        } else {
+                            #[cfg(debug_assertions)]
+                            println!("<inferrence> {ident}: {t}");
+                            *ty = Some(t);
+                        }
+                    }
+                    Ok(expr.map(|rhs| ExprStmt {
                         expr: Expr::Assignment(Box::new(Assignment {
                             lvalue: Expr::Variable(AnalysisVar {
                                 unique_id,
                                 ident,
                                 is_global,
                                 #[cfg(debug_assertions)]
-                                _ty: _ty.clone(),
+                                _ty: ty.clone(),
                             }),
                             rhs,
                         })),
-                    })
-                }),
+                    }))
+                })
+                .map_err(|e| vec![e]),
         }
     }
 }
@@ -1660,7 +1829,7 @@ where
 {
     let mut env = StaticEnvironment::new();
     for (op, def) in builtin_ops::builtin_ops() {
-        env.decl_op(op, def);
+        env.decl_op(op, def, None);
     }
     env.push_layer(); // HACK: remove this when functions are implemented
     prgm.decls
@@ -1675,7 +1844,21 @@ pub fn analyze_interp<'src>(
     prgm: &ast::Program<'src>,
 ) -> Result<'src, (InterpProgram<'src>, InterpEnvironment<'src>)> {
     let mut i_env = InterpEnvironment::new();
-    analyze_base(source, prgm, |s_env, stmts| {
+    analyze_base(source, prgm, |mut s_env, stmts| {
+        s_env.finalize_vars().map_err(|e| {
+            e.into_iter()
+                .map(|id| {
+                    let decl = s_env.get_decl(id).expect("error IDs should be valid");
+                    ContextError::node_error(
+                        source,
+                        decl.node
+                            .as_deref()
+                            .expect("builtins should not be ambiguous"),
+                        ErrorType::TypeAmbiguity,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })?;
         Ok(InterpProgram {
             stmts: stmts
                 .into_iter()
