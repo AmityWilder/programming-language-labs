@@ -539,7 +539,7 @@ pub enum PrimitiveType {
 
 impl StaticTypeSize for PrimitiveType {
     fn static_size(&self) -> Result<usize, TypeSizeError> {
-        use crate::types::*;
+        use crate::types::{byte, fail, flpt, nevr, none, sint, text, uint};
         Ok(match self {
             Self::None => std::mem::size_of::<none>(),
             Self::Nevr => std::mem::size_of::<nevr>(),

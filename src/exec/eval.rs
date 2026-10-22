@@ -8,7 +8,7 @@ use crate::{
         PrintStmt, RuntimeOp, RuntimeProgram, RuntimeVar, Statement, types::StaticType,
     },
     exec::{env::Environment, error::Failure},
-    types::*,
+    types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;

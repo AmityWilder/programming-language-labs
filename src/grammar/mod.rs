@@ -669,7 +669,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .flatten()
     }
 
-    /// `directive -> "inpt"`
+    /// `directive -> "inpt" | "inptch`
     fn directive(&mut self) -> Option<Directive<'src>> {
         self.pull_into::<DirectiveKw>().map(|kw| Directive { kw })
     }

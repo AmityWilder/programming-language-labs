@@ -7,7 +7,7 @@ use crate::{
     exec::value::{Value, ValueMut},
     interp::value::InterpVal,
     spec_ops::{BitRotate, BitShift},
-    types::*,
+    types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
 
 macro_rules! prim_op {
@@ -231,32 +231,32 @@ primitive_ops![
     // 0 + 1 = 1
     // 1 + 0 = 1
     // 1 + 1 = 1 (clamped)
-    Add(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l || *r }
+    Add(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l | r }
     // 0 - 0 = 0
     // 0 - 1 = 0 (clamped)
     // 1 - 0 = 1
     // 1 - 1 = 0
-    SubNeg(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l && !*r }
+    SubNeg(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { !r & l }
     // 0 * 0 = 0
     // 0 * 1 = 0
     // 1 * 0 = 0
     // 1 * 1 = 1
-    Mul(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l && *r }
+    Mul(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l & r }
     // 0^0 = 1
     // 0^1 = 0
     // 1^0 = 1
     // 1^1 = 1
-    Pow(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l || !*r }
+    Pow(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { !r | l }
     // 0 / 0 = 1 (clamped infinity)
     // 0 / 1 = 0
     // 1 / 0 = 1 (clamped infinity)
     // 1 / 1 = 1
-    Div(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l || !*r }
+    Div(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { !r | l }
     // 0 % 0 = 1 (clamped infinity)
     // 0 % 1 = 0
     // 1 % 0 = 1 (clamped infinity)
     // 1 % 1 = 1
-    Rem(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l || !*r }
+    Rem(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { !r | l }
 
     Eq(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l == r }
     Eq(Uint, Uint) -> Bool as fn(l: uint, r: uint) -> bool { l == r }

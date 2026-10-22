@@ -17,7 +17,7 @@ use crate::{
         value::{InterpBinaryOpFn, InterpLabel, InterpOp, InterpUnaryOpFn, InterpVal},
     },
     scanner::token::value::{Keyword, LexValue, Operator},
-    types::*,
+    types::{byte, fail, flpt, sint, text, uint},
 };
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;
@@ -413,6 +413,8 @@ impl<'src> GetType<'src> for Literal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Directive {
     Inpt,
+    /// TODO: replace with opaque
+    Inptch,
 }
 
 impl<'src> GetType<'src> for Directive {
@@ -436,6 +438,7 @@ impl<'src> GetType<'src> for Directive {
 
                 _ => AbstractType::Concrete(StaticType::Primitive(PrimitiveType::Text)),
             },
+            Self::Inptch => AbstractType::Concrete(StaticType::Primitive(PrimitiveType::Char)),
         })
     }
 }
@@ -451,6 +454,7 @@ impl<'src> Analyze<'src> for ast::Directive<'src> {
     ) -> Result<'src, Self::Ouptut> {
         match self.kw.val {
             ast::DirectiveKw::Inpt => Ok(Directive::Inpt),
+            ast::DirectiveKw::Inptch => Ok(Directive::Inptch),
         }
     }
 }
@@ -1029,6 +1033,7 @@ impl<'src> ast::Binary<'src> {
                     Expr::Literal(_) => ImmutableAssignment::Literal,
                     Expr::Directive(directive) => match directive {
                         Directive::Inpt => ImmutableAssignment::Keyword(Keyword::Inpt),
+                        Directive::Inptch => ImmutableAssignment::Keyword(Keyword::Inptch),
                     },
                 }),
             )])

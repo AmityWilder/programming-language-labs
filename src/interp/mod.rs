@@ -110,20 +110,44 @@ impl Literal {
 }
 
 impl Directive {
-    fn interp_eval(self) -> InterpVal<'static> {
+    fn interp_eval(self) -> Result<InterpVal<'static>, Failure> {
         match self {
             Self::Inpt => {
                 let mut buf = String::new();
                 // TODO: what if we want to receive just a character instead of an entire line?
                 // TODO: handle error
-                std::io::stdin().read_line(&mut buf);
+                std::io::stdin()
+                    .read_line(&mut buf)
+                    .map_err(|_| Failure::FailedRead)?;
                 if buf.ends_with('\n') {
                     buf.pop();
                     if buf.ends_with('\r') {
                         buf.pop();
                     }
                 }
-                InterpVal::Primitive(PrimitiveVal::Text(TextObject(buf)))
+                Ok(InterpVal::Primitive(PrimitiveVal::Text(TextObject(buf))))
+            }
+            Self::Inptch => {
+                use std::io::Read;
+                let mut buf = [0; char::MAX_LEN_UTF8];
+                let mut s = Err(Failure::FailedRead);
+                for i in 0..buf.len() {
+                    // TODO: handle error
+                    std::io::stdin()
+                        .read_exact(std::slice::from_mut(&mut buf[i]))
+                        .map_err(|_| Failure::FailedRead)?;
+                    s = str::from_utf8(&buf).map_err(|_| Failure::ParseChar);
+                    if s.is_ok() {
+                        break;
+                    }
+                }
+                s.map(|s| {
+                    InterpVal::Primitive(PrimitiveVal::Char(CharObject(
+                        s.chars().next().expect(
+                            "loop would have failed with FailedRead if the stdin was empty",
+                        ),
+                    )))
+                })
             }
         }
     }
@@ -138,7 +162,7 @@ impl<'src> Expr<InterpOp<'src>, InterpVar<'src>> {
             Expr::Assignment(_) => unimplemented!("should be handled by outer statement"),
             Expr::Op(expr) => expr.interp_eval(env).map(Cow::Owned),
             Expr::Literal(expr) => Ok(Cow::Owned(expr.interp_eval())),
-            Expr::Directive(expr) => Ok(Cow::Owned(expr.interp_eval())),
+            Expr::Directive(expr) => expr.interp_eval().map(Cow::Owned),
             Expr::Variable(x) => Ok(Cow::Borrowed(
                 env.vars
                     .get(&x.id)

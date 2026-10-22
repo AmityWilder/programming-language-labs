@@ -13,6 +13,7 @@ pub enum Failure {
     DivByZero,
     UnhandledOrNone,
     UnhandledOrNevr,
+    FailedRead,
     Uninitialized, // TODO: change this to be guaranteed by static analysis
 }
 
@@ -63,6 +64,7 @@ impl std::fmt::Display for Failure {
             Self::DivByZero => write!(f, "tried to divide by zero"),
             Self::UnhandledOrNone => write!(f, "tried to perform an operation with none"),
             Self::UnhandledOrNevr => write!(f, "tried to perform an operation with nevr"),
+            Self::FailedRead => write!(f, "failed to read input"),
             Self::Uninitialized => write!(f, "attempted to read uninitialized memory"),
         }
     }

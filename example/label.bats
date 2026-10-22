@@ -1,4 +1,7 @@
 {
+    let ch = inptch;
+    prnt(ch + "\n");
+
     let i = 0;
     .outer: rep i < 5 {
         let j = 0;

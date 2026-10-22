@@ -5,7 +5,7 @@ use crate::{
     },
     exec::error::Failure,
     interp::env::InterpVar,
-    types::*,
+    types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
 use std::{
     collections::HashMap,

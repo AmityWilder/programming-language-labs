@@ -1,7 +1,7 @@
 use super::debug_unsafe;
 #[cfg(debug_assertions)]
 use crate::analyzer::types::{PrimitiveType, StaticType};
-use crate::types::*;
+use crate::types::{byte, fail, flpt, nevr, none, sint, text, uint};
 use std::mem::MaybeUninit;
 
 pub trait AnalogType {
