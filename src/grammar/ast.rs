@@ -686,14 +686,12 @@ impl<'src> AstNode<'src> for Literal<'src> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DirectiveKw {
     Inpt,
-    Inptch,
 }
 
 impl DirectiveKw {
     pub const fn new(value: Keyword) -> Option<Self> {
         match value {
             Keyword::Inpt => Some(Self::Inpt),
-            Keyword::Inptch => Some(Self::Inptch),
             _ => None,
         }
     }
@@ -701,7 +699,6 @@ impl DirectiveKw {
     pub const fn to_keyword(self) -> Keyword {
         match self {
             Self::Inpt => Keyword::Inpt,
-            Self::Inptch => Keyword::Inptch,
         }
     }
 

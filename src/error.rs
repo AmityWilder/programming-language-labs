@@ -970,6 +970,8 @@ pub enum ErrorType<'src> {
     UnknownVar,
 
     // TODO: make this more helpful
+    /// `.0`: expected
+    /// `.1`: actual
     #[code(CMP, 46)]
     #[err((ts), |f| write!(f, "type mismatch: expected {}, found {}", ts.0, ts.1))]
     #[inlay((_), |f| write!(f, "incorrect type"))]

@@ -22,6 +22,7 @@ use crate::{
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;
 use std::range::Range;
+use types::TypeBound;
 
 pub mod builtin_ops;
 pub mod static_env;
@@ -412,9 +413,9 @@ impl<'src> GetType<'src> for Literal {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Directive {
-    Inpt,
-    /// TODO: replace with opaque
-    Inptch,
+    InptText,
+    InptChar,
+    InptByte,
 }
 
 impl<'src> GetType<'src> for Directive {
@@ -425,20 +426,9 @@ impl<'src> GetType<'src> for Directive {
 
     fn get_type<'ty>(&'ty self, _: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         Some(match self {
-            Self::Inpt => cfg_select! {
-                // TODO: needs fleshing out
-                false => AbstractType::Opaque(Box::new(types::TypeBound::Any(vec![
-                    types::TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
-                        PrimitiveType::Text,
-                    ))),
-                    types::TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
-                        PrimitiveType::Char,
-                    ))),
-                ]))),
-
-                _ => AbstractType::Concrete(StaticType::Primitive(PrimitiveType::Text)),
-            },
-            Self::Inptch => AbstractType::Concrete(StaticType::Primitive(PrimitiveType::Char)),
+            Self::InptText => AbstractType::Text,
+            Self::InptChar => AbstractType::Char,
+            Self::InptByte => AbstractType::Byte,
         })
     }
 }
@@ -448,13 +438,28 @@ impl<'src> Analyze<'src> for ast::Directive<'src> {
 
     fn analyze(
         &self,
-        _source: &'src str,
+        source: &'src str,
         _env: &mut StaticEnvironment<'src>,
-        _ret: Option<&AbstractType<'src>>, // TODO: how can we use this to specialize?
+        ret: Option<&AbstractType<'src>>, // TODO: how can we use this to specialize?
     ) -> Result<'src, Self::Ouptut> {
         match self.kw.val {
-            ast::DirectiveKw::Inpt => Ok(Directive::Inpt),
-            ast::DirectiveKw::Inptch => Ok(Directive::Inptch),
+            ast::DirectiveKw::Inpt => match ret {
+                Some(&AbstractType::Text) | None => Ok(Directive::InptText),
+                Some(&AbstractType::Char) => Ok(Directive::InptChar),
+                Some(&AbstractType::Byte) => Ok(Directive::InptByte),
+
+                Some(actual) => Err(vec![ContextError::node_error(
+                    source,
+                    &self.kw,
+                    ErrorType::TypeMismatch(Box::new((
+                        AbstractType::Opaque(Box::new(TypeBound::Any(vec![
+                            TypeBound::Exactly(AbstractType::Text),
+                            TypeBound::Exactly(AbstractType::Char),
+                        ]))),
+                        actual.clone(),
+                    ))),
+                )]),
+            },
         }
     }
 }
@@ -973,11 +978,7 @@ impl<'src> ast::Binary<'src> {
         let rhs = self.rhs.analyze(source, env, l_ty.as_ref())?;
         let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
         if let Some(ret) = ret
-            && let Err(e) = ret.expect_type(
-                &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::None)),
-                source,
-                self,
-            )
+            && let Err(e) = ret.expect_type(&AbstractType::None, source, self)
         {
             return Err(vec![e]);
         }
@@ -1032,8 +1033,9 @@ impl<'src> ast::Binary<'src> {
                     Expr::Assignment(_) => ImmutableAssignment::Assignment,
                     Expr::Literal(_) => ImmutableAssignment::Literal,
                     Expr::Directive(directive) => match directive {
-                        Directive::Inpt => ImmutableAssignment::Keyword(Keyword::Inpt),
-                        Directive::Inptch => ImmutableAssignment::Keyword(Keyword::Inptch),
+                        Directive::InptByte | Directive::InptChar | Directive::InptText => {
+                            ImmutableAssignment::Keyword(Keyword::Inpt)
+                        }
                     },
                 }),
             )])
@@ -1190,12 +1192,8 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
                 // TBD: can this be a "must_use" lint instead?
                 const REQUIRE_NONE: bool = false;
                 if REQUIRE_NONE {
-                    ty.expect_type(
-                        &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::None)),
-                        source,
-                        &self.expr,
-                    )
-                    .map_err(|e| vec![e])?;
+                    ty.expect_type(&AbstractType::None, source, &self.expr)
+                        .map_err(|e| vec![e])?;
                 }
                 Ok(ExprStmt { expr })
             } else {
@@ -1251,8 +1249,7 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
         env: &mut StaticEnvironment<'src>,
         _ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
-        const EXPR_TY: &AbstractType =
-            &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::Text));
+        const EXPR_TY: &AbstractType = &AbstractType::Text;
         self.group
             .expr
             .analyze(source, env, Some(EXPR_TY))
@@ -1405,24 +1402,20 @@ impl<'src> Analyze<'src> for ast::IfStmt<'src> {
     ) -> Result<'src, Self::Ouptut> {
         let pred = self.pred.analyze(source, env, None)?;
         if let Some(ty) = pred.get_type(env) {
-            ty.expect_type(
-                &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::Bool)),
-                source,
-                &self.pred,
-            )
-            .map_err(|e| vec![e])
-            .and_then(|()| {
-                Ok(IfStmt {
-                    pred,
-                    then: self.then.analyze(source, env, None)?,
-                    or: self
-                        .or
-                        .as_ref()
-                        .map(|x| x.body.analyze(source, env, None))
-                        .transpose()?
-                        .map(Box::new),
+            ty.expect_type(&AbstractType::Bool, source, &self.pred)
+                .map_err(|e| vec![e])
+                .and_then(|()| {
+                    Ok(IfStmt {
+                        pred,
+                        then: self.then.analyze(source, env, None)?,
+                        or: self
+                            .or
+                            .as_ref()
+                            .map(|x| x.body.analyze(source, env, None))
+                            .transpose()?
+                            .map(Box::new),
+                    })
                 })
-            })
         } else {
             Err(vec![ContextError::node_error(
                 source,
@@ -1480,9 +1473,7 @@ impl<'src> GetType<'src> for LoopStmt<AnalysisLabel<'src>, AnalysisOp<'src>, Ana
 
     fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         // TBD: should loops be expressions or just statements?
-        Some(&AbstractType::Concrete(StaticType::Primitive(
-            PrimitiveType::Nevr,
-        )))
+        Some(&AbstractType::Nevr)
     }
 }
 
@@ -1531,9 +1522,7 @@ impl<'src> GetType<'src> for AnalysisCordStmt<'src> {
 
     fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         // TBD: should loops be expressions or just statements?
-        Some(&AbstractType::Concrete(StaticType::Primitive(
-            PrimitiveType::Nevr,
-        )))
+        Some(&AbstractType::Nevr)
     }
 }
 
@@ -1625,9 +1614,7 @@ impl<'src> GetType<'src> for AnalysisRepStmt<'src> {
 
     fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         // TBD: should loops be expressions or just statements?
-        Some(&AbstractType::Concrete(StaticType::Primitive(
-            PrimitiveType::Nevr,
-        )))
+        Some(&AbstractType::Nevr)
     }
 }
 
@@ -1713,9 +1700,7 @@ impl<'src> GetType<'src> for AnalysisHaltStmt<'src> {
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        Some(&AbstractType::Concrete(StaticType::Primitive(
-            PrimitiveType::None,
-        )))
+        Some(&AbstractType::None)
     }
 }
 
@@ -1779,9 +1764,7 @@ impl<'src> GetType<'src> for AnalysisSkipStmt<'src> {
 
     fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         // TBD: should loops be expressions or just statements?
-        Some(&AbstractType::Concrete(StaticType::Primitive(
-            PrimitiveType::Nevr,
-        )))
+        Some(&AbstractType::Nevr)
     }
 }
 
@@ -1848,12 +1831,9 @@ impl<'src> GetType<'src> for AnalysisBlockStmt<'src> {
         &'ty self,
         env: &'ty StaticEnvironment<'src>,
     ) -> Option<&'ty AbstractType<'src>> {
-        self.stmts.last().map_or(
-            Some(&AbstractType::Concrete(StaticType::Primitive(
-                PrimitiveType::None,
-            ))),
-            |stmt| stmt.get_type(env),
-        )
+        self.stmts
+            .last()
+            .map_or(Some(&AbstractType::None), |stmt| stmt.get_type(env))
         // TODO: find all cases where the block can be returned from
     }
 }
@@ -1944,9 +1924,7 @@ impl<'src> GetType<'src> for AnalysisStatement<'src> {
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         match self {
-            Self::Expr(_) | Self::Print(_) => Some(&AbstractType::Concrete(StaticType::Primitive(
-                PrimitiveType::None,
-            ))),
+            Self::Expr(_) | Self::Print(_) => Some(&AbstractType::None),
             Self::If(stmt) => stmt.get_type(env),
             Self::Loop(stmt) => stmt.get_type(env),
             Self::Cord(stmt) => stmt.get_type(env),
@@ -2033,11 +2011,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
         if let Some(ret) = ret
-            && let Err(e) = ret.expect_type(
-                &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::None)),
-                source,
-                self,
-            )
+            && let Err(e) = ret.expect_type(&AbstractType::None, source, self)
         {
             return Err(vec![e]);
         }

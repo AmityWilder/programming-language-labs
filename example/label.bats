@@ -1,6 +1,10 @@
 {
-    let ch = inptch;
-    prnt(ch + "\n");
+    let line = inpt;
+    prnt(line + "\n");
+    let line: text = inpt;
+    prnt(line + "\n");
+    let line: char = inpt;
+    prnt(line + "\n");
 
     let i = 0;
     .outer: rep i < 5 {

@@ -21,11 +21,8 @@ macro_rules! prim_op {
         (
             Operator::$op,
             OpOverload {
-                operands: OperandTypes::Binary(
-                    AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$lhs)),
-                    AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$rhs)),
-                ),
-                output: AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$output)),
+                operands: OperandTypes::Binary(AbstractType::$lhs, AbstractType::$rhs),
+                output: AbstractType::$output,
                 fun: FunShape {
                     params: vec![
                         StaticType::Primitive(PrimitiveType::$lhs),
@@ -93,13 +90,11 @@ macro_rules! prim_op {
         (
             Operator::$op,
             OpOverload {
-                operands: OperandTypes::UnaryPre(AbstractType::Concrete(StaticType::Primitive(
-                    PrimitiveType::$rhs,
-                ))),
-                output: AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$output)),
+                operands: OperandTypes::UnaryPre(AbstractType::$rhs),
+                output: AbstractType::$output,
                 fun: FunShape {
-                    params: vec![StaticType::Primitive(PrimitiveType::$rhs)],
-                    ret: StaticType::Primitive(PrimitiveType::$output),
+                    params: vec![StaticType::$rhs],
+                    ret: StaticType::$output,
                 },
                 def: {
                     fn interp<'src>(rhs: &InterpVal<'src>) -> Result<InterpVal<'src>, Failure> {
@@ -143,13 +138,11 @@ macro_rules! prim_op {
         (
             Operator::$op,
             OpOverload {
-                operands: OperandTypes::UnaryPost(AbstractType::Concrete(StaticType::Primitive(
-                    PrimitiveType::$lhs,
-                ))),
-                output: AbstractType::Concrete(StaticType::Primitive(PrimitiveType::$output)),
+                operands: OperandTypes::UnaryPost(AbstractType::$lhs),
+                output: AbstractType::$output,
                 fun: FunShape {
-                    params: vec![StaticType::Primitive(PrimitiveType::$lhs)],
-                    ret: StaticType::Primitive(PrimitiveType::$output),
+                    params: vec![StaticType::$lhs],
+                    ret: StaticType::$output,
                 },
                 def: {
                     fn interp<'inr>(

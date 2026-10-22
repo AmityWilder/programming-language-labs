@@ -1,6 +1,6 @@
 use super::debug_unsafe;
 #[cfg(debug_assertions)]
-use crate::analyzer::types::{PrimitiveType, StaticType};
+use crate::analyzer::types::StaticType;
 use crate::types::{byte, fail, flpt, nevr, none, sint, text, uint};
 use std::mem::MaybeUninit;
 
@@ -10,7 +10,7 @@ pub trait AnalogType {
 macro_rules! primitive_types {
     ($($Type:ty = $StaticType:ident;)*) => {$(
         impl AnalogType for $Type {
-            const STATIC_TY: StaticType<'static> = StaticType::Primitive(PrimitiveType::$StaticType);
+            const STATIC_TY: StaticType<'static> = StaticType::$StaticType;
         }
     )*};
 }

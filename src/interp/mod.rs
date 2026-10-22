@@ -12,7 +12,7 @@ use crate::{
     },
     exec::error::Failure,
     interp::env::InterpVar,
-    types::text,
+    types::{byte, text},
 };
 use env::InterpEnvironment;
 use std::borrow::Cow;
@@ -109,45 +109,73 @@ impl Literal {
     }
 }
 
+trait Inpt: Sized {
+    fn input() -> Result<Self, Failure>;
+}
+
+impl Inpt for text {
+    fn input() -> Result<Self, Failure> {
+        let mut buf = String::new();
+        // TODO: what if we want to receive just a character instead of an entire line?
+        // TODO: handle error
+        std::io::stdin()
+            .read_line(&mut buf)
+            .map_err(|_| Failure::FailedRead)?;
+        if buf.ends_with('\n') {
+            buf.pop();
+            if buf.ends_with('\r') {
+                buf.pop();
+            }
+        }
+        Ok(buf)
+    }
+}
+
+impl Inpt for char {
+    fn input() -> Result<Self, Failure> {
+        use std::io::Read;
+        let mut buf = [0; char::MAX_LEN_UTF8];
+        let mut s = Err(Failure::FailedRead);
+        for i in 0..buf.len() {
+            // TODO: handle error
+            std::io::stdin()
+                .read_exact(std::slice::from_mut(&mut buf[i]))
+                .map_err(|_| Failure::FailedRead)?;
+            s = str::from_utf8(&buf).map_err(|_| Failure::ParseChar);
+            if s.is_ok() {
+                break;
+            }
+        }
+        s.map(|s| {
+            s.chars()
+                .next()
+                .expect("loop would have failed with FailedRead if the stdin was empty")
+        })
+    }
+}
+
+impl Inpt for byte {
+    fn input() -> Result<Self, Failure> {
+        use std::io::Read;
+        let mut buf = b'\0';
+        std::io::stdin()
+            .read_exact(std::slice::from_mut(&mut buf))
+            .map_err(|_| Failure::FailedRead)
+            .map(|()| buf)
+    }
+}
+
 impl Directive {
     fn interp_eval(self) -> Result<InterpVal<'static>, Failure> {
         match self {
-            Self::Inpt => {
-                let mut buf = String::new();
-                // TODO: what if we want to receive just a character instead of an entire line?
-                // TODO: handle error
-                std::io::stdin()
-                    .read_line(&mut buf)
-                    .map_err(|_| Failure::FailedRead)?;
-                if buf.ends_with('\n') {
-                    buf.pop();
-                    if buf.ends_with('\r') {
-                        buf.pop();
-                    }
-                }
-                Ok(InterpVal::Primitive(PrimitiveVal::Text(TextObject(buf))))
+            Self::InptText => {
+                text::input().map(|x| InterpVal::Primitive(PrimitiveVal::Text(TextObject(x))))
             }
-            Self::Inptch => {
-                use std::io::Read;
-                let mut buf = [0; char::MAX_LEN_UTF8];
-                let mut s = Err(Failure::FailedRead);
-                for i in 0..buf.len() {
-                    // TODO: handle error
-                    std::io::stdin()
-                        .read_exact(std::slice::from_mut(&mut buf[i]))
-                        .map_err(|_| Failure::FailedRead)?;
-                    s = str::from_utf8(&buf).map_err(|_| Failure::ParseChar);
-                    if s.is_ok() {
-                        break;
-                    }
-                }
-                s.map(|s| {
-                    InterpVal::Primitive(PrimitiveVal::Char(CharObject(
-                        s.chars().next().expect(
-                            "loop would have failed with FailedRead if the stdin was empty",
-                        ),
-                    )))
-                })
+            Self::InptChar => {
+                char::input().map(|x| InterpVal::Primitive(PrimitiveVal::Char(CharObject(x))))
+            }
+            Self::InptByte => {
+                byte::input().map(|x| InterpVal::Primitive(PrimitiveVal::Byte(ByteObject(x))))
             }
         }
     }

@@ -257,13 +257,11 @@ impl<'src> TypeCompatible<'src> for Fallible<'src> {
         match other {
             AbstractType::Concrete(StaticType::OrTy(other)) => {
                 *self == **other
-                    || self.is_compatible(&AbstractType::Concrete(StaticType::Primitive(
-                        match other.or {
-                            OrType::None => PrimitiveType::None,
-                            OrType::Nevr => PrimitiveType::Nevr,
-                            OrType::Fail => PrimitiveType::Fail,
-                        },
-                    )))
+                    || self.is_compatible(&match other.or {
+                        OrType::None => AbstractType::None,
+                        OrType::Nevr => AbstractType::Nevr,
+                        OrType::Fail => AbstractType::Fail,
+                    })
                     || self.is_compatible(&other.then.to_abstract())
             }
             _ => false,
@@ -617,6 +615,20 @@ pub enum StaticType<'src> {
     Fun(Box<FunType<'src>>),
 }
 
+#[expect(non_upper_case_globals)]
+impl StaticType<'_> {
+    pub const None: Self = Self::Primitive(PrimitiveType::None);
+    pub const Nevr: Self = Self::Primitive(PrimitiveType::Nevr);
+    pub const Fail: Self = Self::Primitive(PrimitiveType::Fail);
+    pub const Bool: Self = Self::Primitive(PrimitiveType::Bool);
+    pub const Byte: Self = Self::Primitive(PrimitiveType::Byte);
+    pub const Uint: Self = Self::Primitive(PrimitiveType::Uint);
+    pub const Sint: Self = Self::Primitive(PrimitiveType::Sint);
+    pub const Flpt: Self = Self::Primitive(PrimitiveType::Flpt);
+    pub const Char: Self = Self::Primitive(PrimitiveType::Char);
+    pub const Text: Self = Self::Primitive(PrimitiveType::Text);
+}
+
 impl Default for StaticType<'_> {
     fn default() -> Self {
         Self::Primitive(PrimitiveType::default())
@@ -877,6 +889,20 @@ pub enum AbstractType<'src> {
     Opaque(Box<TypeBound<'src>>),
     Generic(GenericType<'src>),
     Param(GenericParam<'src>),
+}
+
+#[expect(non_upper_case_globals)]
+impl AbstractType<'_> {
+    pub const None: Self = Self::Concrete(StaticType::None);
+    pub const Nevr: Self = Self::Concrete(StaticType::Nevr);
+    pub const Fail: Self = Self::Concrete(StaticType::Fail);
+    pub const Bool: Self = Self::Concrete(StaticType::Bool);
+    pub const Byte: Self = Self::Concrete(StaticType::Byte);
+    pub const Uint: Self = Self::Concrete(StaticType::Uint);
+    pub const Sint: Self = Self::Concrete(StaticType::Sint);
+    pub const Flpt: Self = Self::Concrete(StaticType::Flpt);
+    pub const Char: Self = Self::Concrete(StaticType::Char);
+    pub const Text: Self = Self::Concrete(StaticType::Text);
 }
 
 impl TypeSize for AbstractType<'_> {

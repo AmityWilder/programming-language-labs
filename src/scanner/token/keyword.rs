@@ -458,9 +458,6 @@ define_token_eq! {
 
         /// Input from the console (TODO: REPLACE)
         Inpt = "inpt",
-
-        /// Input from the console (TODO: remove once opaque types are stable)
-        Inptch = "inptch",
     }
 }
 
