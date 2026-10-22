@@ -343,13 +343,19 @@ impl GetSyntax for Token<'_> {
     fn syntax(&self) -> Syntax {
         match self.val {
             LexValue::Comment => Syntax::Comment,
+
             LexValue::Whitespace => Syntax::Dimmed,
+
             LexValue::UIntLiteral(_) | LexValue::SIntLiteral(_) | LexValue::FlptLiteral(_) => {
                 Syntax::NumberLiteral
             }
+
             LexValue::CharLiteral(_) => Syntax::CharLiteral,
+
             LexValue::TextLiteral(_) => Syntax::TextLiteral,
+
             LexValue::BoolLiteral(_) => Syntax::LanguageDefined,
+
             LexValue::Identifier => {
                 // constants are all-caps
                 if self.lex.chars().any(char::is_uppercase) {
@@ -362,7 +368,9 @@ impl GetSyntax for Token<'_> {
                     Syntax::Variable
                 }
             }
+
             LexValue::Callable => Syntax::Callable,
+
             LexValue::Keyword(kw) => {
                 if kw.is_flow() {
                     Syntax::CtrlKeyword
@@ -373,20 +381,27 @@ impl GetSyntax for Token<'_> {
                     Syntax::Keyword
                 }
             }
+
             LexValue::Macro => Syntax::MacroName,
+
             LexValue::MacroParam => Syntax::MacroParam,
+
             LexValue::Punctuation(
                 Punctuation::MacroConcat
                 | Punctuation::MacroStringify
                 | Punctuation::MacroConst
                 | Punctuation::Coalesce,
             ) => Syntax::CtrlKeyword,
+
             LexValue::Punctuation(
                 Punctuation::Exists
                 | Punctuation::Convert
                 | Punctuation::Transmute
+                | Punctuation::Incr
+                | Punctuation::Decr
                 | Punctuation::Iff,
             ) => Syntax::Keyword,
+
             LexValue::Punctuation(_) => Syntax::Normal,
         }
     }

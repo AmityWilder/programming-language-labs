@@ -587,29 +587,17 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `factor -> unary_postfix ( ( "*" | "/" | "%" ) unary_postfix )*`
+    /// `factor -> unary_prefix ( ( "*" | "/" | "%" ) unary_prefix )*`
     fn factor(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.unary_postfix()?;
+        let mut expr = self.unary_prefix()?;
         while let Some(op) = self.pull_into_if_in(&[Mul, Div, Rem]) {
-            let rhs = self.unary_postfix()?;
+            let rhs = self.unary_prefix()?;
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
         }
         Ok(expr)
     }
 
-    /// `unary_postfix -> unary_prefix ( "?" )*`
-    fn unary_postfix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.unary_prefix()?;
-        while let Some(op) = self.pull_into_if_in(&[Coalesce]) {
-            expr = Expr::unary(Unary {
-                operand: expr,
-                op,
-                side: OpSide::Postfix,
-            });
-        }
-        Ok(expr)
-    }
-
+    // TODO: `szof uint 3 ** 2` shouldn't be valid syntax
     /// `unary_prefix -> ( ( ( "!" | "!!" | "-" ) | "szof" ( type_expression )? ) )* exponent`
     fn unary_prefix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         if let Some(op) = self.pull_into_if_in(&[Szof]) {
@@ -644,12 +632,25 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(expr)
     }
 
-    /// `conversion -> primary ( "-:>" | "=:>" ) type_expression`
+    /// `conversion -> unary_postfix ( "-:>" | "=:>" ) type_expression`
     fn conversion(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        let mut expr = self.primary()?;
+        let mut expr = self.unary_postfix()?;
         while let Some(op) = self.pull_into_if_in(&[Convert, Transmute]) {
             let rhs = Expr::type_expr(self.type_expression()?);
             expr = Expr::binary(Binary { lhs: expr, op, rhs });
+        }
+        Ok(expr)
+    }
+
+    /// `unary_postfix -> primary ( "?" | "++" | "--" )*`
+    fn unary_postfix(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
+        let mut expr = self.primary()?;
+        while let Some(op) = self.pull_into_if_in(&[Coalesce, Incr, Decr]) {
+            expr = Expr::unary(Unary {
+                operand: expr,
+                op,
+                side: OpSide::Postfix,
+            });
         }
         Ok(expr)
     }

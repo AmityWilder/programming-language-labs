@@ -252,7 +252,7 @@ impl<'src> InterpPrintStmt<'src> {
 /// A predicate that static analysis should guarantee is a boolean
 fn expect_bool<'src>(
     pred: &Expr<InterpOp<'src>, InterpVar<'src>>,
-    env: &InterpEnvironment<'src>,
+    env: &mut InterpEnvironment<'src>,
 ) -> Result<bool, Failure> {
     let buf = pred.interp_eval(env)?;
     Ok(

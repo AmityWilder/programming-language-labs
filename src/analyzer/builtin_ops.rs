@@ -15,7 +15,7 @@ macro_rules! prim_op {
         $op:ident($lhs:ident, $rhs:ident) -> $output:ident
 
         as fn($lhs_name:ident: $Lhs:ty, $rhs_name:ident: $Rhs:ty) -> $Out:ty {
-            $def:expr
+            $($def:tt)*
         }
     ) => {
         (
@@ -25,10 +25,10 @@ macro_rules! prim_op {
                 output: AbstractType::$output,
                 fun: FunShape {
                     params: vec![
-                        StaticType::Primitive(PrimitiveType::$lhs),
-                        StaticType::Primitive(PrimitiveType::$rhs),
+                        StaticType::$lhs,
+                        StaticType::$rhs,
                     ],
-                    ret: StaticType::Primitive(PrimitiveType::$output),
+                    ret: StaticType::$output,
                 },
                 def: {
                     fn interp<'src>(
@@ -57,7 +57,7 @@ macro_rules! prim_op {
                                 stringify!($Rhs),
                             )
                         });
-                        let res: $Out = $def;
+                        let res: $Out = { $($def)* };
                         Ok(res.into())
                     }
                     fn runtime<'src, 'val>(
@@ -69,7 +69,7 @@ macro_rules! prim_op {
                         let $lhs_name = &unsafe { Value::cast_into::<$Lhs>(lhs).assume_init() };
                         // SAFETY: static analyzer must ensure soundness
                         let $rhs_name = &unsafe { Value::cast_into::<$Rhs>(rhs).assume_init() };
-                        let res = $def;
+                        let res: $Out = { $($def)* };
                         // SAFETY: static analyzer must ensure soundness
                         unsafe { ValueMut::cast_into::<$Out>(out) }.data.write(res);
                         Ok(())
@@ -84,7 +84,7 @@ macro_rules! prim_op {
         $op:ident($rhs:ident) -> $output:ident
 
         as fn($rhs_name:ident: $Rhs:ty) -> $Out:ty {
-            $def:expr
+            $($def:tt)*
         }
     ) => {
         (
@@ -108,7 +108,7 @@ macro_rules! prim_op {
                                 stringify!($Rhs),
                             )
                         });
-                        let res: $Out = $def;
+                        let res: $Out = { $($def)* };
                         Ok(res.into())
                     }
                     fn runtime<'src, 'val>(
@@ -117,7 +117,7 @@ macro_rules! prim_op {
                     ) -> Result<(), Failure> {
                         // SAFETY: static analyzer must ensure soundness
                         let $rhs_name = &unsafe { Value::cast_into::<$Rhs>(rhs).assume_init() };
-                        let res = $def;
+                        let res: $Out = { $($def)* };
                         // SAFETY: static analyzer must ensure soundness
                         unsafe { ValueMut::cast_into::<$Out>(out) }.data.write(res);
                         Ok(())
@@ -132,7 +132,7 @@ macro_rules! prim_op {
         ($lhs:ident)$op:ident -> $output:ident
 
         as fn($lhs_name:ident: $Lhs:ty) -> $Out:ty {
-            $def:expr
+            $($def:tt)*
         }
     ) => {
         (
@@ -145,9 +145,9 @@ macro_rules! prim_op {
                     ret: StaticType::$output,
                 },
                 def: {
-                    fn interp<'inr>(
+                    fn interp<'src>(
                         lhs: &InterpVal<'src>,
-                    ) -> Result<Box<dyn 'inr + LangVar>, Failure> {
+                    ) -> Result<InterpVal<'src>, Failure> {
                         let $lhs_name: &$Lhs = lhs.ensure_ok()?.try_into().unwrap_or_else(|_| {
                             panic!(
                                 "{}<{}> lhs type mismatch should be caught by static analysis\
@@ -158,17 +158,16 @@ macro_rules! prim_op {
                                 stringify!($Lhs),
                             )
                         });
-                        let res: $Out = $def;
+                        let res: $Out = { $($def)* };
                         Ok(res.into())
                     }
                     fn runtime<'src, 'val>(
-                        $env: &'val Environment,
                         out: ValueMut<'val, 'src>,
                         lhs: Value<'val, 'src>,
                     ) -> Result<(), Failure> {
                         // SAFETY: static analyzer must ensure soundness
                         let $lhs_name = &unsafe { Value::cast_into::<$Lhs>(lhs).assume_init() };
-                        let res = $def;
+                        let res: $Out = { $($def)* };
                         // SAFETY: static analyzer must ensure soundness
                         unsafe { ValueMut::cast_into::<$Out>(out) }.data.write(res);
                         Ok(())
@@ -185,7 +184,7 @@ macro_rules! primitive_ops {
         $($pre_bin_op:ident)?($lhs_unary:ident$(, $rhs:ident)?)$($post_op:ident)? -> $output:ident
 
         as fn($lhs_unary_name:ident: $Lhs:ty$(, $rhs_name:ident: $Rhs:ty)?) -> $Out:ty {
-            $def:expr
+            $($def:tt)*
         }
     )*) => {
         pub fn builtin_ops<'src>() -> impl IntoIterator<IntoIter: ExactSizeIterator + DoubleEndedIterator, Item = (Operator, OpOverload<'src>)> {
@@ -195,7 +194,7 @@ macro_rules! primitive_ops {
                         $($pre_bin_op)?($lhs_unary$(, $rhs)?)$($post_op)? -> $output
 
                         as fn($lhs_unary_name: $Lhs$(, $rhs_name: $Rhs)?) -> $Out {
-                            $def
+                            $($def)*
                         }
                     )
                 ),*
@@ -212,6 +211,13 @@ primitive_ops![
     Exists(Flpt) -> Bool as fn(r: flpt) -> bool { !r.is_nan() }
     Exists(Char) -> Bool as fn(r: char) -> bool { *r != '\0' }
     Exists(Text) -> Bool as fn(r: text) -> bool { !r.is_empty() }
+
+    (Bool)Incr -> Bool as fn(l: bool) -> bool { todo!("needs mutable access") }
+    (Uint)Incr -> Uint as fn(l: uint) -> uint { todo!("needs mutable access") }
+    (Sint)Incr -> Sint as fn(l: sint) -> sint { todo!("needs mutable access") }
+    (Flpt)Incr -> Flpt as fn(l: flpt) -> flpt { todo!("needs mutable access") }
+    (Char)Incr -> Char as fn(l: char) -> char { todo!("needs mutable access") }
+    (Text)Incr -> Text as fn(l: text) -> text { todo!("needs mutable access") }
 
     And (Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l & r }
     Or  (Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l | r }

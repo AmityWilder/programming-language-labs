@@ -1,4 +1,7 @@
 {
+    let x = 5;
+    prnt(x++ + "\n");
+
     let line = inpt;
     prnt(line + "\n");
     let line: text = inpt;

@@ -42,11 +42,17 @@ define_token_eq! {
         /// Add - Find the sum of `lhs` and `rhs`
         #[op_desc([_, _] => "addition")]
         Add = "+",
+        /// Increment - Iterate to the next item of `rhs`
+        #[op_desc([_] => "iteration")]
+        Incr = "++",
         /// Comma - Separate items in a list
         Comma = ",",
         /// Subtract or negate - Find the difference of `lhs - rhs` or the negation `-rhs`
         #[op_desc([_] => "arithmetic negation", [_, _] => "subtraction")]
         SubNeg = "-",
+        /// Decrement - Iterate to the next item of `rhs` backwards
+        #[op_desc([_] => "reverse iteration")]
+        Decr = "--",
         /// Dot - Access a rec member
         Dot = ".",
         /// Divide - Find the quotient of `lhs / rhs`
