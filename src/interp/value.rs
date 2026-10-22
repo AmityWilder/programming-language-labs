@@ -543,6 +543,12 @@ impl Debug for InterpVal<'_> {
     }
 }
 
+// TBD: can this be baked in?
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct InterpLabel<'src> {
+    pub name: &'src str,
+}
+
 pub type InterpBinaryOpFn = for<'src> fn(
     &InterpVal<'src>,
     &InterpVal<'src>,

@@ -1,7 +1,8 @@
+use super::{AnalysisBlockStmt, AnalysisFnDef};
 use crate::{
     Todo,
     analyzer::{
-        AnalysisOp, AnalysisVar, BlockStmt, FnDef, GetType,
+        GetType,
         types::{AbstractType, FunShape, StaticTypeSize, TypeCompatible, TypeSize, TypeSizeError},
     },
     grammar::ast::AstNodeFinal,
@@ -71,12 +72,7 @@ impl std::fmt::Display for VarType<'_, '_> {
 #[derive(Debug)]
 pub enum EnvItem<'src> {
     Op(OpOverload<'src>),
-    Fun(
-        (
-            FunShape<'src>,
-            BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>>,
-        ),
-    ),
+    Fun((FunShape<'src>, AnalysisBlockStmt<'src>)),
     Var(Option<AbstractType<'src>>, bool),
     Pvt(ConstantValue),
 }
@@ -196,7 +192,7 @@ pub struct OpOverload<'src> {
     pub operands: OperandTypes<'src>,
     pub output: AbstractType<'src>,
     pub fun: FunShape<'src>,
-    pub def: FnDef<AnalysisOp<'src>, AnalysisVar<'src>>,
+    pub def: AnalysisFnDef<'src>,
 }
 
 /// A unique [`EnvItem`] ID
@@ -468,13 +464,6 @@ impl<'src> StaticEnvironment<'src> {
         is_global: bool,
         node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
     ) -> Result<(VarId, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
-        let size = ty
-            .as_ref()
-            .and_then(|t| match t {
-                AbstractType::Concrete(t) => t.size(),
-                _ => None, // awaiting monomorphization
-            })
-            .transpose()?;
         Ok(
             match self.decl_item(EnvKey::Ident(name), EnvItem::Var(ty, is_global), node) {
                 (
@@ -482,7 +471,7 @@ impl<'src> StaticEnvironment<'src> {
                     StaticItem {
                         key: _,
                         val: EnvItem::Var(ty, is_global),
-                        node,
+                        node: _,
                     },
                 ) => (id, ty, *is_global),
 
@@ -506,7 +495,7 @@ impl<'src> StaticEnvironment<'src> {
         &mut self,
         name: &'src str,
         shape: FunShape<'src>,
-        def: BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>>,
+        def: AnalysisBlockStmt<'src>,
         node: Option<Box<dyn AstNodeFinal<'src>>>,
     ) {
         self.decl_item(EnvKey::Ident(name), EnvItem::Fun((shape, def)), node);

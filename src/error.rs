@@ -371,6 +371,7 @@ expected_token! {
         MacroPredLBrace = "a `{` for a macro predicate",
         MacroCondLBrace = "a `{` for a macro condition body",
 
+        Colon = "a `:`",
         LParen = "a `(`",
         CommaOrRParen = "a `,` or `)`",
         Literal = "a literal",
@@ -387,7 +388,9 @@ expected_token! {
         Pattern = "a binding pattern",
         BlockStmt = "a block statement",
         BlockOrIf = "an `if` keyword or a block statement",
-        Statement = "a statement"
+        InKeyword = "an `in` keyword",
+        Statement = "a statement",
+        LoopBlock = "a loop block after the label",
     }
 }
 

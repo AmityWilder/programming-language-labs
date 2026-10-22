@@ -3,8 +3,8 @@
 use crate::{
     error::{ContextError, ExpectedToken, OpSide},
     grammar::ast::{
-        Assignment, BlockStmt, DeclVar, Declaration, ExprStmt, HaltStmt, IfStmt, LoopStmt, OrBody,
-        OrStmt, PrintStmt, Program, Statement, Variable,
+        Assignment, BlockStmt, DeclVar, Declaration, ExprStmt, HaltStmt, IfStmt, OrBody, OrStmt,
+        PrintStmt, Program, Statement, Variable,
     },
     scanner::{
         Bracket,
@@ -17,8 +17,8 @@ use crate::{
 };
 use Operator::*;
 use ast::{
-    Binary, BindingPattern, CordStmt, Directive, DirectiveKw, Expr, ForStmt, Grouping, Literal,
-    OrType, RepStmt, SkipStmt, TypeAnnotation, TypeExpr, Unary,
+    Binary, BindingPattern, Directive, DirectiveKw, Expr, Grouping, Label, Literal, LoopBlock,
+    LoopKind, OrType, ScopeLabel, SkipStmt, TypeAnnotation, TypeExpr, Unary,
 };
 
 pub mod ast;
@@ -268,7 +268,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             Ok(Declaration::var(DeclVar {
                 var_kw,
                 binding: self
-                    .pattern()
+                    .bind_pattern()
                     .ok_or_else(|| self.error(ExpectedToken::Pattern))?,
                 ty: self.type_annotation().transpose()?,
                 assignment: self.assignment().transpose()?,
@@ -299,10 +299,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .or_else(|| self.halt_statement().map(|res| res.map(Statement::Halt)))
             .or_else(|| self.skip_statement().map(|res| res.map(Statement::Skip)))
             .or_else(|| self.if_statement().map(|res| res.map(Statement::If)))
-            .or_else(|| self.loop_statement().map(|res| res.map(Statement::Loop)))
-            .or_else(|| self.cord_statement().map(|res| res.map(Statement::Cord)))
-            // .or_else(|| self.for_statement().map(|res| res.map(Statement::For)))
-            .or_else(|| self.rep_statement().map(|res| res.map(Statement::Rep)))
+            .or_else(|| self.loop_block().map(|res| res.map(Statement::Loop)))
             .or_else(|| Some(self.expression_statement().map(Statement::Expr)))
             .ok_or_else(|| self.error(ExpectedToken::Statement))
             .flatten()
@@ -372,59 +369,95 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .flatten()
     }
 
-    /// `loop_statement -> "loop" block_statement`
-    pub fn loop_statement(&mut self) -> Option<Result<LoopStmt<'src>, ContextError<'src>>> {
-        self.pull_if_eq(LexValue::Keyword(Keyword::Loop))
-            .map(|loop_kw| {
-                Ok(LoopStmt {
-                    loop_kw,
-                    block: self
-                        .block_statement()
-                        .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
-                        .flatten()?,
-                })
+    /// `loop_block -> ( scope_label )? loop_block1`
+    pub fn loop_block(&mut self) -> Option<Result<LoopBlock<'src>, ContextError<'src>>> {
+        match self.scope_label().transpose() {
+            Ok(label) => self.loop_block1(label),
+            Err(e) => Some(Err(e)),
+        }
+    }
+
+    /// `label -> "." IDENTIFIER`
+    pub fn label(&mut self) -> Option<Result<Label<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Punctuation(Punctuation::Dot))
+            .map(|dot| {
+                self.try_pull_eq(LexValue::Identifier, ExpectedToken::Ident)
+                    .map(|name| Label { dot, name })
             })
     }
 
-    /// `cord_statement -> "cord" block_statement`
-    pub fn cord_statement(&mut self) -> Option<Result<CordStmt<'src>, ContextError<'src>>> {
-        self.pull_if_eq(LexValue::Keyword(Keyword::Cord))
-            .map(|cord_kw| {
-                Ok(CordStmt {
-                    cord_kw,
-                    block: self
-                        .block_statement()
-                        .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
-                        .flatten()?,
-                })
-            })
-    }
-
-    /// `for_statement -> "for" block_statement`
-    pub fn for_statement(&mut self) -> Option<Result<ForStmt<'src>, ContextError<'src>>> {
-        todo!()
-    }
-
-    /// `rep_statement -> "rep" expression block_statement`
-    pub fn rep_statement(&mut self) -> Option<Result<RepStmt<'src>, ContextError<'src>>> {
-        self.pull_if_eq(LexValue::Keyword(Keyword::Rep)).map(|kw| {
-            Ok(RepStmt {
-                kw,
-                pred: self.expression()?,
-                block: self
-                    .block_statement()
-                    .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
-                    .flatten()?,
+    /// `scope_label -> label ":"`
+    pub fn scope_label(&mut self) -> Option<Result<ScopeLabel<'src>, ContextError<'src>>> {
+        self.label().map(|label| {
+            label.and_then(|label| {
+                self.try_pull_eq(
+                    LexValue::Punctuation(Punctuation::Colon),
+                    ExpectedToken::Colon,
+                )
+                .map(|colon| ScopeLabel { label, colon })
             })
         })
     }
 
-    /// `halt_statement -> "halt" ";"`
+    /// `loop_block1 -> ( "loop" | "cord" | "for" bind_pattern "in" expression | "rep" expression ) block_statement`
+    pub fn loop_block1(
+        &mut self,
+        label: Option<ScopeLabel<'src>>,
+    ) -> Option<Result<LoopBlock<'src>, ContextError<'src>>> {
+        let body = self
+            .pull_if_eq(LexValue::Keyword(Keyword::Loop))
+            .map(|kw| Ok((kw, LoopKind::Loop)))
+            .or_else(|| {
+                self.pull_if_eq(LexValue::Keyword(Keyword::Cord))
+                    .map(|kw| Ok((kw, LoopKind::Cord)))
+            })
+            .or_else(|| {
+                self.pull_if_eq(LexValue::Keyword(Keyword::For)).map(|kw| {
+                    let bind = self
+                        .bind_pattern()
+                        .ok_or_else(|| self.error(ExpectedToken::Pattern))?;
+                    let in_kw =
+                        self.try_pull_eq(LexValue::Keyword(Keyword::In), ExpectedToken::InKeyword)?;
+                    let iter = self.expression()?;
+                    Ok((kw, LoopKind::For { bind, in_kw, iter }))
+                })
+            })
+            .or_else(|| {
+                self.pull_if_eq(LexValue::Keyword(Keyword::Rep)).map(|kw| {
+                    let pred = self.expression()?;
+                    Ok((kw, LoopKind::Rep { pred }))
+                })
+            });
+        Some(
+            if label.is_some() {
+                // loop is mandatory
+                body.ok_or_else(|| self.error(ExpectedToken::LoopBlock))
+                    .flatten()
+            } else {
+                // loop is optional
+                body?
+            }
+            .and_then(|(kw, kind)| {
+                self.block_statement()
+                    .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
+                    .flatten()
+                    .map(|block| LoopBlock {
+                        label,
+                        kw,
+                        kind,
+                        block,
+                    })
+            }),
+        )
+    }
+
+    /// `halt_statement -> "halt" ( label )? ";"`
     pub fn halt_statement(&mut self) -> Option<Result<HaltStmt<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Keyword(Keyword::Halt))
             .map(|halt_kw| {
                 Ok(HaltStmt {
                     halt_kw,
+                    label: self.label().transpose()?,
                     semi: self.try_pull_eq(
                         LexValue::Punctuation(Punctuation::Semi),
                         ExpectedToken::Semi,
@@ -433,12 +466,13 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `skip_statement -> "skip" ";"`
+    /// `skip_statement -> "skip" ( label )? ";"`
     pub fn skip_statement(&mut self) -> Option<Result<SkipStmt<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Keyword(Keyword::Skip))
             .map(|skip_kw| {
                 Ok(SkipStmt {
                     skip_kw,
+                    label: self.label().transpose()?,
                     semi: self.try_pull_eq(
                         LexValue::Punctuation(Punctuation::Semi),
                         ExpectedToken::Semi,
@@ -641,7 +675,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     }
 
     /// `pattern -> IDENTIFIER`
-    fn pattern(&mut self) -> Option<BindingPattern<'src>> {
+    fn bind_pattern(&mut self) -> Option<BindingPattern<'src>> {
         self.pull_if_eq(LexValue::Identifier)
             .map(|ident| BindingPattern { ident })
     }

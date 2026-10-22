@@ -14,14 +14,14 @@ use crate::{
     grammar::ast::{self, AstNodeFinal, VarKeyword},
     interp::{
         env::{InterpEnvironment, InterpVar},
-        value::{InterpBinaryOpFn, InterpOp, InterpUnaryOpFn, InterpVal},
+        value::{InterpBinaryOpFn, InterpLabel, InterpOp, InterpUnaryOpFn, InterpVal},
     },
     scanner::token::value::{Keyword, LexValue, Operator},
     types::*,
 };
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;
-use std::{marker::PhantomData, range::Range};
+use std::range::Range;
 
 pub mod builtin_ops;
 pub mod static_env;
@@ -70,11 +70,15 @@ pub trait CoagulateVars<'src> {
 }
 
 #[derive(Debug)]
-pub enum FnDef<O, V> {
+pub enum FnDef<L, O, V> {
     LangOpB(BinaryOpFn, InterpBinaryOpFn),
     LangOpU(UnaryOpFn, InterpUnaryOpFn),
-    UserDef(BlockStmt<O, V>),
+    UserDef(BlockStmt<L, O, V>),
 }
+
+pub type AnalysisFnDef<'src> = FnDef<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeFnDef<'src> = FnDef<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpFnDef<'src> = FnDef<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnRef<'src> {
@@ -102,7 +106,11 @@ pub enum Operands<O, V> {
     UnaryPost(Expr<O, V>),
 }
 
-impl<'src> Operands<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisOperands<'src> = Operands<AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeOperands<'src> = Operands<RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpOperands<'src> = Operands<InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> AnalysisOperands<'src> {
     pub fn get_types(&self, env: &StaticEnvironment<'src>) -> Option<OperandTypes<'src>> {
         Some(match self {
             Self::Binary(lhs, rhs) => OperandTypes::Binary(
@@ -119,8 +127,8 @@ impl<'src> Operands<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CementVars for Operands<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = Operands<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisOperands<'src> {
+    type Concrete = RuntimeOperands<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
@@ -131,8 +139,8 @@ impl<'src> CementVars for Operands<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for Operands<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = Operands<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisOperands<'src> {
+    type Interp = InterpOperands<'src>;
 
     fn coagulate_vars(
         self,
@@ -147,6 +155,60 @@ impl<'src> CoagulateVars<'src> for Operands<AnalysisOp<'src>, AnalysisVar<'src>>
             Self::UnaryPre(x) => Operands::UnaryPre(x.coagulate_vars(s_env, i_env)),
             Self::UnaryPost(x) => Operands::UnaryPost(x.coagulate_vars(s_env, i_env)),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct AnalysisLabel<'src> {
+    pub name: &'src str,
+}
+
+impl<'src> Analyze<'src> for ast::Label<'src> {
+    type Ouptut = AnalysisLabel<'src>;
+
+    fn analyze(
+        &self,
+        _source: &'src str,
+        _env: &mut StaticEnvironment<'src>,
+        _ret: Option<&AbstractType<'src>>,
+    ) -> Result<'src, Self::Ouptut> {
+        // TODO: validation? of any kind?
+        Ok(AnalysisLabel {
+            name: self.name.lex,
+        })
+    }
+}
+
+impl<'src> Analyze<'src> for ast::ScopeLabel<'src> {
+    type Ouptut = AnalysisLabel<'src>;
+
+    fn analyze(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> Result<'src, Self::Ouptut> {
+        self.label.analyze(source, env, ret)
+    }
+}
+
+impl CementVars for AnalysisLabel<'_> {
+    type Concrete = RuntimeLabel;
+
+    fn cement_vars(self, _ranges: &[Range<usize>]) -> Self::Concrete {
+        RuntimeLabel(todo!())
+    }
+}
+
+impl<'src> CoagulateVars<'src> for AnalysisLabel<'src> {
+    type Interp = InterpLabel<'src>;
+
+    fn coagulate_vars(
+        self,
+        _s_env: &StaticEnvironment<'src>,
+        _i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        InterpLabel { name: self.name }
     }
 }
 
@@ -177,6 +239,9 @@ pub enum AnalysisOp<'src> {
         Expr<Self, AnalysisVar<'src>>,
     ),
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RuntimeLabel(Todo); // TODO
 
 #[derive(Debug, Clone)]
 pub enum RuntimeOp<'src> {
@@ -526,7 +591,11 @@ pub struct Assignment<O, V> {
     pub rhs: Expr<O, V>,
 }
 
-impl<'src> GetType<'src> for Assignment<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisAssignment<'src> = Assignment<AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeAssignment<'src> = Assignment<RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpAssignment<'src> = Assignment<InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisAssignment<'src> {
     type Output<'ty>
         = PrimitiveType
     where
@@ -537,8 +606,8 @@ impl<'src> GetType<'src> for Assignment<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CementVars for Assignment<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = Assignment<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisAssignment<'src> {
+    type Concrete = RuntimeAssignment<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         Assignment {
@@ -548,8 +617,8 @@ impl<'src> CementVars for Assignment<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for Assignment<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = Assignment<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisAssignment<'src> {
+    type Interp = InterpAssignment<'src>;
 
     fn coagulate_vars(
         self,
@@ -611,7 +680,11 @@ pub enum Expr<O, V> {
     Variable(V),
 }
 
-impl<'src> GetType<'src> for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisExpr<'src> = Expr<AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeExpr<'src> = Expr<RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpExpr<'src> = Expr<InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisExpr<'src> {
     type Output<'ty>
         = ExprType<'src, 'ty>
     where
@@ -629,7 +702,7 @@ impl<'src> GetType<'src> for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::Expr<'src> {
-    type Ouptut = Expr<AnalysisOp<'src>, AnalysisVar<'src>>;
+    type Ouptut = AnalysisExpr<'src>;
 
     fn analyze(
         &self,
@@ -649,8 +722,8 @@ impl<'src> Analyze<'src> for ast::Expr<'src> {
     }
 }
 
-impl<'src> CementVars for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = Expr<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisExpr<'src> {
+    type Concrete = RuntimeExpr<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
@@ -663,8 +736,8 @@ impl<'src> CementVars for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for Expr<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = Expr<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisExpr<'src> {
+    type Interp = InterpExpr<'src>;
 
     fn coagulate_vars(
         self,
@@ -718,7 +791,7 @@ impl<'src> Analyze<'src> for ast::Literal<'src> {
 
 /// Variable access, not assignment
 impl<'src> Analyze<'src> for ast::Variable<'src> {
-    type Ouptut = Expr<AnalysisOp<'src>, AnalysisVar<'src>>;
+    type Ouptut = AnalysisExpr<'src>;
 
     fn analyze(
         &self,
@@ -890,7 +963,7 @@ impl<'src> ast::Binary<'src> {
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>,
-    ) -> Result<'src, Expr<AnalysisOp<'src>, AnalysisVar<'src>>> {
+    ) -> Result<'src, AnalysisExpr<'src>> {
         let mut lhs = self.lhs.analyze(source, env, None)?;
         let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
         let rhs = self.rhs.analyze(source, env, l_ty.as_ref())?;
@@ -967,7 +1040,7 @@ impl<'src> ast::Binary<'src> {
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>,
-    ) -> Result<'src, Expr<AnalysisOp<'src>, AnalysisVar<'src>>> {
+    ) -> Result<'src, AnalysisExpr<'src>> {
         let lhs = self.lhs.analyze(source, env, None)?;
         let r_ty = if let ast::Expr::Type(type_expr) = &self.rhs {
             type_expr.analyze(source, env)?
@@ -994,7 +1067,7 @@ impl<'src> ast::Binary<'src> {
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>,
-    ) -> Result<'src, Expr<AnalysisOp<'src>, AnalysisVar<'src>>> {
+    ) -> Result<'src, AnalysisExpr<'src>> {
         let lhs = self.lhs.analyze(source, env, None)?;
         let rhs = self.rhs.analyze(source, env, None)?;
         let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
@@ -1072,7 +1145,7 @@ impl<'src> ast::Binary<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Binary<'src> {
-    type Ouptut = Expr<AnalysisOp<'src>, AnalysisVar<'src>>;
+    type Ouptut = AnalysisExpr<'src>;
 
     fn analyze(
         &self,
@@ -1094,8 +1167,12 @@ pub struct ExprStmt<O, V> {
     pub expr: Expr<O, V>,
 }
 
+pub type AnalysisExprStmt<'src> = ExprStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeExprStmt<'src> = ExprStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpExprStmt<'src> = ExprStmt<InterpOp<'src>, InterpVar<'src>>;
+
 impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
-    type Ouptut = ExprStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+    type Ouptut = AnalysisExprStmt<'src>;
 
     fn analyze(
         &self,
@@ -1127,8 +1204,8 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
     }
 }
 
-impl<'src> CementVars for ExprStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = ExprStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisExprStmt<'src> {
+    type Concrete = RuntimeExprStmt<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         ExprStmt {
@@ -1137,8 +1214,8 @@ impl<'src> CementVars for ExprStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for ExprStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = ExprStmt<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisExprStmt<'src> {
+    type Interp = InterpExprStmt<'src>;
 
     fn coagulate_vars(
         self,
@@ -1156,8 +1233,12 @@ pub struct PrintStmt<O, V> {
     pub expr: Expr<O, V>,
 }
 
+pub type AnalysisPrintStmt<'src> = PrintStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimePrintStmt<'src> = PrintStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpPrintStmt<'src> = PrintStmt<InterpOp<'src>, InterpVar<'src>>;
+
 impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
-    type Ouptut = PrintStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+    type Ouptut = AnalysisPrintStmt<'src>;
 
     fn analyze(
         &self,
@@ -1186,8 +1267,8 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
     }
 }
 
-impl<'src> CementVars for PrintStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = PrintStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisPrintStmt<'src> {
+    type Concrete = RuntimePrintStmt<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         PrintStmt {
@@ -1196,8 +1277,8 @@ impl<'src> CementVars for PrintStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for PrintStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = PrintStmt<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisPrintStmt<'src> {
+    type Interp = InterpPrintStmt<'src>;
 
     fn coagulate_vars(
         self,
@@ -1211,12 +1292,16 @@ impl<'src> CoagulateVars<'src> for PrintStmt<AnalysisOp<'src>, AnalysisVar<'src>
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum OrStmt<O, V> {
-    More(IfStmt<O, V>),
-    Last(BlockStmt<O, V>),
+pub enum OrStmt<L, O, V> {
+    More(IfStmt<L, O, V>),
+    Last(BlockStmt<L, O, V>),
 }
 
-impl<'src> GetType<'src> for OrStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisOrStmt<'src> = OrStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeOrStmt<'src> = OrStmt<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpOrStmt<'src> = OrStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisOrStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1230,8 +1315,8 @@ impl<'src> GetType<'src> for OrStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CementVars for OrStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = OrStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisOrStmt<'src> {
+    type Concrete = RuntimeOrStmt<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
@@ -1241,8 +1326,8 @@ impl<'src> CementVars for OrStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for OrStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = OrStmt<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisOrStmt<'src> {
+    type Interp = InterpOrStmt<'src>;
 
     fn coagulate_vars(
         self,
@@ -1257,13 +1342,13 @@ impl<'src> CoagulateVars<'src> for OrStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::OrBody<'src> {
-    type Ouptut = OrStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+    type Ouptut = AnalysisOrStmt<'src>;
 
     fn analyze(
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>, // TBD: does `or` return a value?
+        _ret: Option<&AbstractType<'src>>, // TBD: does `or` return a value?
     ) -> Result<'src, Self::Ouptut> {
         match self {
             Self::More(stmt) => stmt.analyze(source, env, None).map(OrStmt::More),
@@ -1273,14 +1358,18 @@ impl<'src> Analyze<'src> for ast::OrBody<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct IfStmt<O, V> {
+pub struct IfStmt<L, O, V> {
     /// Must output [`bool`]
     pub pred: Expr<O, V>,
-    pub then: BlockStmt<O, V>,
-    pub or: Option<Box<OrStmt<O, V>>>,
+    pub then: BlockStmt<L, O, V>,
+    pub or: Option<Box<OrStmt<L, O, V>>>,
 }
 
-impl<'src> GetType<'src> for IfStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisIfStmt<'src> = IfStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeIfStmt<'src> = IfStmt<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpIfStmt<'src> = IfStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisIfStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1301,13 +1390,13 @@ impl<'src> GetType<'src> for IfStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::IfStmt<'src> {
-    type Ouptut = IfStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+    type Ouptut = AnalysisIfStmt<'src>;
 
     fn analyze(
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>, // TBD: does `if` return a value?
+        _ret: Option<&AbstractType<'src>>, // TBD: does `if` return a value?
     ) -> Result<'src, Self::Ouptut> {
         let pred = self.pred.analyze(source, env, None)?;
         if let Some(ty) = pred.get_type(env) {
@@ -1339,8 +1428,8 @@ impl<'src> Analyze<'src> for ast::IfStmt<'src> {
     }
 }
 
-impl<'src> CementVars for IfStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = IfStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisIfStmt<'src> {
+    type Concrete = RuntimeIfStmt<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         IfStmt {
@@ -1351,8 +1440,8 @@ impl<'src> CementVars for IfStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for IfStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = IfStmt<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisIfStmt<'src> {
+    type Interp = InterpIfStmt<'src>;
 
     fn coagulate_vars(
         self,
@@ -1368,11 +1457,17 @@ impl<'src> CoagulateVars<'src> for IfStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LoopStmt<O, V> {
-    pub block: BlockStmt<O, V>,
+pub struct LoopStmt<L, O, V> {
+    pub label: Option<L>,
+    pub block: BlockStmt<L, O, V>,
 }
 
-impl<'src> GetType<'src> for LoopStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisLoopStmt<'src> =
+    LoopStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeLoopStmt<'src> = LoopStmt<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpLoopStmt<'src> = LoopStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for LoopStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1386,33 +1481,19 @@ impl<'src> GetType<'src> for LoopStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> Analyze<'src> for ast::LoopStmt<'src> {
-    type Ouptut = LoopStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
-
-    fn analyze(
-        &self,
-        source: &'src str,
-        env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>, // TBD: does `loop` return a value?
-    ) -> Result<'src, Self::Ouptut> {
-        self.block
-            .analyze(source, env, None)
-            .map(|block| LoopStmt { block })
-    }
-}
-
-impl<'src> CementVars for LoopStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = LoopStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisLoopStmt<'src> {
+    type Concrete = RuntimeLoopStmt<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         LoopStmt {
+            label: self.label.map(|label| label.cement_vars(ranges)),
             block: self.block.cement_vars(ranges),
         }
     }
 }
 
-impl<'src> CoagulateVars<'src> for LoopStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = LoopStmt<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisLoopStmt<'src> {
+    type Interp = InterpLoopStmt<'src>;
 
     fn coagulate_vars(
         self,
@@ -1420,17 +1501,24 @@ impl<'src> CoagulateVars<'src> for LoopStmt<AnalysisOp<'src>, AnalysisVar<'src>>
         i_env: &mut InterpEnvironment<'src>,
     ) -> Self::Interp {
         LoopStmt {
+            label: self.label.map(|label| label.coagulate_vars(s_env, i_env)),
             block: self.block.coagulate_vars(s_env, i_env),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CordStmt<O, V> {
-    pub block: BlockStmt<O, V>,
+pub struct CordStmt<L, O, V> {
+    pub label: Option<L>,
+    pub block: BlockStmt<L, O, V>,
 }
 
-impl<'src> GetType<'src> for CordStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisCordStmt<'src> =
+    CordStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeCordStmt<'src> = CordStmt<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpCordStmt<'src> = CordStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisCordStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1444,33 +1532,19 @@ impl<'src> GetType<'src> for CordStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> Analyze<'src> for ast::CordStmt<'src> {
-    type Ouptut = CordStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
-
-    fn analyze(
-        &self,
-        source: &'src str,
-        env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>, // TBD: does `cord` return a value?
-    ) -> Result<'src, Self::Ouptut> {
-        self.block
-            .analyze(source, env, None)
-            .map(|block| CordStmt { block })
-    }
-}
-
-impl<'src> CementVars for CordStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = CordStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisCordStmt<'src> {
+    type Concrete = RuntimeCordStmt<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         CordStmt {
+            label: self.label.map(|label| label.cement_vars(ranges)),
             block: self.block.cement_vars(ranges),
         }
     }
 }
 
-impl<'src> CoagulateVars<'src> for CordStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = CordStmt<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisCordStmt<'src> {
+    type Interp = InterpCordStmt<'src>;
 
     fn coagulate_vars(
         self,
@@ -1478,72 +1552,67 @@ impl<'src> CoagulateVars<'src> for CordStmt<AnalysisOp<'src>, AnalysisVar<'src>>
         i_env: &mut InterpEnvironment<'src>,
     ) -> Self::Interp {
         CordStmt {
+            label: self.label.map(|label| label.coagulate_vars(s_env, i_env)),
             block: self.block.coagulate_vars(s_env, i_env),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ForStmt<O, V> {
-    pub binding_decl: Option<V>,
+pub struct ForStmt<L, O, V> {
+    pub label: Option<L>,
+    pub binding_decl: V,
     pub iter: Expr<O, V>, // TBD: what makes an expression iterable?
-    pub block: BlockStmt<O, V>,
+    pub block: BlockStmt<L, O, V>,
 }
 
-impl<'src> GetType<'src> for ForStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisForStmt<'src> = ForStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeForStmt<'src> = ForStmt<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpForStmt<'src> = ForStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisForStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        // TBD: should loops be expressions or just statements?
-        Some(&AbstractType::Concrete(StaticType::Primitive(
-            PrimitiveType::Nevr,
-        )))
-    }
-}
-
-impl<'src> Analyze<'src> for ast::ForStmt<'src> {
-    type Ouptut = ForStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
-
-    fn analyze(
-        &self,
-        source: &'src str,
-        env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>, // TBD: does `for` return a value?
-    ) -> Result<'src, Self::Ouptut> {
         todo!()
     }
 }
 
-impl<'src> CementVars for ForStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = ForStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisForStmt<'src> {
+    type Concrete = RuntimeForStmt<'src>;
 
-    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+    fn cement_vars(self, _ranges: &[Range<usize>]) -> Self::Concrete {
         todo!()
     }
 }
 
-impl<'src> CoagulateVars<'src> for ForStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = ForStmt<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisForStmt<'src> {
+    type Interp = InterpForStmt<'src>;
 
     fn coagulate_vars(
         self,
-        s_env: &StaticEnvironment<'src>,
-        i_env: &mut InterpEnvironment<'src>,
+        _s_env: &StaticEnvironment<'src>,
+        _i_env: &mut InterpEnvironment<'src>,
     ) -> Self::Interp {
         todo!()
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RepStmt<O, V> {
+pub struct RepStmt<L, O, V> {
+    pub label: Option<L>,
     pub pred: Expr<O, V>,
-    pub block: BlockStmt<O, V>,
+    pub block: BlockStmt<L, O, V>,
 }
 
-impl<'src> GetType<'src> for RepStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisRepStmt<'src> = RepStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeRepStmt<'src> = RepStmt<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpRepStmt<'src> = RepStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisRepStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1557,40 +1626,20 @@ impl<'src> GetType<'src> for RepStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> Analyze<'src> for ast::RepStmt<'src> {
-    type Ouptut = RepStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
-
-    fn analyze(
-        &self,
-        source: &'src str,
-        env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>, // TBD: does `rep` return a value?
-    ) -> Result<'src, Self::Ouptut> {
-        let pred = self.pred.analyze(
-            source,
-            env,
-            Some(&AbstractType::Concrete(StaticType::Primitive(
-                PrimitiveType::Bool,
-            ))),
-        )?;
-        let block = self.block.analyze(source, env, None)?;
-        Ok(RepStmt { pred, block })
-    }
-}
-
-impl<'src> CementVars for RepStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = RepStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisRepStmt<'src> {
+    type Concrete = RuntimeRepStmt<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         RepStmt {
+            label: self.label.map(|x| x.cement_vars(ranges)),
             pred: self.pred.cement_vars(ranges),
             block: self.block.cement_vars(ranges),
         }
     }
 }
 
-impl<'src> CoagulateVars<'src> for RepStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = RepStmt<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisRepStmt<'src> {
+    type Interp = InterpRepStmt<'src>;
 
     fn coagulate_vars(
         self,
@@ -1598,48 +1647,126 @@ impl<'src> CoagulateVars<'src> for RepStmt<AnalysisOp<'src>, AnalysisVar<'src>> 
         i_env: &mut InterpEnvironment<'src>,
     ) -> Self::Interp {
         RepStmt {
+            label: self.label.map(|x| x.coagulate_vars(s_env, i_env)),
             pred: self.pred.coagulate_vars(s_env, i_env),
             block: self.block.coagulate_vars(s_env, i_env),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct HaltStmt {
-    // TBD: should `break value;` be supported?
+impl<'src> Analyze<'src> for ast::LoopBlock<'src> {
+    type Ouptut = AnalysisStatement<'src>;
+
+    fn analyze(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> Result<'src, Self::Ouptut> {
+        let label = self
+            .label
+            .as_ref()
+            .map(|l| l.analyze(source, env, None))
+            .transpose()?;
+        Ok(match &self.kind {
+            ast::LoopKind::Loop => Statement::Loop(LoopStmt {
+                label,
+                block: self.block.analyze(source, env, ret)?,
+            }),
+            ast::LoopKind::Cord => Statement::Cord(CordStmt {
+                label,
+                block: self.block.analyze(source, env, ret)?,
+            }),
+            ast::LoopKind::Rep { pred } => Statement::Rep(RepStmt {
+                label,
+                pred: pred.analyze(source, env, ret)?,
+                block: self.block.analyze(source, env, ret)?,
+            }),
+            ast::LoopKind::For { bind, in_kw, iter } => Statement::For(ForStmt {
+                label,
+                binding_decl: todo!(), // TODO: this only supports the simplest form
+                iter: iter.analyze(source, env, ret)?, // TBD: what is an iterable?
+                block: self.block.analyze(source, env, ret)?,
+            }),
+        })
+    }
 }
 
-impl<'src> GetType<'src> for HaltStmt {
+#[derive(Debug, Clone, PartialEq)]
+pub struct HaltStmt<L> {
+    pub label: Option<L>, // TBD: should `break value;` be supported?
+}
+
+pub type AnalysisHaltStmt<'src> = HaltStmt<AnalysisLabel<'src>>;
+pub type RuntimeHaltStmt<'src> = HaltStmt<RuntimeLabel>;
+pub type InterpHaltStmt<'src> = HaltStmt<InterpLabel<'src>>;
+
+impl<'src> GetType<'src> for AnalysisHaltStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        // TBD: should loops be expressions or just statements?
         Some(&AbstractType::Concrete(StaticType::Primitive(
-            PrimitiveType::Nevr,
+            PrimitiveType::None,
         )))
     }
 }
 
+impl<'src> CementVars for AnalysisHaltStmt<'src> {
+    type Concrete = RuntimeHaltStmt<'src>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        RuntimeHaltStmt {
+            label: self.label.map(|label| label.cement_vars(ranges)),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for AnalysisHaltStmt<'src> {
+    type Interp = InterpHaltStmt<'src>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        InterpHaltStmt {
+            label: self.label.map(|label| label.coagulate_vars(s_env, i_env)),
+        }
+    }
+}
+
 impl<'src> Analyze<'src> for ast::HaltStmt<'src> {
-    type Ouptut = HaltStmt;
+    type Ouptut = AnalysisHaltStmt<'src>;
 
     fn analyze(
         &self,
-        _source: &'src str,
-        _env: &mut StaticEnvironment<'src>,
-        _ret: Option<&AbstractType<'src>>,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        _ret: Option<&AbstractType<'src>>, // TODO: whose hint is this?
     ) -> Result<'src, Self::Ouptut> {
-        Ok(HaltStmt {})
+        Ok(HaltStmt {
+            label: self
+                .label
+                .as_ref()
+                .map(|label| label.analyze(source, env, None))
+                .transpose()?,
+        })
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SkipStmt {}
+pub struct SkipStmt<L> {
+    pub label: Option<L>,
+}
 
-impl<'src> GetType<'src> for SkipStmt {
+pub type AnalysisSkipStmt<'src> = SkipStmt<AnalysisLabel<'src>>;
+pub type RuntimeSkipStmt<'src> = SkipStmt<RuntimeLabel>;
+pub type InterpSkipStmt<'src> = SkipStmt<InterpLabel<'src>>;
+
+impl<'src> GetType<'src> for AnalysisSkipStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1654,24 +1781,59 @@ impl<'src> GetType<'src> for SkipStmt {
 }
 
 impl<'src> Analyze<'src> for ast::SkipStmt<'src> {
-    type Ouptut = SkipStmt;
+    type Ouptut = AnalysisSkipStmt<'src>;
 
     fn analyze(
         &self,
-        _source: &'src str,
-        _env: &mut StaticEnvironment<'src>,
-        _ret: Option<&AbstractType<'src>>,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        _ret: Option<&AbstractType<'src>>, // TODO: whose hint is this?
     ) -> Result<'src, Self::Ouptut> {
-        Ok(SkipStmt {})
+        Ok(SkipStmt {
+            label: self
+                .label
+                .as_ref()
+                .map(|label| label.analyze(source, env, None))
+                .transpose()?,
+        })
+    }
+}
+
+impl<'src> CementVars for AnalysisSkipStmt<'src> {
+    type Concrete = RuntimeSkipStmt<'src>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        RuntimeSkipStmt {
+            label: self.label.map(|label| label.cement_vars(ranges)),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for AnalysisSkipStmt<'src> {
+    type Interp = InterpSkipStmt<'src>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        InterpSkipStmt {
+            label: self.label.map(|label| label.coagulate_vars(s_env, i_env)),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BlockStmt<O, V> {
-    pub stmts: Vec<Statement<O, V>>,
+pub struct BlockStmt<L, O, V> {
+    pub stmts: Vec<Statement<L, O, V>>,
 }
 
-impl<'src> GetType<'src> for BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisBlockStmt<'src> =
+    BlockStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeBlockStmt<'src> = BlockStmt<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpBlockStmt<'src> = BlockStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisBlockStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1692,13 +1854,13 @@ impl<'src> GetType<'src> for BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
-    type Ouptut = BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+    type Ouptut = AnalysisBlockStmt<'src>;
 
     fn analyze(
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>, // TBD: does `block` return a value?
+        _ret: Option<&AbstractType<'src>>, // TBD: does `block` return a value?
     ) -> Result<'src, Self::Ouptut> {
         env.push_scope().unwrap_or_else(|| {
             todo!("warning: cannot push a scope here, need to be in a function");
@@ -1717,8 +1879,8 @@ impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
     }
 }
 
-impl<'src> CementVars for BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = BlockStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisBlockStmt<'src> {
+    type Concrete = RuntimeBlockStmt<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         BlockStmt {
@@ -1731,8 +1893,8 @@ impl<'src> CementVars for BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = BlockStmt<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisBlockStmt<'src> {
+    type Interp = InterpBlockStmt<'src>;
 
     fn coagulate_vars(
         self,
@@ -1750,20 +1912,25 @@ impl<'src> CoagulateVars<'src> for BlockStmt<AnalysisOp<'src>, AnalysisVar<'src>
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Statement<O, V> {
+pub enum Statement<L, O, V> {
     Expr(ExprStmt<O, V>),
     Print(PrintStmt<O, V>),
-    If(IfStmt<O, V>),
-    Loop(LoopStmt<O, V>),
-    Cord(CordStmt<O, V>),
-    For(ForStmt<O, V>),
-    Rep(RepStmt<O, V>),
-    Halt(HaltStmt),
-    Skip(SkipStmt),
-    Block(BlockStmt<O, V>),
+    If(IfStmt<L, O, V>),
+    Loop(LoopStmt<L, O, V>),
+    Cord(CordStmt<L, O, V>),
+    For(ForStmt<L, O, V>),
+    Rep(RepStmt<L, O, V>),
+    Halt(HaltStmt<L>),
+    Skip(SkipStmt<L>),
+    Block(BlockStmt<L, O, V>),
 }
 
-impl<'src> GetType<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
+pub type AnalysisStatement<'src> =
+    Statement<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeStatement<'src> = Statement<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpStatement<'src> = Statement<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisStatement<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1788,7 +1955,7 @@ impl<'src> GetType<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
 }
 
 impl<'src> Analyze<'src> for ast::Statement<'src> {
-    type Ouptut = Statement<AnalysisOp<'src>, AnalysisVar<'src>>;
+    type Ouptut = AnalysisStatement<'src>;
 
     fn analyze(
         &self,
@@ -1801,10 +1968,7 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
             Self::Expr(stmt) => stmt.analyze(source, env, None).map(Statement::Expr),
             Self::Print(stmt) => stmt.analyze(source, env, None).map(Statement::Print),
             Self::If(stmt) => stmt.analyze(source, env, None).map(Statement::If),
-            Self::Loop(stmt) => stmt.analyze(source, env, None).map(Statement::Loop),
-            Self::Cord(stmt) => stmt.analyze(source, env, None).map(Statement::Cord),
-            Self::For(stmt) => stmt.analyze(source, env, None).map(Statement::For),
-            Self::Rep(stmt) => stmt.analyze(source, env, None).map(Statement::Rep),
+            Self::Loop(stmt) => stmt.analyze(source, env, None),
             Self::Halt(stmt) => stmt.analyze(source, env, None).map(Statement::Halt),
             Self::Skip(stmt) => stmt.analyze(source, env, None).map(Statement::Skip),
             Self::Block(stmt) => stmt.analyze(source, env, None).map(Statement::Block),
@@ -1812,8 +1976,8 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
     }
 }
 
-impl<'src> CementVars for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Concrete = Statement<RuntimeOp<'src>, RuntimeVar<'src>>;
+impl<'src> CementVars for AnalysisStatement<'src> {
+    type Concrete = RuntimeStatement<'src>;
 
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         match self {
@@ -1824,15 +1988,15 @@ impl<'src> CementVars for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
             Self::Cord(stmt) => Statement::Cord(stmt.cement_vars(ranges)),
             Self::For(stmt) => Statement::For(stmt.cement_vars(ranges)),
             Self::Rep(stmt) => Statement::Rep(stmt.cement_vars(ranges)),
-            Self::Halt(stmt) => Statement::Halt(stmt),
-            Self::Skip(stmt) => Statement::Skip(stmt),
+            Self::Halt(stmt) => Statement::Halt(stmt.cement_vars(ranges)),
+            Self::Skip(stmt) => Statement::Skip(stmt.cement_vars(ranges)),
             Self::Block(stmt) => Statement::Block(stmt.cement_vars(ranges)),
         }
     }
 }
 
-impl<'src> CoagulateVars<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
-    type Interp = Statement<InterpOp<'src>, InterpVar<'src>>;
+impl<'src> CoagulateVars<'src> for AnalysisStatement<'src> {
+    type Interp = InterpStatement<'src>;
 
     fn coagulate_vars(
         self,
@@ -1847,8 +2011,8 @@ impl<'src> CoagulateVars<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>
             Self::Cord(stmt) => Statement::Cord(stmt.coagulate_vars(s_env, i_env)),
             Self::For(stmt) => Statement::For(stmt.coagulate_vars(s_env, i_env)),
             Self::Rep(stmt) => Statement::Rep(stmt.coagulate_vars(s_env, i_env)),
-            Self::Halt(stmt) => Statement::Halt(stmt),
-            Self::Skip(stmt) => Statement::Skip(stmt),
+            Self::Halt(stmt) => Statement::Halt(stmt.coagulate_vars(s_env, i_env)),
+            Self::Skip(stmt) => Statement::Skip(stmt.coagulate_vars(s_env, i_env)),
             Self::Block(stmt) => Statement::Block(stmt.coagulate_vars(s_env, i_env)),
         }
     }
@@ -1968,7 +2132,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
 }
 
 impl<'src> Analyze<'src> for ast::Declaration<'src> {
-    type Ouptut = Option<Statement<AnalysisOp<'src>, AnalysisVar<'src>>>;
+    type Ouptut = Option<AnalysisStatement<'src>>;
 
     fn analyze(
         &self,
@@ -1987,23 +2151,24 @@ impl<'src> Analyze<'src> for ast::Declaration<'src> {
 
 /// A post-analysis program ready for execution
 #[derive(Debug, Clone, Default)]
-pub struct Program<O, V> {
-    pub stmts: Vec<Statement<O, V>>,
+pub struct Program<L, O, V> {
+    pub stmts: Vec<Statement<L, O, V>>,
 }
 
-pub type RuntimeProgram<'src> = Program<RuntimeOp<'src>, RuntimeVar<'src>>;
-pub type InterpProgram<'src> = Program<InterpOp<'src>, InterpVar<'src>>;
+pub type AnalysisProgram<'src> = Program<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeProgram<'src> = Program<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpProgram<'src> = Program<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
 
-fn analyze_base<'src, O, V, F>(
+fn analyze_base<'src, L, O, V, F>(
     source: &'src str,
     prgm: &ast::Program<'src>,
     f: F,
-) -> Result<'src, Program<O, V>>
+) -> Result<'src, Program<L, O, V>>
 where
     F: FnOnce(
         StaticEnvironment<'src>,
-        Vec<Statement<AnalysisOp<'src>, AnalysisVar<'src>>>,
-    ) -> Result<'src, Program<O, V>>,
+        Vec<AnalysisStatement<'src>>,
+    ) -> Result<'src, Program<L, O, V>>,
 {
     let mut env = StaticEnvironment::new();
     for (op, def) in builtin_ops::builtin_ops() {

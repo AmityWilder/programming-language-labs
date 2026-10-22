@@ -1,11 +1,5 @@
 // todo: make this a function
 {
-    let i = 0;
-    rep i < 5 {
-        prnt(i + "\n");
-        i = i + 1;
-    }
-
     //let x: uint = none;
     //let y: uint = 'a';
 

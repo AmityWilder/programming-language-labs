@@ -1,4 +1,4 @@
-use super::{debug_info, debug_unsafe, debug_warn};
+use super::debug_unsafe;
 #[cfg(debug_assertions)]
 use crate::analyzer::types::{PrimitiveType, StaticType};
 use crate::types::*;

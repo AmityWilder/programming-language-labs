@@ -1,5 +1,4 @@
 use crate::{
-    Todo,
     error::OpSide,
     scanner::token::{
         ExpansionData, Lexeme, Lexical, SpecToken, Token,
@@ -879,68 +878,77 @@ impl<'src> AstNode<'src> for IfStmt<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct LoopStmt<'src> {
-    /// `loop`
-    pub loop_kw: Lexeme<'src>,
-    pub block: BlockStmt<'src>,
+#[derive(Debug, Clone, PartialEq)]
+pub enum LoopKind<'src> {
+    /// `kw` is `loop`
+    Loop,
+
+    /// `kw` is `cord`
+    Cord,
+
+    /// `kw` is `rep`
+    Rep { pred: Expr<'src> },
+
+    /// `kw` is `for`
+    For {
+        bind: BindingPattern<'src>,
+        /// `in`
+        in_kw: Lexeme<'src>,
+        iter: Expr<'src>,
+    },
 }
 
-impl<'src> AstNode<'src> for LoopStmt<'src> {
+impl<'src> AstNode<'src> for LoopKind<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.loop_kw.get_range_start(source)
+        match self {
+            Self::Loop => None,
+            Self::Cord => None,
+            Self::Rep { pred } => pred.get_range_start(source),
+            Self::For { bind, .. } => bind.get_range_start(source),
+        }
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.block.get_range_end(source)
+        match self {
+            Self::Loop => None,
+            Self::Cord => None,
+            Self::Rep { pred } => pred.get_range_end(source),
+            Self::For { iter, .. } => iter.get_range_end(source),
+        }
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.loop_kw, &self.block).get_range(source)
+        match self {
+            Self::Loop => None,
+            Self::Cord => None,
+            Self::Rep { pred } => pred.get_range(source),
+            Self::For { bind, iter, .. } => (bind, iter).get_range(source),
+        }
     }
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.loop_kw, &self.block).expansion(source)
+        match self {
+            Self::Loop => None,
+            Self::Cord => None,
+            Self::Rep { pred } => pred.expansion(source),
+            Self::For { bind, iter, .. } => (bind, iter).expansion(source),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct CordStmt<'src> {
-    /// `cord`
-    pub cord_kw: Lexeme<'src>,
-    pub block: BlockStmt<'src>,
-}
-
-impl<'src> AstNode<'src> for CordStmt<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.cord_kw.get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.block.get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.cord_kw, &self.block).get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.cord_kw, &self.block).expansion(source)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct ForStmt<'src> {
-    /// `for`
+pub struct LoopBlock<'src> {
+    pub label: Option<ScopeLabel<'src>>,
+    /// variant-dependent
     pub kw: Lexeme<'src>,
-    pub binding: BindingPattern<'src>,
-    pub iter: Expr<'src>,
+    pub kind: LoopKind<'src>,
+    /// the code that gets repeated
     pub block: BlockStmt<'src>,
 }
 
-impl<'src> AstNode<'src> for ForStmt<'src> {
+impl<'src> AstNode<'src> for LoopBlock<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.kw.get_range_start(source)
+        (&self.label, &self.kw).get_range_start(source)
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
@@ -948,37 +956,11 @@ impl<'src> AstNode<'src> for ForStmt<'src> {
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.kw, &self.block).get_range(source)
+        ((&self.label, &self.kw), &self.block).get_range(source)
     }
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.kw, &self.block).expansion(source)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct RepStmt<'src> {
-    /// `rep`
-    pub kw: Lexeme<'src>,
-    pub pred: Expr<'src>,
-    pub block: BlockStmt<'src>,
-}
-
-impl<'src> AstNode<'src> for RepStmt<'src> {
-    fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.kw.get_range_start(source)
-    }
-
-    fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.block.get_range_end(source)
-    }
-
-    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.kw, &self.block).get_range(source)
-    }
-
-    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.kw, &self.block).expansion(source)
+        ((&self.label, &self.kw), &self.block).expansion(source)
     }
 }
 
@@ -986,6 +968,7 @@ impl<'src> AstNode<'src> for RepStmt<'src> {
 pub struct HaltStmt<'src> {
     /// `halt`
     pub halt_kw: Lexeme<'src>,
+    pub label: Option<Label<'src>>,
     // TBD: should `halt value;` be supported?
     /// `;`
     pub semi: Lexeme<'src>,
@@ -1013,6 +996,7 @@ impl<'src> AstNode<'src> for HaltStmt<'src> {
 pub struct SkipStmt<'src> {
     /// `skip`
     pub skip_kw: Lexeme<'src>,
+    pub label: Option<Label<'src>>,
     // TBD: should `skip value;` be supported?
     /// `;`
     pub semi: Lexeme<'src>,
@@ -1121,10 +1105,7 @@ pub enum Statement<'src> {
     // TODO: im not too fond of the print keyword
     Print(PrintStmt<'src>),
     If(IfStmt<'src>),
-    Loop(LoopStmt<'src>),
-    Cord(CordStmt<'src>),
-    For(ForStmt<'src>),
-    Rep(RepStmt<'src>),
+    Loop(LoopBlock<'src>),
     Halt(HaltStmt<'src>),
     Skip(SkipStmt<'src>),
     Block(BlockStmt<'src>),
@@ -1216,6 +1197,57 @@ impl<'src> AstNode<'src> for Assignment<'src> {
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         (&self.op, &self.expr).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct Label<'src> {
+    /// `.`
+    pub dot: Lexeme<'src>,
+    /// identifier
+    pub name: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for Label<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.dot.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.dot, &self.name).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.dot, &self.name).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct ScopeLabel<'src> {
+    pub label: Label<'src>,
+    /// `:`
+    pub colon: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for ScopeLabel<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.label.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.colon.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.label, &self.colon).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.label, &self.colon).expansion(source)
     }
 }
 
