@@ -1,4 +1,5 @@
 use crate::{
+    Todo,
     error::OpSide,
     scanner::token::{
         ExpansionData, Lexeme, Lexical, SpecToken, Token,
@@ -308,6 +309,30 @@ impl<'src, T> AstNode<'src> for SpecToken<'src, T> {
     }
 }
 impl<'src, T> AstNodeFinal<'src> for SpecToken<'src, T> {}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct BindingPattern<'src> {
+    // TBD: what else can a pattern be?
+    pub ident: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for BindingPattern<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.ident.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.ident.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        self.ident.get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        self.ident.expansion(source)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Binary<'src> {
@@ -905,6 +930,59 @@ impl<'src> AstNode<'src> for CordStmt<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct ForStmt<'src> {
+    /// `for`
+    pub kw: Lexeme<'src>,
+    pub binding: BindingPattern<'src>,
+    pub iter: Expr<'src>,
+    pub block: BlockStmt<'src>,
+}
+
+impl<'src> AstNode<'src> for ForStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.block.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.kw, &self.block).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.kw, &self.block).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct RepStmt<'src> {
+    /// `rep`
+    pub kw: Lexeme<'src>,
+    pub pred: Expr<'src>,
+    pub block: BlockStmt<'src>,
+}
+
+impl<'src> AstNode<'src> for RepStmt<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.block.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.kw, &self.block).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.kw, &self.block).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct HaltStmt<'src> {
     /// `halt`
     pub halt_kw: Lexeme<'src>,
@@ -1045,43 +1123,11 @@ pub enum Statement<'src> {
     If(IfStmt<'src>),
     Loop(LoopStmt<'src>),
     Cord(CordStmt<'src>),
+    For(ForStmt<'src>),
+    Rep(RepStmt<'src>),
     Halt(HaltStmt<'src>),
     Skip(SkipStmt<'src>),
     Block(BlockStmt<'src>),
-}
-
-impl<'src> Statement<'src> {
-    pub const fn expr(inner: ExprStmt<'src>) -> Self {
-        Self::Expr(inner)
-    }
-
-    pub const fn print(inner: PrintStmt<'src>) -> Self {
-        Self::Print(inner)
-    }
-
-    pub const fn halt(inner: HaltStmt<'src>) -> Self {
-        Self::Halt(inner)
-    }
-
-    pub const fn skip(inner: SkipStmt<'src>) -> Self {
-        Self::Skip(inner)
-    }
-
-    pub const fn if_stmt(inner: IfStmt<'src>) -> Self {
-        Self::If(inner)
-    }
-
-    pub const fn loop_stmt(inner: LoopStmt<'src>) -> Self {
-        Self::Loop(inner)
-    }
-
-    pub const fn cord_stmt(inner: CordStmt<'src>) -> Self {
-        Self::Cord(inner)
-    }
-
-    pub const fn block(inner: BlockStmt<'src>) -> Self {
-        Self::Block(inner)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
@@ -1254,7 +1300,7 @@ pub struct DeclVar<'src> {
     /// `uni`, `let`, or `pvt`
     pub var_kw: SpecToken<'src, VarKeyword>,
     /// Identifier
-    pub ident: Lexeme<'src>,
+    pub binding: BindingPattern<'src>,
     pub ty: Option<TypeAnnotation<'src>>,
     pub assignment: Option<Assignment<'src>>,
     /// `;`

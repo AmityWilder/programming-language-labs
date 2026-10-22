@@ -17,8 +17,8 @@ use crate::{
 };
 use Operator::*;
 use ast::{
-    Binary, CordStmt, Directive, DirectiveKw, Expr, Grouping, Literal, OrType, SkipStmt,
-    TypeAnnotation, TypeExpr, Unary,
+    Binary, BindingPattern, CordStmt, Directive, DirectiveKw, Expr, ForStmt, Grouping, Literal,
+    OrType, RepStmt, SkipStmt, TypeAnnotation, TypeExpr, Unary,
 };
 
 pub mod ast;
@@ -262,13 +262,14 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `var_declaration -> ( "uni" | "pvt" | "let" ) IDENTIFIER ( type_annotation )? ( assignment )? ";"`
+    /// `var_declaration -> ( "uni" | "pvt" | "let" ) pattern ( type_annotation )? ( assignment )? ";"`
     pub fn var_declaration(&mut self) -> Option<Result<Declaration<'src>, ContextError<'src>>> {
         self.pull_into().map(|var_kw| {
             Ok(Declaration::var(DeclVar {
                 var_kw,
-                // TODO: binding pattern?
-                ident: self.try_pull_eq(LexValue::Identifier, ExpectedToken::Ident)?,
+                binding: self
+                    .pattern()
+                    .ok_or_else(|| self.error(ExpectedToken::Pattern))?,
                 ty: self.type_annotation().transpose()?,
                 assignment: self.assignment().transpose()?,
                 semi: self.try_pull_eq(
@@ -293,20 +294,16 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `statement -> block_statement | print_statement | halt_statement | skip_statement | if_statement | loop_statement | expression_statement`
     pub fn statement(&mut self) -> Result<Statement<'src>, ContextError<'src>> {
         self.block_statement()
-            .map(|res| res.map(Statement::block))
-            .or_else(|| self.print_statement().map(|res| res.map(Statement::print)))
-            .or_else(|| self.halt_statement().map(|res| res.map(Statement::halt)))
-            .or_else(|| self.skip_statement().map(|res| res.map(Statement::skip)))
-            .or_else(|| self.if_statement().map(|res| res.map(Statement::if_stmt)))
-            .or_else(|| {
-                self.loop_statement()
-                    .map(|res| res.map(Statement::loop_stmt))
-            })
-            .or_else(|| {
-                self.cord_statement()
-                    .map(|res| res.map(Statement::cord_stmt))
-            })
-            .or_else(|| Some(self.expression_statement().map(Statement::expr)))
+            .map(|res| res.map(Statement::Block))
+            .or_else(|| self.print_statement().map(|res| res.map(Statement::Print)))
+            .or_else(|| self.halt_statement().map(|res| res.map(Statement::Halt)))
+            .or_else(|| self.skip_statement().map(|res| res.map(Statement::Skip)))
+            .or_else(|| self.if_statement().map(|res| res.map(Statement::If)))
+            .or_else(|| self.loop_statement().map(|res| res.map(Statement::Loop)))
+            .or_else(|| self.cord_statement().map(|res| res.map(Statement::Cord)))
+            // .or_else(|| self.for_statement().map(|res| res.map(Statement::For)))
+            .or_else(|| self.rep_statement().map(|res| res.map(Statement::Rep)))
+            .or_else(|| Some(self.expression_statement().map(Statement::Expr)))
             .ok_or_else(|| self.error(ExpectedToken::Statement))
             .flatten()
     }
@@ -403,7 +400,26 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `halt_statement -> "halt" block_statement`
+    /// `for_statement -> "for" block_statement`
+    pub fn for_statement(&mut self) -> Option<Result<ForStmt<'src>, ContextError<'src>>> {
+        todo!()
+    }
+
+    /// `rep_statement -> "rep" expression block_statement`
+    pub fn rep_statement(&mut self) -> Option<Result<RepStmt<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Rep)).map(|kw| {
+            Ok(RepStmt {
+                kw,
+                pred: self.expression()?,
+                block: self
+                    .block_statement()
+                    .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
+                    .flatten()?,
+            })
+        })
+    }
+
+    /// `halt_statement -> "halt" ";"`
     pub fn halt_statement(&mut self) -> Option<Result<HaltStmt<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Keyword(Keyword::Halt))
             .map(|halt_kw| {
@@ -417,7 +433,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `skip_statement -> "skip" block_statement`
+    /// `skip_statement -> "skip" ";"`
     pub fn skip_statement(&mut self) -> Option<Result<SkipStmt<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Keyword(Keyword::Skip))
             .map(|skip_kw| {
@@ -447,7 +463,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `assign -> IDENTIFIER ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "[<<]=" | "[>>]=" | "|=" | "&=" | "^=" | "!|=" | "!&=" | "!^=" ) expression | expression`
+    /// `assign -> expression ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "**=" | "<<=" | ">>=" | "[<<]=" | "[>>]=" | "|=" | "&=" | "^=" | "!|=" | "!&=" | "!^=" ) expression | expression`
     fn assign(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         let lhs = self.expression()?; // we'll check if this can be assigned to in static analysis
         if let Some(op) = self.pull_into_if_in(&[
@@ -462,7 +478,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         }
     }
 
-    /// `expression -> assign`
+    /// `expression -> or`
     pub fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.or()
     }
@@ -622,6 +638,12 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `directive -> "inpt"`
     fn directive(&mut self) -> Option<Directive<'src>> {
         self.pull_into::<DirectiveKw>().map(|kw| Directive { kw })
+    }
+
+    /// `pattern -> IDENTIFIER`
+    fn pattern(&mut self) -> Option<BindingPattern<'src>> {
+        self.pull_if_eq(LexValue::Identifier)
+            .map(|ident| BindingPattern { ident })
     }
 
     /// `variable -> IDENTIFIER`

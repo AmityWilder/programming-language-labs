@@ -6,8 +6,8 @@
 
 use crate::{
     analyzer::{
-        Assignment, BlockStmt, CordStmt, Directive, Expr, ExprStmt, HaltStmt, IfStmt,
-        InterpProgram, Literal, LoopStmt, OrStmt, PrintStmt, SkipStmt, Statement,
+        Assignment, BlockStmt, CordStmt, Directive, Expr, ExprStmt, ForStmt, HaltStmt, IfStmt,
+        InterpProgram, Literal, LoopStmt, OrStmt, PrintStmt, RepStmt, SkipStmt, Statement,
     },
     exec::error::Failure,
     interp::env::InterpVar,
@@ -196,19 +196,28 @@ impl<'src> PrintStmt<InterpOp<'src>, InterpVar<'src>> {
     }
 }
 
+/// A predicate that static analysis should guarantee is a boolean
+fn expect_bool<'src>(
+    pred: &Expr<InterpOp<'src>, InterpVar<'src>>,
+    env: &InterpEnvironment<'src>,
+) -> Result<bool, Failure> {
+    let buf = pred.interp_eval(env)?;
+    Ok(
+        *<&bool>::try_from(buf.as_ref().ensure_ok()?).unwrap_or_else(|()| {
+            panic!(
+                "should be guaranteed by static analysis\
+                \n expected: bool\
+                \n    found: {buf:?}"
+            )
+        }),
+    )
+}
+
 impl<'src> IfStmt<InterpOp<'src>, InterpVar<'src>> {
     fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow, Failure> {
         let mut cond = self;
         loop {
-            let buf = cond.pred.interp_eval(env)?;
-            let val: &bool = buf.as_ref().ensure_ok()?.try_into().unwrap_or_else(|()| {
-                panic!(
-                    "should be guaranteed by static analysis\
-                \n expected: bool\
-                \n    found: {buf:?}"
-                )
-            });
-            break if *val {
+            break if expect_bool(&cond.pred, env)? {
                 &cond.then
             } else if let Some(or) = cond.or.as_deref() {
                 match or {
@@ -254,6 +263,31 @@ impl<'src> CordStmt<InterpOp<'src>, InterpVar<'src>> {
     }
 }
 
+impl<'src> ForStmt<InterpOp<'src>, InterpVar<'src>> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow, Failure> {
+        todo!()
+    }
+}
+
+impl<'src> RepStmt<InterpOp<'src>, InterpVar<'src>> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow, Failure> {
+        loop {
+            if !expect_bool(&self.pred, env)? {
+                break Ok(ControlFlow::Continue);
+            }
+
+            // identical to "loop"
+            let res = self.block.interp_exec(env)?;
+            match res {
+                // ControlFlow::Skip is consumed by the loop and only serves to let the inner expression skip
+                ControlFlow::Continue | ControlFlow::Skip => (),
+                ControlFlow::Halt => break Ok(ControlFlow::Continue),
+                flow @ (ControlFlow::Give(()) | ControlFlow::Fail(_)) => break Ok(flow),
+            }
+        }
+    }
+}
+
 impl<'src> BlockStmt<InterpOp<'src>, InterpVar<'src>> {
     fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow, Failure> {
         for stmt in &self.stmts {
@@ -274,6 +308,8 @@ impl<'src> Statement<InterpOp<'src>, InterpVar<'src>> {
             Self::If(stmt) => stmt.interp_exec(env),
             Self::Loop(stmt) => stmt.interp_exec(env),
             Self::Cord(stmt) => stmt.interp_exec(env),
+            Self::For(stmt) => stmt.interp_exec(env),
+            Self::Rep(stmt) => stmt.interp_exec(env),
             Self::Halt(HaltStmt {}) => Ok(ControlFlow::Halt),
             Self::Skip(SkipStmt {}) => Ok(ControlFlow::Skip),
             Self::Block(stmt) => stmt.interp_exec(env),

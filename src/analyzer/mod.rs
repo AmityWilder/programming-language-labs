@@ -1,4 +1,5 @@
 use crate::{
+    Todo,
     analyzer::{
         static_env::{
             EnvItem, EnvKey, OpOverload, OperandTypes, StaticEnvironment, StaticItem, VarType,
@@ -20,7 +21,7 @@ use crate::{
 };
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;
-use std::range::Range;
+use std::{marker::PhantomData, range::Range};
 
 pub mod builtin_ops;
 pub mod static_env;
@@ -1483,6 +1484,127 @@ impl<'src> CoagulateVars<'src> for CordStmt<AnalysisOp<'src>, AnalysisVar<'src>>
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ForStmt<O, V> {
+    pub binding_decl: Option<V>,
+    pub iter: Expr<O, V>, // TBD: what makes an expression iterable?
+    pub block: BlockStmt<O, V>,
+}
+
+impl<'src> GetType<'src> for ForStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Output<'ty>
+        = &'ty AbstractType<'src>
+    where
+        'src: 'ty;
+
+    fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
+        // TBD: should loops be expressions or just statements?
+        Some(&AbstractType::Concrete(StaticType::Primitive(
+            PrimitiveType::Nevr,
+        )))
+    }
+}
+
+impl<'src> Analyze<'src> for ast::ForStmt<'src> {
+    type Ouptut = ForStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+
+    fn analyze(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>, // TBD: does `for` return a value?
+    ) -> Result<'src, Self::Ouptut> {
+        todo!()
+    }
+}
+
+impl<'src> CementVars for ForStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Concrete = ForStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        todo!()
+    }
+}
+
+impl<'src> CoagulateVars<'src> for ForStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = ForStmt<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepStmt<O, V> {
+    pub pred: Expr<O, V>,
+    pub block: BlockStmt<O, V>,
+}
+
+impl<'src> GetType<'src> for RepStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Output<'ty>
+        = &'ty AbstractType<'src>
+    where
+        'src: 'ty;
+
+    fn get_type<'ty>(&'ty self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
+        // TBD: should loops be expressions or just statements?
+        Some(&AbstractType::Concrete(StaticType::Primitive(
+            PrimitiveType::Nevr,
+        )))
+    }
+}
+
+impl<'src> Analyze<'src> for ast::RepStmt<'src> {
+    type Ouptut = RepStmt<AnalysisOp<'src>, AnalysisVar<'src>>;
+
+    fn analyze(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>, // TBD: does `rep` return a value?
+    ) -> Result<'src, Self::Ouptut> {
+        let pred = self.pred.analyze(
+            source,
+            env,
+            Some(&AbstractType::Concrete(StaticType::Primitive(
+                PrimitiveType::Bool,
+            ))),
+        )?;
+        let block = self.block.analyze(source, env, None)?;
+        Ok(RepStmt { pred, block })
+    }
+}
+
+impl<'src> CementVars for RepStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Concrete = RepStmt<RuntimeOp<'src>, RuntimeVar<'src>>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        RepStmt {
+            pred: self.pred.cement_vars(ranges),
+            block: self.block.cement_vars(ranges),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for RepStmt<AnalysisOp<'src>, AnalysisVar<'src>> {
+    type Interp = RepStmt<InterpOp<'src>, InterpVar<'src>>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        RepStmt {
+            pred: self.pred.coagulate_vars(s_env, i_env),
+            block: self.block.coagulate_vars(s_env, i_env),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct HaltStmt {
     // TBD: should `break value;` be supported?
 }
@@ -1634,6 +1756,8 @@ pub enum Statement<O, V> {
     If(IfStmt<O, V>),
     Loop(LoopStmt<O, V>),
     Cord(CordStmt<O, V>),
+    For(ForStmt<O, V>),
+    Rep(RepStmt<O, V>),
     Halt(HaltStmt),
     Skip(SkipStmt),
     Block(BlockStmt<O, V>),
@@ -1654,6 +1778,8 @@ impl<'src> GetType<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
             Self::If(stmt) => stmt.get_type(env),
             Self::Loop(stmt) => stmt.get_type(env),
             Self::Cord(stmt) => stmt.get_type(env),
+            Self::For(stmt) => stmt.get_type(env),
+            Self::Rep(stmt) => stmt.get_type(env),
             Self::Halt(stmt) => stmt.get_type(env),
             Self::Skip(stmt) => stmt.get_type(env),
             Self::Block(stmt) => stmt.get_type(env),
@@ -1677,6 +1803,8 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
             Self::If(stmt) => stmt.analyze(source, env, None).map(Statement::If),
             Self::Loop(stmt) => stmt.analyze(source, env, None).map(Statement::Loop),
             Self::Cord(stmt) => stmt.analyze(source, env, None).map(Statement::Cord),
+            Self::For(stmt) => stmt.analyze(source, env, None).map(Statement::For),
+            Self::Rep(stmt) => stmt.analyze(source, env, None).map(Statement::Rep),
             Self::Halt(stmt) => stmt.analyze(source, env, None).map(Statement::Halt),
             Self::Skip(stmt) => stmt.analyze(source, env, None).map(Statement::Skip),
             Self::Block(stmt) => stmt.analyze(source, env, None).map(Statement::Block),
@@ -1694,6 +1822,8 @@ impl<'src> CementVars for Statement<AnalysisOp<'src>, AnalysisVar<'src>> {
             Self::If(stmt) => Statement::If(stmt.cement_vars(ranges)),
             Self::Loop(stmt) => Statement::Loop(stmt.cement_vars(ranges)),
             Self::Cord(stmt) => Statement::Cord(stmt.cement_vars(ranges)),
+            Self::For(stmt) => Statement::For(stmt.cement_vars(ranges)),
+            Self::Rep(stmt) => Statement::Rep(stmt.cement_vars(ranges)),
             Self::Halt(stmt) => Statement::Halt(stmt),
             Self::Skip(stmt) => Statement::Skip(stmt),
             Self::Block(stmt) => Statement::Block(stmt.cement_vars(ranges)),
@@ -1715,6 +1845,8 @@ impl<'src> CoagulateVars<'src> for Statement<AnalysisOp<'src>, AnalysisVar<'src>
             Self::If(stmt) => Statement::If(stmt.coagulate_vars(s_env, i_env)),
             Self::Loop(stmt) => Statement::Loop(stmt.coagulate_vars(s_env, i_env)),
             Self::Cord(stmt) => Statement::Cord(stmt.coagulate_vars(s_env, i_env)),
+            Self::For(stmt) => Statement::For(stmt.coagulate_vars(s_env, i_env)),
+            Self::Rep(stmt) => Statement::Rep(stmt.coagulate_vars(s_env, i_env)),
             Self::Halt(stmt) => Statement::Halt(stmt),
             Self::Skip(stmt) => Statement::Skip(stmt),
             Self::Block(stmt) => Statement::Block(stmt.coagulate_vars(s_env, i_env)),
@@ -1740,7 +1872,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
         {
             return Err(vec![e]);
         }
-        let ident = self.ident.lex;
+        let ident = self.binding.ident.lex; // TODO: what if there's multiple?
         let annotated_type = self.ty.as_ref().map(|annotation| {
             annotation
                 .ty
@@ -1755,7 +1887,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
 
         #[cfg(debug_assertions)]
         {
-            print!("{}: ", self.ident.lex);
+            print!("{}: ", self.binding.ident.lex); // TODO: what if there's multiple?
             if let Some(annotated_type) = &annotated_type {
                 print!("{annotated_type}");
             } else {
@@ -1791,7 +1923,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                     ident,
                     expr.map(|_| todo!("constant folding"))
                         .ok_or_else(|| vec![todo!("error: missing assignment for constant")])?,
-                    Some(Box::new(self.ident)),
+                    Some(Box::new(self.binding.ident)), // TODO: what if there's multiple?
                 )
                 .map_err(|e| vec![todo!("error: {e}")])
                 .map(|()| None),
@@ -1804,7 +1936,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                         .and_then(|x| x.get_type(env))
                         .map(|t| t.to_abstract()),
                     true,
-                    Some(Box::new(self.ident)),
+                    Some(Box::new(self.binding.ident)), // TODO: what if there's multiple?
                 )
                 .map_err(|e| todo!("error: {e}"))
                 .and_then(|(unique_id, ty, is_global)| {

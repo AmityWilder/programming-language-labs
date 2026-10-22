@@ -357,6 +357,8 @@ impl<'src> Statement<RuntimeOp<'src>, RuntimeVar<'src>> {
             Self::If(stmt) => stmt.exec(env),
             Self::Loop(stmt) => stmt.exec(env),
             Self::Cord(_) => todo!(),
+            Self::For(_) => todo!(),
+            Self::Rep(_) => todo!(),
             Self::Halt(_) => todo!(),
             Self::Skip(_) => todo!(),
             Self::Block(stmt) => stmt.exec(env),

@@ -384,6 +384,7 @@ expected_token! {
         Semi = "a `;`",
         Declaration = "a declaration or statement",
         Ident = "an identifier",
+        Pattern = "a binding pattern",
         BlockStmt = "a block statement",
         BlockOrIf = "an `if` keyword or a block statement",
         Statement = "a statement"
