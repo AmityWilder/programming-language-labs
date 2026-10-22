@@ -227,6 +227,37 @@ primitive_ops![
     Nor (Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { !(l | r) }
     Xnor(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { !(l ^ r) }
 
+    // 0 + 0 = 0
+    // 0 + 1 = 1
+    // 1 + 0 = 1
+    // 1 + 1 = 1 (clamped)
+    Add(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l || *r }
+    // 0 - 0 = 0
+    // 0 - 1 = 0 (clamped)
+    // 1 - 0 = 1
+    // 1 - 1 = 0
+    SubNeg(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l && !*r }
+    // 0 * 0 = 0
+    // 0 * 1 = 0
+    // 1 * 0 = 0
+    // 1 * 1 = 1
+    Mul(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l && *r }
+    // 0^0 = 1
+    // 0^1 = 0
+    // 1^0 = 1
+    // 1^1 = 1
+    Pow(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l || !*r }
+    // 0 / 0 = 1 (clamped infinity)
+    // 0 / 1 = 0
+    // 1 / 0 = 1 (clamped infinity)
+    // 1 / 1 = 1
+    Div(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l || !*r }
+    // 0 % 0 = 1 (clamped infinity)
+    // 0 % 1 = 0
+    // 1 % 0 = 1 (clamped infinity)
+    // 1 % 1 = 1
+    Rem(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { *l || !*r }
+
     Eq(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { l == r }
     Eq(Uint, Uint) -> Bool as fn(l: uint, r: uint) -> bool { l == r }
     Eq(Sint, Sint) -> Bool as fn(l: sint, r: sint) -> bool { l == r }
