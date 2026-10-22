@@ -402,6 +402,36 @@ impl<'src> AstNode<'src> for Grouping<'src> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct Sequence<'src> {
+    /// `[`
+    pub open: Lexeme<'src>,
+    pub expr: Expr<'src>,
+    /// `]`
+    pub close: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for Sequence<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.open.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.close.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.open, &self.close).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        // don't need to check expr because it's between open and close,
+        // and therefore must be in the same expansion if the other two are.
+        // this is also cheaper, since now we don't have to recursively check the inner expressions :)
+        (&self.open, &self.close).expansion(source)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum OrTypeKeyword {
     #[default]

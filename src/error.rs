@@ -376,6 +376,7 @@ expected_token! {
         Literal = "a literal",
         ParenExpr = "a parenthesized expression",
         ExprOrRParen = "an expression or `)`",
+        ExprOrRBrack = "an expression or `]`",
         Expr = "an expression",
         TypeExpr = "a type expression",
         OrType = "an \"or-type\" (`fail`, `none`, or `nevr`)",

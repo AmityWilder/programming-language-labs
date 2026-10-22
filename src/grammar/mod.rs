@@ -645,6 +645,20 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         .map(|value| Literal { value })
     }
 
+    /// `sequence -> "[" expression "]"`
+    fn sequence(&mut self) -> Option<Result<Grouping<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Punctuation(Punctuation::LBrack))
+            .map(|open| {
+                let expr = self.expression()?;
+                self.try_pull_eq(
+                    LexValue::Punctuation(Punctuation::RBrack),
+                    ExpectedToken::ExprOrRBrack,
+                )
+                .map(move |close| Grouping { open, expr, close })
+                .map_err(|e| e.into_bracket_mismatch(Bracket::Brack, open.lex_range(self.source)))
+            })
+    }
+
     /// `group -> "(" expression ")"`
     fn group(&mut self) -> Option<Result<Grouping<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Punctuation(Punctuation::LParen))
