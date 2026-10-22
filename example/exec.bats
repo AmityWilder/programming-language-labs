@@ -1,5 +1,7 @@
 // todo: make this a function
 {
+    x = 5 = 3;
+
     //let x: uint = none;
     //let y: uint = 'a';
 

@@ -43,7 +43,7 @@ pub enum ControlFlow<E = Failure, T = ()> {
 impl InterpVal<'_> {
     pub fn ensure_ok(&self) -> Result<&Self, Failure> {
         match self {
-            Self::Uninit(_) => panic!("reading uninitialized memory!"),
+            Self::Uninit(_) => Err(Failure::Uninitialized),
 
             Self::OrNone(x) => match x.as_ref() {
                 value::OrVal::Ok(x) => x.ensure_ok(),

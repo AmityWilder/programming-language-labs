@@ -1,6 +1,8 @@
 use crate::{
     analyzer::{
-        static_env::{EnvItem, OpOverload, OperandTypes, StaticEnvironment, StaticItem, VarType},
+        static_env::{
+            EnvItem, EnvKey, OpOverload, OperandTypes, StaticEnvironment, StaticItem, VarType,
+        },
         types::{
             AbstractType, Fallible, FunShape, FunType, OrType, PrimitiveType, StaticType,
             TypeCompatible, TypeSize,
@@ -19,7 +21,6 @@ use crate::{
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;
 use std::range::Range;
-use types::TypeBound;
 
 pub mod builtin_ops;
 pub mod static_env;
@@ -357,12 +358,12 @@ impl<'src> GetType<'src> for Directive {
     fn get_type<'ty>(&'ty self, _: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         Some(match self {
             Self::Inpt => cfg_select! {
-                // needs fleshing out
-                false => AbstractType::Opaque(Box::new(TypeBound::Any(vec![
-                    TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
+                // TODO: needs fleshing out
+                false => AbstractType::Opaque(Box::new(types::TypeBound::Any(vec![
+                    types::TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
                         PrimitiveType::Text,
                     ))),
-                    TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
+                    types::TypeBound::Exactly(AbstractType::Concrete(StaticType::Primitive(
                         PrimitiveType::Char,
                     ))),
                 ]))),
@@ -882,6 +883,193 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
     }
 }
 
+impl<'src> ast::Binary<'src> {
+    fn analyze_assignment(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> Result<'src, Expr<AnalysisOp<'src>, AnalysisVar<'src>>> {
+        let mut lhs = self.lhs.analyze(source, env, None)?;
+        let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
+        let rhs = self.rhs.analyze(source, env, l_ty.as_ref())?;
+        let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
+        if let Some(ret) = ret
+            && let Err(e) = ret.expect_type(
+                &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::None)),
+                source,
+                self,
+            )
+        {
+            return Err(vec![e]);
+        }
+        // TODO: cases where lhs is assignable in general, not specifically a variable
+        if let Expr::Variable(var) = &mut lhs {
+            match (l_ty, r_ty) {
+                (Some(l_ty), Some(r_ty)) => {
+                    // require rhs to be the same type as lhs
+                    r_ty.expect_type(&l_ty, source, &self.rhs)
+                        .map_err(|e| vec![e])?;
+                }
+
+                (None, Some(r_ty)) => {
+                    // update lhs type to match rhs
+                    let Some((
+                        _id,
+                        &mut StaticItem {
+                            key: EnvKey::Ident(ident),
+                            val: EnvItem::Var(ref mut var_ty, _),
+                            ..
+                        },
+                    )) = env.lookup_mut(var.ident).next()
+                    else {
+                        unreachable!("Expr::Variable should only result from a StaticVar::Var");
+                    };
+                    #[cfg(debug_assertions)]
+                    println!("<inferrence> {ident}: {r_ty}");
+                    *var_ty = Some(r_ty);
+                    #[cfg(debug_assertions)]
+                    {
+                        var._ty = var_ty.clone();
+                    }
+                }
+
+                (_, None) => {
+                    // failed type deduction twice; type ambiguity error
+                    return Err(vec![
+                        ContextError::node_error(source, &self.lhs, ErrorType::TypeAmbiguity),
+                        ContextError::node_error(source, &self.rhs, ErrorType::TypeAmbiguity),
+                    ]);
+                }
+            }
+
+            Ok(Expr::Assignment(Box::new(Assignment { lvalue: lhs, rhs })))
+        } else {
+            Err(vec![ContextError::node_error(
+                source,
+                &self.lhs,
+                ErrorType::AssignImmutable(match &lhs {
+                    Expr::Variable(_) => unreachable!(),
+                    Expr::Op(_) => ImmutableAssignment::Expression,
+                    Expr::Assignment(_) => ImmutableAssignment::Assignment,
+                    Expr::Literal(_) => ImmutableAssignment::Literal,
+                    Expr::Directive(directive) => match directive {
+                        Directive::Inpt => ImmutableAssignment::Keyword(Keyword::Inpt),
+                    },
+                }),
+            )])
+        }
+    }
+
+    fn analyze_conversion(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> Result<'src, Expr<AnalysisOp<'src>, AnalysisVar<'src>>> {
+        let lhs = self.lhs.analyze(source, env, None)?;
+        let r_ty = if let ast::Expr::Type(type_expr) = &self.rhs {
+            type_expr.analyze(source, env)?
+        } else {
+            unimplemented!("should be handled by grammar");
+        };
+        let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
+        if let Some(l_ty) = l_ty {
+            print!("{l_ty}");
+        } else {
+            print!("<implicit>");
+        }
+        print!(" {} {r_ty}", self.op.lex);
+        if let Some(ret) = ret {
+            println!("{{hint: {ret}}}");
+        } else {
+            println!();
+        }
+        todo!("conversion");
+    }
+
+    fn analyze_op(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> Result<'src, Expr<AnalysisOp<'src>, AnalysisVar<'src>>> {
+        let lhs = self.lhs.analyze(source, env, None)?;
+        let rhs = self.rhs.analyze(source, env, None)?;
+        let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
+        let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
+        match (l_ty, r_ty) {
+            (Some(l_ty), Some(r_ty)) => {
+                let operands = Operands::Binary(lhs, rhs);
+                let operand_types = OperandTypes::Binary(l_ty, r_ty);
+                let op = &self.op.val;
+                env.lookup(op)
+                    .map(|(_, item)| match &item.val {
+                        EnvItem::Op(overload) => overload,
+                        _ => unreachable!("only operators should be stored with operator keys"),
+                    })
+                    .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)))
+                    .find(|overload| overload.operands == operand_types)
+                    .ok_or_else(|| {
+                        // TODO: give the actual error this much info
+                        #[cfg(debug_assertions)]
+                        println!(
+                            "error: no such operator defined\n operator: {op:?}\n \
+                                operand types: {operand_types}\n \
+                                operands: {operands:?}\n \
+                                supported operands: {:#?}",
+                            env.lookup(op)
+                                .map(|(_, item)| match &item.val {
+                                    EnvItem::Op(overload) => overload,
+                                    _ => unreachable!(
+                                        "only operators should be stored with operator keys"
+                                    ),
+                                })
+                                .map(|t| t.fun.to_string())
+                                .collect::<Vec<_>>()
+                        );
+                        let OperandTypes::Binary(l_ty, r_ty) = operand_types else {
+                            unreachable!();
+                        };
+                        vec![ContextError::node_error(
+                            source,
+                            &self.op,
+                            ErrorType::Incompatible {
+                                op: op.to_token_eq(),
+                                l_range: self.lhs.range(source),
+                                r_range: self.rhs.range(source),
+                                l_ty,
+                                r_ty,
+                            },
+                        )]
+                    })
+                    .map(|overload| {
+                        let (def, interp_def) = match &overload.def {
+                            FnDef::LangOpB(def, interp_def) => (def, interp_def),
+                            FnDef::LangOpU(_, _) | FnDef::UserDef(_) => {
+                                unimplemented!()
+                            }
+                        };
+                        Expr::Op(Box::new(match operands {
+                            Operands::Binary(l, r) => {
+                                AnalysisOp::Binary((overload.fun.clone(), *def, *interp_def), l, r)
+                            }
+                            _ => unreachable!(),
+                        }))
+                    })
+            }
+
+            (l_ty, r_ty) => Err(std::iter::chain(
+                l_ty.is_none()
+                    .then(|| ContextError::node_error(source, &self.lhs, ErrorType::TypeAmbiguity)),
+                r_ty.is_none()
+                    .then(|| ContextError::node_error(source, &self.rhs, ErrorType::TypeAmbiguity)),
+            )
+            .collect::<Vec<ContextError<'src>>>()),
+        }
+    }
+}
+
 impl<'src> Analyze<'src> for ast::Binary<'src> {
     type Ouptut = Expr<AnalysisOp<'src>, AnalysisVar<'src>>;
 
@@ -891,152 +1079,10 @@ impl<'src> Analyze<'src> for ast::Binary<'src> {
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
-        if self.op.val == Operator::Assign {
-            let mut lhs = self.lhs.analyze(source, env, None)?;
-            let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
-            let rhs = self.rhs.analyze(source, env, l_ty.as_ref())?;
-            let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
-            if let Some(ret) = ret
-                && let Err(e) = ret.expect_type(
-                    &AbstractType::Concrete(StaticType::Primitive(PrimitiveType::None)),
-                    source,
-                    self,
-                )
-            {
-                return Err(vec![e]);
-            }
-            // TODO: cases where lhs is assignable in general, not specifically a variable
-            if let Expr::Variable(var) = &mut lhs {
-                match (l_ty, r_ty) {
-                    (Some(l_ty), Some(r_ty)) => {
-                        // require rhs to be the same type as lhs
-                        r_ty.expect_type(&l_ty, source, &self.rhs)
-                            .map_err(|e| vec![e])?;
-                    }
-
-                    (None, Some(r_ty)) => {
-                        // update lhs type to match rhs
-                        let Some((
-                            id,
-                            &mut StaticItem {
-                                val: EnvItem::Var(ref mut var_ty, _),
-                                ..
-                            },
-                        )) = env.lookup_mut(var.ident).next()
-                        else {
-                            unreachable!("Expr::Variable should only result from a StaticVar::Var");
-                        };
-                        let r_ty_size = r_ty.size();
-                        *var_ty = Some(r_ty);
-                        #[cfg(debug_assertions)]
-                        {
-                            var._ty = var_ty.clone();
-                        }
-                    }
-
-                    (_, None) => {
-                        // failed type deduction twice; type ambiguity error
-                        return Err(vec![
-                            ContextError::node_error(source, &self.lhs, ErrorType::TypeAmbiguity),
-                            ContextError::node_error(source, &self.rhs, ErrorType::TypeAmbiguity),
-                        ]);
-                    }
-                }
-
-                Ok(Expr::Assignment(Box::new(Assignment { lvalue: lhs, rhs })))
-            } else {
-                Err(vec![ContextError::node_error(
-                    source,
-                    &self.lhs,
-                    ErrorType::AssignImmutable(match &lhs {
-                        Expr::Variable(_) => unreachable!(),
-                        Expr::Op(_) => ImmutableAssignment::Expression,
-                        Expr::Assignment(_) => ImmutableAssignment::Assignment,
-                        Expr::Literal(_) => ImmutableAssignment::Literal,
-                        Expr::Directive(directive) => match directive {
-                            Directive::Inpt => ImmutableAssignment::Keyword(Keyword::Inpt),
-                        },
-                    }),
-                )])
-            }
-        } else {
-            let lhs = self.lhs.analyze(source, env, None)?;
-            let rhs = self.rhs.analyze(source, env, None)?;
-            let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
-            let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
-            match (l_ty, r_ty) {
-                (Some(l_ty), Some(r_ty)) => {
-                    let operands = Operands::Binary(lhs, rhs);
-                    let operand_types = OperandTypes::Binary(l_ty, r_ty);
-                    let op = &self.op.val;
-                    env.lookup(op)
-                        .map(|(_, item)| match &item.val {
-                            EnvItem::Op(overload) => overload,
-                            _ => unreachable!("only operators should be stored with operator keys"),
-                        })
-                        .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)))
-                        .find(|overload| overload.operands == operand_types)
-                        .ok_or_else(|| {
-                            // TODO: give the actual error this much info
-                            #[cfg(debug_assertions)]
-                            println!(
-                                "error: no such operator defined\n operator: {op:?}\n \
-                                operand types: {operand_types}\n \
-                                operands: {operands:?}\n \
-                                supported operands: {:#?}",
-                                env.lookup(op)
-                                    .map(|(_, item)| match &item.val {
-                                        EnvItem::Op(overload) => overload,
-                                        _ => unreachable!(
-                                            "only operators should be stored with operator keys"
-                                        ),
-                                    })
-                                    .map(|t| t.fun.to_string())
-                                    .collect::<Vec<_>>()
-                            );
-                            let OperandTypes::Binary(l_ty, r_ty) = operand_types else {
-                                unreachable!();
-                            };
-                            vec![ContextError::node_error(
-                                source,
-                                &self.op,
-                                ErrorType::Incompatible {
-                                    op: op.to_token_eq(),
-                                    l_range: self.lhs.range(source),
-                                    r_range: self.rhs.range(source),
-                                    l_ty,
-                                    r_ty,
-                                },
-                            )]
-                        })
-                        .map(|overload| {
-                            let (def, interp_def) = match &overload.def {
-                                FnDef::LangOpB(def, interp_def) => (def, interp_def),
-                                FnDef::LangOpU(_, _) | FnDef::UserDef(_) => {
-                                    unimplemented!()
-                                }
-                            };
-                            Expr::Op(Box::new(match operands {
-                                Operands::Binary(l, r) => AnalysisOp::Binary(
-                                    (overload.fun.clone(), *def, *interp_def),
-                                    l,
-                                    r,
-                                ),
-                                _ => unreachable!(),
-                            }))
-                        })
-                }
-
-                (l_ty, r_ty) => Err(std::iter::chain(
-                    l_ty.is_none().then(|| {
-                        ContextError::node_error(source, &self.lhs, ErrorType::TypeAmbiguity)
-                    }),
-                    r_ty.is_none().then(|| {
-                        ContextError::node_error(source, &self.rhs, ErrorType::TypeAmbiguity)
-                    }),
-                )
-                .collect::<Vec<ContextError<'src>>>()),
-            }
+        match self.op.val {
+            Operator::Assign => self.analyze_assignment(source, env, ret),
+            Operator::Convert | Operator::Transmute => self.analyze_conversion(source, env, ret),
+            _ => self.analyze_op(source, env, ret),
         }
     }
 }

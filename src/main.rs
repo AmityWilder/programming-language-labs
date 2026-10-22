@@ -814,14 +814,30 @@ fn run_code(source: &str, config: &Cli) {
 
     // execution
     if config.do_eval {
-        println!("\nrunning...\n----------");
+        let outer_style = Style::new().foreground(highlight::style::Color::BrightBlack);
+        println!(
+            "\n{}running...\n----------{}",
+            outer_style.begin(),
+            outer_style.end()
+        );
         let res = interpret(&program, env);
         if let Err(e) = res
             && config.print_errors
         {
-            println!("----------\nruntime error: {e}");
+            let style = SYNTAX_STYLE_ANSI.invalid;
+            println!(
+                "{}----------{}\n{}unhandled runtime error: {e}{}",
+                outer_style.begin(),
+                outer_style.end(),
+                style.begin(),
+                style.end()
+            );
         } else {
-            println!("----------\nfinished\n");
+            println!(
+                "{}----------\nfinished{}\n",
+                outer_style.begin(),
+                outer_style.end()
+            );
         }
     }
 }
