@@ -27,7 +27,7 @@ pub fn interp_exists_def<'brw, 'src>(
 ) -> std::result::Result<InterpValue<'brw, 'src>, Failure> {
     Ok(InterpValue::Prvalue(InterpVal::Primitive(
         crate::interp::value::PrimitiveVal::Bool(crate::interp::value::BoolObject(
-            lhs.to_ref().ensure_ok().is_ok(),
+            lhs.into_ref().ensure_ok().is_ok(),
         )),
     )))
 }
@@ -57,8 +57,8 @@ macro_rules! prim_op {
                         lhs: InterpValue<'brw, 'src>,
                         rhs: InterpValue<'brw, 'src>,
                     ) -> Result<InterpValue<'brw, 'src>, Failure> {
-                        let lhs = lhs.to_ref();
-                        let rhs = rhs.to_ref();
+                        let lhs = lhs.into_ref();
+                        let rhs = rhs.into_ref();
                         let $lhs_name: &$Lhs = lhs.as_ref().ensure_ok()?.try_into().unwrap_or_else(|_| {
                             panic!(
                                 "{}<{}, {}> lhs type mismatch should be caught by static analysis\
@@ -122,7 +122,7 @@ macro_rules! prim_op {
                 },
                 def: {
                     fn interp<'brw, 'src>(rhs: InterpValue<'brw, 'src>) -> Result<InterpValue<'brw, 'src>, Failure> {
-                        let rhs = rhs.to_ref();
+                        let rhs = rhs.into_ref();
                         let $rhs_name: &$Rhs = rhs.as_ref().ensure_ok()?.try_into().unwrap_or_else(|_| {
                             panic!(
                                 "{}<{}> rhs type mismatch should be caught by static analysis\
@@ -246,7 +246,7 @@ macro_rules! incr_decr_op {
                 },
                 def: {
                     fn interp<'brw, 'src>(rhs: InterpValue<'brw, 'src>) -> Result<InterpValue<'brw, 'src>, Failure> {
-                        let mut rhs = rhs.to_mut().unwrap_or_else(|| {
+                        let mut rhs = rhs.into_mut().unwrap_or_else(|| {
                             panic!(
                                 "{}<{}> requires an lvalue operand, should be guaranteed by static analysis",
                                 stringify!($op),
@@ -471,7 +471,38 @@ pub fn builtin_ops<'src>()
         Add(Char, Text) -> Text as fn(l: char, r: text) -> text { format!("{l}{r}") }
         Add(Text, Text) -> Text as fn(l: text, r: text) -> text { format!("{l}{r}") }
     ].into_iter().chain([
-        incr_decr_op!((Uint)Incr -> Uint as fn(rhs: uint) -> uint { std::mem::replace(rhs, *rhs + 1) }),
-        incr_decr_op!((Sint)Incr -> Sint as fn(rhs: sint) -> sint { std::mem::replace(rhs, *rhs + 1) }),
+        incr_decr_op!((Bool)Incr -> Bool as fn(rhs: bool) -> bool {
+            std::mem::replace(rhs, if *rhs { todo!("iterator finality") } else { true })
+        }),
+        incr_decr_op!((Bool)Decr -> Bool as fn(rhs: bool) -> bool {
+            std::mem::replace(rhs, if *rhs { false } else { todo!("iterator finality") })
+        }),
+        incr_decr_op!((Byte)Incr -> Byte as fn(rhs: byte) -> byte {
+            std::mem::replace(rhs, rhs.checked_add(1).unwrap_or_else(|| todo!("iterator finality")))
+        }),
+        incr_decr_op!((Byte)Decr -> Byte as fn(rhs: byte) -> byte {
+            std::mem::replace(rhs, rhs.checked_sub(1).unwrap_or_else(|| todo!("iterator finality")))
+        }),
+        incr_decr_op!((Uint)Incr -> Uint as fn(rhs: uint) -> uint {
+            std::mem::replace(rhs, rhs.checked_add(1).unwrap_or_else(|| todo!("iterator finality")))
+        }),
+        incr_decr_op!((Uint)Decr -> Uint as fn(rhs: uint) -> uint {
+            std::mem::replace(rhs, rhs.checked_sub(1).unwrap_or_else(|| todo!("iterator finality")))
+        }),
+        incr_decr_op!((Sint)Incr -> Sint as fn(rhs: sint) -> sint {
+            std::mem::replace(rhs, rhs.checked_add(1).unwrap_or_else(|| todo!("iterator finality")))
+        }),
+        incr_decr_op!((Sint)Decr -> Sint as fn(rhs: sint) -> sint {
+            std::mem::replace(rhs, rhs.checked_sub(1).unwrap_or_else(|| todo!("iterator finality")))
+        }),
+        incr_decr_op!((Char)Incr -> Char as fn(rhs: char) -> char {
+            rhs.to_u32().checked_add(1).and_then(char::from_u32).unwrap_or_else(|| todo!("iterator finality"))
+        }),
+        incr_decr_op!((Char)Decr -> Char as fn(rhs: char) -> char {
+            rhs.to_u32().checked_sub(1).and_then(char::from_u32).unwrap_or_else(|| todo!("iterator finality"))
+        }),
+        incr_decr_op!((Text)Incr -> Char as fn(rhs: text) -> char {
+            if rhs.is_empty() { todo!("iterator finality") } else { rhs.remove(0) }
+        }),
     ])
 }

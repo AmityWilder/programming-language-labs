@@ -1,11 +1,8 @@
 //! AST Printer
 
 use crate::{
-    grammar::{ast::OrTypeKeyword, fmt::lisp::Lisp},
-    scanner::token::{
-        Lexeme, SpecToken,
-        value::{Keyword, LexValue, Punctuation},
-    },
+    grammar::fmt::lisp::Lisp,
+    scanner::token::value::{Keyword, LexValue},
 };
 
 macro_rules! token {

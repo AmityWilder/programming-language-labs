@@ -5,7 +5,7 @@ use crate::{
     analyzer::types::AbstractType,
     arrayvec::ArrayVec,
     exec::error::Failure,
-    grammar::ast::{AstNode, AstNodeFinal},
+    grammar::ast::AstNode,
     highlight::{
         highlight,
         style::{Color, Style, StyleWrapper},

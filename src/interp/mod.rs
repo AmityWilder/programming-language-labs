@@ -231,7 +231,7 @@ impl<'src> InterpExprStmt<'src> {
         if let Expr::Assignment(assignment) = &self.expr {
             assignment.interp_exec(env)
         } else {
-            let res = self.expr.interp_eval(env)?.to_ref();
+            let res = self.expr.interp_eval(env)?.into_ref();
             let res = res.as_ref();
             if !matches!(res, InterpVal::Primitive(PrimitiveVal::None(_))) {
                 // println!("WARNING: non-none expression result ignored: {res:?}"); // lint
@@ -246,7 +246,7 @@ impl<'src> InterpPrintStmt<'src> {
         &self,
         env: &'brw mut InterpEnvironment<'src>,
     ) -> Result<ControlFlow<'brw, 'src>, Failure> {
-        let buf = self.expr.interp_eval(env)?.to_ref();
+        let buf = self.expr.interp_eval(env)?.into_ref();
         let val: &text = buf
             .as_ref()
             .ensure_ok()?
@@ -262,7 +262,7 @@ fn expect_bool<'src>(
     pred: &InterpExpr<'src>,
     env: &mut InterpEnvironment<'src>,
 ) -> Result<bool, Failure> {
-    let buf = pred.interp_eval(env)?.to_ref();
+    let buf = pred.interp_eval(env)?.into_ref();
     match <&bool>::try_from(buf.as_ref().ensure_ok()?) {
         Ok(&x) => Ok(x),
         Err(()) => panic!(

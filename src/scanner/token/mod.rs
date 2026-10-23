@@ -1,9 +1,6 @@
 //! Definitions of tokens and their values.
 
-use crate::{
-    error::ErrorType,
-    scanner::{symbols::ESCAPE, token::value::LexValue},
-};
+use crate::scanner::{symbols::ESCAPE, token::value::LexValue};
 use std::range::Range;
 
 /// Helper macro for preventing issues with missed variants when adding new ones
@@ -137,6 +134,13 @@ pub trait Lexical<'src> {
 
     /// Returns a boolean representing whether the lexeme is the exact same position in source,
     /// without needing to lookup within the source
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "will be used in semantic highlighting, once that's fixed"
+        )
+    )]
     fn lex_eq<Q>(&self, other: &Q) -> bool
     where
         Q: ?Sized + Lexical<'src>,

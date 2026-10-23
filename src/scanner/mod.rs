@@ -182,6 +182,10 @@ impl<'src> Scanner<'src> {
         }
     }
 
+    #[expect(
+        dead_code,
+        reason = "will be used in semantic highlighting, once that's fixed"
+    )]
     pub const fn new_subset(original: &'src str, source: &'src str, can_be_negative: bool) -> Self {
         Self {
             original,
@@ -358,7 +362,7 @@ impl<'src> Scanner<'src> {
                         lex,
                         val,
                         mac: None,
-                    }).map_err(|esc| ErrorType::InvalidEscape(esc)),
+                    }).map_err(ErrorType::InvalidEscape),
 
                     CHAR_DELIM => LexValue::char_literal(lex).map(|val| Token {
                         lex,
