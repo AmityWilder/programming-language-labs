@@ -11,11 +11,13 @@ use std::{
     range::Range,
 };
 
+/// The context in which a type must be statically sized
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SizeReq {
     ArrayElement,
 }
 
+/// Describes the location as a plural without any artical
 impl std::fmt::Display for SizeReq {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -29,6 +31,15 @@ pub enum TypeSizeError {
     #[default]
     TooBig,
     IllegalUnsized(SizeReq),
+}
+
+impl From<TypeSizeError> for ErrorType<'_> {
+    fn from(value: TypeSizeError) -> Self {
+        match value {
+            TypeSizeError::TooBig => Self::TypeTooBig,
+            TypeSizeError::IllegalUnsized(req) => Self::IllegalUnsized(req),
+        }
+    }
 }
 
 impl std::fmt::Display for TypeSizeError {

@@ -6,8 +6,8 @@
 
 use crate::{
     analyzer::{
-        Directive, Expr, InterpAssignment, InterpBlockStmt, InterpCordStmt, InterpExpr,
-        InterpExprStmt, InterpForStmt, InterpHaltStmt, InterpIfStmt, InterpLoopStmt,
+        Directive, Expr, InterpAssignment, InterpBlockStmt, InterpCordStmt, InterpDeferNode,
+        InterpExpr, InterpExprStmt, InterpForStmt, InterpHaltStmt, InterpIfStmt, InterpLoopStmt,
         InterpPrintStmt, InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal,
         OrStmt,
     },
@@ -422,6 +422,31 @@ impl<'src> InterpBlockStmt<'src> {
     }
 }
 
+impl<'src> InterpDeferNode<'src> {
+    fn interp_exec<'brw>(
+        &self,
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+        let res = self.inner.interp_exec(env);
+        // de-borrow
+        // TBD: is cloning everything really the right choice?
+        let res = res.map(|x| match x {
+            ControlFlow::Continue => ControlFlow::Continue,
+            ControlFlow::Skip(l, x) => {
+                ControlFlow::Skip(l, x.map(|x| InterpValue::Prvalue(x.to_owned())))
+            }
+            ControlFlow::Halt(l, x) => {
+                ControlFlow::Halt(l, x.map(|x| InterpValue::Prvalue(x.to_owned())))
+            }
+            ControlFlow::Give(x) => ControlFlow::Give(InterpValue::Prvalue(x.to_owned())),
+            ControlFlow::Emit(x) => ControlFlow::Emit(InterpValue::Prvalue(x.to_owned())),
+            ControlFlow::Fail(e) => ControlFlow::Fail(e),
+        });
+        self.on_pop.interp_exec(env)?;
+        res
+    }
+}
+
 impl<'src> InterpStatement<'src> {
     fn interp_exec<'brw>(
         &self,
@@ -438,6 +463,7 @@ impl<'src> InterpStatement<'src> {
             Self::Halt(stmt) => stmt.interp_exec(env),
             Self::Skip(stmt) => stmt.interp_exec(env),
             Self::Block(stmt) => stmt.interp_exec(env),
+            Self::Defer(node) => node.interp_exec(env),
         }
     }
 }

@@ -240,8 +240,6 @@ pub struct DeclItem<'src> {
 pub struct StaticEnvironment<'src> {
     /// Actual storage for the definitions, independent of visibility
     decls: Vec<DeclItem<'src>>,
-    /// Blocks that get executed when their associated scope pops
-    defers: Vec<(ScopeId, AnalysisBlockStmt<'src>)>,
     curr_scope_id: usize,
     /// NOTE: this does NOT represent "the scope where all global variables belong",
     /// this is just the scope of all things outside of any function!!
@@ -254,7 +252,6 @@ impl<'src> StaticEnvironment<'src> {
     pub const fn new() -> Self {
         Self {
             decls: Vec::new(),
-            defers: Vec::new(),
             curr_scope_id: 0,
             global: Scope::new(),
             layers: Vec::new(),
@@ -481,11 +478,6 @@ impl<'src> StaticEnvironment<'src> {
         node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
     ) {
         self.decl_item(EnvKey::Op(op), EnvItem::Op(def), node);
-    }
-
-    pub fn decl_defer(&mut self, on_pop: AnalysisBlockStmt<'src>) {
-        // TBD: how will scope pop be detected?
-        self.defers.push((self.curr_scope_id, on_pop));
     }
 
     pub fn finalize_vars(&mut self) -> Result<(), Vec<VarId>> {

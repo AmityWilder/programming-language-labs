@@ -14,7 +14,7 @@ pub enum Failure {
     UnhandledOrNone,
     UnhandledOrNevr,
     FailedRead,
-    Uninitialized, // TODO: change this to be guaranteed by static analysis
+    Uninitialized, // TODO: change this to be guarded by static analysis
 }
 
 impl From<std::str::ParseBoolError> for Failure {

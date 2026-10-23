@@ -2,7 +2,7 @@
 
 use crate::{
     SYNTAX_STYLE_ANSI,
-    analyzer::types::AbstractType,
+    analyzer::types::{AbstractType, SizeReq},
     arrayvec::ArrayVec,
     exec::error::Failure,
     grammar::ast::AstNode,
@@ -1052,99 +1052,114 @@ pub enum ErrorType<'src> {
     #[help(|f, _src| write!(f, "try changing the expression to a `loop` or `cord` or remove the assignment"))]
     FallibleBlockExpr,
 
+    #[code(CMP, 49)]
+    #[err(|f| write!(f, "type size exceeds what can be stored on a {}-bit system", usize::BITS))]
+    #[inlay(|f| write!(f, "type size exceeds {} bytes", usize::MAX))]
+    #[help(|f, _src| write!(f, "consider making the type smaller (I have no idea how it got so big)"))]
+    TypeTooBig, // TODO: recursive type should have a separate error
+
+    // TODO: make this more helpful
+    #[code(CMP, 50)]
+    #[err((_), |f| write!(f, "runtime-sized type stored in a statically-sized location"))]
+    #[inlay((x), |f| write!(f, "{x} must have static size"))]
+    #[help((_), |f, _src| write!(f, "try adding indirection, or replace the type with a statically-sized one"))]
+    IllegalUnsized(SizeReq),
+
     // TODO: need an error for undefined conversion
 
     // ----------------------------
     // runtime
     // ----------------------------
-    #[code(RUN, 50)]
+    #[code(RUN, 60)]
     #[err((_), |f| write!(f, "unhandled failure"))]
     #[inlay((_), |f| write!(f, "failed operation"))]
     #[help((_), |f, _src| write!(f, "try handling the error"))] // TODO: make this more helpful
     Fail(Failure),
 
-    /// An operation resulted in overflow
-    #[code(RUN, 51)]
-    #[err((_), |f| write!(f, "arithmetic overflow"))]
-    #[inlay((_), |f| write!(f, "unhandled integer overflow"))]
-    #[help((e), |f, _src| {
-        #[expect(clippy::as_conversions, reason = "if n is an integer, then n <= 2^n-1")]
-        const N: usize = usize::BITS as usize;
-        const K: usize = N - 1;
+    // TODO: move this information into `Failure`:
 
-        match e {
-            OverflowError::UAdd {..} |
-            OverflowError::USub {..} |
-            OverflowError::UMul {..} |
-            OverflowError::UPow {..} => writeln!(f, "uints must be between {} and {}.", usize::MIN, usize::MAX)?,
+    // /// An operation resulted in overflow
+    // #[code(RUN, 51)]
+    // #[err((_), |f| write!(f, "arithmetic overflow"))]
+    // #[inlay((_), |f| write!(f, "unhandled integer overflow"))]
+    // #[help((e), |f, _src| {
+    //     #[expect(clippy::as_conversions, reason = "if n is an integer, then n <= 2^n-1")]
+    //     const N: usize = usize::BITS as usize;
+    //     const K: usize = N - 1;
 
-            OverflowError::SAdd {..} |
-            OverflowError::SSub {..} |
-            OverflowError::SMul {..} |
-            OverflowError::SPow {..} |
-            OverflowError::SNeg {..} => writeln!(f, "sints must be between {} and {}.", isize::MIN, isize::MAX)?,
-        }
-        f.write_str("use conditions to ensure this expression's output can fit within the appropriate bounds for its type, or switch to using a flpt.")?;
+    //     match e {
+    //         OverflowError::UAdd {..} |
+    //         OverflowError::USub {..} |
+    //         OverflowError::UMul {..} |
+    //         OverflowError::UPow {..} => writeln!(f, "uints must be between {} and {}.", usize::MIN, usize::MAX)?,
 
-        match e {
-            OverflowError::SNeg { r_value, .. } => {
-                assert_eq!(*r_value, isize::MIN, "when else can unary negation result in overflow?");
-                let (prefix_min, last_digit_min) = (isize::MIN / 10, isize::MIN % 10);
-                let (prefix_max, last_digit_max) = (isize::MAX / 10, isize::MAX % 10);
-                write!(f,
-                    "\n\nremember that a signed integer can be 1 magnitude greater in the negatives than the positives \
-                    (i.e. {prefix_min}\x1b[1m{}\x1b[22m vs {prefix_max}\x1b[1m{last_digit_max}\x1b[22m)",
-                    last_digit_min.unsigned_abs()
-                )
-            }
+    //         OverflowError::SAdd {..} |
+    //         OverflowError::SSub {..} |
+    //         OverflowError::SMul {..} |
+    //         OverflowError::SPow {..} |
+    //         OverflowError::SNeg {..} => writeln!(f, "sints must be between {} and {}.", isize::MIN, isize::MAX)?,
+    //     }
+    //     f.write_str("use conditions to ensure this expression's output can fit within the appropriate bounds for its type, or switch to using a flpt.")?;
 
-            OverflowError::UPow { l_value, r_value, .. } if *r_value >= N => {
-                assert!(*l_value >= 2, "how did you overflow a uint from multiplying 0 or 1 by itself...");
-                write!(f,
-                    "\n\nuints are stored as {N} digits in base 2, so putting anything bigger than 1 to a power of at least {N} is certain to overflow.")?;
-                if *r_value == N {
-                    write!(f,
-                        "\n\nremember that 2**{N} can't be stored in {N} digits; the biggest number you can store in {N} bits is {N} consecutive 1s, \
-                        which is 1 value smaller than 2**{N}"
-                    )?;
-                }
-                Ok(())
-            }
+    //     match e {
+    //         OverflowError::SNeg { r_value, .. } => {
+    //             assert_eq!(*r_value, isize::MIN, "when else can unary negation result in overflow?");
+    //             let (prefix_min, last_digit_min) = (isize::MIN / 10, isize::MIN % 10);
+    //             let (prefix_max, last_digit_max) = (isize::MAX / 10, isize::MAX % 10);
+    //             write!(f,
+    //                 "\n\nremember that a signed integer can be 1 magnitude greater in the negatives than the positives \
+    //                 (i.e. {prefix_min}\x1b[1m{}\x1b[22m vs {prefix_max}\x1b[1m{last_digit_max}\x1b[22m)",
+    //                 last_digit_min.unsigned_abs()
+    //             )
+    //         }
 
-            OverflowError::SPow { l_value, r_value, .. } if let Ok(r_value) = usize::try_from(*r_value) && r_value >= K => {
-                assert!(!(0..2).contains(l_value), "how did you overflow a uint from multiplying 0 or 1 by itself...");
-                write!(f,
-                    "\n\nsints are stored as {N} digits in base 2 (using 2's complement to store negatives), \
-                    so putting anything bigger than 1 to a power of at least {K} is certain to overflow.")?;
-                if r_value == K {
-                    write!(f,
-                        "\n\nremember that 2**{K} can't be stored in {K} digits; the biggest number you can store in {K} bits is {K} consecutive 1s, \
-                        which is 1 value smaller than 2**{K}"
-                    )?;
-                }
-                Ok(())
-            }
+    //         OverflowError::UPow { l_value, r_value, .. } if *r_value >= N => {
+    //             assert!(*l_value >= 2, "how did you overflow a uint from multiplying 0 or 1 by itself...");
+    //             write!(f,
+    //                 "\n\nuints are stored as {N} digits in base 2, so putting anything bigger than 1 to a power of at least {N} is certain to overflow.")?;
+    //             if *r_value == N {
+    //                 write!(f,
+    //                     "\n\nremember that 2**{N} can't be stored in {N} digits; the biggest number you can store in {N} bits is {N} consecutive 1s, \
+    //                     which is 1 value smaller than 2**{N}"
+    //                 )?;
+    //             }
+    //             Ok(())
+    //         }
 
-            // no additional notes
-            _ => Ok(())
-        }
-    })]
-    #[info((e), *e)]
-    Overflow(OverflowError),
+    //         OverflowError::SPow { l_value, r_value, .. } if let Ok(r_value) = usize::try_from(*r_value) && r_value >= K => {
+    //             assert!(!(0..2).contains(l_value), "how did you overflow a uint from multiplying 0 or 1 by itself...");
+    //             write!(f,
+    //                 "\n\nsints are stored as {N} digits in base 2 (using 2's complement to store negatives), \
+    //                 so putting anything bigger than 1 to a power of at least {K} is certain to overflow.")?;
+    //             if r_value == K {
+    //                 write!(f,
+    //                     "\n\nremember that 2**{K} can't be stored in {K} digits; the biggest number you can store in {K} bits is {K} consecutive 1s, \
+    //                     which is 1 value smaller than 2**{K}"
+    //                 )?;
+    //             }
+    //             Ok(())
+    //         }
 
-    /// Failed to convert between integer types
-    #[code(RUN, 52)]
-    #[err({ failure, .. }, |f| write!(f, "failed conversion: {failure}"))]
-    #[inlay({ .. }, |f| write!(f, "integer conversion failed"))]
-    #[help({ .. }, |f, _src| write!(f, "ensure the expression fits in the target type"))]
-    #[info({ op, op_range, failure }, [
-        (*op_range, FailedConversionMsg::new(*op, OpSide::Prefix, *failure)),
-    ])]
-    FailedConvert {
-        op: TokenEq,
-        op_range: Range<usize>,
-        failure: IntConversionFailure,
-    },
+    //         // no additional notes
+    //         _ => Ok(())
+    //     }
+    // })]
+    // #[info((e), *e)]
+    // Overflow(OverflowError),
+
+    // /// Failed to convert between integer types
+    // #[code(RUN, 52)]
+    // #[err({ failure, .. }, |f| write!(f, "failed conversion: {failure}"))]
+    // #[inlay({ .. }, |f| write!(f, "integer conversion failed"))]
+    // #[help({ .. }, |f, _src| write!(f, "ensure the expression fits in the target type"))]
+    // #[info({ op, op_range, failure }, [
+    //     (*op_range, FailedConversionMsg::new(*op, OpSide::Prefix, *failure)),
+    // ])]
+    // FailedConvert {
+    //     op: TokenEq,
+    //     op_range: Range<usize>,
+    //     failure: IntConversionFailure,
+    // },
 }
 }
 

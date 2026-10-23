@@ -11,7 +11,7 @@ use crate::{
     },
     error::{ContextError, ErrorType, ImmutableAssignment, OpSide},
     exec::{env::Environment, error::Failure},
-    grammar::ast::{self, AstNodeFinal, VarKeyword},
+    grammar::ast::{self, AstNode, AstNodeFinal, VarKeyword},
     interp::{
         env::{InterpEnvironment, InterpVar},
         value::{InterpBinaryOpFn, InterpLabel, InterpOp, InterpUnaryOpFn, InterpVal},
@@ -644,11 +644,7 @@ impl<'src> CoagulateVars<'src> for AnalysisAssignment<'src> {
 }
 
 impl<'src> ast::TypeExpr<'src> {
-    fn analyze(
-        &self,
-        _source: &'src str,
-        _env: &StaticEnvironment<'src>,
-    ) -> Result<'src, AbstractType<'src>> {
+    fn analyze(&self, _source: &'src str, _env: &StaticEnvironment<'src>) -> AbstractType<'src> {
         let ok_ty = if let Some(name) = self.name.val {
             StaticType::Primitive(match name {
                 ast::TypenameKeyword::None => PrimitiveType::None,
@@ -665,20 +661,18 @@ impl<'src> ast::TypeExpr<'src> {
             todo!("custom types")
         };
 
-        Ok(AbstractType::Concrete(
-            if let Some(or_ty) = self.or_ty.as_ref() {
-                StaticType::OrTy(Box::new(Fallible {
-                    then: ok_ty,
-                    or: match or_ty.ty.val {
-                        ast::OrTypeKeyword::None => OrType::None,
-                        ast::OrTypeKeyword::Nevr => OrType::Nevr,
-                        ast::OrTypeKeyword::Fail => OrType::Fail,
-                    },
-                }))
-            } else {
-                ok_ty
-            },
-        ))
+        AbstractType::Concrete(if let Some(or_ty) = self.or_ty.as_ref() {
+            StaticType::OrTy(Box::new(Fallible {
+                then: ok_ty,
+                or: match or_ty.ty.val {
+                    ast::OrTypeKeyword::None => OrType::None,
+                    ast::OrTypeKeyword::Nevr => OrType::Nevr,
+                    ast::OrTypeKeyword::Fail => OrType::Fail,
+                },
+            }))
+        } else {
+            ok_ty
+        })
     }
 }
 
@@ -826,7 +820,8 @@ impl<'src> Analyze<'src> for ast::BlockExpr<'src> {
                 | Statement::If(_)
                 | Statement::Halt(_)
                 | Statement::Skip(_)
-                | Statement::Block(_) => unreachable!("analysis came from a LoopBlock"),
+                | Statement::Block(_)
+                | Statement::Defer(_) => unreachable!("analysis came from a LoopBlock"),
             }),
             ast::BlockExpr::Block(stmt) => stmt.analyze(source, env, ret).map(BlockExpr::Block),
         }
@@ -1179,7 +1174,7 @@ impl<'src> ast::Binary<'src> {
     ) -> Result<'src, AnalysisExpr<'src>> {
         let lhs = self.lhs.analyze(source, env, None)?;
         let r_ty = if let ast::Expr::Type(ref type_expr) = self.rhs {
-            type_expr.analyze(source, env)?
+            type_expr.analyze(source, env)
         } else {
             unimplemented!("should be handled by grammar");
         };
@@ -1973,6 +1968,32 @@ impl<'src> GetType<'src> for AnalysisBlockStmt<'src> {
     }
 }
 
+fn analyze_defers<'ast, 'src: 'ast, I>(
+    iter: I,
+    source: &'src str,
+    env: &mut StaticEnvironment<'src>,
+    ret: Option<&AbstractType<'src>>, // TBD: does `block` return a value?
+) -> Result<'src, AnalysisBlockStmt<'src>>
+where
+    I: IntoIterator<Item = &'ast ast::Declaration<'src>>,
+{
+    let mut iter = iter.into_iter();
+    let (lo, hi) = iter.size_hint();
+    let mut stmts = Vec::with_capacity(hi.unwrap_or(lo));
+    while let Some(decl) = iter.next() {
+        if let ast::Declaration::Defer(decl) = decl {
+            stmts.push(Statement::Defer(DeferNode {
+                on_pop: decl.on_pop.analyze(source, env, ret)?,
+                inner: analyze_defers(iter, source, env, ret)?,
+            }));
+            break;
+        } else if let Some(stmt) = decl.analyze(source, env, None).transpose() {
+            stmts.push(stmt?);
+        }
+    }
+    Ok(BlockStmt { stmts })
+}
+
 impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
     type Ouptut = AnalysisBlockStmt<'src>;
 
@@ -1980,22 +2001,16 @@ impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        _ret: Option<&AbstractType<'src>>, // TBD: does `block` return a value?
+        ret: Option<&AbstractType<'src>>, // TBD: does `block` return a value?
     ) -> Result<'src, Self::Ouptut> {
         env.push_scope().unwrap_or_else(|| {
             todo!("warning: cannot push a scope here, need to be in a function");
         });
-        self.body
-            .iter()
-            .filter_map(|decl| decl.analyze(source, env, None).transpose())
-            .collect::<Result<'src, Vec<_>>>()
-            .map(|stmts| BlockStmt { stmts })
-            .inspect(|_| {
-                // TODO: drop each variable in scope
-                if env.pop_scope().is_none() {
-                    todo!("scope pushes and pops should be balanced - tried to pop global scope");
-                }
-            })
+        let res = analyze_defers(&self.body, source, env, ret);
+        if env.pop_scope().is_none() {
+            todo!("scope pushes and pops should be balanced - tried to pop global scope");
+        }
+        res
     }
 }
 
@@ -2032,6 +2047,61 @@ impl<'src> CoagulateVars<'src> for AnalysisBlockStmt<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DeferNode<L, O, V> {
+    pub inner: BlockStmt<L, O, V>,
+    pub on_pop: BlockStmt<L, O, V>,
+}
+
+pub type AnalysisDeferNode<'src> =
+    DeferNode<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type RuntimeDeferNode<'src> = DeferNode<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
+pub type InterpDeferNode<'src> = DeferNode<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+
+impl<'src> GetType<'src> for AnalysisDeferNode<'src> {
+    type Output<'ty>
+        = &'ty AbstractType<'src>
+    where
+        'src: 'ty;
+
+    fn get_type<'ty>(
+        &'ty self,
+        env: &'ty StaticEnvironment<'src>,
+    ) -> Option<&'ty AbstractType<'src>> {
+        // TBD: can defer change the return type?
+        self.on_pop
+            .get_type(env)
+            .filter(|ty| !ty.is_compatible(&AbstractType::None))
+            .or_else(|| self.inner.get_type(env))
+    }
+}
+
+impl<'src> CementVars for AnalysisDeferNode<'src> {
+    type Concrete = RuntimeDeferNode<'src>;
+
+    fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
+        DeferNode {
+            inner: self.inner.cement_vars(ranges),
+            on_pop: self.on_pop.cement_vars(ranges),
+        }
+    }
+}
+
+impl<'src> CoagulateVars<'src> for AnalysisDeferNode<'src> {
+    type Interp = InterpDeferNode<'src>;
+
+    fn coagulate_vars(
+        self,
+        s_env: &StaticEnvironment<'src>,
+        i_env: &mut InterpEnvironment<'src>,
+    ) -> Self::Interp {
+        DeferNode {
+            inner: self.inner.coagulate_vars(s_env, i_env),
+            on_pop: self.on_pop.coagulate_vars(s_env, i_env),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement<L, O, V> {
     Expr(ExprStmt<L, O, V>),
     Print(PrintStmt<L, O, V>),
@@ -2043,6 +2113,7 @@ pub enum Statement<L, O, V> {
     Halt(HaltStmt<L, O, V>),
     Skip(SkipStmt<L, O, V>),
     Block(BlockStmt<L, O, V>),
+    Defer(DeferNode<L, O, V>),
 }
 
 pub type AnalysisStatement<'src> =
@@ -2068,6 +2139,7 @@ impl<'src> GetType<'src> for AnalysisStatement<'src> {
             Self::Halt(stmt) => stmt.get_type(env),
             Self::Skip(stmt) => stmt.get_type(env),
             Self::Block(stmt) => stmt.get_type(env),
+            Self::Defer(node) => node.get_type(env),
         }
     }
 }
@@ -2109,6 +2181,7 @@ impl<'src> CementVars for AnalysisStatement<'src> {
             Self::Halt(stmt) => Statement::Halt(stmt.cement_vars(ranges)),
             Self::Skip(stmt) => Statement::Skip(stmt.cement_vars(ranges)),
             Self::Block(stmt) => Statement::Block(stmt.cement_vars(ranges)),
+            Self::Defer(node) => Statement::Defer(node.cement_vars(ranges)),
         }
     }
 }
@@ -2132,22 +2205,8 @@ impl<'src> CoagulateVars<'src> for AnalysisStatement<'src> {
             Self::Halt(stmt) => Statement::Halt(stmt.coagulate_vars(s_env, i_env)),
             Self::Skip(stmt) => Statement::Skip(stmt.coagulate_vars(s_env, i_env)),
             Self::Block(stmt) => Statement::Block(stmt.coagulate_vars(s_env, i_env)),
+            Self::Defer(node) => Statement::Defer(node.coagulate_vars(s_env, i_env)),
         }
-    }
-}
-
-impl<'src> Analyze<'src> for ast::DeclDefer<'src> {
-    type Ouptut = ();
-
-    fn analyze(
-        &self,
-        source: &'src str,
-        env: &mut StaticEnvironment<'src>,
-        _ret: Option<&AbstractType<'src>>,
-    ) -> Result<'src, Self::Ouptut> {
-        let on_pop = self.on_pop.analyze(source, env, None)?;
-        env.decl_defer(on_pop);
-        Ok(())
     }
 }
 
@@ -2166,17 +2225,19 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
             return Err(vec![e]);
         }
         let ident = self.binding.ident.lex; // TODO: what if there's multiple?
-        let annotated_type = self.ty.as_ref().map(|annotation| {
-            annotation
-                .ty
-                .analyze(source, env)
-                .expect("infallible at the time of writing")
-        });
+        let annotated_type = self
+            .ty
+            .as_ref()
+            .map(|annotation| annotation.ty.analyze(source, env));
         let expr = self
             .assignment
             .as_ref()
             .map(|x| x.expr.analyze(source, env, annotated_type.as_ref()))
             .transpose()?;
+        let ty = annotated_type.clone().or_else(|| {
+            expr.as_ref()
+                .and_then(|x| x.get_type(env).map(|t| t.to_abstract()))
+        });
 
         #[cfg(debug_assertions)]
         {
@@ -2218,20 +2279,42 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                         .ok_or_else(|| vec![todo!("error: missing assignment for constant")])?,
                     Some(Box::new(self.binding.ident)), // TODO: what if there's multiple?
                 )
-                .map_err(|e| vec![todo!("error: {e}")])
-                .map(|()| None),
+                .map(|()| None)
+                .map_err(|e| {
+                    vec![ContextError::node_error(
+                        source,
+                        self.ty
+                            .as_ref()
+                            .map(|x| &x.ty as &dyn AstNode)
+                            .or_else(|| self.assignment.as_ref().map(|x| &x.expr as &dyn AstNode))
+                            .expect(
+                                "type must have come from one of these two to produce an error",
+                            ),
+                        e.into(),
+                    )]
+                }),
 
             // Variable
             VarKeyword::Uni | VarKeyword::Let => env
                 .decl_var(
                     ident,
-                    expr.as_ref()
-                        .and_then(|x| x.get_type(env))
-                        .map(|t| t.to_abstract()),
+                    ty,
                     true,
                     Some(Box::new(self.binding.ident)), // TODO: what if there's multiple?
                 )
-                .map_err(|e| todo!("error: {e}"))
+                .map_err(|e| {
+                    ContextError::node_error(
+                        source,
+                        self.ty
+                            .as_ref()
+                            .map(|x| &x.ty as &dyn AstNode)
+                            .or_else(|| self.assignment.as_ref().map(|x| &x.expr as &dyn AstNode))
+                            .expect(
+                                "type must have come from one of these two to produce an error",
+                            ),
+                        e.into(),
+                    )
+                })
                 .and_then(|(unique_id, ty, is_global)| {
                     if let Some(t) = annotated_type {
                         if let Some(ty) = ty {
@@ -2273,7 +2356,10 @@ impl<'src> Analyze<'src> for ast::Declaration<'src> {
             Self::Var(decl) => decl
                 .analyze(source, env, ret)
                 .map(|x| x.map(Statement::Expr)),
-            Self::Defer(decl) => decl.analyze(source, env, ret).map(|()| None),
+            Self::Defer(_) => {
+                // TODO: error when at global scope
+                unimplemented!("should be handled by block")
+            }
             Self::Stmt(stmt) => stmt.analyze(source, env, ret).map(Some),
         }
     }
