@@ -901,6 +901,31 @@ impl<'src> AstNode<'src> for IfStmt<'src> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct DeclDefer<'src> {
+    /// `defer`
+    pub kw: Lexeme<'src>,
+    pub on_pop: BlockStmt<'src>,
+}
+
+impl<'src> AstNode<'src> for DeclDefer<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.on_pop.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.kw, &self.on_pop).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.kw, &self.on_pop).expansion(source)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum LoopKind<'src> {
     /// `kw` is `loop`
@@ -910,13 +935,19 @@ pub enum LoopKind<'src> {
     Cord,
 
     /// `kw` is `rep`
-    Rep { pred: Expr<'src> },
+    Rep {
+        /// The condition on which the loop will continue
+        pred: Expr<'src>,
+    },
 
     /// `kw` is `for`
     For {
+        /// The variable `iter` items are stored in
         bind: BindingPattern<'src>,
         /// `in`
         in_kw: Lexeme<'src>,
+        /// An expression which produces an iterable value
+        /// (i.e. a value which overloads `++`)
         iter: Expr<'src>,
     },
 }
@@ -1380,12 +1411,17 @@ impl<'src> AstNode<'src> for DeclVar<'src> {
 #[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
 pub enum Declaration<'src> {
     Var(DeclVar<'src>),
+    Defer(DeclDefer<'src>),
     Stmt(Statement<'src>),
 }
 
 impl<'src> Declaration<'src> {
     pub const fn var(inner: DeclVar<'src>) -> Self {
         Self::Var(inner)
+    }
+
+    pub const fn defer(inner: DeclDefer<'src>) -> Self {
+        Self::Defer(inner)
     }
 
     pub const fn stmt(inner: Statement<'src>) -> Self {

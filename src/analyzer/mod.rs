@@ -2124,6 +2124,21 @@ impl<'src> CoagulateVars<'src> for AnalysisStatement<'src> {
     }
 }
 
+impl<'src> Analyze<'src> for ast::DeclDefer<'src> {
+    type Ouptut = ();
+
+    fn analyze(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        _ret: Option<&AbstractType<'src>>,
+    ) -> Result<'src, Self::Ouptut> {
+        let on_pop = self.on_pop.analyze(source, env, None)?;
+        env.decl_defer(on_pop);
+        Ok(())
+    }
+}
+
 impl<'src> Analyze<'src> for ast::DeclVar<'src> {
     type Ouptut = Option<ExprStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>>;
 
@@ -2246,6 +2261,7 @@ impl<'src> Analyze<'src> for ast::Declaration<'src> {
             Self::Var(decl) => decl
                 .analyze(source, env, ret)
                 .map(|x| x.map(Statement::Expr)),
+            Self::Defer(decl) => decl.analyze(source, env, ret).map(|()| None),
             Self::Stmt(stmt) => stmt.analyze(source, env, ret).map(Some),
         }
     }

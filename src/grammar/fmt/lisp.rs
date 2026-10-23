@@ -1,8 +1,9 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     grammar::ast::{
-        Binary, BlockExpr, BlockStmt, DeclVar, Declaration, Directive, Expr, Grouping, IfStmt,
-        Literal, LoopBlock, OrBody, OrStmt, OrType, Statement, TypeExpr, Unary, Variable,
+        Binary, BlockExpr, BlockStmt, DeclDefer, DeclVar, Declaration, Directive, Expr, Grouping,
+        IfStmt, Literal, LoopBlock, LoopKind, OrBody, OrStmt, OrType, Statement, TypeExpr, Unary,
+        Variable,
     },
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
 };
@@ -30,8 +31,44 @@ impl<T: ?Sized + LispDisplay> std::fmt::Display for Lisp<T> {
     }
 }
 
+/// Adapter to display contents as lisp
+#[repr(transparent)]
+pub struct LispDyn<'a>(dyn 'a + LispDisplay);
+
+impl<'a> LispDyn<'a> {
+    pub const fn new<'b>(value: &'b (dyn 'a + LispDisplay)) -> &'b Self {
+        // SAFETY: Lisp is a transparent wrapper for `T`.
+        unsafe { std::mem::transmute(value) }
+    }
+}
+
+impl std::fmt::Display for LispDyn<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        LispDisplay::fmt(&self.0, f) // calls LispDisplay::fmt, since T isn't proven to implement any other fmt
+    }
+}
+
+fn lisp<'ops, T, U, I>(f: &mut std::fmt::Formatter<'_>, op: &T, operands: I) -> std::fmt::Result
+where
+    T: ?Sized + std::fmt::Display,
+    U: ?Sized + std::fmt::Display + 'ops,
+    I: 'ops + IntoIterator<Item = &'ops U>,
+{
+    f.write_str("(")?;
+    if f.alternate() {
+        std::fmt::Display::fmt(&crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(op), f)?;
+    } else {
+        &op.fmt(f)?;
+    }
+    for operand in operands {
+        f.write_str(" ")?;
+        operand.fmt(f)?;
+    }
+    f.write_str(")")
+}
+
 macro_rules! parenthesize {
-    ($f:expr, $kw:expr $(, $args:expr)* $(,)?) => {{
+    ($f:expr, $kw:expr, [$($args:expr),* $(,)?] $(,)?) => {{
         $f.write_str("(")?;
         if $f.alternate() {
             std::fmt::Display::fmt(&crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style($kw), $f)?;
@@ -39,8 +76,8 @@ macro_rules! parenthesize {
             std::fmt::Display::fmt(&$kw, $f)?;
         }
         $(
-            $f.write_str(" ")?;
-            std::fmt::Display::fmt(&$args, $f)?;
+        $f.write_str(" ")?;
+        std::fmt::Display::fmt(&$args, $f)?;
         )*
         $f.write_str(")")
     }};
@@ -48,19 +85,19 @@ macro_rules! parenthesize {
 
 impl LispDisplay for Binary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        parenthesize!(f, self.op.lex, Lisp::new(&self.lhs), Lisp::new(&self.rhs))
+        parenthesize!(f, self.op.lex, [Lisp::new(&self.lhs), Lisp::new(&self.rhs)])
     }
 }
 
 impl LispDisplay for Unary<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        parenthesize!(f, self.op.lex, Lisp::new(&self.operand))
+        parenthesize!(f, self.op.lex, [Lisp::new(&self.operand)])
     }
 }
 
 impl LispDisplay for Grouping<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        parenthesize!(f, "group", Lisp::new(&self.expr))
+        parenthesize!(f, "group", [Lisp::new(&self.expr)])
     }
 }
 
@@ -84,8 +121,7 @@ impl LispDisplay for TypeExpr<'_> {
             parenthesize!(
                 f,
                 pipe.lex,
-                Lisp::new(&TypeName(name.lex)),
-                Lisp::new(&TypeName(ty.lex)),
+                [Lisp::new(&TypeName(name.lex)), Lisp::new(&TypeName(ty.lex))]
             )
         } else {
             std::fmt::Display::fmt(Lisp::new(&TypeName(name.lex)), f)
@@ -144,30 +180,31 @@ impl LispDisplay for IfStmt<'_> {
             then,
             or,
         } = self;
-        f.write_str("(")?;
-        if f.alternate() {
-            std::fmt::Display::fmt(
-                &crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(if_kw.lex),
-                f,
-            )?;
-        } else {
-            std::fmt::Display::fmt(&(if_kw.lex), f)?;
-        }
-        f.write_str(" ")?;
-        std::fmt::Display::fmt(Lisp::new(pred), f)?;
-        f.write_str(" ")?;
-        std::fmt::Display::fmt(Lisp::new(then), f)?;
-        if let Some(or) = or.as_deref() {
-            f.write_str(" ")?;
-            std::fmt::Display::fmt(Lisp::new(or), f)?;
-        }
-        f.write_str(")")
+        lisp(
+            f,
+            &if_kw.lex,
+            ([LispDyn::new(pred), LispDyn::new(then)])
+                .into_iter()
+                .chain(or.as_deref().into_iter().map(|or| LispDyn::new(or))),
+        )
     }
 }
 
 impl LispDisplay for LoopBlock<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        let Self {
+            label: _, // TBD
+            kw,
+            kind,
+            block,
+        } = self;
+        match kind {
+            LoopKind::Loop | LoopKind::Cord => lisp(f, &kw.lex, std::iter::once(Lisp::new(block))),
+
+            LoopKind::Rep { .. } | LoopKind::For { .. } => {
+                Err(std::fmt::Error) // not an expression
+            }
+        }
     }
 }
 
@@ -205,11 +242,11 @@ impl LispDisplay for Statement<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Expr(inner) => LispDisplay::fmt(&inner.expr, f),
-            Self::Print(_) => Ok(()),
+            Self::Print(_) => Ok(()), // wont this leave an extra space?
             Self::If(inner) => LispDisplay::fmt(inner, f),
             Self::Loop(inner) => LispDisplay::fmt(inner, f),
-            Self::Halt(inner) => todo!(),
-            Self::Skip(inner) => todo!(),
+            Self::Halt(_inner) => todo!(),
+            Self::Skip(_inner) => todo!(),
             Self::Block(inner) => LispDisplay::fmt(inner, f),
         }
     }
@@ -219,6 +256,7 @@ impl LispDisplay for Declaration<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Var(inner) => LispDisplay::fmt(inner, f),
+            Self::Defer(_inner) => Ok(()), // wont this leave an extra space?
             Self::Stmt(inner) => LispDisplay::fmt(inner, f),
         }
     }
@@ -226,18 +264,8 @@ impl LispDisplay for Declaration<'_> {
 
 impl LispDisplay for BlockStmt<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { open, body, close } = self;
-        f.write_str("(")?;
-        if f.alternate() {
-            std::fmt::Display::fmt(&crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style("block"), f)?;
-        } else {
-            std::fmt::Display::fmt(&"block", f)?;
-        }
-        f.write_str(" ")?;
-        for item in body {
-            std::fmt::Display::fmt(Lisp::new(item), f)?;
-        }
-        f.write_str(")")
+        let Self { body, .. } = self;
+        lisp(f, "block", body.iter().map(|x| LispDyn::new(x)))
     }
 }
 

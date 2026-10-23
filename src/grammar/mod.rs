@@ -17,8 +17,8 @@ use crate::{
 };
 use Operator::*;
 use ast::{
-    Binary, BindingPattern, Directive, DirectiveKw, Expr, Grouping, Label, Literal, LoopBlock,
-    LoopKind, OrType, ScopeLabel, SkipStmt, TypeAnnotation, TypeExpr, Unary,
+    Binary, BindingPattern, DeclDefer, Directive, DirectiveKw, Expr, Grouping, Label, Literal,
+    LoopBlock, LoopKind, OrType, ScopeLabel, SkipStmt, TypeAnnotation, TypeExpr, Unary,
 };
 
 pub mod ast;
@@ -243,9 +243,14 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(Program { decls })
     }
 
-    /// `declaration -> var_declaration | statement`
+    /// `declaration -> var_declaration | defer_declaration | statement`
     pub fn declaration(&mut self) -> Result<Declaration<'src>, ContextError<'src>> {
         self.var_declaration()
+            .map(|res| res.map(Declaration::var))
+            .or_else(|| {
+                self.defer_declaration()
+                    .map(|res| res.map(Declaration::defer))
+            })
             .or_else(|| Some(self.statement().map(Declaration::stmt)))
             .ok_or_else(|| self.error(ExpectedToken::Declaration))
             .flatten()
@@ -263,9 +268,9 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     }
 
     /// `var_declaration -> ( "uni" | "pvt" | "let" ) pattern ( type_annotation )? ( assignment )? ";"`
-    pub fn var_declaration(&mut self) -> Option<Result<Declaration<'src>, ContextError<'src>>> {
+    pub fn var_declaration(&mut self) -> Option<Result<DeclVar<'src>, ContextError<'src>>> {
         self.pull_into().map(|var_kw| {
-            Ok(Declaration::var(DeclVar {
+            Ok(DeclVar {
                 var_kw,
                 binding: self
                     .bind_pattern()
@@ -276,7 +281,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                     LexValue::Punctuation(Punctuation::Semi),
                     ExpectedToken::Semi,
                 )?,
-            }))
+            })
         })
     }
 
@@ -291,7 +296,13 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `statement -> block_statement | print_statement | halt_statement | skip_statement | if_statement | loop_statement | expression_statement`
+    /// `statement -> block_statement
+    ///     | print_statement
+    ///     | halt_statement
+    ///     | skip_statement
+    ///     | if_statement
+    ///     | loop_statement
+    ///     | expression_statement`
     pub fn statement(&mut self) -> Result<Statement<'src>, ContextError<'src>> {
         self.block_statement()
             .map(|res| res.map(Statement::Block))
@@ -331,6 +342,20 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 )?,
             })
         })
+    }
+
+    /// `defer_declaration -> "defer" block_statement`
+    pub fn defer_declaration(&mut self) -> Option<Result<DeclDefer<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Defer))
+            .map(|kw| {
+                Ok(DeclDefer {
+                    kw,
+                    on_pop: self
+                        .block_statement()
+                        .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
+                        .flatten()?,
+                })
+            })
     }
 
     /// `if_statement -> "if" expression block_statement ( or_statement )?`

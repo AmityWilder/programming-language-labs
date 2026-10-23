@@ -400,20 +400,22 @@ mod scan {
                 assert_matches!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[
+                        // without a number after the hyphen, the number literal is "-5e",
+                        // but "e" isn't a valid number literal suffix
                         Err(ContextError {
                             err: ErrorType::InvalidNumLiteral(_),
                             ..
                         }),
-                        // without a number after the hyphen, the number literal is "-5e",
-                        // but "e" isn't a valid number literal suffix
+                        // what's important is just that everything after the e ISN'T part of the flpt literal,
+                        // and that it isn't used up. it doesn't matter what it actually resolves to.
                         Ok(Token {
-                            lex: "-",
-                            val: LexValue::Punctuation(Punctuation::SubNeg),
+                            lex: "--",
+                            val: LexValue::Punctuation(Punctuation::Decr),
                             mac: None
                         }),
                         Ok(Token {
-                            lex: "-5",
-                            val: LexValue::SIntLiteral(-5),
+                            lex: "5",
+                            val: LexValue::SIntLiteral(5),
                             mac: None
                         })
                     ]

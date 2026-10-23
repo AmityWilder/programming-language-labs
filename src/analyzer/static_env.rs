@@ -1,4 +1,4 @@
-use super::{AnalysisBlockStmt, AnalysisFnDef};
+use super::{AnalysisBlockStmt, AnalysisFnDef, BlockStmt};
 use crate::{
     Todo,
     analyzer::{
@@ -198,6 +198,9 @@ pub struct OpOverload<'src> {
 /// A unique [`EnvItem`] ID
 pub type VarId = usize;
 
+/// A unique [`Scope`] ID
+pub type ScopeId = usize;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SizeUpdateError {
     AlreadySized(usize),
@@ -237,6 +240,9 @@ pub struct DeclItem<'src> {
 pub struct StaticEnvironment<'src> {
     /// Actual storage for the definitions, independent of visibility
     decls: Vec<DeclItem<'src>>,
+    /// Blocks that get executed when their associated scope pops
+    defers: Vec<(ScopeId, AnalysisBlockStmt<'src>)>,
+    curr_scope_id: usize,
     /// NOTE: this does NOT represent "the scope where all global variables belong",
     /// this is just the scope of all things outside of any function!!
     /// It is used to guarantee the stack is never empty.
@@ -248,6 +254,8 @@ impl<'src> StaticEnvironment<'src> {
     pub const fn new() -> Self {
         Self {
             decls: Vec::new(),
+            defers: Vec::new(),
+            curr_scope_id: 0,
             global: Scope::new(),
             layers: Vec::new(),
         }
@@ -307,8 +315,10 @@ impl<'src> StaticEnvironment<'src> {
         // Relies on the assumption that IDs increase monotonically along the stack
         let StaticEnvironment {
             decls: items,
+
             global,
             layers,
+            ..
         } = self;
         let mut f = Self::id_offset(items.len());
         let mut items = items.iter().rev();
@@ -332,6 +342,7 @@ impl<'src> StaticEnvironment<'src> {
             decls: items,
             global,
             layers,
+            ..
         } = self;
         let mut items = items.iter_mut().rev();
         let mut f = Self::id_offset(items.len());
@@ -356,48 +367,6 @@ impl<'src> StaticEnvironment<'src> {
             .filter(|(_, item)| key.is_matching(&item.key))
     }
 
-    pub fn finalize_vars(&mut self) -> Result<(), Vec<VarId>> {
-        let mut unresolved = Vec::new();
-        for id in 0..self.decls.len() {
-            let prev_end = if let Some(atop) = self.decls[id].loc.atop {
-                if let Some(range) = self.decls[atop].loc.range {
-                    range.end
-                } else {
-                    println!("ambiguous type position cascade");
-                    continue;
-                }
-            } else {
-                0
-            };
-            let size = match self.decls[id].item.val.get_type(self) {
-                Some(VarType::Fun(_)) => {
-                    // TODO: function sizes
-                    0
-                }
-                Some(VarType::Abstract(AbstractType::Concrete(ty))) => {
-                    // TODO: what about constants?
-                    ty.size()
-                        .expect("variable sizes must be static")
-                        .map_err(|e| vec![todo!("error: {e}")])? // TODO: how do we report this?
-                }
-                _ => {
-                    println!("error: type never resolved for {:?}", self.decls[id]);
-                    unresolved.push(id);
-                    continue;
-                }
-            };
-            self.decls[id].loc.range = Some(Range {
-                start: prev_end,
-                end: prev_end + size,
-            });
-        }
-        if unresolved.is_empty() {
-            Ok(())
-        } else {
-            Err(unresolved)
-        }
-    }
-
     /// Entering a function definition
     pub fn push_layer(&mut self) {
         self.layers.push(Layer::new());
@@ -414,6 +383,7 @@ impl<'src> StaticEnvironment<'src> {
     /// Returns [`None`] if not in a function; since
     #[must_use = "indicates success"]
     pub fn push_scope(&mut self) -> Option<()> {
+        self.curr_scope_id = self.curr_scope_id.strict_add(1);
         self.curr_layer_mut()
             .map(|layer| layer.scopes.push(Scope::new()))
     }
@@ -464,20 +434,18 @@ impl<'src> StaticEnvironment<'src> {
         is_global: bool,
         node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
     ) -> Result<(VarId, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
-        Ok(
-            match self.decl_item(EnvKey::Ident(name), EnvItem::Var(ty, is_global), node) {
-                (
-                    id,
-                    StaticItem {
-                        key: _,
-                        val: EnvItem::Var(ty, is_global),
-                        node: _,
-                    },
-                ) => (id, ty, *is_global),
+        match self.decl_item(EnvKey::Ident(name), EnvItem::Var(ty, is_global), node) {
+            (
+                id,
+                StaticItem {
+                    key: _,
+                    val: EnvItem::Var(ty, is_global),
+                    node: _,
+                },
+            ) => Ok((id, ty, *is_global)),
 
-                _ => unreachable!("pushed a var"),
-            },
-        )
+            _ => unreachable!("pushed a var"),
+        }
     }
 
     pub fn decl_pvt(
@@ -508,6 +476,53 @@ impl<'src> StaticEnvironment<'src> {
         node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
     ) {
         self.decl_item(EnvKey::Op(op), EnvItem::Op(def), node);
+    }
+
+    pub fn decl_defer(&mut self, on_pop: AnalysisBlockStmt<'src>) {
+        // TBD: how will scope pop be detected?
+        self.defers.push((self.curr_scope_id, on_pop));
+    }
+
+    pub fn finalize_vars(&mut self) -> Result<(), Vec<VarId>> {
+        let mut unresolved = Vec::new();
+        for id in 0..self.decls.len() {
+            let prev_end = if let Some(atop) = self.decls[id].loc.atop {
+                if let Some(range) = self.decls[atop].loc.range {
+                    range.end
+                } else {
+                    println!("ambiguous type position cascade");
+                    continue;
+                }
+            } else {
+                0
+            };
+            let size = match self.decls[id].item.val.get_type(self) {
+                Some(VarType::Fun(_)) => {
+                    // TODO: function sizes
+                    0
+                }
+                Some(VarType::Abstract(AbstractType::Concrete(ty))) => {
+                    // TODO: what about constants?
+                    ty.size()
+                        .expect("variable sizes must be static")
+                        .map_err(|e| vec![todo!("error: {e}")])? // TODO: how do we report this?
+                }
+                _ => {
+                    println!("error: type never resolved for {:?}", self.decls[id]);
+                    unresolved.push(id);
+                    continue;
+                }
+            };
+            self.decls[id].loc.range = Some(Range {
+                start: prev_end,
+                end: prev_end + size,
+            });
+        }
+        if unresolved.is_empty() {
+            Ok(())
+        } else {
+            Err(unresolved)
+        }
     }
 
     pub fn cement_ranges(mut self) -> Result<Box<[Range<usize>]>, impl IntoIterator<Item = VarId>> {

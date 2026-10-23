@@ -395,6 +395,10 @@ define_token_eq! {
         /// ```
         Cord = "cord",
 
+        /// Code that will be executed when scope pops,
+        /// whether it's natural or because of a `halt`/`give`/`fail`
+        Defer = "defer",
+
         // Loop control
         /// Quit the loop.
         /// ### Syntax
