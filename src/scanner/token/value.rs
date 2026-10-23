@@ -41,7 +41,9 @@ impl<'src> TextLiteral<'src> {
     }
 
     /// Replace escape sequences with their meanings
-    pub fn process(&self) -> Result<Cow<'src, str>, ErrorType<'src>> {
+    ///
+    /// Returns [`Err`] if an escape sequence is invalid
+    pub fn process(&self) -> Result<Cow<'src, str>, &'src str> {
         if self.has_escapes() {
             let mut processed = String::with_capacity(self.content.len());
             let mut prev_end = 0;
@@ -271,7 +273,9 @@ impl<'src> LexValue<'src> {
     }
 
     /// Parses a string literal lexeme into its value, without allocating
-    pub fn text_literal(src: &'src str) -> Result<Self, ErrorType<'src>> {
+    ///
+    /// Returns [`Err`] if there is an invalid escape sequence
+    pub fn text_literal(src: &'src str) -> Result<Self, &'src str> {
         let content = src
             .strip_circumfix(TEXT_DELIM, TEXT_DELIM)
             .expect("string literal tokens should include delimiters (`\"`)");
@@ -310,7 +314,7 @@ impl<'src> Escapes<'src> {
 }
 
 impl<'src> Iterator for Escapes<'src> {
-    type Item = Result<(Range<usize>, char), ErrorType<'src>>;
+    type Item = Result<(Range<usize>, char), &'src str>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.source.find(ESCAPE).map(|pos| {
@@ -323,7 +327,7 @@ impl<'src> Iterator for Escapes<'src> {
                     .expect("source should be a substr of original")
                     .start,
             );
-            if let Ok((range, _)) = &item {
+            if let Ok((range, _)) = item {
                 self.source = self.original.get(range.end..).expect(
                     "escape sequence range's end should be a valid position within original",
                 );
@@ -492,7 +496,7 @@ mod escapes_tests {
     #[test]
     fn test_esc_esc() {
         const SOURCE: &str = r"apple \\foo\0";
-        const EXPECT: [Result<(Range<usize>, char), ErrorType<'_>>; 2] = [
+        const EXPECT: [Result<(Range<usize>, char), &str>; 2] = [
             Ok((
                 Range {
                     start: "apple ".len(),

@@ -253,7 +253,7 @@ macro_rules! incr_decr_op {
                                 stringify!($Rhs),
                             );
                         });
-                        let InterpVal::Primitive(PrimitiveVal::$rhs(rhs)) = &mut *rhs else {
+                        let InterpVal::Primitive(PrimitiveVal::$rhs(ref mut rhs)) = *rhs else {
                             panic!(
                                 "{}<{}> rhs type mismatch should be caught by static analysis\
                                 \n expected: {}\

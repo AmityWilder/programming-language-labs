@@ -390,12 +390,12 @@ pub fn escape_char(src: &str) -> Option<(usize, Result<char, ()>)> {
 /// Range part of return is the range in the string literal that should get replaced with the char part of the literal
 ///
 /// Errors if `i` is not the position of a `\` in `src`
-fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>> {
+fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), &str> {
     let esc_rest = src
         .get(i..)
         .expect("`i` should not be within a UTF-8 character");
     escape_char(esc_rest)
-        .ok_or(ErrorType::InvalidEscape(esc_rest))
+        .ok_or(esc_rest)
         .and_then(|(len, res)| {
             let esc = esc_rest.get(..len).expect(
                 "return of escape_char, starting at `i`, should not be within a UTF-8 character",
@@ -404,8 +404,7 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), ErrorType<'_>
                 i..i.checked_add(len)
                     .expect("should be at most the length of a string already in memory"),
             );
-            res.map(|ch| (range, ch))
-                .map_err(|()| ErrorType::InvalidEscape(esc))
+            res.map(|ch| (range, ch)).map_err(|()| esc)
         })
 }
 

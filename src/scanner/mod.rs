@@ -358,7 +358,8 @@ impl<'src> Scanner<'src> {
                         lex,
                         val,
                         mac: None,
-                    }),
+                    }).map_err(|esc| ErrorType::InvalidEscape(esc)),
+
                     CHAR_DELIM => LexValue::char_literal(lex).map(|val| Token {
                         lex,
                         val,

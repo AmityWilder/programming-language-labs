@@ -879,7 +879,13 @@ impl<'src> Analyze<'src> for ast::Literal<'src> {
             LexValue::CharLiteral(x) => Literal::Char(x.ch),
             LexValue::TextLiteral(x) => Literal::Text(
                 x.process()
-                    .map_err(|e| vec![ContextError::token_error(source, Some(&self.value), e)])?
+                    .map_err(|esc| {
+                        vec![ContextError::token_error(
+                            source,
+                            Some(&self.value),
+                            ErrorType::InvalidEscape(esc),
+                        )]
+                    })?
                     .to_string(),
             ),
             LexValue::BoolLiteral(x) => Literal::Bool(x),
@@ -947,6 +953,34 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
     }
 }
 
+fn find_unary_overload<'env, 'src>(
+    op: Operator,
+    side: OpSide,
+    ty: &AbstractType<'src>,
+    env: &'env StaticEnvironment<'src>,
+    ret: Option<&AbstractType<'src>>,
+) -> Option<&'env OpOverload<'src>> {
+    let mut iter = env
+        .lookup(&op)
+        .map(|(_, item)| match &item.val {
+            EnvItem::Op(overload) => overload,
+            _ => unreachable!("only operators should be stored with operator keys"),
+        })
+        .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)));
+    match side {
+        OpSide::Postfix => iter.find(|overload| {
+            matches!(&overload.operands,
+                OperandTypes::UnaryPost(t) if t == ty
+            )
+        }),
+        OpSide::Prefix => iter.find(|overload| {
+            matches!(&overload.operands,
+                OperandTypes::UnaryPre(t) if t == ty
+            )
+        }),
+    }
+}
+
 impl<'src> Analyze<'src> for ast::Unary<'src> {
     type Ouptut = AnalysisOp<'src>;
 
@@ -964,36 +998,20 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                     ErrorType::TypeAmbiguity,
                 )]);
             };
-            let (operands, operand_types) = match self.side {
-                OpSide::Postfix => (Operands::UnaryPost(operand), OperandTypes::UnaryPost(ty)),
-                OpSide::Prefix => (Operands::UnaryPre(operand), OperandTypes::UnaryPre(ty)),
-            };
-            let overload = env
-                .lookup(&self.op.val)
-                .map(|(_, item)| match &item.val {
-                    EnvItem::Op(overload) => overload,
-                    _ => unreachable!("only operators should be stored with operator keys"),
-                })
-                .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)))
-                .find(|overload| overload.operands == operand_types);
-
+            let overload = find_unary_overload(self.op.val, self.side, &ty, env, ret);
             if let Some(overload) = overload {
                 let (def, interp_def) = match overload.def {
                     FnDef::LangOpU(def, interp_def) => (def, interp_def),
                     FnDef::LangOpB(_, _) | FnDef::UserDef(_) => unimplemented!(),
                 };
-                Ok(match operands {
-                    Operands::Binary(_, _) => unreachable!(),
-                    Operands::UnaryPre(r) => {
-                        AnalysisOp::UnaryPre((overload.fun.clone(), def, interp_def), r)
-                    }
-                    Operands::UnaryPost(l) => {
-                        AnalysisOp::UnaryPost((overload.fun.clone(), def, interp_def), l)
-                    }
+                let fun = overload.fun.clone();
+                Ok(match self.side {
+                    OpSide::Prefix => AnalysisOp::UnaryPre((fun, def, interp_def), operand),
+                    OpSide::Postfix => AnalysisOp::UnaryPost((fun, def, interp_def), operand),
                 })
             }
             // HACK: `Exists` should be generic
-            else if let Operands::UnaryPre(operand) = &operands
+            else if let OpSide::Prefix = self.side
                 && matches!(self.op.val, Operator::Exists)
             {
                 let Some(ty) = operand.get_type(env) else {
@@ -1021,34 +1039,21 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                         builtin_ops::exists_def,
                         builtin_ops::interp_exists_def,
                     ),
-                    match operands {
-                        Operands::UnaryPre(operand) => operand,
-                        _ => unreachable!("guarded by branch condition"),
-                    },
+                    operand,
                 ))
             } else {
-                let side = match &operand_types {
-                    OperandTypes::UnaryPost(_) => OpSide::Postfix,
-                    OperandTypes::UnaryPre(_) => OpSide::Prefix,
-                    OperandTypes::Binary(_, _) => unreachable!(),
-                };
-                let ty = match operand_types {
-                    OperandTypes::UnaryPost(ty) | OperandTypes::UnaryPre(ty) => ty,
-                    OperandTypes::Binary(_, _) => unreachable!(),
-                };
-                let op = &self.op.val;
-                Err([ContextError::node_error(
+                let e = ContextError::node_error(
                     source,
                     &self.op,
                     ErrorType::Unsupported {
-                        op: op.to_token_eq(),
-                        side,
+                        op: self.op.val.to_token_eq(),
+                        side: self.side,
                         ty,
                         range: self.operand.range(source),
                         candidates: env
-                            .lookup(op)
+                            .lookup(&self.op.val)
                             .filter_map(|(_, item)| match &item.val {
-                                EnvItem::Op(overload) => match (&overload.operands, side) {
+                                EnvItem::Op(overload) => match (&overload.operands, self.side) {
                                     (OperandTypes::UnaryPost(t), OpSide::Postfix)
                                     | (OperandTypes::UnaryPre(t), OpSide::Prefix) => {
                                         Some(((t.clone(),), overload.output.clone()))
@@ -1061,11 +1066,32 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                             })
                             .collect(),
                     },
-                )]
-                .to_vec())
+                );
+                Err(vec![e])
             }
         })
     }
+}
+
+fn find_binary_overload<'env, 'src>(
+    op: Operator,
+    l_ty: &AbstractType<'src>,
+    r_ty: &AbstractType<'src>,
+    env: &'env StaticEnvironment<'src>,
+    ret: Option<&AbstractType<'src>>,
+) -> Option<&'env OpOverload<'src>> {
+    let mut iter = env
+        .lookup(&op)
+        .map(|(_, item)| match &item.val {
+            EnvItem::Op(overload) => overload,
+            _ => unreachable!("only operators should be stored with operator keys"),
+        })
+        .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)));
+    iter.find(|overload| {
+        matches!(&overload.operands,
+            OperandTypes::Binary(l, r) if l == l_ty && r == r_ty
+        )
+    })
 }
 
 impl<'src> ast::Binary<'src> {
@@ -1152,7 +1178,7 @@ impl<'src> ast::Binary<'src> {
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, AnalysisExpr<'src>> {
         let lhs = self.lhs.analyze(source, env, None)?;
-        let r_ty = if let ast::Expr::Type(type_expr) = &self.rhs {
+        let r_ty = if let ast::Expr::Type(ref type_expr) = self.rhs {
             type_expr.analyze(source, env)?
         } else {
             unimplemented!("should be handled by grammar");
@@ -1183,65 +1209,51 @@ impl<'src> ast::Binary<'src> {
         let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
         let r_ty = rhs.get_type(env).map(|t| t.to_abstract());
         match (l_ty, r_ty) {
-            (Some(l_ty), Some(r_ty)) => {
-                let operands = Operands::Binary(lhs, rhs);
-                let operand_types = OperandTypes::Binary(l_ty, r_ty);
-                let op = &self.op.val;
-                env.lookup(op)
-                    .map(|(_, item)| match &item.val {
-                        EnvItem::Op(overload) => overload,
-                        _ => unreachable!("only operators should be stored with operator keys"),
-                    })
-                    .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)))
-                    .find(|overload| overload.operands == operand_types)
-                    .ok_or_else(|| {
-                        let OperandTypes::Binary(l_ty, r_ty) = operand_types else {
-                            unreachable!();
-                        };
-                        [ContextError::node_error(
-                            source,
-                            &self.op,
-                            ErrorType::Incompatible {
-                                op: op.to_token_eq(),
-                                l_range: self.lhs.range(source),
-                                r_range: self.rhs.range(source),
-                                l_ty,
-                                r_ty,
-                                candidates: env
-                                    .lookup(op)
-                                    .filter_map(|(_, item)| match &item.val {
-                                        EnvItem::Op(overload) => match &overload.operands {
-                                            OperandTypes::Binary(lhs, rhs) => Some((
-                                                (lhs.clone(), rhs.clone()),
-                                                overload.output.clone(),
-                                            )),
-                                            OperandTypes::UnaryPost(_)
-                                            | OperandTypes::UnaryPre(_) => None,
-                                        },
-                                        _ => unreachable!(
-                                            "only operators should be stored with operator keys"
-                                        ),
-                                    })
-                                    .collect(),
-                            },
-                        )]
-                        .to_vec()
-                    })
-                    .map(|overload| {
-                        let (def, interp_def) = match &overload.def {
-                            FnDef::LangOpB(def, interp_def) => (def, interp_def),
-                            FnDef::LangOpU(_, _) | FnDef::UserDef(_) => {
-                                unimplemented!()
-                            }
-                        };
-                        Expr::Op(Box::new(match operands {
-                            Operands::Binary(l, r) => {
-                                AnalysisOp::Binary((overload.fun.clone(), *def, *interp_def), l, r)
-                            }
-                            _ => unreachable!(),
-                        }))
-                    })
-            }
+            (Some(l_ty), Some(r_ty)) => find_binary_overload(self.op.val, &l_ty, &r_ty, env, ret)
+                .ok_or_else(|| {
+                    let e = ContextError::node_error(
+                        source,
+                        &self.op,
+                        ErrorType::Incompatible {
+                            op: self.op.val.to_token_eq(),
+                            l_range: self.lhs.range(source),
+                            r_range: self.rhs.range(source),
+                            l_ty,
+                            r_ty,
+                            candidates: env
+                                .lookup(&self.op.val)
+                                .filter_map(|(_, item)| match &item.val {
+                                    EnvItem::Op(overload) => match &overload.operands {
+                                        OperandTypes::Binary(lhs, rhs) => Some((
+                                            (lhs.clone(), rhs.clone()),
+                                            overload.output.clone(),
+                                        )),
+                                        OperandTypes::UnaryPost(_) | OperandTypes::UnaryPre(_) => {
+                                            None
+                                        }
+                                    },
+                                    _ => unreachable!(
+                                        "only operators should be stored with operator keys"
+                                    ),
+                                })
+                                .collect(),
+                        },
+                    );
+                    vec![e]
+                })
+                .map(|overload| {
+                    let (def, interp_def) = match &overload.def {
+                        FnDef::LangOpB(def, interp_def) => (def, interp_def),
+                        FnDef::LangOpU(_, _) | FnDef::UserDef(_) => {
+                            unimplemented!()
+                        }
+                    };
+                    Expr::Op(Box::new(AnalysisOp::Binary(
+                        (overload.fun.clone(), *def, *interp_def),
+                        lhs,
+                        rhs,
+                    )))
+                }),
 
             (l_ty, r_ty) => Err(std::iter::chain(
                 l_ty.is_none()
@@ -1486,7 +1498,7 @@ impl<'src> GetType<'src> for AnalysisIfStmt<'src> {
         let ty = self.then.get_type(env);
         #[cfg(debug_assertions)]
         if let Some(then_ty) = ty
-            && let Some(or) = &self.or
+            && let Some(ref or) = self.or
         {
             let or_ty = or.get_type(env);
             // TODO: this needs to be an error somewhere
@@ -2169,7 +2181,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
         #[cfg(debug_assertions)]
         {
             print!("{}: ", self.binding.ident.lex); // TODO: what if there's multiple?
-            if let Some(annotated_type) = &annotated_type {
+            if let Some(ref annotated_type) = annotated_type {
                 print!("{annotated_type}");
             } else {
                 print!("<implicit>");
@@ -2182,7 +2194,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
             }
         }
 
-        if let Some(annotated_type) = annotated_type.as_ref()
+        if let Some(ref annotated_type) = annotated_type
             && let Some(expr_ty) = expr.as_ref().and_then(|x| x.get_type(env))
             && let Err(e) = expr_ty.expect_type(
                 annotated_type,
@@ -2222,7 +2234,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                 .map_err(|e| todo!("error: {e}"))
                 .and_then(|(unique_id, ty, is_global)| {
                     if let Some(t) = annotated_type {
-                        if let Some(ty) = ty.as_ref() {
+                        if let Some(ty) = ty {
                             ty.expect_type(&t, source, self)?;
                         } else {
                             #[cfg(debug_assertions)]

@@ -5,7 +5,7 @@ use crate::{
     analyzer::types::AbstractType,
     arrayvec::ArrayVec,
     exec::error::Failure,
-    grammar::ast::AstNodeFinal,
+    grammar::ast::{AstNode, AstNodeFinal},
     highlight::{
         highlight,
         style::{Color, Style, StyleWrapper},
@@ -1189,14 +1189,9 @@ impl<'src> ContextError<'src> {
     /// Produce an error on an [`AstNodeFinal`] implementor
     pub fn node_error<T>(source: &'src str, node: &T, err: ErrorType<'src>) -> Self
     where
-        T: ?Sized + AstNodeFinal<'src>,
+        T: ?Sized + AstNode<'src>,
     {
-        Self::error(
-            source,
-            Some(node.range(source)),
-            node.expansion(source),
-            err,
-        )
+        Self::error(source, node.get_range(source), node.expansion(source), err)
     }
 
     /// Produce an error on an optional token (the range will be its lexeme)

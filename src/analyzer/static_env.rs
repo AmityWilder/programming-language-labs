@@ -434,6 +434,11 @@ impl<'src> StaticEnvironment<'src> {
         is_global: bool,
         node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
     ) -> Result<(VarId, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
+        if let Some(ref ty) = ty
+            && let Some(Err(e)) = ty.size()
+        {
+            return Err(e);
+        }
         match self.decl_item(EnvKey::Ident(name), EnvItem::Var(ty, is_global), node) {
             (
                 id,

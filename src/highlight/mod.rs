@@ -3,7 +3,7 @@
 // TODO: add unit tests for syntax parsing
 
 use crate::{
-    error::{ContextError, ErrorType},
+    error::ContextError,
     highlight::{
         style::StyleWrapper,
         syntax::{GetSyntax, Syntax, SyntaxStyle},
@@ -153,20 +153,17 @@ const fn escaped_ranges_closure(range: Range<usize>) -> (Range<usize>, Syntax) {
 /// Offsets [`Range`]s by the length of a char/string delimiter and tuples them with [`Syntax::EscapeSeq`]
 pub type EscapedRanges<I> = std::iter::Map<I, fn(Range<usize>) -> (Range<usize>, Syntax)>;
 
-fn escape_ranges_closure(
-    item: Result<(Range<usize>, char), ErrorType<'_>>,
-) -> Option<Range<usize>> {
+fn escape_ranges_closure<E>(item: Result<(Range<usize>, char), E>) -> Option<Range<usize>> {
     match item {
         Ok((r, _)) => Some(r),
         Err(_) => None,
     }
 }
 
+type EscapeRangesClosure<E> = fn(Result<(Range<usize>, char), E>) -> Option<Range<usize>>;
+
 /// Not related to [`EscapedRanges`], actually. Just adapts an [`Escapes`] iterator into its non-error ranges.
-pub type EscapeRanges<'src> = std::iter::FilterMap<
-    Escapes<'src>,
-    fn(Result<(Range<usize>, char), ErrorType<'src>>) -> Option<Range<usize>>,
->;
+pub type EscapeRanges<'src> = std::iter::FilterMap<Escapes<'src>, EscapeRangesClosure<&'src str>>;
 
 /// Returns a syntax iterator over subtokens of a text literal
 fn escaped_text_literal<'src>(
@@ -182,10 +179,7 @@ fn escaped_text_literal<'src>(
             reason = "only way to do this as far as I know"
         )]
         Escapes::new(literal.content)
-            .filter_map(
-                escape_ranges_closure
-                    as fn(Result<(Range<usize>, char), ErrorType<'src>>) -> Option<Range<usize>>,
-            )
+            .filter_map(escape_ranges_closure as EscapeRangesClosure<&'src str>)
             .map(escaped_ranges_closure),
     )
 }
