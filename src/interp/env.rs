@@ -1,5 +1,5 @@
 use crate::{analyzer::static_env::VarId, interp::value::InterpVal};
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct InterpVar<'src> {
@@ -9,7 +9,7 @@ pub struct InterpVar<'src> {
 
 #[derive(Debug, Clone)]
 pub struct InterpEnvironment<'src> {
-    pub vars: HashMap<VarId, InterpVal<'src>>,
+    pub vars: HashMap<VarId, RefCell<InterpVal<'src>>>,
 }
 
 impl InterpEnvironment<'_> {

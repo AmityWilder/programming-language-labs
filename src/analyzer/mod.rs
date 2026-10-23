@@ -21,7 +21,7 @@ use crate::{
 };
 #[cfg(not(debug_assertions))]
 use std::marker::PhantomData;
-use std::range::Range;
+use std::{cell::RefCell, range::Range};
 use types::TypeBound;
 
 pub mod builtin_ops;
@@ -531,7 +531,7 @@ impl<'src> CoagulateVars<'src> for AnalysisVar<'src> {
                     AbstractType::Concrete(ty) => {
                         i_env
                             .vars
-                            .insert(self.unique_id, InterpVal::Uninit(ty.clone()));
+                            .insert(self.unique_id, RefCell::new(InterpVal::Uninit(ty.clone())));
                         InterpVar {
                             ident: self.ident,
                             id: self.unique_id,
@@ -896,27 +896,6 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
             else if let Operands::UnaryPre(operand) = &operands
                 && matches!(self.op.val, Operator::Exists)
             {
-                fn exists_def<'val, 'src>(
-                    _out: crate::exec::value::ValueMut<'val, 'src>,
-                    _lhs: crate::exec::value::Value<'val, 'src>,
-                ) -> std::result::Result<(), Failure> {
-                    todo!()
-                }
-
-                #[expect(
-                    clippy::unnecessary_wraps,
-                    reason = "needs to fit the function pointer shape"
-                )]
-                fn interp_exists_def<'src>(
-                    lhs: &InterpVal<'src>,
-                ) -> std::result::Result<InterpVal<'src>, Failure> {
-                    Ok(InterpVal::Primitive(
-                        crate::interp::value::PrimitiveVal::Bool(crate::interp::value::BoolObject(
-                            lhs.ensure_ok().is_ok(),
-                        )),
-                    ))
-                }
-
                 let Some(ty) = operand.get_type(env) else {
                     return Err(vec![ContextError::node_error(
                         source,
@@ -939,8 +918,8 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                             params: vec![ty],
                             ret: StaticType::Primitive(PrimitiveType::Bool),
                         },
-                        exists_def,
-                        interp_exists_def,
+                        builtin_ops::exists_def,
+                        builtin_ops::interp_exists_def,
                     ),
                     match operands {
                         Operands::UnaryPre(operand) => operand,
@@ -948,19 +927,42 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                     },
                 ))
             } else {
-                let r_ty = match operand_types {
+                let side = match &operand_types {
+                    OperandTypes::UnaryPost(_) => OpSide::Postfix,
+                    OperandTypes::UnaryPre(_) => OpSide::Prefix,
+                    OperandTypes::Binary(_, _) => unreachable!(),
+                };
+                let ty = match operand_types {
                     OperandTypes::UnaryPost(ty) | OperandTypes::UnaryPre(ty) => ty,
                     OperandTypes::Binary(_, _) => unreachable!(),
                 };
-                Err(vec![ContextError::node_error(
+                let op = &self.op.val;
+                Err([ContextError::node_error(
                     source,
-                    self,
+                    &self.op,
                     ErrorType::Unsupported {
-                        op: self.op.val.to_token_eq(),
-                        r_ty,
-                        r_range: self.operand.range(source),
+                        op: op.to_token_eq(),
+                        side,
+                        ty,
+                        range: self.operand.range(source),
+                        candidates: env
+                            .lookup(op)
+                            .filter_map(|(_, item)| match &item.val {
+                                EnvItem::Op(overload) => match (&overload.operands, side) {
+                                    (OperandTypes::UnaryPost(t), OpSide::Postfix)
+                                    | (OperandTypes::UnaryPre(t), OpSide::Prefix) => {
+                                        Some(((t.clone(),), overload.output.clone()))
+                                    }
+                                    _ => None,
+                                },
+                                _ => unreachable!(
+                                    "only operators should be stored with operator keys"
+                                ),
+                            })
+                            .collect(),
                     },
-                )])
+                )]
+                .to_vec())
             }
         })
     }
@@ -1092,27 +1094,10 @@ impl<'src> ast::Binary<'src> {
                     .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)))
                     .find(|overload| overload.operands == operand_types)
                     .ok_or_else(|| {
-                        // TODO: give the actual error this much info
-                        #[cfg(debug_assertions)]
-                        println!(
-                            "error: no such operator defined\n operator: {op:?}\n \
-                                operand types: {operand_types}\n \
-                                operands: {operands:?}\n \
-                                supported operands: {:#?}",
-                            env.lookup(op)
-                                .map(|(_, item)| match &item.val {
-                                    EnvItem::Op(overload) => overload,
-                                    _ => unreachable!(
-                                        "only operators should be stored with operator keys"
-                                    ),
-                                })
-                                .map(|t| t.fun.to_string())
-                                .collect::<Vec<_>>()
-                        );
                         let OperandTypes::Binary(l_ty, r_ty) = operand_types else {
                             unreachable!();
                         };
-                        vec![ContextError::node_error(
+                        [ContextError::node_error(
                             source,
                             &self.op,
                             ErrorType::Incompatible {
@@ -1121,8 +1106,25 @@ impl<'src> ast::Binary<'src> {
                                 r_range: self.rhs.range(source),
                                 l_ty,
                                 r_ty,
+                                candidates: env
+                                    .lookup(op)
+                                    .filter_map(|(_, item)| match &item.val {
+                                        EnvItem::Op(overload) => match &overload.operands {
+                                            OperandTypes::Binary(lhs, rhs) => Some((
+                                                (lhs.clone(), rhs.clone()),
+                                                overload.output.clone(),
+                                            )),
+                                            OperandTypes::UnaryPost(_)
+                                            | OperandTypes::UnaryPre(_) => None,
+                                        },
+                                        _ => unreachable!(
+                                            "only operators should be stored with operator keys"
+                                        ),
+                                    })
+                                    .collect(),
                             },
                         )]
+                        .to_vec()
                     })
                     .map(|overload| {
                         let (def, interp_def) = match &overload.def {

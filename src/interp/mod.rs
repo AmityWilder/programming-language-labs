@@ -11,11 +11,10 @@ use crate::{
         InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal, OrStmt,
     },
     exec::error::Failure,
-    interp::env::InterpVar,
+    interp::{env::InterpVar, value::InterpValue},
     types::{byte, text},
 };
 use env::InterpEnvironment;
-use std::borrow::Cow;
 use value::{
     BoolObject, ByteObject, CharObject, FailObject, FlptObject, InterpLabel, InterpOp, InterpVal,
     NoneObject, PrimitiveVal, SintObject, TextObject, UintObject,
@@ -73,20 +72,20 @@ impl<'src> InterpOp<'src> {
     fn interp_eval<'env>(
         &self,
         env: &'env InterpEnvironment<'src>,
-    ) -> Result<InterpVal<'src>, Failure> {
+    ) -> Result<InterpValue<'env, 'src>, Failure> {
         match self {
             Self::Binary(_, fun, lhs, rhs) => {
                 let lhs = lhs.interp_eval(env)?;
                 let rhs = rhs.interp_eval(env)?;
-                fun(&lhs, &rhs)
+                fun(lhs, rhs)
             }
             Self::UnaryPre(_, fun, rhs) => {
                 let rhs = rhs.interp_eval(env)?;
-                fun(&rhs)
+                fun(rhs)
             }
             Self::UnaryPost(_, fun, lhs) => {
                 let lhs = lhs.interp_eval(env)?;
-                fun(&lhs)
+                fun(lhs)
             }
         }
     }
@@ -166,7 +165,7 @@ impl Inpt for byte {
 }
 
 impl Directive {
-    fn interp_eval(self) -> Result<InterpVal<'static>, Failure> {
+    fn interp_eval<'src>(self) -> Result<InterpVal<'static>, Failure> {
         match self {
             Self::InptText => {
                 text::input().map(|x| InterpVal::Primitive(PrimitiveVal::Text(TextObject(x))))
@@ -182,16 +181,16 @@ impl Directive {
 }
 
 impl<'src> Expr<InterpOp<'src>, InterpVar<'src>> {
-    fn interp_eval<'val>(
-        &'val self,
-        env: &'val InterpEnvironment<'src>,
-    ) -> Result<Cow<'val, InterpVal<'src>>, Failure> {
+    fn interp_eval<'brw>(
+        &self,
+        env: &'brw InterpEnvironment<'src>,
+    ) -> Result<InterpValue<'brw, 'src>, Failure> {
         match self {
             Expr::Assignment(_) => unimplemented!("should be handled by outer statement"),
-            Expr::Op(expr) => expr.interp_eval(env).map(Cow::Owned),
-            Expr::Literal(expr) => Ok(Cow::Owned(expr.interp_eval())),
-            Expr::Directive(expr) => expr.interp_eval().map(Cow::Owned),
-            Expr::Variable(x) => Ok(Cow::Borrowed(
+            Expr::Op(expr) => expr.interp_eval(env),
+            Expr::Literal(expr) => Ok(InterpValue::Prvalue(expr.interp_eval())),
+            Expr::Directive(expr) => expr.interp_eval().map(InterpValue::Prvalue),
+            Expr::Variable(x) => Ok(InterpValue::Lvalue(
                 env.vars
                     .get(&x.id)
                     .expect("should be guaranteed by static analysis"),
@@ -209,27 +208,28 @@ impl<'src> InterpAssignment<'src> {
             }
             _ => todo!("mutable expressions"),
         };
-        let rhs = self.rhs.interp_eval(env)?.into_owned();
+        let rvalue = self.rhs.interp_eval(env)?.to_owned();
         let lvalue = env
             .vars
-            .get_mut(&var.id)
+            .get(&var.id)
             .expect("should be guaranteed by static analysis");
-        // println!("assigning {rhs:?} to {} ({lvalue:?})", var.ident);
-        *lvalue = rhs;
-        // println!("{} is now {lvalue:?}", var.ident);
+        *lvalue.borrow_mut() = rvalue;
         Ok(ControlFlow::Continue)
     }
 }
 
 impl<'src> InterpExprStmt<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec<'env>(
+        &self,
+        env: &'env mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'src>, Failure> {
         if let Expr::Assignment(assignment) = &self.expr {
             assignment.interp_exec(env)
         } else {
-            let res = self.expr.interp_eval(env)?;
-            if !matches!(res.as_ref(), InterpVal::Primitive(PrimitiveVal::None(_))) {
-                // lint
-                println!("WARNING: non-none expression result ignored: {res:?}");
+            let res = self.expr.interp_eval(env)?.to_ref();
+            let res = res.as_ref();
+            if !matches!(res, InterpVal::Primitive(PrimitiveVal::None(_))) {
+                // println!("WARNING: non-none expression result ignored: {res:?}"); // lint
             }
             Ok(ControlFlow::Continue)
         }
@@ -237,8 +237,11 @@ impl<'src> InterpExprStmt<'src> {
 }
 
 impl<'src> InterpPrintStmt<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
-        let buf = self.expr.interp_eval(env)?;
+    fn interp_exec<'env>(
+        &self,
+        env: &'env mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'src>, Failure> {
+        let buf = self.expr.interp_eval(env)?.to_ref();
         let val: &text = buf
             .as_ref()
             .ensure_ok()?
@@ -254,20 +257,22 @@ fn expect_bool<'src>(
     pred: &Expr<InterpOp<'src>, InterpVar<'src>>,
     env: &mut InterpEnvironment<'src>,
 ) -> Result<bool, Failure> {
-    let buf = pred.interp_eval(env)?;
-    Ok(
-        *<&bool>::try_from(buf.as_ref().ensure_ok()?).unwrap_or_else(|()| {
-            panic!(
-                "should be guaranteed by static analysis\
-                \n expected: bool\
-                \n    found: {buf:?}"
-            )
-        }),
-    )
+    let buf = pred.interp_eval(env)?.to_ref();
+    match <&bool>::try_from(buf.as_ref().ensure_ok()?) {
+        Ok(&x) => Ok(x),
+        Err(()) => panic!(
+            "should be guaranteed by static analysis\
+            \n expected: bool\
+            \n    found: {buf:?}"
+        ),
+    }
 }
 
 impl<'src> InterpIfStmt<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec<'env>(
+        &self,
+        env: &'env mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'src>, Failure> {
         let mut cond = self;
         loop {
             break if expect_bool(&cond.pred, env)? {
@@ -331,8 +336,10 @@ impl<'src> InterpCordStmt<'src> {
 }
 
 impl<'src> InterpForStmt<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
-        let mut _iterable = self.iter.interp_eval(env)?.ensure_ok()?;
+    fn interp_exec<'env>(
+        &self,
+        _env: &'env mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'src>, Failure> {
         todo!("how does an expression iterate?")
     }
 }

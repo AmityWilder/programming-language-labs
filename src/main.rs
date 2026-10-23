@@ -780,15 +780,16 @@ fn run_code(source: &str, config: &Cli) {
         }
     };
 
-    // semantic highlighting
-    // TODO: need to find a way to have this take Result instead of flattening
-    if config.semantic_highlight {
-        println!("\nsemantic highlighting:");
-        // TODO
-        println!(
-            "TODO: print_highlighted(semantic(source, prgm.iter().flatten()), &SYNTAX_STYLE_ANSI)"
-        );
-    }
+    // TODO
+    // // semantic highlighting
+    // // TODO: need to find a way to have this take Result instead of flattening
+    // if config.semantic_highlight {
+    //     println!("\nsemantic highlighting:");
+    //     // TODO
+    //     println!(
+    //         "TODO: print_highlighted(semantic(source, prgm.iter().flatten()), &SYNTAX_STYLE_ANSI)"
+    //     );
+    // }
 
     let (program, env) = match analyze_interp(source, &prgm) {
         Ok(prgm) => prgm,

@@ -8,6 +8,7 @@ use crate::{
     types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
 use std::{
+    cell::{Ref, RefCell, RefMut},
     collections::HashMap,
     fmt::{self, Debug, Formatter},
     range::Range,
@@ -443,6 +444,76 @@ impl Debug for FunVal {
     }
 }
 
+/// An [`InterpVal`] that **can be** referenced
+#[derive(Debug)]
+pub enum InterpValue<'brw, 'src> {
+    /// Has no accessible address
+    ///
+    /// Example: literals
+    Prvalue(InterpVal<'src>),
+
+    /// Has an address but which is no longer accessible
+    ///
+    /// Example: temporary
+    Rvalue(&'brw InterpVal<'src>),
+
+    /// Has an accessible address
+    ///
+    /// Example: variable name
+    Lvalue(&'brw RefCell<InterpVal<'src>>),
+}
+
+impl<'brw, 'src> InterpValue<'brw, 'src> {
+    pub fn to_ref(self) -> InterpRef<'brw, 'src> {
+        match self {
+            Self::Prvalue(prvalue) => InterpRef::Prvalue(prvalue),
+            Self::Rvalue(rvalue) => InterpRef::Rvalue(rvalue),
+            Self::Lvalue(lvalue) => InterpRef::Lvalue(lvalue.borrow()),
+        }
+    }
+
+    pub fn to_mut(self) -> Option<RefMut<'brw, InterpVal<'src>>> {
+        match self {
+            Self::Prvalue(_) | Self::Rvalue(_) => None,
+            Self::Lvalue(lvalue) => Some(lvalue.borrow_mut()),
+        }
+    }
+
+    pub fn to_owned(self) -> InterpVal<'src> {
+        match self {
+            Self::Prvalue(x) => x.clone(),
+            Self::Rvalue(x) => x.clone(),
+            Self::Lvalue(x) => x.borrow().clone(),
+        }
+    }
+}
+
+/// An [`InterpVal`] that **is** referenced
+#[derive(Debug)]
+pub enum InterpRef<'brw, 'src> {
+    Prvalue(InterpVal<'src>),
+    Rvalue(&'brw InterpVal<'src>),
+    Lvalue(Ref<'brw, InterpVal<'src>>),
+}
+
+impl<'src> std::ops::Deref for InterpRef<'_, 'src> {
+    type Target = InterpVal<'src>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Prvalue(x) => x,
+            Self::Rvalue(x) => x,
+            Self::Lvalue(x) => x,
+        }
+    }
+}
+
+impl<'src> AsRef<InterpVal<'src>> for InterpRef<'_, 'src> {
+    fn as_ref(&self) -> &InterpVal<'src> {
+        self
+    }
+}
+
 #[derive(Clone)]
 pub enum InterpVal<'src> {
     Uninit(StaticType<'src>),
@@ -549,13 +620,16 @@ pub struct InterpLabel<'src> {
     pub name: &'src str,
 }
 
-pub type InterpBinaryOpFn = for<'src> fn(
-    &InterpVal<'src>,
-    &InterpVal<'src>,
-) -> std::result::Result<InterpVal<'src>, Failure>;
+pub type InterpBinaryOpFn =
+    for<'brw, 'src> fn(
+        InterpValue<'brw, 'src>,
+        InterpValue<'brw, 'src>,
+    ) -> std::result::Result<InterpValue<'brw, 'src>, Failure>;
 
 pub type InterpUnaryOpFn =
-    for<'src> fn(&InterpVal<'src>) -> std::result::Result<InterpVal<'src>, Failure>;
+    for<'brw, 'src> fn(
+        InterpValue<'brw, 'src>,
+    ) -> std::result::Result<InterpValue<'brw, 'src>, Failure>;
 
 pub enum InterpOp<'src> {
     Binary(

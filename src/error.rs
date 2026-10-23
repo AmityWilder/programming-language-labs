@@ -7,6 +7,7 @@ use crate::{
     exec::error::Failure,
     grammar::ast::AstNodeFinal,
     highlight::{
+        highlight,
         style::{Color, Style, StyleWrapper},
         syntax::Syntax,
         write_highlight,
@@ -22,6 +23,7 @@ use crate::{
             ExpansionData, Lexical, Token, escape_char,
             value::{Keyword, Operator, TokenEq},
         },
+        tokenize,
     },
 };
 use std::range::Range;
@@ -925,8 +927,25 @@ pub enum ErrorType<'src> {
     #[code(CMP, 42)]
     #[err({ op, l_ty, r_ty, .. }, |f| write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`"))]
     #[inlay({ .. }, |f| write!(f, "operation is not supported between operands of these types"))]
-    #[help({ .. }, |f, _src| {
-        write!(f, "try changing operators, converting types, or wrapping something in parentheses")
+    #[help({ candidates, op, .. }, |f, _src| {
+        write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
+        if candidates.is_empty() {
+            writeln!(f, "\nno overload exists for `{op}` in this position") // why??
+        } else {
+            writeln!(f, "\nthe following overloads exist:")?;
+            let mut buf = String::new();
+            for ((lhs, rhs), ret) in candidates {
+                use std::fmt::Write;
+                buf.clear();
+                _ = write!(buf, "fun {op}({lhs}, {rhs}) -> {ret}");
+                write!(f, "  ")?;
+                for (lexeme, syntax) in highlight(tokenize(&buf)) {
+                    _ = write!(f, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
+                }
+                writeln!(f)?;
+            }
+            Ok(())
+        }
     })]
     #[info({ l_ty, l_range, r_ty, r_range, .. }, [
         (*l_range, TypeResolutionMsg { side: OpSide::Postfix, ty: l_ty.clone() }),
@@ -939,20 +958,45 @@ pub enum ErrorType<'src> {
         r_range: Range<usize>,
         l_ty: AbstractType<'src>,
         r_ty: AbstractType<'src>,
+        candidates: Vec<((AbstractType<'src>, AbstractType<'src>), AbstractType<'src>)>,
     },
 
     /// The operand in a unary operation is of an unsupported type
     #[code(CMP, 43)]
-    #[err({ op, r_ty, .. }, |f| write!(f, "`{op}` is not supported for {r_ty}"))]
-    #[inlay({ .. }, |f| write!(f, "operation is not supported for operands of this type"))]
-    #[help({ .. }, |f, _src| write!(f, "try a different operator or convert the type"))]
-    #[info({ r_ty, r_range, .. }, [(*r_range, TypeResolutionMsg { side: OpSide::Prefix, ty: r_ty.clone() })])]
+    #[err({ op, ty, .. }, |f| write!(f, "`{op}` is not supported for {ty}"))]
+    #[inlay({ .. }, |f| write!(f, "operation is not supported for operand of this type"))]
+    #[help({ candidates, op, side, .. }, |f, _src| {
+        write!(f, "try a different operator or convert the type")?;
+        if candidates.is_empty() {
+            writeln!(f, "\nno overload exists for `{op}` in this position") // why??
+        } else {
+            writeln!(f, "\nthe following overloads exist:")?;
+            let mut buf = String::new();
+            for ((arg,), ret) in candidates {
+                use std::fmt::Write;
+                buf.clear();
+                match side {
+                    OpSide::Postfix => _ = write!(buf, "fun ({arg}){op} -> {ret}"),
+                    OpSide::Prefix => _ = write!(buf, "fun {op}({arg}) -> {ret}"),
+                }
+                write!(f, "  ")?;
+                for (lexeme, syntax) in highlight(tokenize(&buf)) {
+                    _ = write!(f, "{}", SYNTAX_STYLE_ANSI[syntax].style(lexeme));
+                }
+                writeln!(f)?;
+            }
+            Ok(())
+        }
+    })]
+    #[info({ ty, range, side, .. }, [(*range, TypeResolutionMsg { side: *side, ty: ty.clone() })])]
     Unsupported {
         /// The unary operator
         op: TokenEq,
+        side: OpSide,
         /// The type of the value on the right side of the operator
-        r_ty: AbstractType<'src>,
-        r_range: Range<usize>,
+        ty: AbstractType<'src>,
+        range: Range<usize>,
+        candidates: Vec<((AbstractType<'src>,), AbstractType<'src>)>,
     },
 
     /// Unsigned cannot be negated
