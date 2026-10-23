@@ -3,8 +3,8 @@
 use crate::{
     error::{ContextError, ExpectedToken, OpSide},
     grammar::ast::{
-        Assignment, BlockStmt, DeclVar, Declaration, ExprStmt, HaltStmt, IfStmt, OrBody, OrStmt,
-        PrintStmt, Program, Statement, Variable,
+        Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, ExprStmt, HaltStmt, IfStmt, OrBody,
+        OrStmt, PrintStmt, Program, Statement, Variable,
     },
     scanner::{
         Bracket,
@@ -451,33 +451,57 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         )
     }
 
-    /// `halt_statement -> "halt" ( label )? ";"`
+    /// `halt_statement -> "halt" ( label )? expression ";"`
     pub fn halt_statement(&mut self) -> Option<Result<HaltStmt<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Keyword(Keyword::Halt))
             .map(|halt_kw| {
-                Ok(HaltStmt {
-                    halt_kw,
-                    label: self.label().transpose()?,
-                    semi: self.try_pull_eq(
-                        LexValue::Punctuation(Punctuation::Semi),
-                        ExpectedToken::Semi,
-                    )?,
-                })
+                let label = self.label().transpose()?;
+                self.pull_if_eq(LexValue::Punctuation(Punctuation::Semi))
+                    .map_or_else(
+                        || {
+                            self.expression().and_then(|value| {
+                                self.try_pull_eq(
+                                    LexValue::Punctuation(Punctuation::Semi),
+                                    ExpectedToken::Semi,
+                                )
+                                .map(|semi| (Some(value), semi))
+                            })
+                        },
+                        |semi| Ok((None, semi)),
+                    )
+                    .map(|(value, semi)| HaltStmt {
+                        halt_kw,
+                        label,
+                        value,
+                        semi,
+                    })
             })
     }
 
-    /// `skip_statement -> "skip" ( label )? ";"`
+    /// `skip_statement -> "skip" ( label )? expression ";"`
     pub fn skip_statement(&mut self) -> Option<Result<SkipStmt<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Keyword(Keyword::Skip))
             .map(|skip_kw| {
-                Ok(SkipStmt {
-                    skip_kw,
-                    label: self.label().transpose()?,
-                    semi: self.try_pull_eq(
-                        LexValue::Punctuation(Punctuation::Semi),
-                        ExpectedToken::Semi,
-                    )?,
-                })
+                let label = self.label().transpose()?;
+                self.pull_if_eq(LexValue::Punctuation(Punctuation::Semi))
+                    .map_or_else(
+                        || {
+                            self.expression().and_then(|value| {
+                                self.try_pull_eq(
+                                    LexValue::Punctuation(Punctuation::Semi),
+                                    ExpectedToken::Semi,
+                                )
+                                .map(|semi| (Some(value), semi))
+                            })
+                        },
+                        |semi| Ok((None, semi)),
+                    )
+                    .map(|(value, semi)| SkipStmt {
+                        skip_kw,
+                        label,
+                        value,
+                        semi,
+                    })
             })
     }
 
@@ -512,9 +536,17 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         }
     }
 
-    /// `expression -> or`
+    /// `expression -> if_block | loop_block | block_statement | or`
     pub fn expression(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
-        self.or()
+        self.if_statement()
+            .map(|res| res.map(BlockExpr::if_expr))
+            .or_else(|| self.loop_block().map(|res| res.map(BlockExpr::loop_expr)))
+            .or_else(|| {
+                self.block_statement()
+                    .map(|res| res.map(BlockExpr::block_expr))
+            })
+            .map(|res| res.map(Expr::Block))
+            .unwrap_or_else(|| self.or())
     }
 
     /// `or -> xor ( ("|" | "!|") xor )*`

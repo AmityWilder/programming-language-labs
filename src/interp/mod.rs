@@ -6,12 +6,13 @@
 
 use crate::{
     analyzer::{
-        Directive, Expr, InterpAssignment, InterpBlockStmt, InterpCordStmt, InterpExprStmt,
-        InterpForStmt, InterpHaltStmt, InterpIfStmt, InterpLoopStmt, InterpPrintStmt,
-        InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal, OrStmt,
+        Directive, Expr, InterpAssignment, InterpBlockStmt, InterpCordStmt, InterpExpr,
+        InterpExprStmt, InterpForStmt, InterpHaltStmt, InterpIfStmt, InterpLoopStmt,
+        InterpPrintStmt, InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal,
+        OrStmt,
     },
     exec::error::Failure,
-    interp::{env::InterpVar, value::InterpValue},
+    interp::value::InterpValue,
     types::{byte, text},
 };
 use env::InterpEnvironment;
@@ -23,21 +24,21 @@ use value::{
 pub mod env;
 pub mod value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum ControlFlow<'src, E = Failure, T = ()> {
+#[derive(Debug, Default)]
+pub enum ControlFlow<'brw, 'src> {
     /// Keep going as usual
     #[default]
     Continue,
     /// Skip to the next iteration of the current loop
-    Skip(Option<InterpLabel<'src>>),
+    Skip(Option<InterpLabel<'src>>, Option<InterpValue<'brw, 'src>>),
     /// End the current loop
-    Halt(Option<InterpLabel<'src>>),
+    Halt(Option<InterpLabel<'src>>, Option<InterpValue<'brw, 'src>>),
     /// End the current function
-    Give(T),
-    // /// End the current function, but keep its information (TBD: is this reasonable?)
-    // Emit,
+    Give(InterpValue<'brw, 'src>),
+    /// End the current function, but keep its information (TBD: is this reasonable?)
+    Emit(InterpValue<'brw, 'src>),
     /// Produce an exception
-    Fail(E),
+    Fail(Failure),
 }
 
 impl InterpVal<'_> {
@@ -140,7 +141,7 @@ impl Inpt for char {
             std::io::stdin()
                 .read_exact(std::slice::from_mut(&mut buf[i]))
                 .map_err(|_| Failure::FailedRead)?;
-            s = str::from_utf8(&buf).map_err(|_| Failure::ParseChar);
+            s = str::from_utf8(&buf[..i + 1]).map_err(|_| Failure::ParseChar);
             if s.is_ok() {
                 break;
             }
@@ -165,7 +166,7 @@ impl Inpt for byte {
 }
 
 impl Directive {
-    fn interp_eval<'src>(self) -> Result<InterpVal<'static>, Failure> {
+    fn interp_eval(self) -> Result<InterpVal<'static>, Failure> {
         match self {
             Self::InptText => {
                 text::input().map(|x| InterpVal::Primitive(PrimitiveVal::Text(TextObject(x))))
@@ -180,12 +181,13 @@ impl Directive {
     }
 }
 
-impl<'src> Expr<InterpOp<'src>, InterpVar<'src>> {
+impl<'src> InterpExpr<'src> {
     fn interp_eval<'brw>(
         &self,
         env: &'brw InterpEnvironment<'src>,
     ) -> Result<InterpValue<'brw, 'src>, Failure> {
         match self {
+            Expr::Block(expr) => todo!(),
             Expr::Assignment(_) => unimplemented!("should be handled by outer statement"),
             Expr::Op(expr) => expr.interp_eval(env),
             Expr::Literal(expr) => Ok(InterpValue::Prvalue(expr.interp_eval())),
@@ -200,7 +202,10 @@ impl<'src> Expr<InterpOp<'src>, InterpVar<'src>> {
 }
 
 impl<'src> InterpAssignment<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec<'brw>(
+        &self,
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         let var = match &self.lvalue {
             Expr::Variable(var) => var,
             Expr::Assignment(_) | Expr::Literal(_) => {
@@ -219,10 +224,10 @@ impl<'src> InterpAssignment<'src> {
 }
 
 impl<'src> InterpExprStmt<'src> {
-    fn interp_exec<'env>(
+    fn interp_exec<'brw>(
         &self,
-        env: &'env mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         if let Expr::Assignment(assignment) = &self.expr {
             assignment.interp_exec(env)
         } else {
@@ -237,10 +242,10 @@ impl<'src> InterpExprStmt<'src> {
 }
 
 impl<'src> InterpPrintStmt<'src> {
-    fn interp_exec<'env>(
+    fn interp_exec<'brw>(
         &self,
-        env: &'env mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         let buf = self.expr.interp_eval(env)?.to_ref();
         let val: &text = buf
             .as_ref()
@@ -254,7 +259,7 @@ impl<'src> InterpPrintStmt<'src> {
 
 /// A predicate that static analysis should guarantee is a boolean
 fn expect_bool<'src>(
-    pred: &Expr<InterpOp<'src>, InterpVar<'src>>,
+    pred: &InterpExpr<'src>,
     env: &mut InterpEnvironment<'src>,
 ) -> Result<bool, Failure> {
     let buf = pred.interp_eval(env)?.to_ref();
@@ -269,10 +274,10 @@ fn expect_bool<'src>(
 }
 
 impl<'src> InterpIfStmt<'src> {
-    fn interp_exec<'env>(
+    fn interp_exec<'brw>(
         &self,
-        env: &'env mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         let mut cond = self;
         loop {
             break if expect_bool(&cond.pred, env)? {
@@ -298,15 +303,19 @@ fn label_eq(mine: Option<InterpLabel<'_>>, flow: InterpLabel<'_>) -> bool {
 }
 
 impl<'src> InterpLoopStmt<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec<'brw>(
+        &self,
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         loop {
             match self.block.interp_exec(env)? {
-                // ControlFlow::Skip is consumed by the loop and only serves to let the inner expression skip
-                ControlFlow::Continue | ControlFlow::Skip(None) => {}
-                ControlFlow::Skip(Some(label)) if label_eq(self.label, label) => {}
+                // TODO: handle value yeilded by skip
+                ControlFlow::Continue | ControlFlow::Skip(None, _) => {}
+                ControlFlow::Skip(Some(label), _) if label_eq(self.label, label) => {}
 
-                ControlFlow::Halt(None) => break Ok(ControlFlow::Continue),
-                ControlFlow::Halt(Some(label)) if label_eq(self.label, label) => {
+                // TODO: handle value yeilded by halt
+                ControlFlow::Halt(None, _) => break Ok(ControlFlow::Continue),
+                ControlFlow::Halt(Some(label), _) if label_eq(self.label, label) => {
                     break Ok(ControlFlow::Continue);
                 }
 
@@ -317,15 +326,21 @@ impl<'src> InterpLoopStmt<'src> {
 }
 
 impl<'src> InterpCordStmt<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec<'brw>(
+        &self,
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         loop {
             match self.block.interp_exec(env)? {
-                // ControlFlow::Skip is the only case in which the cord repeats
-                ControlFlow::Skip(None) => {}
-                ControlFlow::Skip(Some(label)) if label_eq(self.label, label) => {}
+                // TODO: handle value yeilded by skip
+                ControlFlow::Skip(None, _) => {}
+                ControlFlow::Skip(Some(label), _) if label_eq(self.label, label) => {}
 
-                ControlFlow::Continue | ControlFlow::Halt(None) => break Ok(ControlFlow::Continue),
-                ControlFlow::Halt(Some(label)) if label_eq(self.label, label) => {
+                // TODO: handle value yeilded by halt
+                ControlFlow::Continue | ControlFlow::Halt(None, _) => {
+                    break Ok(ControlFlow::Continue);
+                }
+                ControlFlow::Halt(Some(label), _) if label_eq(self.label, label) => {
                     break Ok(ControlFlow::Continue);
                 }
 
@@ -336,16 +351,19 @@ impl<'src> InterpCordStmt<'src> {
 }
 
 impl<'src> InterpForStmt<'src> {
-    fn interp_exec<'env>(
+    fn interp_exec<'brw>(
         &self,
-        _env: &'env mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+        _env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         todo!("how does an expression iterate?")
     }
 }
 
 impl<'src> InterpRepStmt<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec<'brw>(
+        &self,
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         loop {
             if !expect_bool(&self.pred, env)? {
                 break Ok(ControlFlow::Continue);
@@ -353,12 +371,13 @@ impl<'src> InterpRepStmt<'src> {
 
             // identical to "loop"
             match self.block.interp_exec(env)? {
-                // ControlFlow::Skip is consumed by the loop and only serves to let the inner expression skip
-                ControlFlow::Continue | ControlFlow::Skip(None) => (),
-                ControlFlow::Skip(Some(label)) if label_eq(self.label, label) => (),
+                // TODO: handle value yeilded by skip
+                ControlFlow::Continue | ControlFlow::Skip(None, _) => (),
+                ControlFlow::Skip(Some(label), _) if label_eq(self.label, label) => (),
 
-                ControlFlow::Halt(None) => break Ok(ControlFlow::Continue),
-                ControlFlow::Halt(Some(label)) if label_eq(self.label, label) => {
+                // TODO: handle value yeilded by halt
+                ControlFlow::Halt(None, _) => break Ok(ControlFlow::Continue),
+                ControlFlow::Halt(Some(label), _) if label_eq(self.label, label) => {
                     break Ok(ControlFlow::Continue);
                 }
 
@@ -370,26 +389,29 @@ impl<'src> InterpRepStmt<'src> {
 
 impl<'src> InterpHaltStmt<'src> {
     #[expect(clippy::unnecessary_wraps, reason = "future-proof")]
-    const fn interp_exec(
+    const fn interp_exec<'brw>(
         &self,
-        _env: &mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
-        Ok(ControlFlow::Halt(self.label))
+        _env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+        Ok(ControlFlow::Halt(self.label, None)) // TODO
     }
 }
 
 impl<'src> InterpSkipStmt<'src> {
     #[expect(clippy::unnecessary_wraps, reason = "future-proof")]
-    const fn interp_exec(
+    const fn interp_exec<'brw>(
         &self,
-        _env: &mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
-        Ok(ControlFlow::Skip(self.label))
+        _env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+        Ok(ControlFlow::Skip(self.label, None)) // TODO
     }
 }
 
 impl<'src> InterpBlockStmt<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec<'brw>(
+        &self,
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         for stmt in &self.stmts {
             let res = stmt.interp_exec(env)?;
             if !matches!(res, ControlFlow::Continue) {
@@ -401,7 +423,10 @@ impl<'src> InterpBlockStmt<'src> {
 }
 
 impl<'src> InterpStatement<'src> {
-    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec<'brw>(
+        &self,
+        env: &'brw mut InterpEnvironment<'src>,
+    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
         match self {
             Self::Expr(stmt) => stmt.interp_exec(env),
             Self::Print(stmt) => stmt.interp_exec(env),
@@ -423,11 +448,9 @@ pub fn interpret<'src>(
 ) -> Result<(), Failure> {
     for stmt in &prgm.stmts {
         let flow = stmt.interp_exec(&mut env)?;
-        assert_eq!(
-            flow,
-            ControlFlow::Continue,
-            "should not halt without a loop or cord"
-        );
+        if !matches!(flow, ControlFlow::Continue) {
+            panic!("should not halt without a loop or cord\n {flow:?}");
+        }
     }
     Ok(())
 }

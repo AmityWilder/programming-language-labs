@@ -2,7 +2,7 @@
 
 use crate::{
     SYNTAX_STYLE_ANSI,
-    analyzer::{AnalysisOp, AnalysisVar, Expr, types::AbstractType},
+    analyzer::types::AbstractType,
     arrayvec::ArrayVec,
     exec::error::Failure,
     grammar::ast::AstNodeFinal,
@@ -451,7 +451,7 @@ macro_rules! CtxErrType {{
                 'src: 'err,
                 F: FnMut(LineRef<'src, 'err>)
             {
-                match &self.err {
+                match &*self.err {
                     $($($Enum::$Variant$({$( $info_s_ident$(: $info_s_pat)?, )* ..})?$(($( $info_t_pat ),*))? => {
                         for (range, msg) in $info {
                             visit(LineRef::new(self.source, RefStyleKind::Info, range, msg.into()));
@@ -489,7 +489,7 @@ macro_rules! CtxErrType {{
                     .source
                     .get(self.0.range)
                     .expect("range should be a range in source");
-                match &self.0.err {$(
+                match &*self.0.err {$(
                     $Enum::$Variant$({$( $help_s_ident$(: $help_s_pat)?, )* ..})?$(($( $help_t_pat ),*))? => { let $help_f = f; let $src = src; $help }
                 ),*}
             }
@@ -497,10 +497,10 @@ macro_rules! CtxErrType {{
 
         impl std::fmt::Display for ContextErrorCode<'_, '_> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let area = match &self.0.err {$(
+                let area = match &*self.0.err {$(
                     $Enum::$Variant{..} => stringify!($kind)
                 ),*};
-                let code = match &self.0.err {$(
+                let code = match &*self.0.err {$(
                     $Enum::$Variant{..} => $code
                 ),*};
                 write!(f, "err[{area}.{code:>03}]")
@@ -1045,6 +1045,13 @@ pub enum ErrorType<'src> {
     })]
     AssignImmutable(ImmutableAssignment),
 
+    // TODO: make this more helpful
+    #[code(CMP, 49)]
+    #[err(|f| write!(f, "only `loop` and `cord` are supported loop expressions"))]
+    #[inlay(|f| write!(f, "may finish without a result"))]
+    #[help(|f, _src| write!(f, "try changing the expression to a `loop` or `cord` or remove the assignment"))]
+    FallibleBlockExpr,
+
     // TODO: need an error for undefined conversion
 
     // ----------------------------
@@ -1130,12 +1137,11 @@ pub enum ErrorType<'src> {
     #[err({ failure, .. }, |f| write!(f, "failed conversion: {failure}"))]
     #[inlay({ .. }, |f| write!(f, "integer conversion failed"))]
     #[help({ .. }, |f, _src| write!(f, "ensure the expression fits in the target type"))]
-    #[info({ op, op_range, failure, is_binary }, [
-        (*op_range, FailedConversionMsg::new(*op, OpSide::Prefix, *failure, *is_binary)),
+    #[info({ op, op_range, failure }, [
+        (*op_range, FailedConversionMsg::new(*op, OpSide::Prefix, *failure)),
     ])]
     FailedConvert {
         op: TokenEq,
-        is_binary: bool,
         op_range: Range<usize>,
         failure: IntConversionFailure,
     },
@@ -1155,12 +1161,12 @@ pub struct ContextError<'src> {
     /// [`None`] if the error did not occur in a macro expansion.
     pub mac: Option<Range<usize>>,
     /// The exact error that was found
-    pub err: ErrorType<'src>,
+    pub err: Box<ErrorType<'src>>,
 }
 
 impl<'src> ContextError<'src> {
     /// Produce an error with optional range
-    pub const fn error(
+    pub fn error(
         source: &'src str,
         range: Option<Range<usize>>,
         mac: Option<ExpansionData<'src>>,
@@ -1175,11 +1181,8 @@ impl<'src> ContextError<'src> {
                     end: source.len(),
                 },
             },
-            mac: match mac {
-                Some(ExpansionData { range, .. }) => Some(range),
-                None => None,
-            },
-            err,
+            mac: mac.map(|ExpansionData { range, .. }| range),
+            err: Box::new(err),
         }
     }
 
@@ -1214,7 +1217,7 @@ impl<'src> ContextError<'src> {
     where
         F: FnOnce(ErrorType<'src>) -> ErrorType<'src>,
     {
-        self.err = f(self.err);
+        self.err = Box::new(f(*self.err)); // TODO: :c
         self
     }
 
@@ -1272,25 +1275,13 @@ impl<'src> ContextError<'src> {
     }
 
     /// No token was found despite expecting one
-    pub const fn missing(source: &'src str, expect: ExpectedToken) -> Self {
+    pub fn missing(source: &'src str, expect: ExpectedToken) -> Self {
         Self::error(
             source,
             None,
             None, // TODO: is there a case where macro expansion can have a missing token?
             ErrorType::MissingToken { expect },
         )
-    }
-
-    /// A token is expected but wasn't found; determine from its existence if it's unexpected or missing
-    pub fn missing_or_unexpected(
-        token: Option<&Token<'src>>,
-        source: &'src str,
-        expect: ExpectedToken,
-    ) -> Self {
-        match token {
-            Some(token) => Self::unexpected(token, source, expect),
-            None => Self::missing(source, expect),
-        }
     }
 }
 
@@ -1655,14 +1646,16 @@ impl<'src, 'arr, 'err> LineRefs<'src, 'arr, 'err> {
 
         if is_unterminated_block_comment {
             write_highlight(
-                std::iter::once(ContextError {
+                std::iter::once(ContextError::error(
                     source,
-                    range: source
-                        .substr_range(line_after_block_comment)
-                        .expect("line_after_block_comment should be a substr of source"),
-                    mac: None,
-                    err: ErrorType::EndlessBlockComment,
-                }),
+                    Some(
+                        source
+                            .substr_range(line_after_block_comment)
+                            .expect("line_after_block_comment should be a substr of source"),
+                    ),
+                    None,
+                    ErrorType::EndlessBlockComment,
+                )),
                 f,
                 &SYNTAX_STYLE_ANSI,
             )
@@ -2056,33 +2049,17 @@ struct FailedConversionMsg {
     op: TokenEq,
     side: OpSide,
     failure: IntConversionFailure,
-    is_binary: bool,
 }
 
 impl FailedConversionMsg {
-    const fn new(
-        op: TokenEq,
-        side: OpSide,
-        failure: IntConversionFailure,
-        is_binary: bool,
-    ) -> Self {
-        Self {
-            op,
-            side,
-            failure,
-            is_binary,
-        }
+    const fn new(op: TokenEq, side: OpSide, failure: IntConversionFailure) -> Self {
+        Self { op, side, failure }
     }
 }
 
 impl std::fmt::Display for FailedConversionMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self {
-            op,
-            side,
-            failure,
-            is_binary,
-        } = self;
+        let Self { op, side, failure } = self;
         let target_ty = failure.target_ty();
         let (min, max) = target_ty.bounds();
         let value = failure.value();

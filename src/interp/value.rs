@@ -1,10 +1,9 @@
 use crate::{
     analyzer::{
-        Expr,
+        InterpExpr,
         types::{FunShape, StaticType},
     },
     exec::error::Failure,
-    interp::env::InterpVar,
     types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
 use std::{
@@ -635,11 +634,11 @@ pub enum InterpOp<'src> {
     Binary(
         FunShape<'src>,
         InterpBinaryOpFn,
-        Expr<Self, InterpVar<'src>>,
-        Expr<Self, InterpVar<'src>>,
+        InterpExpr<'src>,
+        InterpExpr<'src>,
     ),
-    UnaryPre(FunShape<'src>, InterpUnaryOpFn, Expr<Self, InterpVar<'src>>),
-    UnaryPost(FunShape<'src>, InterpUnaryOpFn, Expr<Self, InterpVar<'src>>),
+    UnaryPre(FunShape<'src>, InterpUnaryOpFn, InterpExpr<'src>),
+    UnaryPost(FunShape<'src>, InterpUnaryOpFn, InterpExpr<'src>),
 }
 
 impl Debug for InterpOp<'_> {

@@ -1,6 +1,6 @@
 use crate::{
     error::{ContextError, ErrorType, OpSide},
-    grammar::ast::{AstNodeFinal, Binary, Expr, Literal, TypenameKeyword, Unary},
+    grammar::ast::{AstNodeFinal, Binary, BlockExpr, Expr, Literal, TypenameKeyword, Unary},
     scanner::token::{
         SpecToken,
         value::{LexValue, Operator},
@@ -414,6 +414,16 @@ where
         Expr::Directive(inner) => Err(ContextError::token_error(
             source,
             Some(&inner.kw),
+            ErrorType::InvalidPreOperator, // TODO: this isn't an operator
+        )),
+
+        Expr::Block(inner) => Err(ContextError::token_error(
+            source,
+            Some(match inner {
+                BlockExpr::If(inner) => &inner.if_kw,
+                BlockExpr::Loop(inner) => &inner.kw,
+                BlockExpr::Block(inner) => &inner.open,
+            }),
             ErrorType::InvalidPreOperator, // TODO: this isn't an operator
         )),
 

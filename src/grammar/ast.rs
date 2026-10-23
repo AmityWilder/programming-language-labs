@@ -780,7 +780,30 @@ impl<'src> AstNode<'src> for Variable<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
+pub enum BlockExpr<'src> {
+    If(Box<IfStmt<'src>>),
+    /// Only `loop` or `cord`
+    Loop(Box<LoopBlock<'src>>),
+    Block(BlockStmt<'src>),
+}
+
+impl<'src> BlockExpr<'src> {
+    pub fn if_expr(inner: IfStmt<'src>) -> Self {
+        Self::If(Box::new(inner))
+    }
+
+    pub fn loop_expr(inner: LoopBlock<'src>) -> Self {
+        Self::Loop(Box::new(inner))
+    }
+
+    pub fn block_expr(inner: BlockStmt<'src>) -> Self {
+        Self::Block(inner)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
 pub enum Expr<'src> {
+    Block(BlockExpr<'src>),
     Binary(Box<Binary<'src>>),
     Unary(Box<Unary<'src>>),
     Literal(Literal<'src>),
@@ -901,8 +924,7 @@ pub enum LoopKind<'src> {
 impl<'src> AstNode<'src> for LoopKind<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
         match self {
-            Self::Loop => None,
-            Self::Cord => None,
+            Self::Loop | Self::Cord => None,
             Self::Rep { pred } => pred.get_range_start(source),
             Self::For { bind, .. } => bind.get_range_start(source),
         }
@@ -910,8 +932,7 @@ impl<'src> AstNode<'src> for LoopKind<'src> {
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
         match self {
-            Self::Loop => None,
-            Self::Cord => None,
+            Self::Loop | Self::Cord => None,
             Self::Rep { pred } => pred.get_range_end(source),
             Self::For { iter, .. } => iter.get_range_end(source),
         }
@@ -919,8 +940,7 @@ impl<'src> AstNode<'src> for LoopKind<'src> {
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
         match self {
-            Self::Loop => None,
-            Self::Cord => None,
+            Self::Loop | Self::Cord => None,
             Self::Rep { pred } => pred.get_range(source),
             Self::For { bind, iter, .. } => (bind, iter).get_range(source),
         }
@@ -928,8 +948,7 @@ impl<'src> AstNode<'src> for LoopKind<'src> {
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         match self {
-            Self::Loop => None,
-            Self::Cord => None,
+            Self::Loop | Self::Cord => None,
             Self::Rep { pred } => pred.expansion(source),
             Self::For { bind, iter, .. } => (bind, iter).expansion(source),
         }
@@ -969,7 +988,7 @@ pub struct HaltStmt<'src> {
     /// `halt`
     pub halt_kw: Lexeme<'src>,
     pub label: Option<Label<'src>>,
-    // TBD: should `halt value;` be supported?
+    pub value: Option<Expr<'src>>,
     /// `;`
     pub semi: Lexeme<'src>,
 }
@@ -997,7 +1016,8 @@ pub struct SkipStmt<'src> {
     /// `skip`
     pub skip_kw: Lexeme<'src>,
     pub label: Option<Label<'src>>,
-    // TBD: should `skip value;` be supported?
+    // TODO: wait a sec, how tf would `skip` output a value? remove this.
+    pub value: Option<Expr<'src>>,
     /// `;`
     pub semi: Lexeme<'src>,
 }

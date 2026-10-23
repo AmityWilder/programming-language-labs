@@ -19,6 +19,7 @@
     impl_trait_in_bindings,
     impl_trait_in_fn_trait_return,
     macro_derive,
+    deref_patterns,
     char_to_u32,
 )]
 #![forbid(

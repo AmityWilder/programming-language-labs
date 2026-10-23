@@ -18,12 +18,12 @@ mod scan {
         const SOURCE: &str = "\\";
         assert_eq!(
             tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
-            &[Err(ContextError {
-                source: SOURCE,
-                range: (0..SOURCE.len()).into(),
-                mac: None,
-                err: ErrorType::UnknownToken,
-            })]
+            &[Err(ContextError::error(
+                SOURCE,
+                Some((0..SOURCE.len()).into()),
+                None,
+                ErrorType::UnknownToken
+            ))]
         );
     }
 
@@ -543,12 +543,12 @@ mod scan {
             const SOURCE: &str = "'aa'";
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
-                &[Err(ContextError {
-                    source: SOURCE,
-                    range: (0..SOURCE.len()).into(),
-                    mac: None,
-                    err: ErrorType::MultiCharLiteral,
-                })]
+                &[Err(ContextError::error(
+                    SOURCE,
+                    Some((0..SOURCE.len()).into()),
+                    None,
+                    ErrorType::MultiCharLiteral
+                ))]
             );
         }
 
@@ -557,12 +557,12 @@ mod scan {
             const SOURCE: &str = "''";
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
-                &[Err(ContextError {
-                    source: SOURCE,
-                    range: (0..SOURCE.len()).into(),
-                    mac: None,
-                    err: ErrorType::EmptyCharLiteral,
-                })]
+                &[Err(ContextError::error(
+                    SOURCE,
+                    Some((0..SOURCE.len()).into()),
+                    None,
+                    ErrorType::EmptyCharLiteral,
+                ))]
             );
         }
 
@@ -571,12 +571,12 @@ mod scan {
             const SOURCE: &str = "' ";
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
-                &[Err(ContextError {
-                    source: SOURCE,
-                    range: (0..SOURCE.len()).into(),
-                    mac: None,
-                    err: ErrorType::EndlessCharLiteral,
-                })]
+                &[Err(ContextError::error(
+                    SOURCE,
+                    Some((0..SOURCE.len()).into()),
+                    None,
+                    ErrorType::EndlessCharLiteral,
+                ))]
             );
         }
 
@@ -620,12 +620,12 @@ mod scan {
                 const SOURCE: &str = "'\\1b'";
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
-                    &[Err(ContextError {
-                        source: SOURCE,
-                        range: (0..SOURCE.len()).into(),
-                        mac: None,
-                        err: ErrorType::MultiCharLiteral,
-                    })]
+                    &[Err(ContextError::error(
+                        SOURCE,
+                        Some((0..SOURCE.len()).into()),
+                        None,
+                        ErrorType::MultiCharLiteral,
+                    ))]
                 );
             }
 
@@ -634,12 +634,12 @@ mod scan {
                 const SOURCE: &str = "'\\'";
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
-                    &[Err(ContextError {
-                        source: SOURCE,
-                        range: (0..SOURCE.len()).into(),
-                        mac: None,
-                        err: ErrorType::EscapedCharLiteralEnd,
-                    })]
+                    &[Err(ContextError::error(
+                        SOURCE,
+                        Some((0..SOURCE.len()).into()),
+                        None,
+                        ErrorType::EscapedCharLiteralEnd,
+                    ))]
                 );
             }
         }
@@ -693,12 +693,12 @@ mod scan {
             const SOURCE: &str = "\" ";
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
-                &[Err(ContextError {
-                    source: SOURCE,
-                    range: (0..SOURCE.len()).into(),
-                    mac: None,
-                    err: ErrorType::EndlessStringLiteral,
-                })]
+                &[Err(ContextError::error(
+                    SOURCE,
+                    Some((0..SOURCE.len()).into()),
+                    None,
+                    ErrorType::EndlessStringLiteral,
+                ))]
             );
         }
 
@@ -749,12 +749,12 @@ mod scan {
                 const SOURCE: &str = "\"\\\"";
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
-                    &[Err(ContextError {
-                        source: SOURCE,
-                        range: (0..SOURCE.len()).into(),
-                        mac: None,
-                        err: ErrorType::EscapedStringLiteralEnd,
-                    })]
+                    &[Err(ContextError::error(
+                        SOURCE,
+                        Some((0..SOURCE.len()).into()),
+                        None,
+                        ErrorType::EscapedStringLiteralEnd
+                    ))]
                 );
             }
         }

@@ -1,5 +1,6 @@
 {
     let i = 0;
+    //let n = if true { 2 } or { 3 };
     .outer: rep i < 5 {
         let i = i++;
         let j = 0;

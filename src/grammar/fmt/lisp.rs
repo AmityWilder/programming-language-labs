@@ -1,6 +1,9 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    grammar::ast::{Binary, Directive, Expr, Grouping, Literal, OrType, TypeExpr, Unary, Variable},
+    grammar::ast::{
+        Binary, BlockExpr, BlockStmt, DeclVar, Declaration, Directive, Expr, Grouping, IfStmt,
+        Literal, LoopBlock, OrBody, OrStmt, OrType, Statement, TypeExpr, Unary, Variable,
+    },
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
 };
 
@@ -123,9 +126,135 @@ impl LispDisplay for Variable<'_> {
     }
 }
 
+impl LispDisplay for OrStmt<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { body, .. } = self;
+        match body {
+            OrBody::More(inner) => LispDisplay::fmt(inner, f),
+            OrBody::Last(inner) => LispDisplay::fmt(inner, f),
+        }
+    }
+}
+
+impl LispDisplay for IfStmt<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            if_kw,
+            pred,
+            then,
+            or,
+        } = self;
+        f.write_str("(")?;
+        if f.alternate() {
+            std::fmt::Display::fmt(
+                &crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(if_kw.lex),
+                f,
+            )?;
+        } else {
+            std::fmt::Display::fmt(&(if_kw.lex), f)?;
+        }
+        f.write_str(" ")?;
+        std::fmt::Display::fmt(Lisp::new(pred), f)?;
+        f.write_str(" ")?;
+        std::fmt::Display::fmt(Lisp::new(then), f)?;
+        if let Some(or) = or.as_deref() {
+            f.write_str(" ")?;
+            std::fmt::Display::fmt(Lisp::new(or), f)?;
+        }
+        f.write_str(")")
+    }
+}
+
+impl LispDisplay for LoopBlock<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
+impl LispDisplay for DeclVar<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            var_kw,
+            binding,
+            assignment,
+            ..
+        } = self;
+        f.write_str("(")?;
+        if f.alternate() {
+            std::fmt::Display::fmt(
+                &crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(var_kw.lex),
+                f,
+            )?;
+        } else {
+            std::fmt::Display::fmt(&var_kw.lex, f)?;
+        }
+        f.write_str(" ")?;
+        std::fmt::Display::fmt(
+            &crate::SYNTAX_STYLE_ANSI[Syntax::Variable].style(binding.ident.lex),
+            f,
+        )?;
+        if let Some(assignment) = assignment {
+            f.write_str(" ")?;
+            LispDisplay::fmt(&assignment.expr, f)?;
+        }
+        f.write_str(")")
+    }
+}
+
+impl LispDisplay for Statement<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Expr(inner) => LispDisplay::fmt(&inner.expr, f),
+            Self::Print(_) => Ok(()),
+            Self::If(inner) => LispDisplay::fmt(inner, f),
+            Self::Loop(inner) => LispDisplay::fmt(inner, f),
+            Self::Halt(inner) => todo!(),
+            Self::Skip(inner) => todo!(),
+            Self::Block(inner) => LispDisplay::fmt(inner, f),
+        }
+    }
+}
+
+impl LispDisplay for Declaration<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Var(inner) => LispDisplay::fmt(inner, f),
+            Self::Stmt(inner) => LispDisplay::fmt(inner, f),
+        }
+    }
+}
+
+impl LispDisplay for BlockStmt<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { open, body, close } = self;
+        f.write_str("(")?;
+        if f.alternate() {
+            std::fmt::Display::fmt(&crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style("block"), f)?;
+        } else {
+            std::fmt::Display::fmt(&"block", f)?;
+        }
+        f.write_str(" ")?;
+        for item in body {
+            std::fmt::Display::fmt(Lisp::new(item), f)?;
+        }
+        f.write_str(")")
+    }
+}
+
+impl LispDisplay for BlockExpr<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::If(inner) => LispDisplay::fmt(&**inner, f),
+            Self::Loop(inner) => LispDisplay::fmt(&**inner, f),
+            Self::Block(inner) => LispDisplay::fmt(inner, f),
+        }
+    }
+}
+
 impl LispDisplay for Expr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Block(inner) => LispDisplay::fmt(inner, f),
             Self::Binary(inner) => LispDisplay::fmt(&**inner, f),
             Self::Unary(inner) => LispDisplay::fmt(&**inner, f),
             // TBD: should this use val instead of lex?
