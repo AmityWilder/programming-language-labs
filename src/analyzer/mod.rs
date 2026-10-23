@@ -1984,6 +1984,7 @@ where
         if let ast::Declaration::Defer(decl) = decl {
             stmts.push(Statement::Defer(DeferNode {
                 on_pop: decl.on_pop.analyze(source, env, ret)?,
+                ret_param: todo!(),
                 inner: analyze_defers(iter, source, env, ret)?,
             }));
             break;
@@ -2049,6 +2050,7 @@ impl<'src> CoagulateVars<'src> for AnalysisBlockStmt<'src> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeferNode<L, O, V> {
     pub inner: BlockStmt<L, O, V>,
+    pub ret_param: Option<V>,
     pub on_pop: BlockStmt<L, O, V>,
 }
 
@@ -2081,6 +2083,7 @@ impl<'src> CementVars for AnalysisDeferNode<'src> {
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         DeferNode {
             inner: self.inner.cement_vars(ranges),
+            ret_param: self.ret_param.map(|x| x.cement_vars(ranges)),
             on_pop: self.on_pop.cement_vars(ranges),
         }
     }
@@ -2096,6 +2099,7 @@ impl<'src> CoagulateVars<'src> for AnalysisDeferNode<'src> {
     ) -> Self::Interp {
         DeferNode {
             inner: self.inner.coagulate_vars(s_env, i_env),
+            ret_param: self.ret_param.map(|x| x.coagulate_vars(s_env, i_env)),
             on_pop: self.on_pop.coagulate_vars(s_env, i_env),
         }
     }

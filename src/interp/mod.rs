@@ -12,7 +12,7 @@ use crate::{
         OrStmt,
     },
     exec::error::Failure,
-    interp::value::InterpValue,
+    interp::value::{InterpValue, InterpVarValue},
     types::{byte, text},
 };
 use env::InterpEnvironment;
@@ -25,18 +25,16 @@ pub mod env;
 pub mod value;
 
 #[derive(Debug, Default)]
-pub enum ControlFlow<'brw, 'src> {
+pub enum ControlFlow<'src> {
     /// Keep going as usual
     #[default]
     Continue,
     /// Skip to the next iteration of the current loop
-    Skip(Option<InterpLabel<'src>>, Option<InterpValue<'brw, 'src>>),
+    Skip(Option<InterpLabel<'src>>, Option<InterpVarValue<'src>>),
     /// End the current loop
-    Halt(Option<InterpLabel<'src>>, Option<InterpValue<'brw, 'src>>),
+    Halt(Option<InterpLabel<'src>>, Option<InterpVarValue<'src>>),
     /// End the current function
-    Give(InterpValue<'brw, 'src>),
-    /// End the current function, but keep its information (TBD: is this reasonable?)
-    Emit(InterpValue<'brw, 'src>),
+    Give(InterpVarValue<'src>),
     /// Produce an exception
     Fail(Failure),
 }
@@ -135,22 +133,74 @@ impl Inpt for char {
     fn input() -> Result<Self, Failure> {
         use std::io::Read;
         let mut buf = [0; char::MAX_LEN_UTF8];
-        let mut s = Err(Failure::FailedRead);
         for i in 0..buf.len() {
-            // TODO: handle error
-            std::io::stdin()
-                .read_exact(std::slice::from_mut(&mut buf[i]))
-                .map_err(|_| Failure::FailedRead)?;
-            s = str::from_utf8(&buf[..i + 1]).map_err(|_| Failure::ParseChar);
-            if s.is_ok() {
+            // SAFETY:
+            //
+            // Definition 1:
+            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some non-negative integer n. Then, `S.len() = n`.
+            //
+            // Definition 2:
+            // Let `h,k` be integers. Then, `h..k` is the range of all integers `n` such that `h <= n < k`.
+            //
+            // Definition 3:
+            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some non-negative integer `n` and let `k` be an integer.
+            // Then, `S.get_unchecked_mut(k)` is "sound" if and only if `0 <= k < n`.
+            //
+            // Definition 4:
+            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some non-negative integer `n` and let `h,k` be integers.
+            // Then, `S.get_unchecked_mut(h..=k)` is sound if and only if `S.get_unchecked_mut(l)`
+            // is sound for all integers `l` such that `h <= l <= k`.
+            //
+            // Theorem:
+            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some integer `n > 0`.
+            // Let `k` be an integer such that `0 <= k < n`.
+            // Then, `S.get_unchecked_mut(0..=k)` is sound.
+            //
+            // Proof.
+            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some integer `n > 0`.
+            // Let `P(l)` be the statement "`S.get_unchecked_mut(0..=l)` is sound".
+            // We will show that if `0 <= l < n`, then `P(l)` is true.
+            //
+            // Base case: `l = 0`
+            // Since `0 <= 0` and `n > 0`, we know `0 <= 0 < n`.
+            // Therefore, by definition 3, `S.get_unchecked_mut(0)` is sound.
+            // Since `S.get_unchecked_mut(m)` is sound for all integers `m` such that `0 <= m <= 0`,
+            // by definition 4, `S.get_unchecked_mut(0..=0)` is sound.
+            // This proves that `P(0)` is true.
+            //
+            // Induction step:
+            // Assume `P(0), P(1), ..., P(t)` are all true for some integer `t >= 0`.
+            // In other words, `S.get_unchecked_mut(0..=t)` is sound.
+            // So by definition, `S.get_unchecked_mut(w)` is sound for all integers `w` such that `0 <= w < t`.
+            // We will show that if `t + 1 < n`, then `P(t + 1)` is true.
+            // Since `t >= 0`, we know `t + 1 >= 0`.
+            // If `t + 1 < n`, then `0 <= t + 1 < n`.
+            // So by definition 3, `S.get_unchecked_mut(t + 1)` is sound.
+            // Since `S.get_unchecked_mut(w)` is sound for all integers `w` such that `0 <= w < t`,
+            // and `S.get_unchecked_mut(t + 1)` is sound, `S.get_unchecked_mut(0..=(t + 1))` is sound. □
+            let seg = unsafe { buf.get_unchecked_mut(0..=i) };
+
+            let [.., newest] = seg else {
+                unreachable!("inclusive range can't be empty")
+            };
+            if std::io::stdin()
+                .read_exact(std::slice::from_mut(newest))
+                .is_err()
+            {
                 break;
             }
+
+            // TBD: what if `seg` starts within a UTF-8 char?
+            // then even if a char starting on the next byte is valid, the str as a whole will never be valid
+            if let Ok(s) = str::from_utf8(&*seg) {
+                let ch = s
+                    .chars()
+                    .next()
+                    .expect("loop would have exited with FailedRead if the stdin was empty");
+                return Ok(ch);
+            }
         }
-        s.map(|s| {
-            s.chars()
-                .next()
-                .expect("loop would have failed with FailedRead if the stdin was empty")
-        })
+        Err(Failure::FailedRead)
     }
 }
 
@@ -158,10 +208,14 @@ impl Inpt for byte {
     fn input() -> Result<Self, Failure> {
         use std::io::Read;
         let mut buf = b'\0';
-        std::io::stdin()
+        if std::io::stdin()
             .read_exact(std::slice::from_mut(&mut buf))
-            .map_err(|_| Failure::FailedRead)
-            .map(|()| buf)
+            .is_ok()
+        {
+            Ok(buf)
+        } else {
+            Err(Failure::FailedRead)
+        }
     }
 }
 
@@ -187,7 +241,7 @@ impl<'src> InterpExpr<'src> {
         env: &'brw InterpEnvironment<'src>,
     ) -> Result<InterpValue<'brw, 'src>, Failure> {
         match self {
-            Expr::Block(expr) => todo!(),
+            Expr::Block(_expr) => todo!("block expression"),
             Expr::Assignment(_) => unimplemented!("should be handled by outer statement"),
             Expr::Op(expr) => expr.interp_eval(env),
             Expr::Literal(expr) => Ok(InterpValue::Prvalue(expr.interp_eval())),
@@ -205,7 +259,7 @@ impl<'src> InterpAssignment<'src> {
     fn interp_exec<'brw>(
         &self,
         env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         let var = match &self.lvalue {
             Expr::Variable(var) => var,
             Expr::Assignment(_) | Expr::Literal(_) => {
@@ -227,7 +281,7 @@ impl<'src> InterpExprStmt<'src> {
     fn interp_exec<'brw>(
         &self,
         env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         if let Expr::Assignment(assignment) = &self.expr {
             assignment.interp_exec(env)
         } else {
@@ -245,7 +299,7 @@ impl<'src> InterpPrintStmt<'src> {
     fn interp_exec<'brw>(
         &self,
         env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         let buf = self.expr.interp_eval(env)?.into_ref();
         let val: &text = buf
             .as_ref()
@@ -277,7 +331,7 @@ impl<'src> InterpIfStmt<'src> {
     fn interp_exec<'brw>(
         &self,
         env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         let mut cond = self;
         loop {
             break if expect_bool(&cond.pred, env)? {
@@ -306,7 +360,7 @@ impl<'src> InterpLoopStmt<'src> {
     fn interp_exec<'brw>(
         &self,
         env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         loop {
             match self.block.interp_exec(env)? {
                 // TODO: handle value yeilded by skip
@@ -329,7 +383,7 @@ impl<'src> InterpCordStmt<'src> {
     fn interp_exec<'brw>(
         &self,
         env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         loop {
             match self.block.interp_exec(env)? {
                 // TODO: handle value yeilded by skip
@@ -354,7 +408,7 @@ impl<'src> InterpForStmt<'src> {
     fn interp_exec<'brw>(
         &self,
         _env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         todo!("how does an expression iterate?")
     }
 }
@@ -363,7 +417,7 @@ impl<'src> InterpRepStmt<'src> {
     fn interp_exec<'brw>(
         &self,
         env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         loop {
             if !expect_bool(&self.pred, env)? {
                 break Ok(ControlFlow::Continue);
@@ -392,7 +446,7 @@ impl<'src> InterpHaltStmt<'src> {
     const fn interp_exec<'brw>(
         &self,
         _env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         Ok(ControlFlow::Halt(self.label, None)) // TODO
     }
 }
@@ -402,7 +456,7 @@ impl<'src> InterpSkipStmt<'src> {
     const fn interp_exec<'brw>(
         &self,
         _env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         Ok(ControlFlow::Skip(self.label, None)) // TODO
     }
 }
@@ -411,7 +465,7 @@ impl<'src> InterpBlockStmt<'src> {
     fn interp_exec<'brw>(
         &self,
         env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         for stmt in &self.stmts {
             let res = stmt.interp_exec(env)?;
             if !matches!(res, ControlFlow::Continue) {
@@ -423,27 +477,18 @@ impl<'src> InterpBlockStmt<'src> {
 }
 
 impl<'src> InterpDeferNode<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         let res = self.inner.interp_exec(env);
-        // de-borrow
-        // TBD: is cloning everything really the right choice?
-        let res = res.map(|x| match x {
-            ControlFlow::Continue => ControlFlow::Continue,
-            ControlFlow::Skip(l, x) => {
-                ControlFlow::Skip(l, x.map(|x| InterpValue::Prvalue(x.to_owned())))
-            }
-            ControlFlow::Halt(l, x) => {
-                ControlFlow::Halt(l, x.map(|x| InterpValue::Prvalue(x.to_owned())))
-            }
-            ControlFlow::Give(x) => ControlFlow::Give(InterpValue::Prvalue(x.to_owned())),
-            ControlFlow::Emit(x) => ControlFlow::Emit(InterpValue::Prvalue(x.to_owned())),
-            ControlFlow::Fail(e) => ControlFlow::Fail(e),
-        });
-        self.on_pop.interp_exec(env)?;
-        res
+        if let Some(param) = self.ret_param {
+            // *env.vars
+            //     .get_mut(param.id)
+            //     .expect("should be guaranteed by static analysis") = InterpVal(res);
+            self.on_pop.interp_exec(env)
+        } else {
+            // TBD: if both fail, which failure gets output?
+            _ = self.on_pop.interp_exec(env);
+            res
+        }
     }
 }
 
@@ -451,7 +496,7 @@ impl<'src> InterpStatement<'src> {
     fn interp_exec<'brw>(
         &self,
         env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'brw, 'src>, Failure> {
+    ) -> Result<ControlFlow<'src>, Failure> {
         match self {
             Self::Expr(stmt) => stmt.interp_exec(env),
             Self::Print(stmt) => stmt.interp_exec(env),

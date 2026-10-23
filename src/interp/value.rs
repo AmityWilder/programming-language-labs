@@ -1,6 +1,7 @@
 use crate::{
     analyzer::{
         InterpExpr,
+        static_env::VarId,
         types::{FunShape, StaticType},
     },
     exec::error::Failure,
@@ -337,6 +338,20 @@ impl Debug for FunVal {
     fn fmt(&self, _f: &mut Formatter<'_>) -> fmt::Result {
         todo!()
     }
+}
+
+/// An [`InterpVal`] that **can be** referenced without holding a reference
+#[derive(Debug)]
+pub enum InterpVarValue<'src> {
+    /// Has no accessible address
+    ///
+    /// Example: literals
+    Prvalue(InterpVal<'src>),
+
+    /// Has an accessible address
+    ///
+    /// Example: variable name
+    Lvalue(VarId),
 }
 
 /// An [`InterpVal`] that **can be** referenced
