@@ -12,18 +12,15 @@
             }
             // performs more expensive string concatenations,
             // so we want to avoid it if we can
-            let n; // numeric value of the text x
             // find a number in 0..100 that is equal to x
             let i = 0u;
-            loop {
-                if !(i < 100u) { halt; }
+            rep i < 100u {
+                let i = i++; // for loops dont exist yet :/
                 if x == "" + i {
-                    n = i;
                     success = true;
                     is_odd = (i & 1u) == 1u;
                     halt; // exits the loop, and then the cord ends naturally
                 }
-                i = i + 1u;
             }
         }
         if !success {
