@@ -16,6 +16,7 @@ use crate::{
     types::{byte, text},
 };
 use env::InterpEnvironment;
+use std::num::NonZero;
 use value::{
     BoolObject, ByteObject, CharObject, FailObject, FlptObject, InterpLabel, InterpOp, InterpVal,
     NoneObject, PrimitiveVal, SintObject, TextObject, UintObject,
@@ -108,15 +109,15 @@ impl Literal {
 }
 
 trait Inpt: Sized {
-    fn input() -> Result<Self, Failure>;
+    fn input<R: std::io::BufRead>(stream: R) -> Result<Self, Failure>;
 }
 
 impl Inpt for text {
-    fn input() -> Result<Self, Failure> {
+    fn input<R: std::io::BufRead>(mut stream: R) -> Result<Self, Failure> {
         let mut buf = String::new();
         // TODO: what if we want to receive just a character instead of an entire line?
         // TODO: handle error
-        std::io::stdin()
+        stream
             .read_line(&mut buf)
             .map_err(|_| Failure::FailedRead)?;
         if buf.ends_with('\n') {
@@ -130,88 +131,43 @@ impl Inpt for text {
 }
 
 impl Inpt for char {
-    fn input() -> Result<Self, Failure> {
-        use std::io::Read;
-        let mut buf = [0; char::MAX_LEN_UTF8];
-        for i in 0..buf.len() {
-            // SAFETY:
-            //
-            // Definition 1:
-            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some non-negative integer n. Then, `S.len() = n`.
-            //
-            // Definition 2:
-            // Let `h,k` be integers. Then, `h..k` is the range of all integers `n` such that `h <= n < k`.
-            //
-            // Definition 3:
-            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some non-negative integer `n` and let `k` be an integer.
-            // Then, `S.get_unchecked_mut(k)` is "sound" if and only if `0 <= k < n`.
-            //
-            // Definition 4:
-            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some non-negative integer `n` and let `h,k` be integers.
-            // Then, `S.get_unchecked_mut(h..=k)` is sound if and only if `S.get_unchecked_mut(l)`
-            // is sound for all integers `l` such that `h <= l <= k`.
-            //
-            // Theorem:
-            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some integer `n > 0`.
-            // Let `k` be an integer such that `0 <= k < n`.
-            // Then, `S.get_unchecked_mut(0..=k)` is sound.
-            //
-            // Proof.
-            // Let `S` be the array `[S_0, S_1, ..., S_n]` for some integer `n > 0`.
-            // Let `P(l)` be the statement "`S.get_unchecked_mut(0..=l)` is sound".
-            // We will show that if `0 <= l < n`, then `P(l)` is true.
-            //
-            // Base case: `l = 0`
-            // Since `0 <= 0` and `n > 0`, we know `0 <= 0 < n`.
-            // Therefore, by definition 3, `S.get_unchecked_mut(0)` is sound.
-            // Since `S.get_unchecked_mut(m)` is sound for all integers `m` such that `0 <= m <= 0`,
-            // by definition 4, `S.get_unchecked_mut(0..=0)` is sound.
-            // This proves that `P(0)` is true.
-            //
-            // Induction step:
-            // Assume `P(0), P(1), ..., P(t)` are all true for some integer `t >= 0`.
-            // In other words, `S.get_unchecked_mut(0..=t)` is sound.
-            // So by definition, `S.get_unchecked_mut(w)` is sound for all integers `w` such that `0 <= w < t`.
-            // We will show that if `t + 1 < n`, then `P(t + 1)` is true.
-            // Since `t >= 0`, we know `t + 1 >= 0`.
-            // If `t + 1 < n`, then `0 <= t + 1 < n`.
-            // So by definition 3, `S.get_unchecked_mut(t + 1)` is sound.
-            // Since `S.get_unchecked_mut(w)` is sound for all integers `w` such that `0 <= w < t`,
-            // and `S.get_unchecked_mut(t + 1)` is sound, `S.get_unchecked_mut(0..=(t + 1))` is sound. □
-            let seg = unsafe { buf.get_unchecked_mut(0..=i) };
+    fn input<R: std::io::BufRead>(mut stream: R) -> Result<Self, Failure> {
+        let mut buf = [0u8; char::MAX_LEN_UTF8];
 
-            let [.., newest] = seg else {
-                unreachable!("inclusive range can't be empty")
-            };
-            if std::io::stdin()
-                .read_exact(std::slice::from_mut(newest))
-                .is_err()
-            {
-                break;
-            }
+        // SAFETY: buf is not empty
+        let first = unsafe { buf.get_unchecked_mut(0) };
 
-            // TBD: what if `seg` starts within a UTF-8 char?
-            // then even if a char starting on the next byte is valid, the str as a whole will never be valid
-            if let Ok(s) = str::from_utf8(&*seg) {
-                let ch = s
-                    .chars()
-                    .next()
-                    .expect("loop would have exited with FailedRead if the stdin was empty");
-                return Ok(ch);
-            }
+        if stream.read_exact(std::slice::from_mut(first)).is_err() {
+            return Err(Failure::FailedRead);
         }
-        Err(Failure::FailedRead)
+
+        let Some(n) = NonZero::new(core::str::utf8_char_width(*first)) else {
+            return Err(Failure::FailedRead);
+        };
+        debug_assert!(n.get() <= buf.len(), "the full char must fit in buf");
+
+        // SAFETY: buf.len() is the maximum utf8 char width (len>=n) and n is non-zero (n>=1)
+        let seg = unsafe { buf.get_unchecked_mut(1..n.get()) };
+
+        if stream.read_exact(seg).is_err() {
+            return Err(Failure::FailedRead);
+        }
+
+        // SAFETY: buf.len() is the maximum utf8 char width (len>=n) and n is non-zero (n>=1)
+        let seg = unsafe { buf.get_unchecked_mut(..n.get()) };
+
+        if let Ok(s) = str::from_utf8(seg) {
+            Ok(s.chars().next().expect("should have at least one char"))
+        } else {
+            Err(Failure::FailedRead)
+        }
     }
 }
 
 impl Inpt for byte {
-    fn input() -> Result<Self, Failure> {
-        use std::io::Read;
+    fn input<R: std::io::BufRead>(mut stream: R) -> Result<Self, Failure> {
         let mut buf = b'\0';
-        if std::io::stdin()
-            .read_exact(std::slice::from_mut(&mut buf))
-            .is_ok()
-        {
+        if stream.read_exact(std::slice::from_mut(&mut buf)).is_ok() {
             Ok(buf)
         } else {
             Err(Failure::FailedRead)
@@ -222,15 +178,14 @@ impl Inpt for byte {
 impl Directive {
     fn interp_eval(self) -> Result<InterpVal<'static>, Failure> {
         match self {
-            Self::InptText => {
-                text::input().map(|x| InterpVal::Primitive(PrimitiveVal::Text(TextObject(x))))
-            }
-            Self::InptChar => {
-                char::input().map(|x| InterpVal::Primitive(PrimitiveVal::Char(CharObject(x))))
-            }
-            Self::InptByte => {
-                byte::input().map(|x| InterpVal::Primitive(PrimitiveVal::Byte(ByteObject(x))))
-            }
+            Self::InptText => text::input(std::io::stdin().lock())
+                .map(|x| InterpVal::Primitive(PrimitiveVal::Text(TextObject(x)))),
+
+            Self::InptChar => char::input(std::io::stdin().lock())
+                .map(|x| InterpVal::Primitive(PrimitiveVal::Char(CharObject(x)))),
+
+            Self::InptByte => byte::input(std::io::stdin().lock())
+                .map(|x| InterpVal::Primitive(PrimitiveVal::Byte(ByteObject(x)))),
         }
     }
 }
@@ -520,8 +475,43 @@ pub fn interpret<'src>(
     for stmt in &prgm.stmts {
         let flow = stmt.interp_exec(&mut env)?;
         if !matches!(flow, ControlFlow::Continue) {
-            panic!("should not halt without a loop or cord\n {flow:?}");
+            todo!("should not halt without a loop or cord\n {flow:?}");
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod inpt_char_tests {
+    use super::*;
+
+    #[test]
+    fn test_first_char() {
+        let stream = b"abc".as_slice();
+        assert_eq!(char::input(stream), Ok('a'));
+    }
+
+    #[test]
+    fn test_leading_continuation() {
+        let stream = b"\x80".as_slice();
+        assert_eq!(char::input(stream), Err(Failure::FailedRead));
+    }
+
+    #[test]
+    fn test_early_end() {
+        let stream = b"".as_slice();
+        assert_eq!(char::input(stream), Err(Failure::FailedRead));
+    }
+
+    #[test]
+    fn test_bad_overlong() {
+        let stream = b"\xC0\x9F".as_slice();
+        assert_eq!(char::input(stream), Err(Failure::FailedRead));
+    }
+
+    #[test]
+    fn test_oversize_multibyte() {
+        let stream = b"\xF4\x90".as_slice();
+        assert_eq!(char::input(stream), Err(Failure::FailedRead));
+    }
 }
