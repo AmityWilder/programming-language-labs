@@ -479,6 +479,7 @@ impl Keyword {
                 | Self::In
                 | Self::Loop
                 | Self::Cord
+                | Self::Defer
                 | Self::Halt
                 | Self::Skip
                 | Self::Give

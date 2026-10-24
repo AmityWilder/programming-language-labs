@@ -10,7 +10,7 @@ macro_rules! debug_info {
         }
     };
 }
-use debug_info;
+pub(crate) use debug_info;
 
 macro_rules! debug_warn {
     ($($args:tt)*) => {
@@ -19,7 +19,7 @@ macro_rules! debug_warn {
         }
     };
 }
-use debug_warn;
+pub(crate) use debug_warn;
 
 macro_rules! debug_unsafe {
     ($($args:tt)*) => {
@@ -28,4 +28,4 @@ macro_rules! debug_unsafe {
         }
     };
 }
-use debug_unsafe;
+pub(crate) use debug_unsafe;

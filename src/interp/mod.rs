@@ -11,8 +11,9 @@ use crate::{
         InterpPrintStmt, InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal,
         OrStmt,
     },
-    exec::error::Failure,
+    exec::{debug_warn, error::Failure},
     interp::value::{InterpValue, InterpVarValue},
+    scanner::token::value::Keyword,
     types::{byte, text},
 };
 use env::InterpEnvironment;
@@ -196,7 +197,7 @@ impl<'src> InterpExpr<'src> {
         env: &'brw InterpEnvironment<'src>,
     ) -> Result<InterpValue<'brw, 'src>, Failure> {
         match self {
-            Expr::Block(_expr) => todo!("block expression"),
+            Expr::Block(_expr) => todo!("block expressions"),
             Expr::Assignment(_) => unimplemented!("should be handled by outer statement"),
             Expr::Op(expr) => expr.interp_eval(env),
             Expr::Literal(expr) => Ok(InterpValue::Prvalue(expr.interp_eval())),
@@ -211,10 +212,7 @@ impl<'src> InterpExpr<'src> {
 }
 
 impl<'src> InterpAssignment<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         let var = match &self.lvalue {
             Expr::Variable(var) => var,
             Expr::Assignment(_) | Expr::Literal(_) => {
@@ -233,10 +231,7 @@ impl<'src> InterpAssignment<'src> {
 }
 
 impl<'src> InterpExprStmt<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         if let Expr::Assignment(assignment) = &self.expr {
             assignment.interp_exec(env)
         } else {
@@ -251,10 +246,7 @@ impl<'src> InterpExprStmt<'src> {
 }
 
 impl<'src> InterpPrintStmt<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         let buf = self.expr.interp_eval(env)?.into_ref();
         let val: &text = buf
             .as_ref()
@@ -283,10 +275,7 @@ fn expect_bool<'src>(
 }
 
 impl<'src> InterpIfStmt<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         let mut cond = self;
         loop {
             break if expect_bool(&cond.pred, env)? {
@@ -312,10 +301,7 @@ fn label_eq(mine: Option<InterpLabel<'_>>, flow: InterpLabel<'_>) -> bool {
 }
 
 impl<'src> InterpLoopStmt<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         loop {
             match self.block.interp_exec(env)? {
                 // TODO: handle value yeilded by skip
@@ -335,10 +321,7 @@ impl<'src> InterpLoopStmt<'src> {
 }
 
 impl<'src> InterpCordStmt<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         loop {
             match self.block.interp_exec(env)? {
                 // TODO: handle value yeilded by skip
@@ -360,19 +343,16 @@ impl<'src> InterpCordStmt<'src> {
 }
 
 impl<'src> InterpForStmt<'src> {
-    fn interp_exec<'brw>(
+    fn interp_exec(
         &self,
-        _env: &'brw mut InterpEnvironment<'src>,
+        _env: &mut InterpEnvironment<'src>,
     ) -> Result<ControlFlow<'src>, Failure> {
         todo!("how does an expression iterate?")
     }
 }
 
 impl<'src> InterpRepStmt<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         loop {
             if !expect_bool(&self.pred, env)? {
                 break Ok(ControlFlow::Continue);
@@ -398,9 +378,9 @@ impl<'src> InterpRepStmt<'src> {
 
 impl<'src> InterpHaltStmt<'src> {
     #[expect(clippy::unnecessary_wraps, reason = "future-proof")]
-    const fn interp_exec<'brw>(
+    const fn interp_exec(
         &self,
-        _env: &'brw mut InterpEnvironment<'src>,
+        _env: &mut InterpEnvironment<'src>,
     ) -> Result<ControlFlow<'src>, Failure> {
         Ok(ControlFlow::Halt(self.label, None)) // TODO
     }
@@ -408,19 +388,16 @@ impl<'src> InterpHaltStmt<'src> {
 
 impl<'src> InterpSkipStmt<'src> {
     #[expect(clippy::unnecessary_wraps, reason = "future-proof")]
-    const fn interp_exec<'brw>(
+    const fn interp_exec(
         &self,
-        _env: &'brw mut InterpEnvironment<'src>,
+        _env: &mut InterpEnvironment<'src>,
     ) -> Result<ControlFlow<'src>, Failure> {
         Ok(ControlFlow::Skip(self.label, None)) // TODO
     }
 }
 
 impl<'src> InterpBlockStmt<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         for stmt in &self.stmts {
             let res = stmt.interp_exec(env)?;
             if !matches!(res, ControlFlow::Continue) {
@@ -433,25 +410,54 @@ impl<'src> InterpBlockStmt<'src> {
 
 impl<'src> InterpDeferNode<'src> {
     fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
-        let res = self.inner.interp_exec(env);
-        if let Some(param) = self.ret_param {
-            // *env.vars
-            //     .get_mut(param.id)
-            //     .expect("should be guaranteed by static analysis") = InterpVal(res);
-            self.on_pop.interp_exec(env)
-        } else {
-            // TBD: if both fail, which failure gets output?
-            _ = self.on_pop.interp_exec(env);
-            res
+        // defer takes precedence over inner, unless inner fails or the defer has no output, in which case inner wins.
+
+        let inner_res = self.inner.interp_exec(env);
+        // TODO: pass inner_res into self.ret_param
+
+        // even if inner errors, we still want to unwind
+        let defer_res = self.on_pop.interp_exec(env);
+
+        // TBD: what's the difference between Err and ControlFlow::Fail? does it need to be preserved?
+        if let Err(inner_err) | Ok(ControlFlow::Fail(inner_err)) = inner_res {
+            // inner error wins, since any defer errors may have cascaded from inner error.
+            return Err(inner_err);
+        }
+
+        match defer_res {
+            // TBD: what's the difference between Err and ControlFlow::Fail? does it need to be preserved?
+            Err(defer_err) | Ok(ControlFlow::Fail(defer_err)) => {
+                // inner didn't error, since it would have been handled earlier.
+                // if defer fails, and inner doesn't, defer always wins.
+                Err(defer_err)
+            }
+
+            Ok(ControlFlow::Continue) => {
+                // defer has no output, inner wins.
+                inner_res
+            }
+
+            Ok(defer_res) => {
+                // defer has a non-error output, defer wins.
+                if let Ok(
+                    ControlFlow::Skip(_, _) | ControlFlow::Halt(_, _) | ControlFlow::Give(_),
+                ) = inner_res
+                {
+                    // TBD: what to do with the inner result? is discarding it the most logical plan?
+                    debug_warn!(
+                        "if `{0}` yeilds a result, then the result of the rest of the scope is consumed! \
+                        give the `{0}` a parameter to pass the result into the defer block.",
+                        Keyword::Defer
+                    );
+                }
+                Ok(defer_res)
+            }
         }
     }
 }
 
 impl<'src> InterpStatement<'src> {
-    fn interp_exec<'brw>(
-        &self,
-        env: &'brw mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         match self {
             Self::Expr(stmt) => stmt.interp_exec(env),
             Self::Print(stmt) => stmt.interp_exec(env),

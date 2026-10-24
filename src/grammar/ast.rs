@@ -902,9 +902,37 @@ impl<'src> AstNode<'src> for IfStmt<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct DeferParam<'src> {
+    /// `(`
+    pub open: Lexeme<'src>,
+    pub param: BindingPattern<'src>,
+    /// `)`
+    pub close: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for DeferParam<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.open.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.close.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.open, &self.close).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.open, &self.close).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct DeclDefer<'src> {
     /// `defer`
     pub kw: Lexeme<'src>,
+    pub param: Option<DeferParam<'src>>,
     pub on_pop: BlockStmt<'src>,
 }
 

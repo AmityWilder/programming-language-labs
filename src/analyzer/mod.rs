@@ -1984,7 +1984,26 @@ where
         if let ast::Declaration::Defer(decl) = decl {
             stmts.push(Statement::Defer(DeferNode {
                 on_pop: decl.on_pop.analyze(source, env, ret)?,
-                ret_param: todo!(),
+                ret_param: decl
+                    .param
+                    .as_ref()
+                    .map(|x| {
+                        let ident = x.param.ident.lex;
+                        env.decl_var(
+                            ident,
+                            ret.cloned(),
+                            true,
+                            Some(Box::new(x.param.ident)), // TODO: what if there's multiple?
+                        )
+                        .map(|(unique_id, _, is_global)| AnalysisVar {
+                            unique_id,
+                            ident,
+                            is_global,
+                            _ty: None,
+                        })
+                        .map_err(|e| vec![ContextError::node_error(source, &x.param, e.into())])
+                    })
+                    .transpose()?,
                 inner: analyze_defers(iter, source, env, ret)?,
             }));
             break;

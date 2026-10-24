@@ -3,8 +3,8 @@
 use crate::{
     error::{ContextError, ExpectedToken, OpSide},
     grammar::ast::{
-        Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, ExprStmt, HaltStmt, IfStmt, OrBody,
-        OrStmt, PrintStmt, Program, Statement, Variable,
+        Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DeferParam, ExprStmt, HaltStmt,
+        IfStmt, OrBody, OrStmt, PrintStmt, Program, Statement, Variable,
     },
     scanner::{
         Bracket,
@@ -344,16 +344,38 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `defer_declaration -> "defer" block_statement`
+    /// `defer_declaration -> "defer" ( defer_param )? block_statement`
     pub fn defer_declaration(&mut self) -> Option<Result<DeclDefer<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Keyword(Keyword::Defer))
             .map(|kw| {
                 Ok(DeclDefer {
                     kw,
+                    param: self.defer_param().transpose()?,
                     on_pop: self
                         .block_statement()
                         .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
                         .flatten()?,
+                })
+            })
+    }
+
+    /// `defer_param -> "(" bind_pattern ")"`
+    pub fn defer_param(&mut self) -> Option<Result<DeferParam<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Punctuation(Punctuation::LParen))
+            .map(|open| {
+                Ok(DeferParam {
+                    open,
+                    param: self
+                        .bind_pattern()
+                        .ok_or_else(|| self.error(ExpectedToken::Pattern))?,
+                    close: self
+                        .try_pull_eq(
+                            LexValue::Punctuation(Punctuation::RParen),
+                            ExpectedToken::ExprOrRParen,
+                        )
+                        .map_err(|e| {
+                            e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source))
+                        })?,
                 })
             })
     }
@@ -777,13 +799,18 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     fn group(&mut self) -> Option<Result<Grouping<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Punctuation(Punctuation::LParen))
             .map(|open| {
-                let expr = self.expression()?;
-                self.try_pull_eq(
-                    LexValue::Punctuation(Punctuation::RParen),
-                    ExpectedToken::ExprOrRParen,
-                )
-                .map(move |close| Grouping { open, expr, close })
-                .map_err(|e| e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source)))
+                Ok(Grouping {
+                    open,
+                    expr: self.expression()?,
+                    close: self
+                        .try_pull_eq(
+                            LexValue::Punctuation(Punctuation::RParen),
+                            ExpectedToken::ExprOrRParen,
+                        )
+                        .map_err(|e| {
+                            e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source))
+                        })?,
+                })
             })
     }
 
