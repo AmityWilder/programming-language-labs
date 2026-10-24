@@ -8,8 +8,8 @@
             let j = j++;
             prnt("(" + i + ", " + j + ")\n");
             if i == 3 & j == 3 {
-                prnt("halt\n");
-                halt .outer;
+                prnt("done\n");
+                done .outer;
             }
         }
     }

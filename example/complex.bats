@@ -8,7 +8,7 @@
             // trivial case
             if x == "0" | x == "1" {
                 is_odd = x == "1";
-                halt; // early-exits the cord
+                done; // early-exits the cord
             }
             // performs more expensive string concatenations,
             // so we want to avoid it if we can
@@ -19,7 +19,7 @@
                 if x == "" + i {
                     success = true;
                     is_odd = (i & 1u) == 1u;
-                    halt; // exits the loop, and then the cord ends naturally
+                    done; // exits the loop, and then the cord ends naturally
                 }
             }
         }

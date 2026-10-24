@@ -21,7 +21,7 @@
 
     let i = -5;
     loop {
-        if i > 5 { halt; }
+        if i > 5 { done; }
         let temp = i;
         i = i + 1;
         let i = temp;

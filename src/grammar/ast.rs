@@ -1043,18 +1043,18 @@ impl<'src> AstNode<'src> for LoopBlock<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct HaltStmt<'src> {
-    /// `halt`
-    pub halt_kw: Lexeme<'src>,
+pub struct DoneStmt<'src> {
+    /// `done`
+    pub kw: Lexeme<'src>,
     pub label: Option<Label<'src>>,
     pub value: Option<Expr<'src>>,
     /// `;`
     pub semi: Lexeme<'src>,
 }
 
-impl<'src> AstNode<'src> for HaltStmt<'src> {
+impl<'src> AstNode<'src> for DoneStmt<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.halt_kw.get_range_start(source)
+        self.kw.get_range_start(source)
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
@@ -1062,18 +1062,18 @@ impl<'src> AstNode<'src> for HaltStmt<'src> {
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.halt_kw, &self.semi).get_range(source)
+        (&self.kw, &self.semi).get_range(source)
     }
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.halt_kw, &self.semi).expansion(source)
+        (&self.kw, &self.semi).expansion(source)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct SkipStmt<'src> {
     /// `skip`
-    pub skip_kw: Lexeme<'src>,
+    pub kw: Lexeme<'src>,
     pub label: Option<Label<'src>>,
     /// `;`
     pub semi: Lexeme<'src>,
@@ -1081,7 +1081,7 @@ pub struct SkipStmt<'src> {
 
 impl<'src> AstNode<'src> for SkipStmt<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.skip_kw.get_range_start(source)
+        self.kw.get_range_start(source)
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
@@ -1089,11 +1089,11 @@ impl<'src> AstNode<'src> for SkipStmt<'src> {
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        (&self.skip_kw, &self.semi).get_range(source)
+        (&self.kw, &self.semi).get_range(source)
     }
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        (&self.skip_kw, &self.semi).expansion(source)
+        (&self.kw, &self.semi).expansion(source)
     }
 }
 
@@ -1183,7 +1183,7 @@ pub enum Statement<'src> {
     Print(PrintStmt<'src>),
     If(IfStmt<'src>),
     Loop(LoopBlock<'src>),
-    Halt(HaltStmt<'src>),
+    Done(DoneStmt<'src>),
     Skip(SkipStmt<'src>),
     Block(BlockStmt<'src>),
 }

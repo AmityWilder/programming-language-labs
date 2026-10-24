@@ -7,7 +7,7 @@
 use crate::{
     analyzer::{
         Directive, Expr, InterpAssignment, InterpBlockStmt, InterpCordStmt, InterpDeferNode,
-        InterpExpr, InterpExprStmt, InterpForStmt, InterpHaltStmt, InterpIfStmt, InterpLoopStmt,
+        InterpDoneStmt, InterpExpr, InterpExprStmt, InterpForStmt, InterpIfStmt, InterpLoopStmt,
         InterpPrintStmt, InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal,
         OrStmt,
     },
@@ -34,7 +34,7 @@ pub enum ControlFlow<'src> {
     /// Skip to the next iteration of the current loop
     Skip(Option<InterpLabel<'src>>),
     /// End the current loop
-    Halt(Option<InterpLabel<'src>>, Option<InterpVarValue<'src>>),
+    Done(Option<InterpLabel<'src>>, Option<InterpVarValue<'src>>),
     /// End the current function
     Give(InterpVarValue<'src>),
     /// Produce an exception
@@ -340,9 +340,9 @@ impl<'src> InterpLoopStmt<'src> {
                 ControlFlow::Continue | ControlFlow::Skip(None) => {}
                 ControlFlow::Skip(Some(label)) if label_eq(self.label, label) => {}
 
-                // TODO: handle value yeilded by halt
-                ControlFlow::Halt(None, _) => break Ok(ControlFlow::Continue),
-                ControlFlow::Halt(Some(label), _) if label_eq(self.label, label) => {
+                // TODO: handle value yeilded by done
+                ControlFlow::Done(None, _) => break Ok(ControlFlow::Continue),
+                ControlFlow::Done(Some(label), _) if label_eq(self.label, label) => {
                     break Ok(ControlFlow::Continue);
                 }
 
@@ -360,11 +360,11 @@ impl<'src> InterpCordStmt<'src> {
                 ControlFlow::Skip(None) => {}
                 ControlFlow::Skip(Some(label)) if label_eq(self.label, label) => {}
 
-                // TODO: handle value yeilded by halt
-                ControlFlow::Continue | ControlFlow::Halt(None, _) => {
+                // TODO: handle value yeilded by done
+                ControlFlow::Continue | ControlFlow::Done(None, _) => {
                     break Ok(ControlFlow::Continue);
                 }
-                ControlFlow::Halt(Some(label), _) if label_eq(self.label, label) => {
+                ControlFlow::Done(Some(label), _) if label_eq(self.label, label) => {
                     break Ok(ControlFlow::Continue);
                 }
 
@@ -379,7 +379,7 @@ impl<'src> InterpForStmt<'src> {
         &self,
         _env: &mut InterpEnvironment<'src>,
     ) -> Result<ControlFlow<'src>, Failure> {
-        todo!("how does an expression iterate?")
+        todo!("iterable expressions")
     }
 }
 
@@ -396,9 +396,9 @@ impl<'src> InterpRepStmt<'src> {
                 ControlFlow::Continue | ControlFlow::Skip(None) => (),
                 ControlFlow::Skip(Some(label)) if label_eq(self.label, label) => (),
 
-                // TODO: handle value yeilded by halt
-                ControlFlow::Halt(None, _) => break Ok(ControlFlow::Continue),
-                ControlFlow::Halt(Some(label), _) if label_eq(self.label, label) => {
+                // TODO: handle value yeilded by done
+                ControlFlow::Done(None, _) => break Ok(ControlFlow::Continue),
+                ControlFlow::Done(Some(label), _) if label_eq(self.label, label) => {
                     break Ok(ControlFlow::Continue);
                 }
 
@@ -408,13 +408,13 @@ impl<'src> InterpRepStmt<'src> {
     }
 }
 
-impl<'src> InterpHaltStmt<'src> {
+impl<'src> InterpDoneStmt<'src> {
     fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
         self.value
             .as_ref()
             .map(|x| x.interp_eval(env).map(|v| env.get_ptr(v)))
             .transpose()
-            .map(|value| ControlFlow::Halt(self.label, value))
+            .map(|value| ControlFlow::Done(self.label, value))
     }
 }
 
@@ -467,7 +467,7 @@ impl<'src> InterpDeferNode<'src> {
 
             Ok(defer_res) => {
                 // defer has a non-error output, defer wins.
-                if let Ok(ControlFlow::Skip(_) | ControlFlow::Halt(_, _) | ControlFlow::Give(_)) =
+                if let Ok(ControlFlow::Skip(_) | ControlFlow::Done(_, _) | ControlFlow::Give(_)) =
                     inner_res
                 {
                     // TBD: what to do with the inner result? is discarding it the most logical plan?
@@ -493,7 +493,7 @@ impl<'src> InterpStatement<'src> {
             Self::Cord(stmt) => stmt.interp_exec(env),
             Self::For(stmt) => stmt.interp_exec(env),
             Self::Rep(stmt) => stmt.interp_exec(env),
-            Self::Halt(stmt) => stmt.interp_exec(env),
+            Self::Done(stmt) => stmt.interp_exec(env),
             Self::Skip(stmt) => Ok(stmt.interp_exec(env)),
             Self::Block(stmt) => stmt.interp_exec(env),
             Self::Defer(node) => node.interp_exec(env),
@@ -508,7 +508,9 @@ pub fn interpret<'src>(
     for stmt in &prgm.stmts {
         let flow = stmt.interp_exec(&mut env)?;
         if !matches!(flow, ControlFlow::Continue) {
-            todo!("should not halt without a loop or cord\n {flow:?}");
+            todo!(
+                "should be caught by static analysis: should not use `done` without a loop or cord\n {flow:?}"
+            );
         }
     }
     Ok(())

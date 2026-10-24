@@ -245,7 +245,7 @@ impl LispDisplay for Statement<'_> {
             Self::Print(_) => Ok(()), // wont this leave an extra space?
             Self::If(inner) => LispDisplay::fmt(inner, f),
             Self::Loop(inner) => LispDisplay::fmt(inner, f),
-            Self::Halt(_inner) => todo!(),
+            Self::Done(_inner) => todo!(),
             Self::Skip(_inner) => todo!(),
             Self::Block(inner) => LispDisplay::fmt(inner, f),
         }

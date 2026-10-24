@@ -3,7 +3,7 @@
 use crate::{
     error::{ContextError, ExpectedToken, OpSide},
     grammar::ast::{
-        Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DeferParam, ExprStmt, HaltStmt,
+        Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DeferParam, DoneStmt, ExprStmt,
         IfStmt, OrBody, OrStmt, PrintStmt, Program, Statement, Variable,
     },
     scanner::{
@@ -212,7 +212,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             // start of new statement/definition
             if self.tokens.peek().is_some_and(match_token!(Keyword::{
                 Rec | Sup | Cat | Alt | Sub | Def | Fun | Mem | Let | Uni | Pvt | If |
-                Or | Pick | Rep | For | Loop | Cord | Halt | Skip | Give | Fail | Emit
+                Or | Pick | Rep | For | Loop | Cord | Done | Skip | Give | Fail | Emit
             })) {
                 break;
             }
@@ -298,7 +298,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     /// `statement -> block_statement
     ///     | print_statement
-    ///     | halt_statement
+    ///     | done_statement
     ///     | skip_statement
     ///     | if_statement
     ///     | loop_statement
@@ -307,7 +307,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.block_statement()
             .map(|res| res.map(Statement::Block))
             .or_else(|| self.print_statement().map(|res| res.map(Statement::Print)))
-            .or_else(|| self.halt_statement().map(|res| res.map(Statement::Halt)))
+            .or_else(|| self.done_statement().map(|res| res.map(Statement::Done)))
             .or_else(|| self.skip_statement().map(|res| res.map(Statement::Skip)))
             .or_else(|| self.if_statement().map(|res| res.map(Statement::If)))
             .or_else(|| self.loop_block().map(|res| res.map(Statement::Loop)))
@@ -498,31 +498,30 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         )
     }
 
-    /// `halt_statement -> "halt" ( label )? expression ";"`
-    pub fn halt_statement(&mut self) -> Option<Result<HaltStmt<'src>, ContextError<'src>>> {
-        self.pull_if_eq(LexValue::Keyword(Keyword::Halt))
-            .map(|halt_kw| {
-                let label = self.label().transpose()?;
-                self.pull_if_eq(LexValue::Punctuation(Punctuation::Semi))
-                    .map_or_else(
-                        || {
-                            self.expression().and_then(|value| {
-                                self.try_pull_eq(
-                                    LexValue::Punctuation(Punctuation::Semi),
-                                    ExpectedToken::Semi,
-                                )
-                                .map(|semi| (Some(value), semi))
-                            })
-                        },
-                        |semi| Ok((None, semi)),
-                    )
-                    .map(|(value, semi)| HaltStmt {
-                        halt_kw,
-                        label,
-                        value,
-                        semi,
-                    })
-            })
+    /// `done_statement -> "done" ( label )? expression ";"`
+    pub fn done_statement(&mut self) -> Option<Result<DoneStmt<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Done)).map(|kw| {
+            let label = self.label().transpose()?;
+            self.pull_if_eq(LexValue::Punctuation(Punctuation::Semi))
+                .map_or_else(
+                    || {
+                        self.expression().and_then(|value| {
+                            self.try_pull_eq(
+                                LexValue::Punctuation(Punctuation::Semi),
+                                ExpectedToken::Semi,
+                            )
+                            .map(|semi| (Some(value), semi))
+                        })
+                    },
+                    |semi| Ok((None, semi)),
+                )
+                .map(|(value, semi)| DoneStmt {
+                    kw,
+                    label,
+                    value,
+                    semi,
+                })
+        })
     }
 
     /// `skip_statement -> "skip" ( label )? ";"`
@@ -530,7 +529,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.pull_if_eq(LexValue::Keyword(Keyword::Skip))
             .map(|skip_kw| {
                 Ok(SkipStmt {
-                    skip_kw,
+                    kw: skip_kw,
                     label: self.label().transpose()?,
                     semi: self.try_pull_eq(
                         LexValue::Punctuation(Punctuation::Semi),

@@ -396,7 +396,7 @@ define_token_eq! {
         Cord = "cord",
 
         /// Code that will be executed when scope pops,
-        /// whether it's natural or because of a `halt`/`give`/`fail`
+        /// whether it's natural or because of a `done`/`give`/`fail`
         Defer = "defer",
 
         // Loop control
@@ -404,10 +404,10 @@ define_token_eq! {
         /// ### Syntax
         /// ```rs
         /// /* for/rep/loop/cord */ {
-        ///     if /* condition */ { halt; }
+        ///     if /* condition */ { done; }
         /// }
         /// ```
-        Halt = "halt",
+        Done = "done",
         /// Stop the current loop and skip to the next iteration.
         /// ### Syntax
         /// ```rs
@@ -480,7 +480,7 @@ impl Keyword {
                 | Self::Loop
                 | Self::Cord
                 | Self::Defer
-                | Self::Halt
+                | Self::Done
                 | Self::Skip
                 | Self::Give
                 | Self::Fail

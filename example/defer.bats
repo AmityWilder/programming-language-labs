@@ -21,7 +21,7 @@
     let x = 0;
     rep x < 100 {
         defer { prnt("exiting\n"); }
-        defer { halt; }
+        defer { done; }
         defer {
             prnt("this defer skips, but that skip will be consumed by the outer defer due to Batscript's rules. expect a warning.\n");
             skip;

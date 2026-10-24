@@ -619,7 +619,7 @@ impl<'src> Analyze<'src> for ast::BlockExpr<'src> {
                 Statement::Expr(_)
                 | Statement::Print(_)
                 | Statement::If(_)
-                | Statement::Halt(_)
+                | Statement::Done(_)
                 | Statement::Skip(_)
                 | Statement::Block(_)
                 | Statement::Defer(_) => unreachable!("analysis came from a LoopBlock"),
@@ -1492,16 +1492,16 @@ impl<'src> Analyze<'src> for ast::LoopBlock<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct HaltStmt<L, O, V> {
+pub struct DoneStmt<L, O, V> {
     pub label: Option<L>,
     pub value: Option<Expr<L, O, V>>,
 }
 
-pub type AnalysisHaltStmt<'src> =
-    HaltStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
-pub type InterpHaltStmt<'src> = HaltStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+pub type AnalysisDoneStmt<'src> =
+    DoneStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type InterpDoneStmt<'src> = DoneStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
 
-impl<'src> GetType<'src> for AnalysisHaltStmt<'src> {
+impl<'src> GetType<'src> for AnalysisDoneStmt<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1512,8 +1512,8 @@ impl<'src> GetType<'src> for AnalysisHaltStmt<'src> {
     }
 }
 
-impl<'src> Analyze<'src> for ast::HaltStmt<'src> {
-    type Ouptut = AnalysisHaltStmt<'src>;
+impl<'src> Analyze<'src> for ast::DoneStmt<'src> {
+    type Ouptut = AnalysisDoneStmt<'src>;
 
     fn analyze(
         &self,
@@ -1521,7 +1521,7 @@ impl<'src> Analyze<'src> for ast::HaltStmt<'src> {
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>, // TODO: whose hint is this?
     ) -> Result<'src, Self::Ouptut> {
-        Ok(HaltStmt {
+        Ok(DoneStmt {
             label: self
                 .label
                 .as_ref()
@@ -1536,15 +1536,15 @@ impl<'src> Analyze<'src> for ast::HaltStmt<'src> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for AnalysisHaltStmt<'src> {
-    type Interp = InterpHaltStmt<'src>;
+impl<'src> CoagulateVars<'src> for AnalysisDoneStmt<'src> {
+    type Interp = InterpDoneStmt<'src>;
 
     fn coagulate_vars(
         self,
         s_env: &StaticEnvironment<'src>,
         i_env: &mut InterpEnvironment<'src>,
     ) -> Self::Interp {
-        InterpHaltStmt {
+        InterpDoneStmt {
             label: self.label.map(|label| label.coagulate_vars(s_env, i_env)),
             value: self.value.map(|value| value.coagulate_vars(s_env, i_env)),
         }
@@ -1768,7 +1768,7 @@ pub enum Statement<L, O, V> {
     Cord(CordStmt<L, O, V>),
     For(ForStmt<L, O, V>),
     Rep(RepStmt<L, O, V>),
-    Halt(HaltStmt<L, O, V>),
+    Done(DoneStmt<L, O, V>),
     Skip(SkipStmt<L>),
     Block(BlockStmt<L, O, V>),
     Defer(DeferNode<L, O, V>),
@@ -1793,7 +1793,7 @@ impl<'src> GetType<'src> for AnalysisStatement<'src> {
             Self::Cord(stmt) => stmt.get_type(env),
             Self::For(stmt) => stmt.get_type(env),
             Self::Rep(stmt) => stmt.get_type(env),
-            Self::Halt(stmt) => stmt.get_type(env),
+            Self::Done(stmt) => stmt.get_type(env),
             Self::Skip(stmt) => stmt.get_type(env),
             Self::Block(stmt) => stmt.get_type(env),
             Self::Defer(node) => node.get_type(env),
@@ -1816,7 +1816,7 @@ impl<'src> Analyze<'src> for ast::Statement<'src> {
             Self::Print(stmt) => stmt.analyze(source, env, None).map(Statement::Print),
             Self::If(stmt) => stmt.analyze(source, env, None).map(Statement::If),
             Self::Loop(stmt) => stmt.analyze(source, env, None),
-            Self::Halt(stmt) => stmt.analyze(source, env, None).map(Statement::Halt),
+            Self::Done(stmt) => stmt.analyze(source, env, None).map(Statement::Done),
             Self::Skip(stmt) => stmt.analyze(source, env, None).map(Statement::Skip),
             Self::Block(stmt) => stmt.analyze(source, env, None).map(Statement::Block),
         }
@@ -1839,7 +1839,7 @@ impl<'src> CoagulateVars<'src> for AnalysisStatement<'src> {
             Self::Cord(stmt) => Statement::Cord(stmt.coagulate_vars(s_env, i_env)),
             Self::For(stmt) => Statement::For(stmt.coagulate_vars(s_env, i_env)),
             Self::Rep(stmt) => Statement::Rep(stmt.coagulate_vars(s_env, i_env)),
-            Self::Halt(stmt) => Statement::Halt(stmt.coagulate_vars(s_env, i_env)),
+            Self::Done(stmt) => Statement::Done(stmt.coagulate_vars(s_env, i_env)),
             Self::Skip(stmt) => Statement::Skip(stmt.coagulate_vars(s_env, i_env)),
             Self::Block(stmt) => Statement::Block(stmt.coagulate_vars(s_env, i_env)),
             Self::Defer(node) => Statement::Defer(node.coagulate_vars(s_env, i_env)),
