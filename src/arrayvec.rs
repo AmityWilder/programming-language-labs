@@ -110,7 +110,7 @@ impl<T, const CAP: usize> ArrayVec<T, CAP> {
         if let Some(new_len) = self.len.checked_add(1)
             && new_len <= CAP
         {
-            #[expect(clippy::indexing_slicing, reason = "Guarded by 'if' condition")]
+            #[expect(clippy::indexing_slicing, reason = "guarded by 'if' condition")]
             let uninit = &mut self.buf[std::mem::replace(&mut self.len, new_len)];
             Ok(uninit.write(value))
         } else {

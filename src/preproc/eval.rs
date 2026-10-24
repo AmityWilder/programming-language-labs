@@ -286,8 +286,8 @@ where
     F: FnMut(&str) -> bool,
 {
     use Operator::{
-        Add, And, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Rem, SubNeg, Szof,
-        Xnor, Xor,
+        Add, And, Div, Eq, Exists, Ge, Gt, Le, Lt, Mul, Nand, Ne, Nor, Not, Or, Rem, SubNeg as Sub,
+        SubNeg as Neg, Szof, Xnor, Xor,
     };
 
     // TODO: Some operations are valid for Expr but not in preprocessing
@@ -314,9 +314,7 @@ where
 
                 Add => preproc_eval(source, lhs, mexists)?.add(preproc_eval(source, rhs, mexists)?),
 
-                SubNeg => {
-                    preproc_eval(source, lhs, mexists)?.sub(preproc_eval(source, rhs, mexists)?)
-                }
+                Sub => preproc_eval(source, lhs, mexists)?.sub(preproc_eval(source, rhs, mexists)?),
 
                 Mul => preproc_eval(source, lhs, mexists)?.mul(preproc_eval(source, rhs, mexists)?),
 
@@ -375,7 +373,7 @@ where
                         preproc_eval(source, operand, mexists)?.size(),
                     )),
 
-                    SubNeg => preproc_eval(source, operand, mexists)?.neg(),
+                    Neg => preproc_eval(source, operand, mexists)?.neg(),
 
                     Not => preproc_eval(source, operand, mexists)?.not(),
 

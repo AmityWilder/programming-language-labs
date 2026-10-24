@@ -20,6 +20,8 @@ pub const BIN_PREFIX: &str = "0b";
 pub const SIGNED_SUFFIX: &str = "s";
 /// The suffix of an unsigned integer literal
 pub const UNSIGNED_SUFFIX: &str = "u";
+/// The suffix of an unsigned integer literal
+pub const BYTE_SUFFIX: &str = "b";
 /// The open delimiter of a block comment
 pub const BLOCK_COMMENT_OPEN: &str = "/*";
 /// The close delimiter of a block comment

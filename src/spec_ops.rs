@@ -77,6 +77,38 @@ impl BitShift<isize> for isize {
     }
 }
 
+impl BitShift<usize> for u8 {
+    #[inline]
+    fn bshl(self, bits: usize) -> Self {
+        self.unbounded_shl(bits as u32)
+    }
+
+    #[inline]
+    fn bshr(self, bits: usize) -> Self {
+        self.unbounded_shr(bits as u32)
+    }
+}
+
+impl BitShift<isize> for u8 {
+    #[inline]
+    fn bshl(self, bits: isize) -> Self {
+        if let Ok(bits) = usize::try_from(bits) {
+            self.bshl(bits)
+        } else {
+            self.bshr(bits.unsigned_abs())
+        }
+    }
+
+    #[inline]
+    fn bshr(self, bits: isize) -> Self {
+        if let Ok(bits) = usize::try_from(bits) {
+            self.bshr(bits)
+        } else {
+            self.bshl(bits.unsigned_abs())
+        }
+    }
+}
+
 /// Lemma 1: `2^n` is a multiple of `2^h` for every integer `h` where `0<=h<=n`
 ///
 /// Proof of Lemma 1:
@@ -156,6 +188,48 @@ impl BitRotate<usize> for isize {
 }
 
 impl BitRotate<isize> for isize {
+    #[inline]
+    fn rotr(self, bits: isize) -> Self {
+        if let Ok(bits) = usize::try_from(bits) {
+            self.rotr(bits)
+        } else {
+            self.rotl(bits.unsigned_abs())
+        }
+    }
+
+    #[inline]
+    fn rotl(self, bits: isize) -> Self {
+        if let Ok(bits) = usize::try_from(bits) {
+            self.rotl(bits)
+        } else {
+            self.rotr(bits.unsigned_abs())
+        }
+    }
+}
+
+impl BitRotate<usize> for u8 {
+    #[inline]
+    fn rotr(self, bits: usize) -> Self {
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            reason = "the truncation is desired"
+        )]
+        self.rotate_right(bits as u32)
+    }
+
+    #[inline]
+    fn rotl(self, bits: usize) -> Self {
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            reason = "the truncation is desired"
+        )]
+        self.rotate_left(bits as u32)
+    }
+}
+
+impl BitRotate<isize> for u8 {
     #[inline]
     fn rotr(self, bits: isize) -> Self {
         if let Ok(bits) = usize::try_from(bits) {

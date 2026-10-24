@@ -2,7 +2,7 @@
     let x = 0;
     defer {
         prnt("even though there's another `x` in this scope later, I bind to the current one.\n" +
-            "After the upcoming code, it should be 2, and is " + x + ". ");
+            "after the upcoming code, it should be 2, and is " + x + ". ");
         if x == 2 {
             prnt("hooray!\n");
         } or {

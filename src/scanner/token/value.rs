@@ -2,15 +2,15 @@
 
 pub use super::{keyword::Keyword, punc::Punctuation};
 use crate::{
-    error::{ErrorType, NumErrorKind},
+    error::{ErrorType, IntKind, NumErrorKind},
     scanner::{
         symbols::{
-            BIN_PREFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX, TEXT_DELIM,
-            UNSIGNED_SUFFIX,
+            BIN_PREFIX, BYTE_SUFFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX,
+            TEXT_DELIM, UNSIGNED_SUFFIX,
         },
         token::{escape_char, escape_seq},
     },
-    types::{flpt, sint, uint},
+    types::{byte, flpt, sint, uint},
 };
 use std::{borrow::Cow, range::Range};
 
@@ -109,6 +109,9 @@ pub enum LexValue<'src> {
     Comment,
 
     // number literal
+    /// Byte literal
+    ByteLiteral(byte),
+    // number literal
     /// Unsigned integer literal
     UIntLiteral(uint),
     /// Signed integer literal
@@ -153,7 +156,9 @@ impl<'src> LexValue<'src> {
     }
 
     /// Parses a number literal lexeme into its value
-    pub fn number_literal(src: &'src str) -> Result<Self, ErrorType<'src>> {
+    ///
+    /// [`Err`] is [`ErrorType::InvalidNumLiteral`]
+    pub fn number_literal(src: &'src str) -> Result<Self, NumErrorKind> {
         // checking the start of a string is easier than looking through every one of its characters, so it goes first.
         // hexadecimal is the only case in which an 'e' might appear while NOT being a float.
         if !src.starts_with(HEX_PREFIX) && src.contains(['e', 'E']) || src.contains('.') {
@@ -161,20 +166,21 @@ impl<'src> LexValue<'src> {
             src.replace('_', "") // TODO: this allocates :c
                 .parse() // turns out parse already handles the "e" syntax on its own
                 .map(Self::FlptLiteral)
-                .map_err(|_| ErrorType::InvalidNumLiteral(NumErrorKind::InvalidFlpt))
+                .map_err(|_| NumErrorKind::InvalidFlpt)
         } else {
             enum SignSuffix {
                 Signed,
                 Unsigned,
             }
 
-            let (with_suffix, sign_suffix) = [
-                (SIGNED_SUFFIX, SignSuffix::Signed),
-                (UNSIGNED_SUFFIX, SignSuffix::Unsigned),
+            let (with_suffix, sign_suffix, bits_suffix) = [
+                (SIGNED_SUFFIX, SignSuffix::Signed, sint::BITS),
+                (UNSIGNED_SUFFIX, SignSuffix::Unsigned, uint::BITS),
+                (BYTE_SUFFIX, SignSuffix::Unsigned, byte::BITS), // byte is always unsigned
             ]
             .into_iter()
-            .find_map(|(suf, sign)| src.strip_suffix(suf).map(|pre| (pre, Some(sign))))
-            .unwrap_or((src, None));
+            .find_map(|(suf, sign, bits)| src.strip_suffix(suf).map(|pre| (pre, Some(sign), bits)))
+            .unwrap_or((src, None, uint::BITS));
 
             let stripped = with_suffix.strip_prefix('-');
             let is_negative = stripped.is_some();
@@ -187,7 +193,7 @@ impl<'src> LexValue<'src> {
 
             // cannot mix explicit unsigned with negative sign
             if matches!(sign_suffix, Some(SignSuffix::Signed)) && is_negative {
-                return Err(ErrorType::InvalidNumLiteral(NumErrorKind::NegUnsigned));
+                return Err(NumErrorKind::NegUnsigned);
             }
 
             let (digits, radix) = [(HEX_PREFIX, 16), (OCT_PREFIX, 8), (BIN_PREFIX, 2)]
@@ -199,42 +205,76 @@ impl<'src> LexValue<'src> {
                 // for digits to be empty, we must have something like "0x".
                 // this is a valid prefix for a number, but without a number following it,
                 // we treat it like "0" with the suffix "x" (which isn't allowed).
-                return Err(ErrorType::InvalidNumLiteral(NumErrorKind::InvalidInt));
+                return Err(NumErrorKind::InvalidInt);
             }
 
+            // yes there's a lot of duplication. annoyingly, generic constants can't be used in array sizes.
             if is_signed {
-                // prefix with a hyphen, underscores stripped
-                #[expect(clippy::as_conversions)]
-                let mut buf = [b'\0'; isize::MAX.ilog2() as usize + 2];
+                match bits_suffix {
+                    sint::BITS => {
+                        // prefix with a hyphen, underscores stripped
+                        #[expect(
+                            clippy::as_conversions,
+                            reason = "int_primitive::MAX.ilog2() is at most 64, which clearly fits in 16 bits"
+                        )]
+                        let mut buf = [b'\0'; sint::MAX.ilog2() as usize + 2];
 
-                let digits = join_parts(
-                    &mut buf,
-                    std::iter::chain(is_negative.then_some("-"), digits.split('_')),
-                )
-                // excessive digits, probably too large of an integer
-                .ok_or(ErrorType::InvalidNumLiteral(if is_negative {
-                    NumErrorKind::SNegOverflow
-                } else {
-                    NumErrorKind::SPosOverflow
-                }))?;
+                        let digits = join_parts(
+                            &mut buf,
+                            std::iter::chain(is_negative.then_some("-"), digits.split('_')),
+                        )
+                        // excessive digits, probably too large of an integer
+                        .ok_or(if is_negative {
+                            NumErrorKind::NegOverflow(IntKind::Sint)
+                        } else {
+                            NumErrorKind::PosOverflow(IntKind::Sint)
+                        })?;
 
-                isize::from_str_radix(digits, radix)
-                    .map(Self::SIntLiteral)
-                    .map_err(|e| ErrorType::InvalidNumLiteral(NumErrorKind::new_signed(*e.kind())))
+                        sint::from_str_radix(digits, radix)
+                            .map(Self::SIntLiteral)
+                            .map_err(|e| NumErrorKind::new_signed(*e.kind()))
+                    }
+
+                    _ => unimplemented!(),
+                }
             } else {
-                // underscores stripped
-                #[expect(clippy::as_conversions)]
-                let mut buf = [b'\0'; usize::MAX.ilog2() as usize + 1];
+                match bits_suffix {
+                    uint::BITS => {
+                        // underscores stripped
+                        #[expect(
+                            clippy::as_conversions,
+                            reason = "int_primitive::MAX.ilog2() is at most 64, which clearly fits in 16 bits"
+                        )]
+                        let mut buf = [b'\0'; uint::MAX.ilog2() as usize + 1];
 
-                let digits = join_parts(&mut buf, digits.split('_'))
-                    // excessive digits, probably too large of an integer
-                    .ok_or(ErrorType::InvalidNumLiteral(NumErrorKind::UPosOverflow))?;
+                        let digits = join_parts(&mut buf, digits.split('_'))
+                            // excessive digits, probably too large of an integer
+                            .ok_or(NumErrorKind::PosOverflow(IntKind::Uint))?;
 
-                usize::from_str_radix(digits, radix)
-                    .map(Self::UIntLiteral)
-                    .map_err(|e| {
-                        ErrorType::InvalidNumLiteral(NumErrorKind::new_unsigned(*e.kind()))
-                    })
+                        uint::from_str_radix(digits, radix)
+                            .map(Self::UIntLiteral)
+                            .map_err(|e| NumErrorKind::new_unsigned(*e.kind()))
+                    }
+
+                    byte::BITS => {
+                        // underscores stripped
+                        #[expect(
+                            clippy::as_conversions,
+                            reason = "int_primitive::MAX.ilog2() is at most 64, which clearly fits in 16 bits"
+                        )]
+                        let mut buf = [b'\0'; byte::MAX.ilog2() as usize + 1];
+
+                        let digits = join_parts(&mut buf, digits.split('_'))
+                            // excessive digits, probably too large of an integer
+                            .ok_or(NumErrorKind::PosOverflow(IntKind::Uint))?;
+
+                        byte::from_str_radix(digits, radix)
+                            .map(Self::ByteLiteral)
+                            .map_err(|e| NumErrorKind::new_unsigned(*e.kind()))
+                    }
+
+                    _ => unimplemented!(),
+                }
             }
         }
     }
@@ -462,6 +502,14 @@ pub enum Operator : TokenEq {
 }
 
 impl Operator {
+    /// Alias for [`Self::SubNeg`] to better imply what the code is doing
+    #[expect(non_upper_case_globals)]
+    pub const Sub: Self = Self::SubNeg;
+
+    /// Alias for [`Self::SubNeg`] to better imply what the code is doing
+    #[expect(non_upper_case_globals)]
+    pub const Neg: Self = Self::SubNeg;
+
     pub const fn as_str(self) -> &'static str {
         self.to_token_eq().as_str()
     }

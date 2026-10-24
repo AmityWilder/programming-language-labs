@@ -432,7 +432,7 @@ impl<'src> Scanner<'src> {
                     val,
                     mac: None,
                 })
-                .map_err(|err| self.error_prev(len, err)),
+                .map_err(|err| self.error_prev(len, ErrorType::InvalidNumLiteral(err))),
         )
     }
 

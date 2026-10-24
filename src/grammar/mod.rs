@@ -754,11 +754,12 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             .map(|ident| Variable { ident })
     }
 
-    /// `literal -> "true" | "fals" | "none" | UINT | SINT | FLPT | CHAR | TEXT | MACRO`
+    /// `literal -> "true" | "fals" | "none" | BYTE | UINT | SINT | FLPT | CHAR | TEXT | MACRO`
     fn literal(&mut self) -> Option<Literal<'src>> {
         self.pull_if(match_token!(
             BoolLiteral(_)
                 | Keyword::None
+                | ByteLiteral(_)
                 | UIntLiteral(_)
                 | SIntLiteral(_)
                 | FlptLiteral(_)

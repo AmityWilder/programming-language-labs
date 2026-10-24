@@ -257,7 +257,7 @@ pub fn builtin_ops<'src>()
         // 0 - 1 = 0 (clamped)
         // 1 - 0 = 1
         // 1 - 1 = 0
-        SubNeg(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { !r & l }
+        Sub(Bool, Bool) -> Bool as fn(l: bool, r: bool) -> bool { !r & l }
         // 0 * 0 = 0
         // 0 * 1 = 0
         // 1 * 0 = 0
@@ -323,6 +323,33 @@ pub fn builtin_ops<'src>()
 
         Not(Bool) -> Bool as fn(r: bool) -> bool { !r }
 
+        // byte
+        And (Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { l & r }
+        Or  (Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { l | r }
+        Xor (Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { l ^ r }
+        Nand(Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { !(l & r) }
+        Nor (Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { !(l | r) }
+        Xnor(Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { !(l ^ r) }
+
+        Add(Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { l + r } // TBD: should overflow result in a failure?
+        Sub(Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { l - r } // TBD: should overflow result in a failure?
+        Mul(Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { l * r } // TBD: should overflow result in a failure?
+        Pow(Byte, Uint) -> Byte as fn(l: byte, r: uint) -> byte { l.pow(*r as u32) } // TBD: should overflow result in a failure?
+        Div(Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { l.checked_div(*r).ok_or(Failure::DivByZero)? }
+        Rem(Byte, Byte) -> Byte as fn(l: byte, r: byte) -> byte { l.checked_rem(*r).ok_or(Failure::DivByZero)? }
+
+        Shl (Byte, Uint) -> Byte as fn(l: byte, r: uint) -> byte { l.bshl(*r) }
+        Shr (Byte, Uint) -> Byte as fn(l: byte, r: uint) -> byte { l.bshr(*r) }
+        Rotl(Byte, Uint) -> Byte as fn(l: byte, r: uint) -> byte { l.rotl(*r) }
+        Rotr(Byte, Uint) -> Byte as fn(l: byte, r: uint) -> byte { l.rotr(*r) }
+
+        Shl (Byte, Sint) -> Byte as fn(l: byte, r: sint) -> byte { l.bshl(*r) }
+        Shr (Byte, Sint) -> Byte as fn(l: byte, r: sint) -> byte { l.bshr(*r) }
+        Rotl(Byte, Sint) -> Byte as fn(l: byte, r: sint) -> byte { l.rotl(*r) }
+        Rotr(Byte, Sint) -> Byte as fn(l: byte, r: sint) -> byte { l.rotr(*r) }
+
+        Not(Uint) -> Uint as fn(r: uint) -> uint { !r }
+
         // uint
         And (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l & r }
         Or  (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l | r }
@@ -331,12 +358,12 @@ pub fn builtin_ops<'src>()
         Nor (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { !(l | r) }
         Xnor(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { !(l ^ r) }
 
-        Add   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l + r } // TBD: should overflow result in a failure?
-        SubNeg(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l - r } // TBD: should overflow result in a failure?
-        Mul   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l * r } // TBD: should overflow result in a failure?
-        Pow   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.pow(*r as u32) } // TBD: should overflow result in a failure?
-        Div   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.checked_div(*r).ok_or(Failure::DivByZero)? }
-        Rem   (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.checked_rem(*r).ok_or(Failure::DivByZero)? }
+        Add(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l + r } // TBD: should overflow result in a failure?
+        Sub(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l - r } // TBD: should overflow result in a failure?
+        Mul(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l * r } // TBD: should overflow result in a failure?
+        Pow(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.pow(*r as u32) } // TBD: should overflow result in a failure?
+        Div(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.checked_div(*r).ok_or(Failure::DivByZero)? }
+        Rem(Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.checked_rem(*r).ok_or(Failure::DivByZero)? }
 
         Shl (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.bshl(*r) }
         Shr (Uint, Uint) -> Uint as fn(l: uint, r: uint) -> uint { l.bshr(*r) }
@@ -358,12 +385,12 @@ pub fn builtin_ops<'src>()
         Nor (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { !(l | r) }
         Xnor(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { !(l ^ r) }
 
-        Add   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l + r } // TBD: should overflow result in a failure?
-        SubNeg(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l - r } // TBD: should overflow result in a failure?
-        Mul   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l * r } // TBD: should overflow result in a failure?
-        Pow   (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.pow(*r as u32) } // TBD: should overflow result in a failure?
-        Div   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.checked_div(*r).ok_or(Failure::DivByZero)? }
-        Rem   (Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.checked_rem(*r).ok_or(Failure::DivByZero)? }
+        Add(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l + r } // TBD: should overflow result in a failure?
+        Sub(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l - r } // TBD: should overflow result in a failure?
+        Mul(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l * r } // TBD: should overflow result in a failure?
+        Pow(Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.pow(*r as u32) } // TBD: should overflow result in a failure?
+        Div(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.checked_div(*r).ok_or(Failure::DivByZero)? }
+        Rem(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.checked_rem(*r).ok_or(Failure::DivByZero)? }
 
         Shl (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.bshl(*r) }
         Shr (Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.bshr(*r) }
@@ -375,18 +402,18 @@ pub fn builtin_ops<'src>()
         Rotl(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.rotl(*r) }
         Rotr(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.rotr(*r) }
 
-        SubNeg(Sint) -> Sint as fn(r: sint) -> sint { -r } // TBD: should overflow result in a failure?
-        Not   (Sint) -> Bool as fn(r: sint) -> sint { !r }
+        Neg(Sint) -> Sint as fn(r: sint) -> sint { -r } // TBD: should overflow result in a failure?
+        Not(Sint) -> Bool as fn(r: sint) -> sint { !r }
 
         // flpt
-        Add   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l + r }
-        SubNeg(Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l - r }
-        Mul   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l * r }
-        Pow   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l.powf(*r) }
-        Div   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l / r }
-        Rem   (Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l % r }
+        Add(Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l + r }
+        Sub(Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l - r }
+        Mul(Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l * r }
+        Pow(Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l.powf(*r) }
+        Div(Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l / r }
+        Rem(Flpt, Flpt) -> Flpt as fn(l: flpt, r: flpt) -> flpt { l % r }
 
-        SubNeg(Flpt) -> Flpt as fn(r: flpt) -> flpt { -r }
+        Neg(Flpt) -> Flpt as fn(r: flpt) -> flpt { -r }
 
         // char
         Add(Char, Uint) -> Char as fn(l: char, r: uint) -> char {
@@ -396,7 +423,7 @@ pub fn builtin_ops<'src>()
                 .and_then(char::from_u32)
                 .ok_or(Failure::Utf8Error)?
         }
-        SubNeg(Char, Uint) -> Char as fn(l: char, r: uint) -> char {
+        Sub(Char, Uint) -> Char as fn(l: char, r: uint) -> char {
             u32::try_from(*r)
                 .ok()
                 .and_then(|r| l.to_u32().checked_add(r))
@@ -408,6 +435,7 @@ pub fn builtin_ops<'src>()
         Add(Text, Text) -> Text as fn(l: text, r: text) -> text { format!("{l}{r}") }
 
         Add(Text, Bool) -> Text as fn(l: text, r: bool) -> text { format!("{l}{r}") }
+        Add(Text, Byte) -> Text as fn(l: text, r: byte) -> text { format!("{l}{r}") }
         Add(Text, Uint) -> Text as fn(l: text, r: uint) -> text { format!("{l}{r}") }
         Add(Text, Sint) -> Text as fn(l: text, r: sint) -> text { format!("{l}{r}") }
         Add(Text, Flpt) -> Text as fn(l: text, r: flpt) -> text { format!("{l}{r}") }
@@ -415,6 +443,7 @@ pub fn builtin_ops<'src>()
         Add(Text, Text) -> Text as fn(l: text, r: text) -> text { format!("{l}{r}") }
 
         Add(Bool, Text) -> Text as fn(l: bool, r: text) -> text { format!("{l}{r}") }
+        Add(Byte, Text) -> Text as fn(l: byte, r: text) -> text { format!("{l}{r}") }
         Add(Uint, Text) -> Text as fn(l: uint, r: text) -> text { format!("{l}{r}") }
         Add(Sint, Text) -> Text as fn(l: sint, r: text) -> text { format!("{l}{r}") }
         Add(Flpt, Text) -> Text as fn(l: flpt, r: text) -> text { format!("{l}{r}") }

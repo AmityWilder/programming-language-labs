@@ -229,7 +229,7 @@ impl Debug for PtrVal {
         const PREFIX_LEN: usize = "0x".len();
         #[expect(
             clippy::as_conversions,
-            reason = "usize doesn't implement a `from` impl even for integers smaller than it"
+            reason = "usize::MAX ilog16 is between 0 and usize::MAX and thus fits in usize"
         )]
         const WIDTH: usize = usize::MAX.ilog(16) as usize + PREFIX_LEN;
         write!(f, "@{:#0WIDTH$X}", self.env_range.start)

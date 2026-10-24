@@ -171,15 +171,12 @@ fn escaped_text_literal<'src>(
     syn: Syntax,
     literal: TextLiteral<'src>,
 ) -> SubTokenSyntax<'src, EscapedRanges<EscapeRanges<'src>>> {
+    let closure: EscapeRangesClosure<&'src str> = escape_ranges_closure;
     SubTokenSyntax::new(
         lex,
         syn,
-        #[expect(
-            clippy::as_conversions,
-            reason = "only way to do this as far as I know"
-        )]
         Escapes::new(literal.content)
-            .filter_map(escape_ranges_closure as EscapeRangesClosure<&'src str>)
+            .filter_map(closure)
             .map(escaped_ranges_closure),
     )
 }
@@ -412,13 +409,8 @@ pub fn highlight<'src, I>(tokens: I) -> HighlightIter<'src, I::IntoIter>
 where
     I: IntoIterator<Item: TokenHighlight<'src>>,
 {
-    #[expect(
-        clippy::as_conversions,
-        reason = "this is the only way to do this as far as I know"
-    )]
-    tokens
-        .into_iter()
-        .flat_map(highlight_iter_closure as fn(I::Item) -> HighlightToken<'src>)
+    let closure: fn(I::Item) -> HighlightToken<'src> = highlight_iter_closure;
+    tokens.into_iter().flat_map(closure)
 }
 
 pub fn write_highlight<'src, I, T, A>(

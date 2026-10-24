@@ -11,7 +11,6 @@ use crate::{
         InterpPrintStmt, InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal,
         OrStmt,
     },
-    debug_warn,
     error::Failure,
     interp::value::{InterpValue, InterpVarValue},
     scanner::token::value::Keyword,
@@ -20,8 +19,8 @@ use crate::{
 use env::InterpEnvironment;
 use std::num::NonZero;
 use value::{
-    BoolObject, ByteObject, CharObject, FailObject, FlptObject, InterpLabel, InterpOp, InterpVal,
-    NoneObject, PrimitiveVal, SintObject, TextObject, UintObject,
+    BoolObject, ByteObject, CharObject, FlptObject, InterpLabel, InterpOp, InterpVal, NoneObject,
+    PrimitiveVal, SintObject, TextObject, UintObject,
 };
 
 pub mod env;
@@ -97,8 +96,6 @@ impl Literal {
     fn interp_eval(&self) -> InterpVal<'static> {
         match self {
             Self::None => InterpVal::Primitive(value::PrimitiveVal::None(NoneObject(()))),
-            Self::Nevr => unreachable!("cannot have nevr literal"), // TBD: will this change?
-            Self::Fail(x) => InterpVal::Primitive(value::PrimitiveVal::Fail(FailObject(*x))),
             Self::Bool(x) => InterpVal::Primitive(value::PrimitiveVal::Bool(BoolObject(*x))),
             Self::Byte(x) => InterpVal::Primitive(value::PrimitiveVal::Byte(ByteObject(*x))),
             Self::Uint(x) => InterpVal::Primitive(value::PrimitiveVal::Uint(UintObject(*x))),

@@ -1,12 +1,11 @@
 use crate::{
-    Todo,
     analyzer::{
         static_env::{
             EnvItem, EnvKey, OpOverload, OperandTypes, StaticEnvironment, StaticItem, VarType,
         },
         types::{
             AbstractType, Fallible, FunShape, FunType, OrType, PrimitiveType, StaticType,
-            TypeCompatible, TypeSize,
+            TypeCompatible,
         },
     },
     error::{ContextError, ErrorType, Failure, ImmutableAssignment, OpSide},
@@ -16,11 +15,9 @@ use crate::{
         value::{InterpBinaryOpFn, InterpLabel, InterpOp, InterpUnaryOpFn, InterpVal},
     },
     scanner::token::value::{Keyword, LexValue, Operator},
-    types::{byte, fail, flpt, sint, text, uint},
+    types::{byte, flpt, sint, text, uint},
 };
-#[cfg(not(debug_assertions))]
-use std::marker::PhantomData;
-use std::{cell::RefCell, range::Range};
+use std::cell::RefCell;
 use types::TypeBound;
 
 pub mod builtin_ops;
@@ -248,8 +245,6 @@ impl<'src> CoagulateVars<'src> for AnalysisOp<'src> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     None,
-    Nevr,
-    Fail(fail),
     Bool(bool),
     Byte(byte),
     Uint(uint),
@@ -268,8 +263,6 @@ impl<'src> GetType<'src> for Literal {
     fn get_type<'ty>(&'ty self, _: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         Some(match self {
             Self::None => PrimitiveType::None,
-            Self::Nevr => PrimitiveType::Nevr,
-            Self::Fail(_) => PrimitiveType::Fail,
             Self::Bool(_) => PrimitiveType::Bool,
             Self::Byte(_) => PrimitiveType::Byte,
             Self::Uint(_) => PrimitiveType::Uint,
@@ -391,16 +384,6 @@ impl<'src> CoagulateVars<'src> for AnalysisVar<'src> {
             _ => panic!("AnalysisVar should represent EnvItem::Var"),
         }
     }
-}
-
-/// Runtime variable
-#[derive(Debug, Clone, PartialEq)]
-pub struct RuntimeVar<'src> {
-    pub range: Range<usize>,
-    #[cfg(debug_assertions)]
-    pub ty_: StaticType<'src>,
-    #[cfg(not(debug_assertions))]
-    _marker: PhantomData<&'src ()>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -673,6 +656,7 @@ impl<'src> Analyze<'src> for ast::Literal<'src> {
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
         let val = match self.value.val {
+            LexValue::ByteLiteral(x) => Literal::Byte(x),
             LexValue::UIntLiteral(x) => Literal::Uint(x),
             LexValue::SIntLiteral(x) => Literal::Sint(x),
             LexValue::FlptLiteral(x) => Literal::Flpt(x),
@@ -1938,8 +1922,12 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                         source,
                         self.ty
                             .as_ref()
-                            .map(|x| &x.ty as &dyn AstNode)
-                            .or_else(|| self.assignment.as_ref().map(|x| &x.expr as &dyn AstNode))
+                            .map(|x| -> &dyn AstNode { &x.ty })
+                            .or_else(|| {
+                                self.assignment
+                                    .as_ref()
+                                    .map(|x| -> &dyn AstNode { &x.expr })
+                            })
                             .expect(
                                 "type must have come from one of these two to produce an error",
                             ),
@@ -1960,8 +1948,12 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
                         source,
                         self.ty
                             .as_ref()
-                            .map(|x| &x.ty as &dyn AstNode)
-                            .or_else(|| self.assignment.as_ref().map(|x| &x.expr as &dyn AstNode))
+                            .map(|x| -> &dyn AstNode { &x.ty })
+                            .or_else(|| {
+                                self.assignment
+                                    .as_ref()
+                                    .map(|x| -> &dyn AstNode { &x.expr })
+                            })
                             .expect(
                                 "type must have come from one of these two to produce an error",
                             ),

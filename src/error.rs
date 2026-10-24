@@ -24,6 +24,7 @@ use crate::{
         },
         tokenize,
     },
+    types::{byte, sint, uint},
 };
 use std::range::Range;
 
@@ -36,15 +37,46 @@ pub enum ImmutableAssignment {
     Keyword(Keyword),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntKind {
+    Byte,
+    Uint,
+    Sint,
+}
+
+impl IntKind {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Byte => "byte",
+            Self::Uint => "unsigned integer",
+            Self::Sint => "signed integer",
+        }
+    }
+
+    pub const fn max(self) -> &'static dyn std::fmt::Display {
+        match self {
+            Self::Byte => &byte::MAX,
+            Self::Uint => &uint::MAX,
+            Self::Sint => &sint::MAX,
+        }
+    }
+
+    pub const fn min(self) -> &'static dyn std::fmt::Display {
+        match self {
+            Self::Byte => &byte::MIN,
+            Self::Uint => &uint::MIN,
+            Self::Sint => &sint::MIN,
+        }
+    }
+}
+
 /// The standard library is allergic to letting me construct its error types, so I've made my own version
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NumErrorKind {
     InvalidInt,
     InvalidFlpt,
-    UPosOverflow,
-    SPosOverflow,
-    UNegOverflow,
-    SNegOverflow,
+    PosOverflow(IntKind),
+    NegOverflow(IntKind),
     /// Negative sign with **explicit** unsigned suffix
     NegUnsigned,
 }
@@ -64,8 +96,8 @@ impl NumErrorKind {
                 unreachable!("tokens can't be empty, this is the wrong error")
             }
             std::num::IntErrorKind::InvalidDigit => Self::InvalidInt,
-            std::num::IntErrorKind::PosOverflow => Self::SPosOverflow,
-            std::num::IntErrorKind::NegOverflow => Self::SNegOverflow,
+            std::num::IntErrorKind::PosOverflow => Self::PosOverflow(IntKind::Sint),
+            std::num::IntErrorKind::NegOverflow => Self::NegOverflow(IntKind::Sint),
             _ => unimplemented!("not a real int error"),
         }
     }
@@ -76,8 +108,8 @@ impl NumErrorKind {
                 unreachable!("tokens can't be empty, this is the wrong error")
             }
             std::num::IntErrorKind::InvalidDigit => Self::InvalidInt,
-            std::num::IntErrorKind::PosOverflow => Self::UPosOverflow,
-            std::num::IntErrorKind::NegOverflow => Self::UNegOverflow,
+            std::num::IntErrorKind::PosOverflow => Self::PosOverflow(IntKind::Uint),
+            std::num::IntErrorKind::NegOverflow => Self::NegOverflow(IntKind::Uint),
             _ => unimplemented!("not a real int error"),
         }
     }
@@ -87,10 +119,8 @@ impl std::fmt::Display for NumErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidInt | Self::InvalidFlpt => "invalid digit found in source code",
-            Self::UPosOverflow | Self::SPosOverflow => "number too large to fit in target type",
-            Self::UNegOverflow | Self::SNegOverflow | Self::NegUnsigned => {
-                "number too small to fit in target type"
-            }
+            Self::PosOverflow(_) => "number too large to fit in target type",
+            Self::NegOverflow(_) | Self::NegUnsigned => "number too small to fit in target type",
         }
         .fmt(f)
     }
@@ -296,45 +326,33 @@ impl IntoIterator for OverflowError {
 
 /// (suffix, name of base)
 fn invalid_num_suffix(src: &str) -> (&str, &'static str) {
+    #![expect(
+        clippy::string_slice,
+        reason = "find should not be within a UTF-8 character"
+    )]
     let src = src.strip_prefix('-').unwrap_or(src);
     if let Some(digits) = src.strip_prefix(HEX_PREFIX) {
         let pos = digits
             .find(|ch: char| !ch.is_ascii_hexdigit())
             .expect("should contain an invalid digit");
-        #[expect(
-            clippy::string_slice,
-            reason = "find should not be within a UTF-8 character"
-        )]
         let suffix = &digits[pos..];
         (suffix, "hexadecimal")
     } else if let Some(digits) = src.strip_prefix(OCT_PREFIX) {
         let pos = digits
             .find(|ch: char| !ch.is_digit(8))
             .expect("should contain an invalid digit");
-        #[expect(
-            clippy::string_slice,
-            reason = "find should not be within a UTF-8 character"
-        )]
         let suffix = &digits[pos..];
         (suffix, "octal")
     } else if let Some(digits) = src.strip_prefix(BIN_PREFIX) {
         let pos = digits
             .find(|ch: char| !ch.is_digit(2))
             .expect("should contain an invalid digit");
-        #[expect(
-            clippy::string_slice,
-            reason = "find should not be within a UTF-8 character"
-        )]
         let suffix = &digits[pos..];
         (suffix, "binary")
     } else {
         let pos = src
             .find(|ch: char| !ch.is_ascii_digit())
             .expect("should contain an invalid digit");
-        #[expect(
-            clippy::string_slice,
-            reason = "find should not be within a UTF-8 character"
-        )]
         let suffix = &src[pos..];
         (suffix, "decimal")
     }
@@ -478,10 +496,6 @@ macro_rules! CtxErrType {{
         }
 
         impl std::fmt::Display for ContextErrorHelp<'_, '_> {
-            // #[expect(
-            //     clippy::too_many_lines,
-            //     reason = "it would be even more complicated to make a separate function for each of these"
-            // )]
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 let src: &str = self
                     .0
@@ -660,10 +674,8 @@ pub enum ErrorType<'src> {
                 let (suffix, base_name) = invalid_num_suffix(src);
                 write!(f, "the suffix `{suffix}` is not valid for {base_name} unsigned integer literals")
             }
-            NumErrorKind::UPosOverflow => write!(f, "the largest supported unsigned integer value is {}", usize::MAX),
-            NumErrorKind::SPosOverflow => write!(f, "the largest supported signed integer value is {}", isize::MAX),
-            NumErrorKind::UNegOverflow => write!(f, "the smallest supported unsigned integer value is {}", usize::MIN),
-            NumErrorKind::SNegOverflow => write!(f, "the smallest supported signed integer value is {}", isize::MIN),
+            NumErrorKind::PosOverflow(kind) => write!(f, "the largest supported {} value is {}", kind.name(), kind.max()),
+            NumErrorKind::NegOverflow(kind) => write!(f, "the smallest supported {} value is {}", kind.name(), kind.min()),
             NumErrorKind::NegUnsigned => f.write_str("unsigned integers cannot be negative"),
             NumErrorKind::InvalidFlpt => write!(f, "I'm not sure how to help with this yet"), // TODO: float literal guidance
         }
@@ -2037,7 +2049,7 @@ impl TargetTy {
     }
 
     const fn bounds(self) -> (i128, i128) {
-        #[expect(clippy::as_conversions)]
+        #[expect(clippy::as_conversions, reason = "these definitely fit in i128")]
         match self {
             Self::UInt => (usize::MIN as i128, usize::MAX as i128),
             Self::SInt => (isize::MIN as i128, isize::MAX as i128),
