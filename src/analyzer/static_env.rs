@@ -431,7 +431,7 @@ impl<'src> StaticEnvironment<'src> {
         is_global: bool,
         node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
     ) -> Result<(VarId, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
-        if let Some(ref ty) = ty
+        if let Some(ty) = &ty
             && let Some(Err(e)) = ty.size()
         {
             return Err(e);

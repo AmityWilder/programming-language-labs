@@ -32,7 +32,7 @@ pub enum ControlFlow<'src> {
     #[default]
     Continue,
     /// Skip to the next iteration of the current loop
-    Skip(Option<InterpLabel<'src>>, Option<InterpVarValue<'src>>),
+    Skip(Option<InterpLabel<'src>>),
     /// End the current loop
     Halt(Option<InterpLabel<'src>>, Option<InterpVarValue<'src>>),
     /// End the current function
@@ -305,8 +305,8 @@ impl<'src> InterpLoopStmt<'src> {
         loop {
             match self.block.interp_exec(env)? {
                 // TODO: handle value yeilded by skip
-                ControlFlow::Continue | ControlFlow::Skip(None, _) => {}
-                ControlFlow::Skip(Some(label), _) if label_eq(self.label, label) => {}
+                ControlFlow::Continue | ControlFlow::Skip(None) => {}
+                ControlFlow::Skip(Some(label)) if label_eq(self.label, label) => {}
 
                 // TODO: handle value yeilded by halt
                 ControlFlow::Halt(None, _) => break Ok(ControlFlow::Continue),
@@ -325,8 +325,8 @@ impl<'src> InterpCordStmt<'src> {
         loop {
             match self.block.interp_exec(env)? {
                 // TODO: handle value yeilded by skip
-                ControlFlow::Skip(None, _) => {}
-                ControlFlow::Skip(Some(label), _) if label_eq(self.label, label) => {}
+                ControlFlow::Skip(None) => {}
+                ControlFlow::Skip(Some(label)) if label_eq(self.label, label) => {}
 
                 // TODO: handle value yeilded by halt
                 ControlFlow::Continue | ControlFlow::Halt(None, _) => {
@@ -361,8 +361,8 @@ impl<'src> InterpRepStmt<'src> {
             // identical to "loop"
             match self.block.interp_exec(env)? {
                 // TODO: handle value yeilded by skip
-                ControlFlow::Continue | ControlFlow::Skip(None, _) => (),
-                ControlFlow::Skip(Some(label), _) if label_eq(self.label, label) => (),
+                ControlFlow::Continue | ControlFlow::Skip(None) => (),
+                ControlFlow::Skip(Some(label)) if label_eq(self.label, label) => (),
 
                 // TODO: handle value yeilded by halt
                 ControlFlow::Halt(None, _) => break Ok(ControlFlow::Continue),
@@ -377,22 +377,18 @@ impl<'src> InterpRepStmt<'src> {
 }
 
 impl<'src> InterpHaltStmt<'src> {
-    #[expect(clippy::unnecessary_wraps, reason = "future-proof")]
-    const fn interp_exec(
-        &self,
-        _env: &mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
-        Ok(ControlFlow::Halt(self.label, None)) // TODO
+    fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
+        self.value
+            .as_ref()
+            .map(|x| x.interp_eval(env).map(|v| env.get_ptr(v)))
+            .transpose()
+            .map(|value| ControlFlow::Halt(self.label, value))
     }
 }
 
 impl<'src> InterpSkipStmt<'src> {
-    #[expect(clippy::unnecessary_wraps, reason = "future-proof")]
-    const fn interp_exec(
-        &self,
-        _env: &mut InterpEnvironment<'src>,
-    ) -> Result<ControlFlow<'src>, Failure> {
-        Ok(ControlFlow::Skip(self.label, None)) // TODO
+    const fn interp_exec(&self, _env: &mut InterpEnvironment<'src>) -> ControlFlow<'src> {
+        ControlFlow::Skip(self.label)
     }
 }
 
@@ -439,9 +435,8 @@ impl<'src> InterpDeferNode<'src> {
 
             Ok(defer_res) => {
                 // defer has a non-error output, defer wins.
-                if let Ok(
-                    ControlFlow::Skip(_, _) | ControlFlow::Halt(_, _) | ControlFlow::Give(_),
-                ) = inner_res
+                if let Ok(ControlFlow::Skip(_) | ControlFlow::Halt(_, _) | ControlFlow::Give(_)) =
+                    inner_res
                 {
                     // TBD: what to do with the inner result? is discarding it the most logical plan?
                     debug_warn!(
@@ -467,7 +462,7 @@ impl<'src> InterpStatement<'src> {
             Self::For(stmt) => stmt.interp_exec(env),
             Self::Rep(stmt) => stmt.interp_exec(env),
             Self::Halt(stmt) => stmt.interp_exec(env),
-            Self::Skip(stmt) => stmt.interp_exec(env),
+            Self::Skip(stmt) => Ok(stmt.interp_exec(env)),
             Self::Block(stmt) => stmt.interp_exec(env),
             Self::Defer(node) => node.interp_exec(env),
         }

@@ -1173,7 +1173,7 @@ impl<'src> ast::Binary<'src> {
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, AnalysisExpr<'src>> {
         let lhs = self.lhs.analyze(source, env, None)?;
-        let r_ty = if let ast::Expr::Type(ref type_expr) = self.rhs {
+        let r_ty = if let ast::Expr::Type(type_expr) = &self.rhs {
             type_expr.analyze(source, env)
         } else {
             unimplemented!("should be handled by grammar");
@@ -1493,7 +1493,7 @@ impl<'src> GetType<'src> for AnalysisIfStmt<'src> {
         let ty = self.then.get_type(env);
         #[cfg(debug_assertions)]
         if let Some(then_ty) = ty
-            && let Some(ref or) = self.or
+            && let Some(or) = &self.or
         {
             let or_ty = or.get_type(env);
             // TODO: this needs to be an error somewhere
@@ -1869,15 +1869,13 @@ impl<'src> CoagulateVars<'src> for AnalysisHaltStmt<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SkipStmt<L, O, V> {
+pub struct SkipStmt<L> {
     pub label: Option<L>,
-    pub value: Option<Expr<L, O, V>>,
 }
 
-pub type AnalysisSkipStmt<'src> =
-    SkipStmt<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
-pub type RuntimeSkipStmt<'src> = SkipStmt<RuntimeLabel, RuntimeOp<'src>, RuntimeVar<'src>>;
-pub type InterpSkipStmt<'src> = SkipStmt<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+pub type AnalysisSkipStmt<'src> = SkipStmt<AnalysisLabel<'src>>;
+pub type RuntimeSkipStmt<'src> = SkipStmt<RuntimeLabel>;
+pub type InterpSkipStmt<'src> = SkipStmt<InterpLabel<'src>>;
 
 impl<'src> GetType<'src> for AnalysisSkipStmt<'src> {
     type Output<'ty>
@@ -1898,18 +1896,13 @@ impl<'src> Analyze<'src> for ast::SkipStmt<'src> {
         &self,
         source: &'src str,
         env: &mut StaticEnvironment<'src>,
-        ret: Option<&AbstractType<'src>>,
+        _ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
         Ok(SkipStmt {
             label: self
                 .label
                 .as_ref()
                 .map(|label| label.analyze(source, env, None))
-                .transpose()?,
-            value: self
-                .value
-                .as_ref()
-                .map(|value| value.analyze(source, env, ret))
                 .transpose()?,
         })
     }
@@ -1921,7 +1914,6 @@ impl<'src> CementVars for AnalysisSkipStmt<'src> {
     fn cement_vars(self, ranges: &[Range<usize>]) -> Self::Concrete {
         RuntimeSkipStmt {
             label: self.label.map(|label| label.cement_vars(ranges)),
-            value: self.value.map(|value| value.cement_vars(ranges)),
         }
     }
 }
@@ -1936,7 +1928,6 @@ impl<'src> CoagulateVars<'src> for AnalysisSkipStmt<'src> {
     ) -> Self::Interp {
         InterpSkipStmt {
             label: self.label.map(|label| label.coagulate_vars(s_env, i_env)),
-            value: self.value.map(|value| value.coagulate_vars(s_env, i_env)),
         }
     }
 }
@@ -2134,7 +2125,7 @@ pub enum Statement<L, O, V> {
     For(ForStmt<L, O, V>),
     Rep(RepStmt<L, O, V>),
     Halt(HaltStmt<L, O, V>),
-    Skip(SkipStmt<L, O, V>),
+    Skip(SkipStmt<L>),
     Block(BlockStmt<L, O, V>),
     Defer(DeferNode<L, O, V>),
 }
@@ -2265,7 +2256,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
         #[cfg(debug_assertions)]
         {
             print!("{}: ", self.binding.ident.lex); // TODO: what if there's multiple?
-            if let Some(ref annotated_type) = annotated_type {
+            if let Some(annotated_type) = &annotated_type {
                 print!("{annotated_type}");
             } else {
                 print!("<implicit>");
@@ -2278,7 +2269,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
             }
         }
 
-        if let Some(ref annotated_type) = annotated_type
+        if let Some(annotated_type) = &annotated_type
             && let Some(expr_ty) = expr.as_ref().and_then(|x| x.get_type(env))
             && let Err(e) = expr_ty.expect_type(
                 annotated_type,

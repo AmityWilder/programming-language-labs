@@ -1075,8 +1075,6 @@ pub struct SkipStmt<'src> {
     /// `skip`
     pub skip_kw: Lexeme<'src>,
     pub label: Option<Label<'src>>,
-    // TODO: wait a sec, how tf would `skip` output a value? remove this.
-    pub value: Option<Expr<'src>>,
     /// `;`
     pub semi: Lexeme<'src>,
 }

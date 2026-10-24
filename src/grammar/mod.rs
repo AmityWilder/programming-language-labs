@@ -525,30 +525,18 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `skip_statement -> "skip" ( label )? expression ";"`
+    /// `skip_statement -> "skip" ( label )? ";"`
     pub fn skip_statement(&mut self) -> Option<Result<SkipStmt<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Keyword(Keyword::Skip))
             .map(|skip_kw| {
-                let label = self.label().transpose()?;
-                self.pull_if_eq(LexValue::Punctuation(Punctuation::Semi))
-                    .map_or_else(
-                        || {
-                            self.expression().and_then(|value| {
-                                self.try_pull_eq(
-                                    LexValue::Punctuation(Punctuation::Semi),
-                                    ExpectedToken::Semi,
-                                )
-                                .map(|semi| (Some(value), semi))
-                            })
-                        },
-                        |semi| Ok((None, semi)),
-                    )
-                    .map(|(value, semi)| SkipStmt {
-                        skip_kw,
-                        label,
-                        value,
-                        semi,
-                    })
+                Ok(SkipStmt {
+                    skip_kw,
+                    label: self.label().transpose()?,
+                    semi: self.try_pull_eq(
+                        LexValue::Punctuation(Punctuation::Semi),
+                        ExpectedToken::Semi,
+                    )?,
+                })
             })
     }
 

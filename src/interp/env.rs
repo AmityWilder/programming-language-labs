@@ -1,6 +1,6 @@
 use crate::{
     analyzer::static_env::VarId,
-    interp::value::{InterpVal, InterpValue},
+    interp::value::{InterpVal, InterpValue, InterpVarValue},
 };
 use std::{cell::RefCell, collections::HashMap};
 
@@ -22,16 +22,18 @@ impl<'src> InterpEnvironment<'src> {
         }
     }
 
-    pub fn get_ptr(&self, var: InterpValue<'_, 'src>) -> Result<VarId, InterpVal<'src>> {
+    pub fn get_ptr(&self, var: InterpValue<'_, 'src>) -> InterpVarValue<'src> {
         match var {
-            InterpValue::Prvalue(x) => Err(x),
+            InterpValue::Prvalue(x) => InterpVarValue::Prvalue(x),
             InterpValue::Rvalue(_) => todo!(),
             InterpValue::Lvalue(x) => self
                 .vars
                 .iter()
                 .find(|(_, var)| std::ptr::eq(*var, x))
-                .map(|(id, _)| *id)
-                .ok_or_else(|| x.borrow().clone()),
+                .map_or_else(
+                    || todo!("not an environment pointer"),
+                    |(id, _)| InterpVarValue::Lvalue(*id),
+                ),
         }
     }
 }
