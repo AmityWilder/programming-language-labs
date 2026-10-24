@@ -1,8 +1,7 @@
 use crate::{
     Todo,
     analyzer::static_env::ConstantValue,
-    error::{ContextError, ErrorType, OpSide},
-    exec::error::Failure,
+    error::{ContextError, ErrorType, Failure, OpSide},
     grammar::ast,
     scanner::token::value::TokenEq,
 };

@@ -5,22 +5,14 @@
 )]
 
 use super::{
-    AbstractType, BlockStmt, Environment, Failure, FnDef, FunType, OpOverload, OperandTypes,
-    Operator, PrimitiveType, StaticType, types::FunShape,
+    AbstractType, BlockStmt, Failure, FnDef, FunType, OpOverload, OperandTypes, Operator,
+    PrimitiveType, StaticType, types::FunShape,
 };
 use crate::{
-    exec::value::{Value, ValueMut},
     interp::value::{InterpVal, InterpValue, PrimitiveVal},
     spec_ops::{BitRotate, BitShift},
     types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
-
-pub fn exists_def<'val, 'src>(
-    _out: crate::exec::value::ValueMut<'val, 'src>,
-    _lhs: crate::exec::value::Value<'val, 'src>,
-) -> std::result::Result<(), Failure> {
-    todo!()
-}
 
 pub fn interp_exists_def<'brw, 'src>(
     lhs: InterpValue<'brw, 'src>,
@@ -84,21 +76,7 @@ macro_rules! prim_op {
                         let res: $Out = { $($def)* };
                         Ok(InterpValue::Prvalue(res.into()))
                     }
-                    fn runtime<'src, 'val>(
-                        out: ValueMut<'val, 'src>,
-                        lhs: Value<'val, 'src>,
-                        rhs: Value<'val, 'src>,
-                    ) -> Result<(), Failure> {
-                        // SAFETY: static analyzer must ensure soundness
-                        let $lhs_name = &unsafe { Value::cast_into::<$Lhs>(lhs).assume_init() };
-                        // SAFETY: static analyzer must ensure soundness
-                        let $rhs_name = &unsafe { Value::cast_into::<$Rhs>(rhs).assume_init() };
-                        let res: $Out = { $($def)* };
-                        // SAFETY: static analyzer must ensure soundness
-                        unsafe { ValueMut::cast_into::<$Out>(out) }.data.write(res);
-                        Ok(())
-                    }
-                    FnDef::LangOpB(runtime, interp)
+                    FnDef::LangOpB(interp)
                 },
             },
         )
@@ -136,18 +114,7 @@ macro_rules! prim_op {
                         let res: $Out = { $($def)* };
                         Ok(InterpValue::Prvalue(res.into()))
                     }
-                    fn runtime<'src, 'val>(
-                        out: ValueMut<'val, 'src>,
-                        rhs: Value<'val, 'src>,
-                    ) -> Result<(), Failure> {
-                        // SAFETY: static analyzer must ensure soundness
-                        let $rhs_name = &unsafe { Value::cast_into::<$Rhs>(rhs).assume_init() };
-                        let res: $Out = { $($def)* };
-                        // SAFETY: static analyzer must ensure soundness
-                        unsafe { ValueMut::cast_into::<$Out>(out) }.data.write(res);
-                        Ok(())
-                    }
-                    FnDef::LangOpU(runtime, interp)
+                    FnDef::LangOpU(interp)
                 },
             },
         )
@@ -187,18 +154,7 @@ macro_rules! prim_op {
                         let res: $Out = { $($def)* };
                         Ok(res.into())
                     }
-                    fn runtime<'src, 'val>(
-                        out: ValueMut<'val, 'src>,
-                        lhs: Value<'val, 'src>,
-                    ) -> Result<(), Failure> {
-                        // SAFETY: static analyzer must ensure soundness
-                        let $lhs_name = &unsafe { Value::cast_into::<$Lhs>(lhs).assume_init() };
-                        let res: $Out = { $($def)* };
-                        // SAFETY: static analyzer must ensure soundness
-                        unsafe { ValueMut::cast_into::<$Out>(out) }.data.write(res);
-                        Ok(())
-                    }
-                    FnDef::LangOpU(runtime, interp)
+                    FnDef::LangOpU(interp)
                 },
             },
         )
@@ -267,13 +223,7 @@ macro_rules! incr_decr_op {
                         let res: $Out = { $($def)* };
                         Ok(InterpValue::Prvalue(res.into()))
                     }
-                    fn runtime<'src, 'val>(
-                        out: ValueMut<'val, 'src>,
-                        rhs: Value<'val, 'src>,
-                    ) -> Result<(), Failure> {
-                        todo!()
-                    }
-                    FnDef::LangOpU(runtime, interp)
+                    FnDef::LangOpU(interp)
                 },
             },
         )

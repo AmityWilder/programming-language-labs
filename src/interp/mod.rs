@@ -11,7 +11,8 @@ use crate::{
         InterpPrintStmt, InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal,
         OrStmt,
     },
-    exec::{debug_warn, error::Failure},
+    debug_warn,
+    error::Failure,
     interp::value::{InterpValue, InterpVarValue},
     scanner::token::value::Keyword,
     types::{byte, text},
@@ -131,6 +132,40 @@ impl Inpt for text {
     }
 }
 
+/// Copied (with modification) from [`core::str::utf8_char_width`],
+/// because it's a compiler internal and therefore may change without warning
+const fn utf8_char_width(first: u8) -> Option<NonZero<usize>> {
+    // https://tools.ietf.org/html/rfc3629
+    const UTF8_CHAR_WIDTH: &[u8; 256] = &[
+        // 1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 0
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 1
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 2
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 3
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 4
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 5
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 6
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 7
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 8
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 9
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // A
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // B
+        0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, // C
+        2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, // D
+        3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, // E
+        4, 4, 4, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // F
+    ];
+    #[expect(
+        clippy::as_conversions,
+        reason = "usize doesn't implement `from` even for types it can convert between"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "u8 is 0-255, and UTF8_CHAR_WIDTH has 256 elements, so it is guaranteed to be in-bounds"
+    )]
+    NonZero::new(UTF8_CHAR_WIDTH[first as usize] as usize)
+}
+
 impl Inpt for char {
     fn input<R: std::io::BufRead>(mut stream: R) -> Result<Self, Failure> {
         let mut buf = [0u8; char::MAX_LEN_UTF8];
@@ -142,7 +177,7 @@ impl Inpt for char {
             return Err(Failure::FailedRead);
         }
 
-        let Some(n) = NonZero::new(core::str::utf8_char_width(*first)) else {
+        let Some(n) = utf8_char_width(*first) else {
             return Err(Failure::FailedRead);
         };
         debug_assert!(n.get() <= buf.len(), "the full char must fit in buf");
