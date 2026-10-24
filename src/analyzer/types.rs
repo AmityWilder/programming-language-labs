@@ -68,10 +68,10 @@ pub trait StaticTypeSize: TypeSize {
 
 /// Display implementation is be how the type will be shown in error messages
 pub trait TypeCompatible<'src>: std::fmt::Display {
-    /// TODO: this is not currently commutative!! check both ways until this is fixed!
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool;
+    /// The type is exactly the same as `other`, just stored in another type
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool;
 
-    // TODO: change this to return an actual error
+    #[deprecated]
     fn expect_type<T: ast::AstNodeFinal<'src>>(
         &self,
         expect: &AbstractType<'src>,
@@ -81,7 +81,7 @@ pub trait TypeCompatible<'src>: std::fmt::Display {
     where
         Self: std::fmt::Debug,
     {
-        if self.is_compatible(expect) {
+        if self.is_type_eq(expect) {
             Ok(())
         } else {
             Err(ContextError::node_error(
@@ -93,15 +93,37 @@ pub trait TypeCompatible<'src>: std::fmt::Display {
     }
 
     fn to_abstract(&self) -> AbstractType<'src>;
+
+    /// `self` has a member `member` which, if `reqs` exists, satisfies the bounds of it.
+    fn has(&self, member: &str, reqs: Option<&TypeBound<'_>>) -> bool {
+        #![expect(unused_variables, reason = "used in implementors")]
+        false
+    }
+
+    /// `self` has the shape of `shape`.
+    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
+        #![expect(unused_variables, reason = "used in implementors")]
+        false
+    }
 }
 
 impl<'src, T: ?Sized + TypeCompatible<'src>> TypeCompatible<'src> for &T {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
-        (*self).is_compatible(other)
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
+        (*self).is_type_eq(other)
     }
 
     fn to_abstract(&self) -> AbstractType<'src> {
         (*self).to_abstract()
+    }
+
+    /// `self` has a member `member` which, if `reqs` exists, satisfies the bounds of it.
+    fn has(&self, member: &str, reqs: Option<&TypeBound<'_>>) -> bool {
+        (*self).has(member, reqs)
+    }
+
+    /// `self` has the shape of `shape`.
+    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
+        (*self).is_shape(shape)
     }
 }
 impl<T: ?Sized + TypeSize> TypeSize for &T {
@@ -118,7 +140,7 @@ pub struct ViewType<'src> {
 
 impl TypeSize for ViewType<'_> {}
 impl<'src> TypeCompatible<'src> for ViewType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::View(other)) if *self == **other)
     }
 
@@ -162,7 +184,7 @@ impl TypeSize for ArrayType<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for ArrayType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Arr(other)) if *self == **other)
     }
 
@@ -200,7 +222,7 @@ impl StaticTypeSize for Ptr<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for Ptr<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Ptr(other)) if *self == **other)
     }
 
@@ -263,16 +285,16 @@ impl TypeSize for Fallible<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for Fallible<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         match other {
             AbstractType::Concrete(StaticType::OrTy(other)) => {
                 *self == **other
-                    || self.is_compatible(&match other.or {
+                    || self.is_type_eq(&match other.or {
                         OrType::None => AbstractType::None,
                         OrType::Nevr => AbstractType::Nevr,
                         OrType::Fail => AbstractType::Fail,
                     })
-                    || self.is_compatible(&other.then.to_abstract())
+                    || self.is_type_eq(&other.then.to_abstract())
             }
             _ => false,
         }
@@ -306,7 +328,7 @@ impl TypeSize for RecType<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for RecType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Rec(other)) if self == other)
     }
 
@@ -346,7 +368,7 @@ impl TypeSize for SupType<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for SupType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Sup(other)) if self == other)
     }
 
@@ -380,7 +402,7 @@ impl TypeSize for SubType<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for SubType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Sub(other)) if *self == **other)
     }
 
@@ -425,7 +447,7 @@ impl TypeSize for CatType<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for CatType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Cat(other)) if *self == **other)
     }
 
@@ -454,7 +476,7 @@ pub struct FunShape<'src> {
 }
 
 impl<'src> TypeCompatible<'src> for FunShape<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Fun(other)) if *self == other.shape)
     }
 
@@ -499,7 +521,7 @@ impl TypeSize for FunType<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for FunType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Fun(other)) if *self == **other)
     }
 
@@ -568,7 +590,7 @@ impl TypeSize for PrimitiveType {
     }
 }
 impl<'src> TypeCompatible<'src> for PrimitiveType {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(StaticType::Primitive(other)) if self == other)
     }
 
@@ -662,7 +684,7 @@ impl TypeSize for StaticType<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for StaticType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Concrete(other) if self == other)
     }
 
@@ -836,6 +858,22 @@ impl std::fmt::Display for TypeBound<'_> {
     }
 }
 
+impl TypeBound<'_> {
+    fn is_satisfied_by<'a, T: TypeCompatible<'a>>(&self, ty: &T) -> bool {
+        match self {
+            TypeBound::All(bounds) => bounds.iter().all(|bound| bound.is_satisfied_by(ty)),
+            TypeBound::Any(bounds) => bounds.iter().any(|bound| bound.is_satisfied_by(ty)),
+            TypeBound::Not(bound) => !bound.is_satisfied_by(ty),
+            TypeBound::Exactly(target) => ty.is_type_eq(target),
+
+            TypeBound::Has { member, reqs } => ty.has(member, reqs.as_deref()),
+            TypeBound::Shape(shape) => ty.is_shape(shape),
+            TypeBound::Supports { .. } => todo!("type bound needs environment access"),
+            TypeBound::Satisfies(_) => todo!("type bound needs code access"),
+        }
+    }
+}
+
 /// A type with generic parameters
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct GenericType<'src> {
@@ -859,7 +897,7 @@ impl std::fmt::Display for GenericType<'_> {
 }
 
 impl<'src> TypeCompatible<'src> for GenericType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Generic(other) if self == other)
     }
 
@@ -882,7 +920,7 @@ impl std::fmt::Display for GenericParam<'_> {
 }
 
 impl<'src> TypeCompatible<'src> for GenericParam<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         matches!(other, AbstractType::Param(other) if self == other)
     }
 
@@ -924,7 +962,7 @@ impl TypeSize for AbstractType<'_> {
     }
 }
 impl<'src> TypeCompatible<'src> for AbstractType<'src> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         self == other
     }
 

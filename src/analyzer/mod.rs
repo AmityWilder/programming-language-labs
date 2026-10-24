@@ -395,12 +395,12 @@ pub enum ExprType<'src, 'ty> {
 }
 
 impl<'src> TypeCompatible<'src> for ExprType<'src, '_> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         match self {
-            Self::Static(t) => t.is_compatible(other),
-            Self::Literal(t) => t.is_compatible(other),
-            Self::Directive(t) => t.is_compatible(other),
-            Self::Variable(t) => t.is_compatible(other),
+            Self::Static(t) => t.is_type_eq(other),
+            Self::Literal(t) => t.is_type_eq(other),
+            Self::Directive(t) => t.is_type_eq(other),
+            Self::Variable(t) => t.is_type_eq(other),
         }
     }
 
@@ -750,7 +750,7 @@ fn find_unary_overload<'env, 'src>(
             EnvItem::Op(overload) => overload,
             _ => unreachable!("only operators should be stored with operator keys"),
         })
-        .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)));
+        .filter(|overload| ret.is_none_or(|ret| overload.output.is_type_eq(ret)));
     match side {
         OpSide::Postfix => iter.find(|overload| {
             matches!(&overload.operands,
@@ -869,7 +869,7 @@ fn find_binary_overload<'env, 'src>(
             EnvItem::Op(overload) => overload,
             _ => unreachable!("only operators should be stored with operator keys"),
         })
-        .filter(|overload| ret.is_none_or(|ret| overload.output.is_compatible(ret)));
+        .filter(|overload| ret.is_none_or(|ret| overload.output.is_type_eq(ret)));
     iter.find(|overload| {
         matches!(&overload.operands,
             OperandTypes::Binary(l, r) if l == l_ty && r == r_ty
@@ -1138,9 +1138,22 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
         _ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
         const EXPR_TY: &AbstractType = &AbstractType::Text;
+        // TBD: should there be a "display" operator that can be overloaded?
         self.group
             .expr
-            .analyze(source, env, Some(EXPR_TY))
+            .analyze(
+                source,
+                env,
+                Some(&AbstractType::Opaque(Box::new(TypeBound::Any(vec![
+                    TypeBound::Exactly(AbstractType::Bool),
+                    TypeBound::Exactly(AbstractType::Byte),
+                    TypeBound::Exactly(AbstractType::Uint),
+                    TypeBound::Exactly(AbstractType::Sint),
+                    TypeBound::Exactly(AbstractType::Flpt),
+                    TypeBound::Exactly(AbstractType::Char),
+                    TypeBound::Exactly(AbstractType::Text),
+                ])))),
+            )
             .and_then(|expr| {
                 if let Some(ty) = expr.get_type(env) {
                     ty.expect_type(EXPR_TY, source, &self.group.expr)
@@ -1738,7 +1751,7 @@ impl<'src> GetType<'src> for AnalysisDeferNode<'src> {
         // TBD: can defer change the return type?
         self.on_pop
             .get_type(env)
-            .filter(|ty| !ty.is_compatible(&AbstractType::None))
+            .filter(|ty| !ty.is_type_eq(&AbstractType::None))
             .or_else(|| self.inner.get_type(env))
     }
 }

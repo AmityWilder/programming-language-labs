@@ -41,10 +41,10 @@ pub enum VarType<'src, 'ty> {
 }
 
 impl<'src> TypeCompatible<'src> for VarType<'src, '_> {
-    fn is_compatible(&self, other: &AbstractType<'_>) -> bool {
+    fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         match self {
-            VarType::Fun(ty) => ty.is_compatible(other),
-            VarType::Abstract(ty) => ty.is_compatible(other),
+            VarType::Fun(ty) => ty.is_type_eq(other),
+            VarType::Abstract(ty) => ty.is_type_eq(other),
         }
     }
 
