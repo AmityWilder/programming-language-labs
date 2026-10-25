@@ -1,14 +1,15 @@
 use crate::{
-    Todo,
     analyzer::static_env::ConstantValue,
-    error::{ContextError, ErrorType, Failure, OpSide},
+    error::{ContextError, ErrorType, Failure},
     grammar::ast,
-    scanner::token::value::TokenEq,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
     range::Range,
 };
+
+pub mod bounds;
+use bounds::TypeBound;
 
 /// The context in which a type must be statically sized
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,9 +70,9 @@ pub trait StaticTypeSize: TypeSize {
 /// Display implementation is be how the type will be shown in error messages
 pub trait TypeCompatible<'src>: std::fmt::Display {
     /// The type is exactly the same as `other`, just stored in another type
+    // TODO: equivalence between a parameter and a non-parameter
     fn is_type_eq(&self, other: &AbstractType<'_>) -> bool;
 
-    #[deprecated]
     fn expect_type<T: ast::AstNodeFinal<'src>>(
         &self,
         expect: &AbstractType<'src>,
@@ -94,14 +95,15 @@ pub trait TypeCompatible<'src>: std::fmt::Display {
 
     fn to_abstract(&self) -> AbstractType<'src>;
 
-    /// `self` has a member `member` which, if `reqs` exists, satisfies the bounds of it.
-    fn has(&self, member: &str, reqs: Option<&TypeBound<'_>>) -> bool {
+    /// `self` has a member `member` which, if `req` exists, satisfies the bounds of it.
+    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
         #![expect(unused_variables, reason = "used in implementors")]
         false
     }
 
     /// `self` has the shape of `shape`.
     fn is_shape(&self, shape: &FunShape<'_>) -> bool {
+        // TBD: how can this identify "call"-operator overloads
         #![expect(unused_variables, reason = "used in implementors")]
         false
     }
@@ -116,9 +118,8 @@ impl<'src, T: ?Sized + TypeCompatible<'src>> TypeCompatible<'src> for &T {
         (*self).to_abstract()
     }
 
-    /// `self` has a member `member` which, if `reqs` exists, satisfies the bounds of it.
-    fn has(&self, member: &str, reqs: Option<&TypeBound<'_>>) -> bool {
-        (*self).has(member, reqs)
+    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
+        (*self).has(member, req)
     }
 
     /// `self` has the shape of `shape`.
@@ -335,6 +336,13 @@ impl<'src> TypeCompatible<'src> for RecType<'src> {
     fn to_abstract(&self) -> AbstractType<'src> {
         self.clone().into()
     }
+
+    fn has(&self, member: &str, bound: Option<&TypeBound<'_>>) -> bool {
+        // TODO: methods
+        self.fields
+            .get(member)
+            .is_some_and(|field| bound.is_none_or(|bound| bound.is_satisfied_by(field)))
+    }
 }
 impl<'src> From<RecType<'src>> for AbstractType<'src> {
     fn from(value: RecType<'src>) -> Self {
@@ -375,6 +383,12 @@ impl<'src> TypeCompatible<'src> for SupType<'src> {
     fn to_abstract(&self) -> AbstractType<'src> {
         self.clone().into()
     }
+
+    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
+        self.variants.iter().all(|variant| variant.has(member, req))
+    }
+
+    // TODO: call overload
 }
 impl<'src> From<SupType<'src>> for AbstractType<'src> {
     fn from(value: SupType<'src>) -> Self {
@@ -392,7 +406,7 @@ impl std::fmt::Display for SupType<'_> {
 pub struct SubType<'src> {
     pub name: &'src str,
     pub base: StaticType<'src>,
-    pub reqs: Vec<TypeBound<'src>>,
+    pub req: Box<TypeBound<'src>>,
 }
 
 impl TypeSize for SubType<'_> {
@@ -408,6 +422,23 @@ impl<'src> TypeCompatible<'src> for SubType<'src> {
 
     fn to_abstract(&self) -> AbstractType<'src> {
         self.clone().into()
+    }
+
+    // TODO: needs to also support methods
+    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
+        self.req
+            .satisfaction_of(&TypeBound::Has {
+                member,                                    // TODO: ew, allocating a vec just to perform a test
+                req: req.map(|req| Box::new(req.clone())), // TODO: ew, allocating a box just to perform a test
+            })
+            .is_guaranteed()
+    }
+
+    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
+        // TODO: ew, cloning just to perform a test
+        self.req
+            .satisfaction_of(&TypeBound::Shape(shape.clone()))
+            .is_guaranteed()
     }
 }
 impl<'src> From<SubType<'src>> for AbstractType<'src> {
@@ -454,6 +485,14 @@ impl<'src> TypeCompatible<'src> for CatType<'src> {
     fn to_abstract(&self) -> AbstractType<'src> {
         self.clone().into()
     }
+
+    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
+        self.repr.has(member, req)
+    }
+
+    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
+        self.repr.is_shape(shape)
+    }
 }
 impl<'src> From<CatType<'src>> for AbstractType<'src> {
     fn from(value: CatType<'src>) -> Self {
@@ -482,6 +521,10 @@ impl<'src> TypeCompatible<'src> for FunShape<'src> {
 
     fn to_abstract(&self) -> AbstractType<'src> {
         self.clone().into()
+    }
+
+    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
+        self == shape
     }
 }
 impl<'src> From<FunShape<'src>> for AbstractType<'src> {
@@ -770,110 +813,6 @@ impl<'src> From<Box<FunType<'src>>> for StaticType<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum TypeBound<'src> {
-    /// Satisfies all of the conditions
-    All(Vec<TypeBound<'src>>),
-
-    /// Satisfies at least one of the conditions
-    Any(Vec<TypeBound<'src>>),
-
-    /// Does not satisfy the condition
-    Not(Box<TypeBound<'src>>),
-
-    /// Matches another type
-    Exactly(AbstractType<'src>),
-
-    /// Possesses a member (method or field) meeting the qualifications
-    Has {
-        /// Name of the member
-        member: &'src str,
-        /// Requirements the member must satisfy
-        reqs: Option<Box<TypeBound<'src>>>,
-    },
-
-    /// Fits a function shape
-    Shape(FunShape<'src>),
-
-    /// An operation the type must support
-    Supports {
-        side: OpSide,
-        op: TokenEq,
-        other: AbstractType<'src>,
-        output: AbstractType<'src>,
-    },
-
-    /// An expression the type must be guaranteed to satisfy at runtime, such as "x!=0", "x>=0", "6<=x<=10", "x.foo==x.bar", etc.
-    /// Mainly enforced by checking if conditions/assertions guard this, or if the user promises it unsafely.
-    Satisfies(Todo),
-}
-
-impl Default for TypeBound<'_> {
-    fn default() -> Self {
-        Self::Exactly(AbstractType::default())
-    }
-}
-
-impl std::fmt::Display for TypeBound<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::All(bounds) => {
-                f.write_str("(")?;
-                let mut has_prev = false;
-                for bound in bounds {
-                    if has_prev {
-                        f.write_str(" & ")?;
-                    }
-                    has_prev = true;
-                    bound.fmt(f)?;
-                }
-                f.write_str(")")
-            }
-            Self::Any(bounds) => {
-                f.write_str("(")?;
-                let mut has_prev = false;
-                for bound in bounds {
-                    if has_prev {
-                        f.write_str(" | ")?;
-                    }
-                    has_prev = true;
-                    bound.fmt(f)?;
-                }
-                f.write_str(")")
-            }
-            Self::Not(bound) => write!(f, "!{bound}"),
-            Self::Exactly(ty) => write!(f, "{ty}"),
-            Self::Has { member, reqs } => {
-                write!(f, "has {member}")?;
-                if let Some(req) = reqs {
-                    write!(f, ": {req}")
-                } else {
-                    Ok(())
-                }
-            }
-            Self::Shape(shape) => shape.fmt(f),
-            Self::Supports { .. } => todo!(),
-            Self::Satisfies(_) => todo!(),
-        }
-    }
-}
-
-impl TypeBound<'_> {
-    fn is_satisfied_by<'a, T: TypeCompatible<'a>>(&self, ty: &T) -> bool {
-        match self {
-            TypeBound::All(bounds) => bounds.iter().all(|bound| bound.is_satisfied_by(ty)),
-            TypeBound::Any(bounds) => bounds.iter().any(|bound| bound.is_satisfied_by(ty)),
-            TypeBound::Not(bound) => !bound.is_satisfied_by(ty),
-            TypeBound::Exactly(target) => ty.is_type_eq(target),
-
-            TypeBound::Has { member, reqs } => ty.has(member, reqs.as_deref()),
-            TypeBound::Shape(shape) => ty.is_shape(shape),
-            TypeBound::Supports { .. } => todo!("type bound needs environment access"),
-            TypeBound::Satisfies(_) => todo!("type bound needs code access"),
-        }
-    }
-}
-
 /// A type with generic parameters
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct GenericType<'src> {
@@ -910,7 +849,7 @@ impl<'src> TypeCompatible<'src> for GenericType<'src> {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct GenericParam<'src> {
     pub ident: &'src str,
-    pub reqs: Box<TypeBound<'src>>,
+    pub req: Box<TypeBound<'src>>,
 }
 impl std::fmt::Display for GenericParam<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

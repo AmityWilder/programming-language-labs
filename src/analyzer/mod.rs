@@ -6,6 +6,7 @@ use crate::{
         types::{
             AbstractType, Fallible, FunShape, FunType, OrType, PrimitiveType, StaticType,
             TypeCompatible,
+            bounds::{Combinator, TypeBound},
         },
     },
     error::{ContextError, ErrorType, Failure, ImmutableAssignment, OpSide},
@@ -18,7 +19,6 @@ use crate::{
     types::{byte, flpt, sint, text, uint},
 };
 use std::cell::RefCell;
-use types::TypeBound;
 
 pub mod builtin_ops;
 pub mod static_env;
@@ -315,10 +315,13 @@ impl<'src> Analyze<'src> for ast::Directive<'src> {
                     source,
                     &self.kw,
                     ErrorType::TypeMismatch(Box::new((
-                        AbstractType::Opaque(Box::new(TypeBound::Any(vec![
-                            TypeBound::Exactly(AbstractType::Text),
-                            TypeBound::Exactly(AbstractType::Char),
-                        ]))),
+                        AbstractType::Opaque(Box::new(TypeBound::Combo(
+                            Combinator::One, // TBD: whats the difference between `Any` and `One` for opaque types?
+                            vec![
+                                TypeBound::Exactly(AbstractType::Text),
+                                TypeBound::Exactly(AbstractType::Char),
+                            ],
+                        ))),
                         actual.clone(),
                     ))),
                 )]),
@@ -1144,15 +1147,18 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
             .analyze(
                 source,
                 env,
-                Some(&AbstractType::Opaque(Box::new(TypeBound::Any(vec![
-                    TypeBound::Exactly(AbstractType::Bool),
-                    TypeBound::Exactly(AbstractType::Byte),
-                    TypeBound::Exactly(AbstractType::Uint),
-                    TypeBound::Exactly(AbstractType::Sint),
-                    TypeBound::Exactly(AbstractType::Flpt),
-                    TypeBound::Exactly(AbstractType::Char),
-                    TypeBound::Exactly(AbstractType::Text),
-                ])))),
+                Some(&AbstractType::Opaque(Box::new(TypeBound::Combo(
+                    Combinator::One, // TBD: whats the difference between `Any` and `One` for opaque types?
+                    vec![
+                        TypeBound::Exactly(AbstractType::Bool),
+                        TypeBound::Exactly(AbstractType::Byte),
+                        TypeBound::Exactly(AbstractType::Uint),
+                        TypeBound::Exactly(AbstractType::Sint),
+                        TypeBound::Exactly(AbstractType::Flpt),
+                        TypeBound::Exactly(AbstractType::Char),
+                        TypeBound::Exactly(AbstractType::Text),
+                    ],
+                )))),
             )
             .and_then(|expr| {
                 if let Some(ty) = expr.get_type(env) {
