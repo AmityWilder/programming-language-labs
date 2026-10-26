@@ -2,7 +2,7 @@ use crate::{
     SYNTAX_STYLE_ANSI, Todo,
     analyzer::{
         static_env::EnvKey,
-        types::{AbstractType, FunShape, TypeCompatible},
+        types::{AbstractType, FunShape, TypeCompatible, bounds},
     },
     error::OpSide,
     highlight::style::StyleWrapper,
@@ -183,12 +183,97 @@ impl Display for Satisfaction {
 }
 
 impl<'src> TypeBound<'src> {
+    pub const fn is_empty(&self) -> bool {
+        matches!(self, Self::Combo(_, []))
+    }
+
+    /// Expand nested combos and double-negations
+    pub fn simplify(&mut self) {
+        match self {
+            &mut Self::Combo(kind, ref mut bounds) => {
+                for bound in bounds.iter_mut() {
+                    bound.simplify();
+                }
+
+                if bounds.len() == 1 {
+                    *self = bounds.pop().expect("just checked");
+                }
+                // associative
+                else if bounds
+                    .iter()
+                    .any(|bound| matches!(bound, &Self::Combo(inner_kind, _) if inner_kind == kind))
+                {
+                    let len = bounds
+                        .iter()
+                        .map(|bound| match bound {
+                            &Self::Combo(inner_kind, ref inner_bounds) if inner_kind == kind => {
+                                inner_bounds.len()
+                            }
+                            _ => 1,
+                        })
+                        .sum();
+                    for bound in std::mem::replace(bounds, Vec::with_capacity(len)) {
+                        match bound {
+                            Self::Combo(inner_kind, inner_bounds) if inner_kind == kind => {
+                                bounds.extend(inner_bounds);
+                            }
+                            bound => {
+                                bounds.push(bound);
+                            }
+                        }
+                    }
+                    // TODO: is this even helpful?
+                    bounds.sort_by_cached_key(ToString::to_string);
+                }
+            }
+
+            Self::Not(bound) => {
+                bound.simplify();
+
+                // double negation
+                if let Self::Not(inner) = bound {
+                    *self = *std::mem::take(inner);
+                }
+
+                debug_assert!(
+                    !matches!(self, Self::Not(Self::Not(_))),
+                    "should have at most 1 `not` after reducing double negation"
+                );
+            }
+
+            Self::Has {
+                req: req @ Some(_), ..
+            } => {
+                let Some(bound) = req else { unreachable!() };
+
+                bound.simplify();
+
+                // empty bound is no bound
+                if bound.is_empty() {
+                    *req = None;
+                }
+            }
+
+            // do not contain nested bounds
+            Self::Exactly(_)
+            | Self::Has { req: None, .. }
+            | Self::Shape(_)
+            | Self::Supports { .. }
+            | Self::Satisfies(_) => {}
+        }
+    }
+
+    pub fn is_legal(&self) -> bool {
+        !matches!(self, Self::Combo(_, []) | Self::Not(Self::Combo(_, [])))
+            && self.satisfaction_of(self).is_possible() // TODO: should this be `is_guaranteed` or `is_possible`?
+    }
+
     // TODO: change to return a `Result<(), _>` to indicate which bound was broken
     pub fn is_satisfied_by<'a, T: TypeCompatible<'a>>(&self, ty: &T) -> bool {
         let res = match self {
             Self::Combo(kind, bounds) => {
-                print!(
-                    "`{self:#}` requires {} one of its bounds to be satisfied. ",
+                println!(
+                    "`{self:#}` requires {} one of its bounds to be satisfied.\n",
                     match kind {
                         Combinator::All => "every",
                         Combinator::Any => "at least",
@@ -228,7 +313,7 @@ impl<'src> TypeBound<'src> {
                                 );
                             } else {
                                 print!(
-                                    "since `{ty:#}` satisfies the bound `{first:#}`, and no others, of `{self:#}`, "
+                                    "since `{ty:#}` exclusively satisfies the bound `{first:#}` of `{self:#}`, "
                                 );
                             }
                             second.is_none()
@@ -705,7 +790,7 @@ mod tests {
 
         #[test]
         fn test_bound_reflexive() {
-            let numeric = TypeBound::Combo(
+            let mut numeric = TypeBound::Combo(
                 Combinator::One,
                 [
                     TypeBound::Exactly(AbstractType::Uint),
@@ -749,6 +834,8 @@ mod tests {
                 ]
                 .to_vec(),
             );
+            numeric.simplify();
+            assert!(numeric.is_legal());
             assert!(numeric.satisfaction_of(&numeric).is_possible());
         }
 
@@ -762,14 +849,16 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Flpt),
                 ],
             );
+            assert!(numeric.is_legal());
             let integral = TypeBound::Combo(
-                Combinator::One,
+                Combinator::Any,
                 vec![
                     TypeBound::Exactly(AbstractType::Byte),
                     TypeBound::Exactly(AbstractType::Uint),
                     TypeBound::Exactly(AbstractType::Sint),
                 ],
             );
+            assert!(integral.is_legal());
             assert!(numeric.satisfaction_of(&integral).is_possible());
         }
     }
