@@ -2,12 +2,50 @@ use crate::{
     SYNTAX_STYLE_ANSI, Todo,
     analyzer::{
         static_env::EnvKey,
-        types::{AbstractType, FunShape, TypeCompatible, bounds},
+        types::{AbstractType, FunShape, TypeCompatible},
     },
     error::OpSide,
     highlight::style::StyleWrapper,
 };
 use std::fmt::Display;
+
+pub mod error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum Satisfaction {
+    Deny = -1,
+    #[default]
+    Unclear = 0,
+    Require = 1,
+}
+
+impl Satisfaction {
+    pub const fn is_impossible(self) -> bool {
+        matches!(self, Self::Deny)
+    }
+
+    pub const fn is_unclear(self) -> bool {
+        matches!(self, Self::Unclear)
+    }
+
+    pub const fn is_guaranteed(self) -> bool {
+        matches!(self, Self::Require)
+    }
+
+    pub const fn is_possible(self) -> bool {
+        matches!(self, Self::Unclear | Self::Require)
+    }
+}
+
+impl Display for Satisfaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Satisfaction::Deny => "impossible",
+            Satisfaction::Unclear => "uncertain",
+            Satisfaction::Require => "guaranteed",
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum OpBound<'src> {
@@ -146,42 +184,6 @@ impl Display for TypeBound<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum Satisfaction {
-    Deny = -1,
-    #[default]
-    Unclear = 0,
-    Require = 1,
-}
-
-impl Satisfaction {
-    pub const fn is_impossible(self) -> bool {
-        matches!(self, Self::Deny)
-    }
-
-    pub const fn is_unclear(self) -> bool {
-        matches!(self, Self::Unclear)
-    }
-
-    pub const fn is_guaranteed(self) -> bool {
-        matches!(self, Self::Require)
-    }
-
-    pub const fn is_possible(self) -> bool {
-        matches!(self, Self::Unclear | Self::Require)
-    }
-}
-
-impl Display for Satisfaction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Satisfaction::Deny => "impossible",
-            Satisfaction::Unclear => "uncertain",
-            Satisfaction::Require => "guaranteed",
-        })
-    }
-}
-
 impl<'src> TypeBound<'src> {
     pub const fn is_empty(&self) -> bool {
         matches!(self, Self::Combo(_, []))
@@ -268,7 +270,7 @@ impl<'src> TypeBound<'src> {
             && self.satisfaction_of(self).is_possible() // TODO: should this be `is_guaranteed` or `is_possible`?
     }
 
-    // TODO: change to return a `Result<(), _>` to indicate which bound was broken
+    // TODO: replace return with `Result<(), UnsatisfiedBoundError>`
     pub fn is_satisfied_by<'a, T: TypeCompatible<'a>>(&self, ty: &T) -> bool {
         let res = match self {
             Self::Combo(kind, bounds) => {
