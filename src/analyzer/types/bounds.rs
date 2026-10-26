@@ -276,7 +276,7 @@ impl<'src> TypeBound<'src> {
             Self::Satisfies(_) => todo!("type bound needs code access"),
         };
         println!(
-            "`{ty}` {} `{self}`.",
+            "`{ty}` {} `{self}`.\n",
             if res { "satisfies" } else { "does not satisfy" }
         );
         res
@@ -437,7 +437,7 @@ impl<'src> TypeBound<'src> {
             Self::Supports { .. } => todo!("`supports` needs fleshing out"),
             Self::Satisfies(_) => todo!("`satisfies` needs fleshing out"),
         };
-        println!("`{self}` satisfaction of `{req}` is {res}.");
+        println!("`{self}` satisfaction of `{req}` is {res}.\n");
         res
     }
 }

@@ -538,7 +538,7 @@ impl<'src> From<FunShape<'src>> for AbstractType<'src> {
 impl std::fmt::Display for FunShape<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { params, ret } = self;
-        write!(f, "fn(")?;
+        write!(f, "fun(")?;
         let mut has_prev = false;
         for param in params {
             if has_prev {
