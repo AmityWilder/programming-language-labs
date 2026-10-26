@@ -1,10 +1,13 @@
 use crate::{
+    SYNTAX_STYLE_ANSI,
     analyzer::static_env::ConstantValue,
     error::{ContextError, ErrorType, Failure},
     grammar::ast,
+    highlight::style::StyleWrapper,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt::Display,
     range::Range,
 };
 
@@ -18,7 +21,7 @@ pub enum SizeReq {
 }
 
 /// Describes the location as a plural without any artical
-impl std::fmt::Display for SizeReq {
+impl Display for SizeReq {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ArrayElement => write!(f, "array elements"),
@@ -42,7 +45,7 @@ impl From<TypeSizeError> for ErrorType<'_> {
     }
 }
 
-impl std::fmt::Display for TypeSizeError {
+impl Display for TypeSizeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::TooBig => write!(f, "type size exceeds {} bytes", usize::MAX),
@@ -68,7 +71,7 @@ pub trait StaticTypeSize: TypeSize {
 }
 
 /// Display implementation is be how the type will be shown in error messages
-pub trait TypeCompatible<'src>: std::fmt::Display {
+pub trait TypeCompatible<'src>: Display {
     /// The type is exactly the same as `other`, just stored in another type
     // TODO: equivalence between a parameter and a non-parameter
     fn is_type_eq(&self, other: &AbstractType<'_>) -> bool;
@@ -154,10 +157,12 @@ impl<'src> From<ViewType<'src>> for AbstractType<'src> {
         AbstractType::Concrete(StaticType::View(Box::new(value)))
     }
 }
-impl std::fmt::Display for ViewType<'_> {
+impl Display for ViewType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { item } = self;
-        write!(f, "[{item}]")
+        f.write_str("[")?;
+        item.fmt(f)?;
+        f.write_str("]")
     }
 }
 
@@ -198,10 +203,14 @@ impl<'src> From<ArrayType<'src>> for AbstractType<'src> {
         AbstractType::Concrete(StaticType::Arr(Box::new(value)))
     }
 }
-impl std::fmt::Display for ArrayType<'_> {
+impl Display for ArrayType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { item, len } = self;
-        write!(f, "[{item}; {len}]")
+        f.write_str("[")?;
+        item.fmt(f)?;
+        f.write_str("; ")?;
+        SYNTAX_STYLE_ANSI.number_literal.alt_style(len).fmt(f)?;
+        f.write_str("]")
     }
 }
 
@@ -236,10 +245,11 @@ impl<'src> From<Ptr<'src>> for AbstractType<'src> {
         AbstractType::Concrete(StaticType::Ptr(Box::new(value)))
     }
 }
-impl std::fmt::Display for Ptr<'_> {
+impl Display for Ptr<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { to } = self;
-        write!(f, "@{to}") // TBD: design
+        f.write_str("@")?; // TBD: design
+        to.fmt(f)
     }
 }
 
@@ -255,13 +265,14 @@ pub enum OrType {
     Fail,
 }
 
-impl std::fmt::Display for OrType {
+impl Display for OrType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
+        let name = match self {
             Self::None => "none",
             Self::Nevr => "nevr",
             Self::Fail => "fail",
-        })
+        };
+        SYNTAX_STYLE_ANSI.typename.alt_style(name).fmt(f)
     }
 }
 
@@ -310,10 +321,12 @@ impl<'src> From<Fallible<'src>> for AbstractType<'src> {
         AbstractType::Concrete(StaticType::OrTy(Box::new(value)))
     }
 }
-impl std::fmt::Display for Fallible<'_> {
+impl Display for Fallible<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { then, or } = self;
-        write!(f, "{then} | {or}")
+        then.fmt(f)?;
+        SYNTAX_STYLE_ANSI.keyword.alt_style(" | ").fmt(f)?;
+        or.fmt(f)
     }
 }
 
@@ -349,10 +362,10 @@ impl<'src> From<RecType<'src>> for AbstractType<'src> {
         AbstractType::Concrete(StaticType::Rec(value))
     }
 }
-impl std::fmt::Display for RecType<'_> {
+impl Display for RecType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { name, .. } = self;
-        write!(f, "{name}") // TODO: what if there are multiple with the same name?
+        SYNTAX_STYLE_ANSI.typename.alt_style(name).fmt(f) // TODO: what if there are multiple with the same name?
     }
 }
 
@@ -395,10 +408,10 @@ impl<'src> From<SupType<'src>> for AbstractType<'src> {
         AbstractType::Concrete(StaticType::Sup(value))
     }
 }
-impl std::fmt::Display for SupType<'_> {
+impl Display for SupType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { name, .. } = self;
-        write!(f, "{name}") // TODO: what if there are multiple with the same name?
+        SYNTAX_STYLE_ANSI.typename.alt_style(name).fmt(f) // TODO: what if there are multiple with the same name?
     }
 }
 
@@ -446,10 +459,10 @@ impl<'src> From<SubType<'src>> for AbstractType<'src> {
         AbstractType::Concrete(StaticType::Sub(Box::new(value)))
     }
 }
-impl std::fmt::Display for SubType<'_> {
+impl Display for SubType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { name, .. } = self;
-        write!(f, "{name}") // TODO: what if there are multiple with the same name?
+        SYNTAX_STYLE_ANSI.typename.alt_style(name).fmt(f) // TODO: what if there are multiple with the same name?
     }
 }
 
@@ -499,10 +512,10 @@ impl<'src> From<CatType<'src>> for AbstractType<'src> {
         AbstractType::Concrete(StaticType::Cat(Box::new(value)))
     }
 }
-impl std::fmt::Display for CatType<'_> {
+impl Display for CatType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { name, .. } = self;
-        write!(f, "{name}") // TODO: what if there are multiple with the same name?
+        SYNTAX_STYLE_ANSI.typename.alt_style(name).fmt(f) // TODO: what if there are multiple with the same name?
     }
 }
 
@@ -535,19 +548,21 @@ impl<'src> From<FunShape<'src>> for AbstractType<'src> {
         })))
     }
 }
-impl std::fmt::Display for FunShape<'_> {
+impl Display for FunShape<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { params, ret } = self;
-        write!(f, "fun(")?;
+        SYNTAX_STYLE_ANSI.keyword.alt_style("fun").fmt(f)?;
+        f.write_str("(")?;
         let mut has_prev = false;
         for param in params {
             if has_prev {
                 f.write_str(", ")?;
             }
-            write!(f, "{param}")?;
+            param.fmt(f)?;
             has_prev = true;
         }
-        write!(f, ") -> {ret}")
+        f.write_str(") -> ")?;
+        ret.fmt(f)
     }
 }
 
@@ -577,10 +592,13 @@ impl<'src> From<FunType<'src>> for AbstractType<'src> {
         AbstractType::Concrete(StaticType::Fun(Box::new(value)))
     }
 }
-impl std::fmt::Display for FunType<'_> {
+impl Display for FunType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { name, shape } = self;
-        write!(f, "{shape}{{{name}}}")
+        shape.fmt(f)?;
+        f.write_str("{")?;
+        SYNTAX_STYLE_ANSI.callable.alt_style(name).fmt(f)?;
+        f.write_str("}")
     }
 }
 
@@ -646,20 +664,23 @@ impl From<PrimitiveType> for AbstractType<'_> {
         AbstractType::Concrete(StaticType::Primitive(value))
     }
 }
-impl std::fmt::Display for PrimitiveType {
+impl Display for PrimitiveType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::None => "none",
-            Self::Nevr => "nevr",
-            Self::Fail => "fail",
-            Self::Bool => "bool",
-            Self::Byte => "byte",
-            Self::Uint => "uint",
-            Self::Sint => "sint",
-            Self::Flpt => "flpt",
-            Self::Char => "char",
-            Self::Text => "text",
-        })
+        SYNTAX_STYLE_ANSI
+            .typename
+            .alt_style(match self {
+                Self::None => "none",
+                Self::Nevr => "nevr",
+                Self::Fail => "fail",
+                Self::Bool => "bool",
+                Self::Byte => "byte",
+                Self::Uint => "uint",
+                Self::Sint => "sint",
+                Self::Flpt => "flpt",
+                Self::Char => "char",
+                Self::Text => "text",
+            })
+            .fmt(f)
     }
 }
 
@@ -735,19 +756,19 @@ impl<'src> TypeCompatible<'src> for StaticType<'src> {
         self.clone().into()
     }
 }
-impl std::fmt::Display for StaticType<'_> {
+impl Display for StaticType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Primitive(t) => write!(f, "{t}"),
-            Self::View(t) => write!(f, "{t}"),
-            Self::Arr(t) => write!(f, "{t}"),
-            Self::Ptr(t) => write!(f, "{t}"),
-            Self::OrTy(t) => write!(f, "{t}"),
-            Self::Rec(t) => write!(f, "{t}"),
-            Self::Sup(t) => write!(f, "{t}"),
-            Self::Sub(t) => write!(f, "{t}"),
-            Self::Cat(t) => write!(f, "{t}"),
-            Self::Fun(t) => write!(f, "{t}"),
+            Self::Primitive(t) => t.fmt(f),
+            Self::View(t) => t.fmt(f),
+            Self::Arr(t) => t.fmt(f),
+            Self::Ptr(t) => t.fmt(f),
+            Self::OrTy(t) => t.fmt(f),
+            Self::Rec(t) => t.fmt(f),
+            Self::Sup(t) => t.fmt(f),
+            Self::Sub(t) => t.fmt(f),
+            Self::Cat(t) => t.fmt(f),
+            Self::Fun(t) => t.fmt(f),
         }
     }
 }
@@ -819,17 +840,18 @@ pub struct GenericType<'src> {
     pub ident: &'src str,
     pub params: Vec<GenericParam<'src>>,
 }
-impl std::fmt::Display for GenericType<'_> {
+impl Display for GenericType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { ident, params } = self;
-        write!(f, "{ident}<")?;
+        SYNTAX_STYLE_ANSI.typename.alt_style(ident).fmt(f)?;
+        f.write_str("<")?;
         let mut has_prev = false;
         for param in params {
             if has_prev {
                 f.write_str(", ")?;
             }
-            write!(f, "{param}")?;
             has_prev = true;
+            param.fmt(f)?;
         }
         f.write_str(">")
     }
@@ -851,10 +873,10 @@ pub struct GenericParam<'src> {
     pub ident: &'src str,
     pub req: Box<TypeBound<'src>>,
 }
-impl std::fmt::Display for GenericParam<'_> {
+impl Display for GenericParam<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { ident, .. } = self;
-        write!(f, "{ident}")
+        SYNTAX_STYLE_ANSI.typename.alt_style(ident).fmt(f)
     }
 }
 
@@ -909,11 +931,14 @@ impl<'src> TypeCompatible<'src> for AbstractType<'src> {
         self.clone()
     }
 }
-impl std::fmt::Display for AbstractType<'_> {
+impl Display for AbstractType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Concrete(t) => t.fmt(f),
-            Self::Opaque(t) => write!(f, "opaque {t}"),
+            Self::Opaque(t) => {
+                f.write_str("opaque ")?;
+                t.fmt(f)
+            }
             Self::Generic(t) => t.fmt(f),
             Self::Param(t) => t.fmt(f),
         }

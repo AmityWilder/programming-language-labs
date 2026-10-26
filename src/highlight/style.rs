@@ -21,6 +21,14 @@ pub trait StyleWrapper {
     }
 
     /// Constructs a [`Styled`] for this type
+    fn alt_style<T>(&self, what: T) -> AltStyled<'_, T, Self> {
+        AltStyled {
+            style: self,
+            inner: what,
+        }
+    }
+
+    /// Constructs a [`Styled`] for this type
     fn style_dbg<T>(&self, what: T) -> StyledDebug<'_, T, Self> {
         StyledDebug {
             style: self,
@@ -50,6 +58,30 @@ impl<T: std::fmt::Display, U: StyleWrapper> std::fmt::Display for Styled<'_, T, 
             self.inner,
             self.style.end()
         )
+    }
+}
+
+/// Encloses `T` with the styling of `U`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AltStyled<'style, T, U>
+where
+    U: ?Sized + StyleWrapper,
+{
+    /// The style to wrap [`Self::inner`] with
+    style: &'style U,
+    /// The content being styled
+    inner: T,
+}
+
+impl<T: std::fmt::Display, U: StyleWrapper> std::fmt::Display for AltStyled<'_, T, U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            self.style.begin().fmt(f)?;
+            self.inner.fmt(f)?;
+            self.style.end().fmt(f)
+        } else {
+            self.inner.fmt(f)
+        }
     }
 }
 
