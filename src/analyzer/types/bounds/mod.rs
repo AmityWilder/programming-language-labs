@@ -2,7 +2,14 @@ use crate::{
     SYNTAX_STYLE_ANSI, Todo,
     analyzer::{
         static_env::EnvKey,
-        types::{AbstractType, FunShape, TypeCompatible},
+        types::{
+            AbstractType, FunShape, TypeCompatible,
+            bounds::error::{
+                AllowedBound, AllowedBoundReason, BoundCheck, CheckedType, DeniedBound,
+                DeniedBoundReason, RequiredBound, RequiredBoundReason, SatisfiedBound,
+                SatisfiedBoundReason, UnsatisfiedBound, UnsatisfiedBoundReason,
+            },
+        },
     },
     error::OpSide,
     highlight::style::StyleWrapper,
@@ -11,41 +18,62 @@ use std::fmt::Display;
 
 pub mod error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum Satisfaction {
-    Deny = -1,
-    #[default]
-    Unclear = 0,
-    Require = 1,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Satisfaction<T, U, E> {
+    Passing(T),
+    Unclear(U),
+    Failing(E),
 }
 
-impl Satisfaction {
-    pub const fn is_impossible(self) -> bool {
-        matches!(self, Self::Deny)
+impl<T, U, E> Satisfaction<T, U, E> {
+    pub const fn is_passing(&self) -> bool {
+        matches!(self, Self::Passing(_))
     }
 
-    pub const fn is_unclear(self) -> bool {
-        matches!(self, Self::Unclear)
+    pub const fn is_unclear(&self) -> bool {
+        matches!(self, Self::Unclear(_))
     }
 
-    pub const fn is_guaranteed(self) -> bool {
-        matches!(self, Self::Require)
-    }
-
-    pub const fn is_possible(self) -> bool {
-        matches!(self, Self::Unclear | Self::Require)
+    pub const fn is_failing(&self) -> bool {
+        matches!(self, Self::Failing(_))
     }
 }
 
-impl Display for Satisfaction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Satisfaction::Deny => "impossible",
-            Satisfaction::Unclear => "uncertain",
-            Satisfaction::Require => "guaranteed",
-        })
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Requiredness<T, U, E> {
+    Require(T),
+    Allow(U),
+    Deny(E),
+}
+
+impl<T, U, E> Requiredness<T, U, E> {
+    pub const fn is_require(&self) -> bool {
+        matches!(self, Self::Require(_))
+    }
+
+    pub const fn is_allow(&self) -> bool {
+        matches!(self, Self::Allow(_))
+    }
+
+    pub const fn is_deny(&self) -> bool {
+        matches!(self, Self::Deny(_))
     }
 }
+
+pub type TypeBoundSatisfaction<'src> =
+    Satisfaction<SatisfiedBound<'src>, AllowedBound<'src>, UnsatisfiedBound<'src>>;
+
+pub type TypeBoundSatisfactionReason<'src> = Satisfaction<
+    SatisfiedBoundReason<'src>,
+    AllowedBoundReason<'src>,
+    UnsatisfiedBoundReason<'src>,
+>;
+
+pub type TypeBoundRequiredness<'src> =
+    Requiredness<RequiredBound<'src>, AllowedBound<'src>, DeniedBound<'src>>;
+
+pub type TypeBoundRequirednessReason<'src> =
+    Requiredness<RequiredBoundReason<'src>, AllowedBoundReason<'src>, DeniedBoundReason<'src>>;
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum OpBound<'src> {
@@ -267,124 +295,220 @@ impl<'src> TypeBound<'src> {
 
     pub fn is_legal(&self) -> bool {
         !matches!(self, Self::Combo(_, []) | Self::Not(Self::Combo(_, [])))
-            && self.satisfaction_of(self).is_possible() // TODO: should this be `is_guaranteed` or `is_possible`?
+            && matches!(self.satisfaction_of(self), Requiredness::Require(_))
     }
 
-    // TODO: replace return with `Result<(), UnsatisfiedBoundError>`
-    pub fn is_satisfied_by<'a, T: TypeCompatible<'a>>(&self, ty: &T) -> bool {
-        let res = match self {
-            Self::Combo(kind, bounds) => {
-                println!(
-                    "`{self:#}` requires {} one of its bounds to be satisfied.\n",
-                    match kind {
-                        Combinator::All => "every",
-                        Combinator::Any => "at least",
-                        Combinator::One => "exactly",
-                    }
-                );
-                match kind {
-                    Combinator::All => {
-                        let failing = bounds.iter().find(|bound| !bound.is_satisfied_by(ty));
-                        if let Some(failing) = failing {
-                            print!(
-                                "since `{ty:#}` does not satisfy the bound `{failing:#}` of `{self:#}`, "
-                            );
-                        } else {
-                            print!("since `{ty:#}` satisfies every bound of `{self:#}`, ");
-                        }
-                        failing.is_none()
-                    }
-                    Combinator::Any => {
-                        let passing = bounds.iter().find(|bound| bound.is_satisfied_by(ty));
-                        if let Some(passing) = passing {
-                            print!(
-                                "since `{ty:#}` satisfies the bound `{passing:#}` of `{self:#}`, "
-                            );
-                        } else {
-                            print!("since `{ty:#}` does not satisfy any bound of `{self:#}`, ");
-                        }
-                        passing.is_some()
-                    }
-                    Combinator::One => {
-                        let mut iter = bounds.iter().filter(|bound| bound.is_satisfied_by(ty));
-                        if let Some(first) = iter.next() {
-                            let second = iter.next();
-                            if let Some(second) = second {
-                                print!(
-                                    "since `{ty:#}` satisfies multiple bounds of `{self:#}`, both `{first:#}` and `{second:#}`, "
-                                );
-                            } else {
-                                print!(
-                                    "since `{ty:#}` exclusively satisfies the bound `{first:#}` of `{self:#}`, "
-                                );
+    pub fn is_satisfied_by<T: TypeCompatible<'src>>(&self, ty: &T) -> TypeBoundSatisfaction<'src> {
+        use Satisfaction::{Failing, Passing, Unclear};
+        let reason: TypeBoundSatisfactionReason = match self {
+            Self::Combo(kind, bounds) => match kind {
+                Combinator::All => {
+                    let mut res = None;
+                    for item in bounds.iter().map(|bound| bound.is_satisfied_by(ty)) {
+                        match item {
+                            Unclear(_) => {
+                                res = Some(item);
                             }
-                            second.is_none()
-                        } else {
-                            print!("since `{ty:#}` does not satisfy any bound of `{self:#}`, ");
-                            false
+
+                            Failing(_) => {
+                                res = Some(item);
+                                break;
+                            }
+
+                            Passing(_) => {} // not enough on its own
                         }
                     }
-                }
-            }
-            Self::Not(bound) => {
-                let res = bound.is_satisfied_by(ty);
-                print!(
-                    "since `{ty:#}` {} `{bound:#}`, and `{self:#}` is the negation of `{bound:#}`, ",
-                    if res { "satisfies" } else { "does not satisfy" }
-                );
-                !res
-            }
-            Self::Exactly(target) => {
-                let res = ty.is_type_eq(target);
-                print!(
-                    "since `{ty:#}` is {}equal to `{target:#}`, ",
-                    if res { "" } else { "not " }
-                );
-                res
-            }
-            Self::Has { member, req } => {
-                let res = ty.has(member, req.as_deref());
-                print!(
-                    "since `{ty:#}` has {} member `{:#}` ",
-                    if res { "a" } else { "no" },
-                    SYNTAX_STYLE_ANSI.variable.alt_style(member)
-                );
-                if let Some(req) = req {
-                    print!("satisfying `{req:#}`");
-                }
-                print!(", ");
-                res
-            }
-            Self::Shape(shape) => {
-                let res = ty.is_shape(shape);
-                print!(
-                    "since `{ty:#}` can{} be called with arguments of ",
-                    if res { "" } else { "not" }
-                );
-                let mut has_prev = false;
-                for param in &shape.params {
-                    if has_prev {
-                        print!(", ");
+                    if let Some(res) = res {
+                        match res {
+                            Unclear(x) => Unclear(AllowedBoundReason::IncompleteAll(Box::new(x))),
+
+                            Failing(x) => Failing(UnsatisfiedBoundReason::NotAll(Box::new(x))),
+
+                            Passing(_) => unreachable!(),
+                        }
+                    } else {
+                        Passing(SatisfiedBoundReason::All)
                     }
-                    has_prev = true;
-                    print!("`{param:#}`");
                 }
-                print!(" to produce a return of `{:#}`, ", shape.ret);
-                res
+
+                Combinator::Any => {
+                    let mut res = None;
+                    for item in bounds.iter().map(|bound| bound.is_satisfied_by(ty)) {
+                        // even if an unclear exists, there might be a passing item, and that would guarantee success.
+                        match item {
+                            Passing(_) => {
+                                res = Some(item);
+                                break;
+                            }
+
+                            Unclear(_) => {
+                                res = Some(item);
+                            }
+
+                            Failing(_) => {} // not enough on its own
+                        }
+                    }
+                    if let Some(res) = res {
+                        match res {
+                            Passing(x) => Passing(SatisfiedBoundReason::Any(Box::new(x))),
+                            Unclear(x) => Unclear(AllowedBoundReason::AnyBestAllowed(Box::new(x))),
+                            Failing(_) => unreachable!(),
+                        }
+                    } else {
+                        Failing(UnsatisfiedBoundReason::NotAny)
+                    }
+                }
+
+                Combinator::One => {
+                    let mut first = None;
+                    let mut second = None;
+                    for item in bounds.iter().map(|bound| bound.is_satisfied_by(ty)) {
+                        // passing takes priority over unclear
+                        match item {
+                            Passing(_) => {
+                                if first.is_none() {
+                                    first = Some(item);
+                                } else {
+                                    second = Some(item);
+                                    break;
+                                }
+                            }
+
+                            Unclear(_) => {
+                                if first.is_none() {
+                                    first = Some(item);
+                                } else if second.is_none() {
+                                    second = Some(item);
+                                }
+                            }
+
+                            Failing(_) => {} // not enough on its own
+                        }
+                    }
+                    if let Some(first) = first {
+                        if let Some(second) = second {
+                            // multiple
+                            match (first, second) {
+                                (Passing(first), Passing(second)) => Failing(
+                                    UnsatisfiedBoundReason::OverOne(Box::new((first, second))),
+                                ),
+
+                                (Passing(passing), Unclear(unclear))
+                                | (Unclear(unclear), Passing(passing)) => {
+                                    Unclear(AllowedBoundReason::OnePassingMultipleAllowed(
+                                        Box::new((passing, unclear)),
+                                    ))
+                                }
+
+                                (Unclear(first), Unclear(second)) => {
+                                    Unclear(AllowedBoundReason::OneAllowsMultiple(Box::new((
+                                        first, second,
+                                    ))))
+                                }
+
+                                (Failing(_), _) | (_, Failing(_)) => unreachable!(),
+                            }
+                        } else {
+                            // one
+                            match first {
+                                Passing(x) => Passing(SatisfiedBoundReason::One(Box::new(x))),
+
+                                Unclear(x) => {
+                                    Unclear(AllowedBoundReason::OneOnlyAllowed(Box::new(x)))
+                                }
+
+                                Failing(_) => unreachable!(),
+                            }
+                        }
+                    } else {
+                        Failing(UnsatisfiedBoundReason::NotOne)
+                    }
+                }
+            },
+
+            Self::Not(bound) => match bound.is_satisfied_by(ty) {
+                Passing(reason) => Failing(UnsatisfiedBoundReason::NotNot(Box::new(reason))),
+
+                Unclear(reason) => Unclear(AllowedBoundReason::IneffectiveNot(Box::new(reason))),
+
+                Failing(reason) => Passing(SatisfiedBoundReason::Not(Box::new(reason))),
+            },
+
+            Self::Exactly(target) => {
+                if ty.is_type_eq(target) {
+                    Passing(SatisfiedBoundReason::Exactly)
+                } else {
+                    Failing(UnsatisfiedBoundReason::Unequal)
+                }
             }
+
+            Self::Has { member, req } => {
+                if let Some(attempt) = ty.get_member(member) {
+                    if let Some(req) = req.as_deref() {
+                        let res: TypeBoundSatisfaction = match &attempt {
+                            CheckedType::Abstract(ty) => req.is_satisfied_by(&ty),
+
+                            CheckedType::Bound(b) => {
+                                b.satisfaction_of(req);
+                                todo!()
+                            }
+                        };
+                        match res {
+                            Passing(x) => Passing(SatisfiedBoundReason::HasMatching(Box::new(x))),
+                            Unclear(x) => Unclear(AllowedBoundReason::HasAllowed(Box::new(x))),
+                            Failing(x) => Failing(UnsatisfiedBoundReason::MemberFails(Box::new(x))),
+                        }
+                    } else {
+                        Passing(SatisfiedBoundReason::Has)
+                    }
+                } else {
+                    Failing(UnsatisfiedBoundReason::MissingMember)
+                }
+            }
+
+            Self::Shape(shape) => {
+                if let Some(actual) = ty.shape() {
+                    if *shape == actual {
+                        Passing(SatisfiedBoundReason::Shape)
+                    } else {
+                        Failing(UnsatisfiedBoundReason::ShapeFails(actual))
+                    }
+                } else {
+                    Failing(UnsatisfiedBoundReason::MissingShape)
+                }
+            }
+
             Self::Supports { .. } => todo!("type bound needs environment access"),
+
             Self::Satisfies(_) => todo!("type bound needs code access"),
         };
-        println!(
-            "`{ty:#}` {} `{self:#}`.\n",
-            if res { "satisfies" } else { "does not satisfy" }
-        );
-        res
+
+        // ew, so much recursive cloning...
+        let bound = self.clone();
+        let attempt = CheckedType::Abstract(ty.to_abstract());
+        match reason {
+            Passing(reason) => Passing(BoundCheck {
+                bound,
+                attempt,
+                reason,
+            }),
+            Unclear(reason) => Unclear(BoundCheck {
+                bound,
+                attempt,
+                reason,
+            }),
+            Failing(reason) => Failing(BoundCheck {
+                bound,
+                attempt,
+                reason,
+            }),
+        }
     }
 
-    pub fn satisfaction_of(&self, req: &TypeBound<'src>) -> Satisfaction {
-        use Satisfaction::{Deny, Require, Unclear};
-        let res = match self {
+    pub fn satisfaction_of(&self, req: &TypeBound<'src>) -> TypeBoundRequiredness<'src> {
+        use Requiredness::{Allow, Deny, Require};
+        use Satisfaction::{Failing, Passing, Unclear};
+        let reason: TypeBoundRequirednessReason = match self {
             Self::Combo(kind, bounds) => {
                 match kind {
                     // if any bound requires the condition, the requirement is satisfied.
@@ -398,16 +522,23 @@ impl<'src> TypeBound<'src> {
                     //
                     // if one bound rejects the condition and another requires it,
                     // the bound is illegal and we needn't cover it in this method.
-                    Combinator::All => bounds
-                        .iter()
-                        .find_map(|bound| match bound.satisfaction_of(req) {
-                            x @ (Deny | Require) => {
-                                print!("since `{bound:#}` satisfaction of `{req:#}` is {x}, `{req:#}` being be among the bounds of `{self:#}` is {x}. thus, ");
-                                Some(x)
+                    Combinator::All => {
+                        if let Some(res) = bounds
+                            .iter()
+                            .map(|bound| bound.satisfaction_of(req))
+                            .find(|res| matches!(res, Require(_) | Deny(_)))
+                        {
+                            match res {
+                                Require(x) => Require(RequiredBoundReason::OneOfAll(Box::new(x))),
+
+                                Deny(x) => Deny(DeniedBoundReason::OneOfAll(Box::new(x))),
+
+                                Allow(_) => unreachable!(),
                             }
-                            Unclear => None,
-                        })
-                        .unwrap_or(Unclear),
+                        } else {
+                            Allow(AllowedBoundReason::NoneOfAll)
+                        }
+                    }
 
                     // if every bound requires the condition, the requirement is satisfied.
                     // since only one bound must be satisfied, if any of them does not satisfy the condition,
@@ -422,17 +553,42 @@ impl<'src> TypeBound<'src> {
                     //
                     // if one bound rejects the condition and another requires it,
                     // the bound is illegal and we needn't cover it in this method.
-                    Combinator::Any | Combinator::One => bounds
-                        .iter()
-                        .find_map(|bound| match bound.satisfaction_of(req) {
-                            x @ (Deny | Unclear) => {
-                                print!("since `{bound:#}` satisfaction of `{req:#}` is {x}, and `{self:#}` only requires one bound to be satisfied, \
-                                        it is possible `{bound:#}` may be the only satisfied bound. thus, ");
-                                Some(x)
+                    Combinator::Any | Combinator::One => {
+                        let mut res = None;
+                        for item in bounds.iter().map(|bound| bound.satisfaction_of(req)) {
+                            match item {
+                                Deny(x) => {
+                                    res = Some(Deny(match kind {
+                                        Combinator::All => unreachable!(),
+                                        Combinator::Any => DeniedBoundReason::OneOfAny(Box::new(x)),
+                                        Combinator::One => DeniedBoundReason::OneOfOne(Box::new(x)),
+                                    }));
+                                    break;
+                                }
+
+                                Allow(x) => {
+                                    res = Some(Allow(match kind {
+                                        Combinator::All => unreachable!(),
+                                        Combinator::Any => {
+                                            AllowedBoundReason::OneOfAny(Box::new(x))
+                                        }
+                                        Combinator::One => {
+                                            AllowedBoundReason::OneOfOne(Box::new(x))
+                                        }
+                                    }));
+                                }
+
+                                Require(_) => {}
                             }
-                            Require => None,
+                        }
+                        res.unwrap_or_else(|| {
+                            Require(match kind {
+                                Combinator::All => unreachable!(),
+                                Combinator::Any => RequiredBoundReason::AllOfAny,
+                                Combinator::One => RequiredBoundReason::AllOfOne,
+                            })
                         })
-                        .unwrap_or(Require),
+                    }
                 }
             }
 
@@ -444,40 +600,29 @@ impl<'src> TypeBound<'src> {
             //
             // if the negated bound neither requires nor rejects the condition,
             // we do not have enough information to determine if it is satisfied or not.
-            Self::Not(bound) => {
-                let x = bound.satisfaction_of(req);
-                let y = match x {
-                    Deny => Require,
-                    Unclear => Unclear,
-                    Require => Deny,
-                };
-                print!(
-                    "since `{bound:#}` satisfaction of `{req:#}` is {x}, and `{bound:#}` is being negated, "
-                );
-                y
-            }
+            Self::Not(bound) => match bound.satisfaction_of(req) {
+                Require(x) => Allow(AllowedBoundReason::NotRequired(Box::new(x))),
+
+                Allow(x) => Allow(AllowedBoundReason::IneffectiveNot(Box::new(x))),
+
+                Deny(x) => Allow(AllowedBoundReason::NotDenied(Box::new(x))),
+            },
 
             // being a type that satisfies the requirement clearly satisfies the requirement.
             //
             // because the type must be exactly this one, if this one does not satisfy the requirement,
             // the requirement cannot be satisfied in any case where the type must be this one.
-            Self::Exactly(ty) => {
-                let x = req.is_satisfied_by(ty);
-                let y = if x { Require } else { Deny };
-                print!(
-                    "since `{self:#}` must be `{ty:#}`, and `{ty:#}` {} `{req:#}`, ",
-                    if x { "satisfies" } else { "does not satisfy" }
-                );
-                y
-            }
+            Self::Exactly(ty) => match req.is_satisfied_by(ty) {
+                Passing(x) => Require(RequiredBoundReason::Exactly(Box::new(x))),
+                Unclear(u) => Allow(AllowedBoundReason::ExactlyAllowed(Box::new(u))),
+                Failing(e) => Deny(DeniedBoundReason::ExactlyUnsatisfying(Box::new(e))),
+            },
 
             Self::Has {
                 member: my_member,
                 req: my_req,
             } => match req {
-                Self::Combo(_, _) | Self::Not(_) => todo!(
-                    "combo could be an over-complex equivalent to the bound. ex: `T | !!(T + T)` = `T`"
-                ),
+                Self::Combo(_, _) | Self::Not(_) => todo!(),
 
                 Self::Has {
                     member: their_member,
@@ -486,64 +631,66 @@ impl<'src> TypeBound<'src> {
                     if my_member == their_member {
                         if let Some(their_req) = their_req.as_deref() {
                             if let Some(my_req) = my_req.as_deref() {
-                                let res = my_req.satisfaction_of(their_req);
-                                println!(
-                                    "both `{req:#}` and `{self:#}` require a member `{their_member:#}` to exist. `{self:#}` requires that member to satisfy `{my_req:#}`, \
-                                    and`{req:#}` requires that member to satisfy `{their_req:#}`. because `{their_member:#}` exists and its satisfaction of `{their_req:#}` is {res},"
-                                );
-                                res
+                                match my_req.satisfaction_of(their_req) {
+                                    Require(x) => {
+                                        Require(RequiredBoundReason::HasMatching(Box::new(x)))
+                                    }
+
+                                    Allow(x) => Allow(AllowedBoundReason::HasAllowed(Box::new(x))),
+
+                                    Deny(x) => Deny(DeniedBoundReason::HasConflicting(Box::new(x))),
+                                }
                             } else {
-                                print!(
-                                    "both `{req:#}` and `{self:#}` require a member `{their_member:#}` to exist. however, `{self:#}` places no requirements on that member, \
-                                    while `{req:#}` requires it to satisfy `{their_req:#}`. it is possible the type satisfies `{req:#}` \
-                                    (for example: `{:#} {{ {their_member}: {their_req:#} }}`), \
-                                    but it is also possible that it does not (for example: `{:#} {{ {my_member}: {:#} }}`). thus, ",
-                                    SYNTAX_STYLE_ANSI.typename.alt_style("Foo"),
-                                    SYNTAX_STYLE_ANSI.typename.alt_style("Bar"),
-                                    // ew, an allocation just to make a printable
-                                    TypeBound::Not(Box::new(their_req.clone()))
-                                );
-                                Unclear
+                                Allow(AllowedBoundReason::HasUndenied)
                             }
                         } else {
-                            print!(
-                                "since both `{req:#}` and `{self:#}` requires a member `{their_member:#}` to exist, and `{req:#}` places no requirements on that member, "
-                            );
-                            Require
+                            Require(RequiredBoundReason::Has)
                         }
                     } else {
-                        println!(
-                            "since `{req:#}` requires a type to have a member {their_member}, but `{self:#}` makes no such requirement, \
-                            it is possible the type satisfies `{req:#}` (for example: {:#} {{ {my_member}, {their_member} }} would satisfy both), \
-                            but it is also possible that it does not (for example: {:#} {{ {my_member} }} would only satisfy `{self:#}`). thus,",
-                            SYNTAX_STYLE_ANSI.typename.alt_style("Foo"),
-                            SYNTAX_STYLE_ANSI.typename.alt_style("Bar"),
-                        );
-                        Unclear
+                        Allow(AllowedBoundReason::MayAlsoHave)
                     }
                 }
 
                 // it is possible the type satisfies the requirement, but these bounds alone don't guarantee it.
-                _ => Unclear,
+                _ => Allow(AllowedBoundReason::MayHave),
             },
 
             Self::Shape(shape) => match req {
-                Self::Combo(_, _) | Self::Not(_) => todo!(
-                    "combo could be an over-complex equivalent to the bound. ex: `T | !!(T + T)` = `T`"
-                ),
+                Self::Combo(_, _) | Self::Not(_) => todo!(),
 
                 // TODO: are there cases where a function shape can be equivalent but not equal?
-                Self::Shape(req_shape) if shape == req_shape => Require,
+                Self::Shape(req_shape) if shape == req_shape => Require(RequiredBoundReason::Shape),
 
                 // it is possible the type satisfies the requirement, but these bounds alone don't guarantee it.
-                _ => Unclear,
+                _ => Allow(AllowedBoundReason::ShapeUndenied),
             },
 
             Self::Supports { .. } => todo!("`supports` needs fleshing out"),
+
             Self::Satisfies(_) => todo!("`satisfies` needs fleshing out"),
         };
-        println!("`{self:#}` satisfaction of `{req:#}` is {res}.\n");
-        res
+
+        let bound = req.clone();
+        let attempt = CheckedType::Bound(self.clone());
+        match reason {
+            Require(reason) => Require(BoundCheck {
+                bound,
+                attempt,
+                reason,
+            }),
+
+            Allow(reason) => Allow(BoundCheck {
+                bound,
+                attempt,
+                reason,
+            }),
+
+            Deny(reason) => Deny(BoundCheck {
+                bound,
+                attempt,
+                reason,
+            }),
+        }
     }
 }
 
@@ -787,7 +934,7 @@ mod tests {
                 ],
             );
             let ty = AbstractType::Text;
-            assert!(bound.is_satisfied_by(&ty));
+            assert!(bound.is_satisfied_by(&ty).is_passing());
         }
 
         #[test]
@@ -838,7 +985,6 @@ mod tests {
             );
             numeric.simplify();
             assert!(numeric.is_legal());
-            assert!(numeric.satisfaction_of(&numeric).is_possible());
         }
 
         #[test]
@@ -861,7 +1007,7 @@ mod tests {
                 ],
             );
             assert!(integral.is_legal());
-            assert!(numeric.satisfaction_of(&integral).is_possible());
+            assert!(!numeric.satisfaction_of(&integral).is_deny());
         }
     }
 }

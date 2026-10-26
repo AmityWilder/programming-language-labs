@@ -1,6 +1,6 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    analyzer::static_env::ConstantValue,
+    analyzer::{static_env::ConstantValue, types::bounds::error::CheckedType},
     error::{ContextError, ErrorType, Failure},
     grammar::ast,
     highlight::style::StyleWrapper,
@@ -99,16 +99,14 @@ pub trait TypeCompatible<'src>: Display {
     fn to_abstract(&self) -> AbstractType<'src>;
 
     /// `self` has a member `member` which, if `req` exists, satisfies the bounds of it.
-    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
+    fn get_member(&self, member: &str) -> Option<CheckedType<'src>> {
         #![expect(unused_variables, reason = "used in implementors")]
-        false
+        None
     }
 
     /// `self` has the shape of `shape`.
-    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
-        // TBD: how can this identify "call"-operator overloads
-        #![expect(unused_variables, reason = "used in implementors")]
-        false
+    fn shape(&self) -> Option<FunShape<'src>> {
+        None
     }
 }
 
@@ -121,13 +119,12 @@ impl<'src, T: ?Sized + TypeCompatible<'src>> TypeCompatible<'src> for &T {
         (*self).to_abstract()
     }
 
-    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
-        (*self).has(member, req)
+    fn get_member(&self, member: &str) -> Option<CheckedType<'src>> {
+        (*self).get_member(member)
     }
 
-    /// `self` has the shape of `shape`.
-    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
-        (*self).is_shape(shape)
+    fn shape(&self) -> Option<FunShape<'src>> {
+        (*self).shape()
     }
 }
 impl<T: ?Sized + TypeSize> TypeSize for &T {
@@ -350,11 +347,11 @@ impl<'src> TypeCompatible<'src> for RecType<'src> {
         self.clone().into()
     }
 
-    fn has(&self, member: &str, bound: Option<&TypeBound<'_>>) -> bool {
+    fn get_member(&self, member: &str) -> Option<CheckedType<'src>> {
         // TODO: methods
         self.fields
             .get(member)
-            .is_some_and(|field| bound.is_none_or(|bound| bound.is_satisfied_by(field)))
+            .map(|t| CheckedType::Abstract(t.to_abstract()))
     }
 }
 impl<'src> From<RecType<'src>> for AbstractType<'src> {
@@ -397,8 +394,11 @@ impl<'src> TypeCompatible<'src> for SupType<'src> {
         self.clone().into()
     }
 
-    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
-        self.variants.iter().all(|variant| variant.has(member, req))
+    fn get_member(&self, _member: &str) -> Option<CheckedType<'src>> {
+        // self.variants.iter().all(|variant| variant.has(member, req))
+        todo!(
+            "can have multiple variants with different types which must each be checked individually"
+        )
     }
 
     // TODO: call overload
@@ -438,20 +438,12 @@ impl<'src> TypeCompatible<'src> for SubType<'src> {
     }
 
     // TODO: needs to also support methods
-    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
-        self.req
-            .satisfaction_of(&TypeBound::Has {
-                member,                                    // TODO: ew, allocating a vec just to perform a test
-                req: req.map(|req| Box::new(req.clone())), // TODO: ew, allocating a box just to perform a test
-            })
-            .is_guaranteed()
+    fn get_member(&self, _member: &str) -> Option<CheckedType<'src>> {
+        todo!("must prove the member isnt erased by req")
     }
 
-    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
-        // TODO: ew, cloning just to perform a test
-        self.req
-            .satisfaction_of(&TypeBound::Shape(shape.clone()))
-            .is_guaranteed()
+    fn shape(&self) -> Option<FunShape<'src>> {
+        todo!("must prove the member isnt erased by req")
     }
 }
 impl<'src> From<SubType<'src>> for AbstractType<'src> {
@@ -499,12 +491,12 @@ impl<'src> TypeCompatible<'src> for CatType<'src> {
         self.clone().into()
     }
 
-    fn has(&self, member: &str, req: Option<&TypeBound<'_>>) -> bool {
-        self.repr.has(member, req)
+    fn get_member(&self, member: &str) -> Option<CheckedType<'src>> {
+        self.repr.get_member(member)
     }
 
-    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
-        self.repr.is_shape(shape)
+    fn shape(&self) -> Option<FunShape<'src>> {
+        self.repr.shape()
     }
 }
 impl<'src> From<CatType<'src>> for AbstractType<'src> {
@@ -536,8 +528,8 @@ impl<'src> TypeCompatible<'src> for FunShape<'src> {
         self.clone().into()
     }
 
-    fn is_shape(&self, shape: &FunShape<'_>) -> bool {
-        self == shape
+    fn shape(&self) -> Option<FunShape<'src>> {
+        Some(self.clone())
     }
 }
 impl<'src> From<FunShape<'src>> for AbstractType<'src> {
