@@ -252,8 +252,14 @@ impl<'src> TypeBound<'src> {
                             }
                         }
                     }
-                    // TODO: is this even helpful?
                     bounds.sort_by_cached_key(ToString::to_string);
+                    // duplicates in `Combinator::One` make it illegal. deduping would make it legal, eliminating a helpful error for users.
+                    if kind != Combinator::One {
+                        bounds.dedup();
+                        if bounds.len() == 1 {
+                            *self = bounds.pop().expect("just checked");
+                        }
+                    }
                 }
             }
 
@@ -305,6 +311,7 @@ impl<'src> TypeBound<'src> {
                 Combinator::All => {
                     let mut res = None;
                     for item in bounds.iter().map(|bound| bound.is_satisfied_by(ty)) {
+                        // failure takes priority over uncertainty
                         match item {
                             Unclear(_) => {
                                 res = Some(item);
@@ -622,7 +629,7 @@ impl<'src> TypeBound<'src> {
                 member: my_member,
                 req: my_req,
             } => match req {
-                Self::Combo(_, _) | Self::Not(_) => todo!(),
+                Self::Not(_) => todo!(),
 
                 Self::Has {
                     member: their_member,
@@ -656,7 +663,7 @@ impl<'src> TypeBound<'src> {
             },
 
             Self::Shape(shape) => match req {
-                Self::Combo(_, _) | Self::Not(_) => todo!(),
+                Self::Not(_) => todo!(),
 
                 // TODO: are there cases where a function shape can be equivalent but not equal?
                 Self::Shape(req_shape) if shape == req_shape => Require(RequiredBoundReason::Shape),
