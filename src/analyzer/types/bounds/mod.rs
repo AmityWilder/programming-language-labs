@@ -171,8 +171,8 @@ impl Display for TypeBound<'_> {
             Self::Combo(kind, bounds) => {
                 let sep = match kind {
                     Combinator::All => " + ",
-                    Combinator::Any => " or ", // can't be `|` because that's already used for fallible types
-                    Combinator::One => "/",
+                    Combinator::Any => " | ", // what about fallible types?
+                    Combinator::One => " / ",
                 };
                 let mut has_prev = false;
                 for bound in bounds {
@@ -190,7 +190,10 @@ impl Display for TypeBound<'_> {
                 parenthesize_if_needed(bound, f)
             }
 
-            Self::Exactly(ty) => ty.fmt(f),
+            Self::Exactly(ty) => {
+                SYNTAX_STYLE_ANSI.keyword.alt_style("only ").fmt(f)?;
+                ty.fmt(f)
+            }
 
             Self::Has { member, req } => {
                 SYNTAX_STYLE_ANSI.keyword.alt_style("has ").fmt(f)?;
@@ -724,7 +727,7 @@ mod tests {
             ] {
                 let expect = ty.to_string();
                 let bound = TypeBound::Exactly(ty);
-                assert_eq!(bound.to_string(), expect);
+                assert_eq!(bound.to_string(), format!("only {expect}"));
             }
         }
 
@@ -742,7 +745,7 @@ mod tests {
             for kind in [Combinator::All, Combinator::Any, Combinator::One] {
                 // TBD: should singular combos even be legal?
                 let bound = TypeBound::Combo(kind, vec![TypeBound::Exactly(AbstractType::Bool)]);
-                assert_eq!(bound.to_string(), "bool",);
+                assert_eq!(bound.to_string(), "only bool");
             }
         }
 
@@ -755,7 +758,7 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Uint),
                 ],
             );
-            assert_eq!(bound.to_string(), "bool + uint",);
+            assert_eq!(bound.to_string(), "only bool + only uint");
         }
 
         #[test]
@@ -768,7 +771,7 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Sint),
                 ],
             );
-            assert_eq!(bound.to_string(), "bool + uint + sint",);
+            assert_eq!(bound.to_string(), "only bool + only uint + only sint");
         }
 
         #[test]
@@ -780,7 +783,7 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Uint),
                 ],
             );
-            assert_eq!(bound.to_string(), "bool or uint",);
+            assert_eq!(bound.to_string(), "only bool | only uint");
         }
 
         #[test]
@@ -793,7 +796,7 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Sint),
                 ],
             );
-            assert_eq!(bound.to_string(), "bool or uint or sint",);
+            assert_eq!(bound.to_string(), "only bool | only uint | only sint");
         }
 
         #[test]
@@ -805,7 +808,7 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Uint),
                 ],
             );
-            assert_eq!(bound.to_string(), "bool/uint",);
+            assert_eq!(bound.to_string(), "only bool / only uint");
         }
 
         #[test]
@@ -818,7 +821,7 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Sint),
                 ],
             );
-            assert_eq!(bound.to_string(), "bool/uint/sint",);
+            assert_eq!(bound.to_string(), "only bool / only uint / only sint");
         }
 
         #[test]
@@ -827,7 +830,7 @@ mod tests {
                 member: "x",
                 req: None,
             };
-            assert_eq!(bound.to_string(), "has x",);
+            assert_eq!(bound.to_string(), "has x");
         }
 
         #[test]
@@ -836,7 +839,7 @@ mod tests {
                 member: "x",
                 req: Some(Box::new(TypeBound::Exactly(AbstractType::Bool))),
             };
-            assert_eq!(bound.to_string(), "has x: bool",);
+            assert_eq!(bound.to_string(), "has x: only bool");
         }
 
         #[test]
@@ -851,7 +854,7 @@ mod tests {
                     ],
                 ))),
             };
-            assert_eq!(bound.to_string(), "has x: bool + uint",);
+            assert_eq!(bound.to_string(), "has x: only bool + only uint");
         }
 
         #[test]
@@ -872,13 +875,16 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Sint),
                 ],
             );
-            assert_eq!(bound.to_string(), "(has x: bool + uint) + sint",);
+            assert_eq!(
+                bound.to_string(),
+                "(has x: only bool + only uint) + only sint"
+            );
         }
 
         #[test]
         fn test_negative_unwrapped() {
             let bound = TypeBound::Not(Box::new(TypeBound::Exactly(AbstractType::Bool)));
-            assert_eq!(bound.to_string(), "!bool",);
+            assert_eq!(bound.to_string(), "!only bool");
         }
 
         #[test]
@@ -886,7 +892,7 @@ mod tests {
             let bound = TypeBound::Not(Box::new(TypeBound::Not(Box::new(TypeBound::Exactly(
                 AbstractType::Bool,
             )))));
-            assert_eq!(bound.to_string(), "!!bool",);
+            assert_eq!(bound.to_string(), "!!only bool");
         }
 
         #[test]
@@ -898,7 +904,7 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Uint),
                 ],
             )));
-            assert_eq!(bound.to_string(), "!(bool + uint)",);
+            assert_eq!(bound.to_string(), "!(only bool + only uint)");
         }
 
         #[test]
@@ -910,7 +916,7 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Uint),
                 ],
             )))));
-            assert_eq!(bound.to_string(), "!!(bool + uint)",);
+            assert_eq!(bound.to_string(), "!!(only bool + only uint)");
         }
 
         #[test]
@@ -922,10 +928,11 @@ mod tests {
                     TypeBound::Exactly(AbstractType::Uint),
                 ],
             )));
-            assert_eq!(bound.to_string(), "!(!bool + uint)",);
+            assert_eq!(bound.to_string(), "!(!only bool + only uint)");
         }
     }
 
+    // NOT PASSING
     mod checking {
         use super::*;
         use crate::analyzer::types::StaticType;

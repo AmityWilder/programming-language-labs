@@ -6,10 +6,7 @@ use crate::{
     },
     highlight::style::StyleWrapper,
 };
-use std::{
-    fmt::Display,
-    iter::{empty, once},
-};
+use std::{assert_matches, fmt::Display, iter::once, range::RangeInclusive};
 
 impl TypeBound<'_> {
     fn let_statements<T>(
@@ -147,26 +144,29 @@ mod local_depth {
     thread_local! {
         static MAX_ID: Cell<usize> = const { Cell::new(0) };
         /// Maps a stringified [`TypeBound`] to a name
-        static LOCAL_DEFS: RefCell<HashMap<String, usize>> = RefCell::new(HashMap::new());
+        static DEFS: RefCell<HashMap<String, usize>> = RefCell::new(HashMap::new());
+    }
+
+    /// Defines a new variable without an actual definition. It will not appear in the table.
+    pub fn create_var() -> usize {
+        MAX_ID.replace(
+            MAX_ID
+                .get()
+                .checked_add(1)
+                .expect("stack overflow while naming bounds"),
+        )
     }
 
     /// Returns [`None`] if the name is too short to require an alias.
     /// Boolean field represents whether the name is new.
     pub fn define<T: ?Sized + ToString>(bound: &T) -> Option<(bool, usize)> {
         const MAX_INLINE_BOUND_CHARS: usize = 1;
-        LOCAL_DEFS.with_borrow_mut(|table| {
+        DEFS.with_borrow_mut(|table| {
             let key = bound.to_string();
             (key.chars().count() > MAX_INLINE_BOUND_CHARS).then(|| {
                 let entry = table.entry(key);
                 let is_new = matches!(entry, std::collections::hash_map::Entry::Vacant(_));
-                let id = entry.or_insert_with(|| {
-                    MAX_ID.replace(
-                        MAX_ID
-                            .get()
-                            .checked_add(1)
-                            .expect("stack overflow while naming bounds"),
-                    )
-                });
+                let id = entry.or_insert_with(create_var);
                 (is_new, *id)
             })
         })
@@ -175,12 +175,12 @@ mod local_depth {
     /// Always call this when finished displaying an error!
     pub fn clear_defs() {
         MAX_ID.set(0);
-        LOCAL_DEFS.with_borrow_mut(|table| {
+        DEFS.with_borrow_mut(|table| {
             table.clear();
         });
     }
 }
-use local_depth::{Indent, LocalDepth, clear_defs, define};
+use local_depth::{Indent, LocalDepth, clear_defs, create_var, define};
 
 trait AliasPrefix: Display {
     fn kind_name(&self) -> &'static str;
@@ -234,6 +234,38 @@ impl AliasPrefix for CheckedType<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+struct MetaType(usize);
+
+impl Display for MetaType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let style = SYNTAX_STYLE_ANSI.typename;
+        if f.alternate() {
+            style.begin().fmt(f)?;
+        }
+        // TODO: what if there's already has a type parameter with that name present in the bounds?
+        let mut n = self.0;
+        loop {
+            let r;
+            (n, r) = (n / 26, n % 26);
+            #[expect(
+                clippy::arithmetic_side_effects,
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                reason = "0-26 and b'A' + 26 are guaranteed to fit in u8 without truncation"
+            )]
+            write!(f, "{}", char::from(b'A' + r as u8))?;
+            if n < 26 {
+                break;
+            }
+        }
+        if f.alternate() {
+            style.end().fmt(f)?;
+        }
+        Ok(())
+    }
+}
+
 #[repr(transparent)]
 struct Aliased<T: ?Sized>(T);
 
@@ -248,16 +280,7 @@ impl<T: ?Sized + Display + AliasPrefix> Display for Aliased<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some((is_new, id)) = define(&self.0) {
             assert!(!is_new, "should define an alias before referencing it");
-            let style = SYNTAX_STYLE_ANSI.typename;
-            if f.alternate() {
-                style.begin().fmt(f)?;
-            }
-            // TODO: what if the user already has a type parameter with that name?
-            write!(f, "{}{id}", self.0.prefix())?;
-            if f.alternate() {
-                style.end().fmt(f)?;
-            }
-            Ok(())
+            MetaType(id).fmt(f)
         } else {
             self.0.fmt(f)
         }
@@ -274,7 +297,11 @@ where
     let iter = iter.into_iter();
     let (lo, hi) = iter.size_hint();
     let len = lo;
-    debug_assert_eq!(Some(len), hi);
+    debug_assert_eq!(
+        Some(len),
+        hi,
+        "cannot require ExactSizeIterator because of Chain, but should still be exact size in practice"
+    );
     for (i, x) in iter.enumerate() {
         if matches!(define(x), Some((true, _))) {
             f.write_str(if has_prev {
@@ -301,6 +328,65 @@ where
         }
     }
     Ok(has_prev)
+}
+
+/// Assumes every local is an [`AbstractType`].
+fn let_locals<'a, I>(
+    iter: I,
+    f: &mut std::fmt::Formatter<'_>,
+) -> Result<Vec<Option<RangeInclusive<usize>>>, std::fmt::Error>
+where
+    I: IntoIterator<IntoIter: 'a, Item = (&'a TypeBound<'a>, usize)>,
+{
+    let mut has_prev_group = false;
+    f.write_str("let ")?;
+    let iter = iter.into_iter();
+    let (lo, hi) = iter.size_hint();
+    debug_assert_eq!(
+        Some(lo),
+        hi,
+        "cannot require ExactSizeIterator because of Chain, but should still be exact size in practice"
+    );
+    let num_groups = lo;
+    iter.enumerate()
+        .map(|(i, (bound, count))| {
+            if has_prev_group {
+                f.write_str(if i == num_groups {
+                    // final group
+                    ", and "
+                } else {
+                    ", "
+                })?;
+            }
+            has_prev_group = true;
+            let mut iter = std::iter::repeat_with(create_var).take(count);
+            let Some(start) = iter.next() else {
+                return Ok(None);
+            };
+            let last = iter.last().unwrap_or(start);
+            let ids = RangeInclusive { start, last };
+            let mut has_prev = false;
+            for id in ids {
+                if has_prev {
+                    f.write_str(if id == last {
+                        // final item
+                        " and "
+                    } else {
+                        ", "
+                    })?;
+                }
+                has_prev = true;
+                write!(f, "`{:#}`", MetaType(id))?;
+            }
+            write!(
+                f,
+                " be {} satisfying the bound `{:#}`",
+                if start == last { "a type" } else { "types" },
+                Aliased::new(bound)
+            )?;
+            Ok(Some(ids))
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -338,6 +424,7 @@ trait Reason {
         &self,
         bound: &TypeBound<'_>,
         attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         #![expect(unused_variables, reason = "used in implementors")]
@@ -371,8 +458,12 @@ pub struct BoundCheck<'src, T> {
     pub reason: T,
 }
 
-impl<T: Reason> Display for BoundCheck<'_, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T: Reason> BoundCheck<'_, T> {
+    fn fmt_check(
+        &self,
+        attempt_var: Option<MetaType>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
         let Self {
             bound,
             attempt,
@@ -381,7 +472,7 @@ impl<T: Reason> Display for BoundCheck<'_, T> {
         Indent.fmt(f)?;
         // write!(f, "{}: ", reason.name())?; // DEBUG
         if reason.is_adapter() {
-            reason.adapter_requirement(bound, attempt, f)?;
+            reason.adapter_requirement(bound, attempt, attempt_var, f)?;
         } else {
             match attempt {
                 CheckedType::Abstract(_) => {
@@ -489,7 +580,7 @@ impl Reason for RequiredBoundReason<'_> {
                 // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    req.fmt(f)?;
+                    req.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -498,7 +589,7 @@ impl Reason for RequiredBoundReason<'_> {
                 // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    req.fmt(f)?;
+                    req.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -507,7 +598,7 @@ impl Reason for RequiredBoundReason<'_> {
                 // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    req.fmt(f)?;
+                    req.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -732,7 +823,7 @@ impl Reason for DeniedBoundReason<'_> {
                 // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt(f)?;
+                    denial.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -741,7 +832,7 @@ impl Reason for DeniedBoundReason<'_> {
                 // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt(f)?;
+                    denial.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -750,7 +841,7 @@ impl Reason for DeniedBoundReason<'_> {
                 // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt(f)?;
+                    denial.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -759,7 +850,7 @@ impl Reason for DeniedBoundReason<'_> {
                 // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    unsatisfied.fmt(f)?;
+                    unsatisfied.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -768,7 +859,7 @@ impl Reason for DeniedBoundReason<'_> {
                 // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt(f)?;
+                    denial.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -777,7 +868,7 @@ impl Reason for DeniedBoundReason<'_> {
                 // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt(f)?;
+                    denial.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -914,19 +1005,25 @@ impl Reason for SatisfiedBoundReason<'_> {
         &self,
         bound: &TypeBound<'_>,
         attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
             Self::Required(_) => {
+                #[cfg(debug_assertions)]
+                assert_matches!(
+                    attempt,
+                    CheckedType::Bound(_),
+                    "only bounds should be used in Required"
+                );
+                let t = attempt_var.expect("attempt_var should be Some if attempt is a Bound");
                 write!(
                     f,
-                    "if a {} `{:#}` requires a bound `{:#}` to be fulfilled in its definition, any type \
-                    which satisfies `{:#}` is guaranteed to satisfy `{:#}`",
-                    attempt.kind_name(),
+                    "if the bound `{:#}` requires the bound `{:#}` to be fulfilled by definition, \
+                    then `{t:#}` is guaranteed to fulfill `{:#}`",
                     Aliased::new(attempt),
                     Aliased::new(bound),
                     Aliased::new(bound),
-                    Aliased::new(attempt),
                 )
             }
 
@@ -943,7 +1040,7 @@ impl Reason for SatisfiedBoundReason<'_> {
             Self::Required(requirement) => {
                 {
                     let _depth = LocalDepth::new();
-                    requirement.fmt(f)?;
+                    requirement.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -957,7 +1054,7 @@ impl Reason for SatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    fulfilled.fmt(f)?;
+                    fulfilled.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -965,7 +1062,7 @@ impl Reason for SatisfiedBoundReason<'_> {
             Self::Not(unfulfilled) => {
                 {
                     let _depth = LocalDepth::new();
-                    unfulfilled.fmt(f)?;
+                    unfulfilled.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -982,7 +1079,7 @@ impl Reason for SatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    fulfilled.fmt(f)?;
+                    fulfilled.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -1187,15 +1284,21 @@ impl Reason for UnsatisfiedBoundReason<'_> {
         &self,
         bound: &TypeBound<'_>,
         attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
             Self::Denied(_) => {
+                #[cfg(debug_assertions)]
+                assert_matches!(
+                    attempt,
+                    CheckedType::Bound(_),
+                    "only bounds should be used in Denied"
+                );
+                let t = attempt_var.expect("attempt_var should be Some if attempt is a Bound");
                 write!(
                     f,
-                    "for a {} `{:#}` to fulfill a bound `{:#}`, the definition of `{:#}` cannot require the negation of `{:#}`",
-                    attempt.kind_name(),
-                    Aliased::new(attempt),
+                    "for `{t:#}` to fulfill the bound `{:#}`, the definition of `{:#}` cannot require the negation of `{:#}`",
                     Aliased::new(bound),
                     Aliased::new(attempt),
                     Aliased::new(bound),
@@ -1203,13 +1306,19 @@ impl Reason for UnsatisfiedBoundReason<'_> {
             }
 
             Self::Unrequired(_) => {
+                #[cfg(debug_assertions)]
+                assert_matches!(
+                    attempt,
+                    CheckedType::Bound(_),
+                    "only bounds should be used in Unrequired"
+                );
+                let t = attempt_var.expect("attempt_var should be Some if attempt is a Bound");
                 write!(
                     f,
-                    "if a {} `{:#}` allows a bound `{:#}` to be unfulfilled, `{:#}` cannot guarantee that `{:#}` will be fulfilled",
-                    attempt.kind_name(),
+                    "if the bound `{:#}` does not require the bound `{:#}` by definition, \
+                    then `{t:#}` is not guaranteed to fulfill `{:#}`",
                     Aliased::new(attempt),
                     Aliased::new(bound),
-                    Aliased::new(attempt),
                     Aliased::new(bound),
                 )
             }
@@ -1227,7 +1336,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
             Self::Denied(denial) => {
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt(f)?;
+                    denial.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -1235,7 +1344,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
             Self::Unrequired(denial) => {
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt(f)?;
+                    denial.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -1249,7 +1358,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    unfulfilled.fmt(f)?;
+                    unfulfilled.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -1263,14 +1372,14 @@ impl Reason for UnsatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    first.fmt(f)?;
+                    first.fmt_check(None, f)?;
                 }
                 writeln!(f)?;
                 Indent.fmt(f)?;
                 writeln!(f, "another is `{:#}`:", Aliased::new(&second.bound))?;
                 {
                     let _depth = LocalDepth::new();
-                    second.fmt(f)?;
+                    second.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -1278,7 +1387,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
             Self::NotNot(fulfilled) => {
                 {
                     let _depth = LocalDepth::new();
-                    fulfilled.fmt(f)?;
+                    fulfilled.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -1295,7 +1404,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    unfulfilled.fmt(f)?;
+                    unfulfilled.fmt_check(None, f)?;
                 }
                 writeln!(f)
             }
@@ -1429,15 +1538,34 @@ impl Display for UnsatisfiedBoundError<'_> {
             let_if_new(items, f)?;
             writeln!(f, ".")?;
         }
-        writeln!(
-            f,
-            "the {} `{:#}` does not satisfy the bound `{:#}`.",
-            diagnosis.attempt.kind_name(),
-            Aliased::new(attempt),
-            Aliased::new(bound),
-        )?;
+        let attempt_var = match attempt {
+            CheckedType::Abstract(_) => {
+                writeln!(
+                    f,
+                    "the type `{:#}` does not satisfy the bound `{:#}`.",
+                    Aliased::new(attempt),
+                    Aliased::new(bound),
+                )?;
+                None
+            }
+
+            CheckedType::Bound(attempt) => {
+                if let [Some(RangeInclusive { start, last })] = let_locals(once((attempt, 1)), f)? {
+                    debug_assert_eq!(start, last, "should only produce one");
+                    let t = MetaType(start);
+                    writeln!(
+                        f,
+                        ". the type `{t:#}` is not guaranteed to satisfy the bound `{:#}`.",
+                        Aliased::new(bound),
+                    )?;
+                    Some(t)
+                } else {
+                    unreachable!("one in should yeild one out")
+                }
+            }
+        };
         writeln!(f, "observe:")?;
-        diagnosis.fmt(f)
+        diagnosis.fmt_check(attempt_var, f)
     }
 }
 
@@ -1506,7 +1634,7 @@ mod tests {
             ]
             .to_vec(),
         );
-        // a.simplify();
+        a.simplify();
 
         let mut b = TypeBound::Combo(
             Combinator::One,
@@ -1550,7 +1678,7 @@ mod tests {
             ]
             .to_vec(),
         );
-        // b.simplify();
+        b.simplify();
 
         let res = a.satisfaction_of(&b);
         let Requiredness::Deny(e) = res else {
