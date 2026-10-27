@@ -6,12 +6,22 @@ use crate::{
     },
     highlight::style::StyleWrapper,
 };
-use std::{fmt::Display, iter::once};
+use std::{
+    fmt::Display,
+    iter::{empty, once},
+};
 
 impl TypeBound<'_> {
-    fn let_statements(&self, f: &mut std::fmt::Formatter<'_>) -> Result<bool, std::fmt::Error> {
+    fn let_statements<T>(
+        &self,
+        reason: &T,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<bool, std::fmt::Error>
+    where
+        T: Reason,
+    {
         match self {
-            TypeBound::Combo(_, x) => let_if_new(once(self).chain(x), f),
+            TypeBound::Combo(_, _) => let_if_new(once(self).chain(reason.aliases_needed()), f),
 
             TypeBound::Exactly(x) => {
                 let items: [&dyn AliasPrefix; 2] = [self, x];
@@ -34,7 +44,7 @@ impl TypeBound<'_> {
                 operands: _,
                 ret: _,
             }
-            | TypeBound::Satisfies(_) => Ok(false),
+            | TypeBound::Satisfies(_) => let_if_new(once(self), f),
         }
     }
 
@@ -143,7 +153,7 @@ mod local_depth {
     /// Returns [`None`] if the name is too short to require an alias.
     /// Boolean field represents whether the name is new.
     pub fn define<T: ?Sized + ToString>(bound: &T) -> Option<(bool, usize)> {
-        const MAX_INLINE_BOUND_CHARS: usize = 8;
+        const MAX_INLINE_BOUND_CHARS: usize = 1;
         LOCAL_DEFS.with_borrow_mut(|table| {
             let key = bound.to_string();
             (key.chars().count() > MAX_INLINE_BOUND_CHARS).then(|| {
@@ -309,7 +319,14 @@ impl Display for CheckedType<'_> {
 }
 
 trait Reason {
+    type AliasesNeeded<'a>: IntoIterator<Item = &'a TypeBound<'a>>
+    where
+        Self: 'a;
+
     fn name(&self) -> &'static str;
+
+    /// If `self` represents a [`TypeBound::Combo`], returns an iterator over specifically the bounds used in reasoning
+    fn aliases_needed(&self) -> Self::AliasesNeeded<'_>;
 
     /// Indicates that the reason uses the same bound as the outer check (e.g. adapting [`DeniedBound`] -> [`UnsatisfiedBound`])
     fn is_adapter(&self) -> bool {
@@ -368,7 +385,7 @@ impl<T: Reason> Display for BoundCheck<'_, T> {
         } else {
             match attempt {
                 CheckedType::Abstract(_) => {
-                    if bound.let_statements(f)? {
+                    if bound.let_statements(reason, f)? {
                         writeln!(f, ".")?;
                         Indent.fmt(f)?;
                     }
@@ -376,7 +393,7 @@ impl<T: Reason> Display for BoundCheck<'_, T> {
                 }
 
                 CheckedType::Bound(attempt_bound) => {
-                    if attempt_bound.let_statements(f)? {
+                    if attempt_bound.let_statements(reason, f)? {
                         writeln!(f, ".")?;
                         Indent.fmt(f)?;
                     }
@@ -432,6 +449,11 @@ pub enum RequiredBoundReason<'src> {
 }
 
 impl Reason for RequiredBoundReason<'_> {
+    type AliasesNeeded<'a>
+        = Option<&'a TypeBound<'a>>
+    where
+        Self: 'a;
+
     fn name(&self) -> &'static str {
         match self {
             Self::OneOfAll { .. } => "OneOfAll",
@@ -441,6 +463,19 @@ impl Reason for RequiredBoundReason<'_> {
             Self::Has { .. } => "Has",
             Self::HasMatching { .. } => "HasMatching",
             Self::Shape { .. } => "Shape",
+        }
+    }
+
+    fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
+        match self {
+            Self::OneOfAll(BoundCheck { bound, .. }) => Some(bound),
+
+            Self::AllOfAny
+            | Self::AllOfOne
+            | Self::Exactly(_)
+            | Self::Has
+            | Self::HasMatching(_)
+            | Self::Shape => None,
         }
     }
 
@@ -572,6 +607,11 @@ pub enum AllowedBoundReason<'src> {
 }
 
 impl Reason for AllowedBoundReason<'_> {
+    type AliasesNeeded<'a>
+        = Option<&'a TypeBound<'a>>
+    where
+        Self: 'a;
+
     fn name(&self) -> &'static str {
         match self {
             Self::NoneOfAll { .. } => "NoneOfAll",
@@ -591,6 +631,29 @@ impl Reason for AllowedBoundReason<'_> {
             Self::HasUndenied { .. } => "HasUndenied",
             Self::HasAllowed { .. } => "HasAllowed",
             Self::ShapeUndenied { .. } => "ShapeUndenied",
+        }
+    }
+
+    fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
+        match self {
+            Self::IncompleteAll(BoundCheck { bound, .. })
+            | Self::AnyBestAllowed(BoundCheck { bound, .. })
+            | Self::OneOnlyAllowed(BoundCheck { bound, .. })
+            | Self::OneOfAny(BoundCheck { bound, .. })
+            | Self::OneOfOne(BoundCheck { bound, .. }) => Some(bound),
+
+            Self::NoneOfAll
+            | Self::OnePassingMultipleAllowed(_)
+            | Self::OneAllowsMultiple(_)
+            | Self::NotDenied(_)
+            | Self::IneffectiveNot(_)
+            | Self::NotRequired(_)
+            | Self::ExactlyAllowed(_)
+            | Self::MayHave
+            | Self::MayAlsoHave
+            | Self::HasUndenied
+            | Self::HasAllowed(_)
+            | Self::ShapeUndenied => None,
         }
     }
 
@@ -633,6 +696,11 @@ pub enum DeniedBoundReason<'src> {
 }
 
 impl Reason for DeniedBoundReason<'_> {
+    type AliasesNeeded<'a>
+        = Option<&'a TypeBound<'a>>
+    where
+        Self: 'a;
+
     fn name(&self) -> &'static str {
         match self {
             Self::OneOfAll { .. } => "OneOfAll",
@@ -641,6 +709,16 @@ impl Reason for DeniedBoundReason<'_> {
             Self::ExactlyUnsatisfying { .. } => "ExactlyUnsatisfying",
             Self::CantHave { .. } => "CantHave",
             Self::HasConflicting { .. } => "HasConflicting",
+        }
+    }
+
+    fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
+        match self {
+            Self::OneOfAll(BoundCheck { bound, .. })
+            | Self::OneOfAny(BoundCheck { bound, .. })
+            | Self::OneOfOne(BoundCheck { bound, .. }) => Some(bound),
+
+            Self::ExactlyUnsatisfying(_) | Self::CantHave(_) | Self::HasConflicting(_) => None,
         }
     }
 
@@ -789,6 +867,11 @@ impl<'src> From<RequiredBound<'src>> for SatisfiedBound<'src> {
 }
 
 impl Reason for SatisfiedBoundReason<'_> {
+    type AliasesNeeded<'a>
+        = Option<&'a TypeBound<'a>>
+    where
+        Self: 'a;
+
     fn name(&self) -> &'static str {
         match self {
             Self::Required { .. } => "Required",
@@ -802,6 +885,24 @@ impl Reason for SatisfiedBoundReason<'_> {
             Self::Shape { .. } => "Shape",
             Self::Supports { .. } => "Supports",
             Self::Satisfies { .. } => "Satisfies",
+        }
+    }
+
+    fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
+        match self {
+            Self::Any(BoundCheck { bound, .. }) | Self::One(BoundCheck { bound, .. }) => {
+                Some(bound)
+            }
+
+            Self::Required(_)
+            | Self::All
+            | Self::Not(_)
+            | Self::Exactly
+            | Self::Has
+            | Self::HasMatching(_)
+            | Self::Shape
+            | Self::Supports(_)
+            | Self::Satisfies(_) => None,
         }
     }
 
@@ -1028,6 +1129,14 @@ impl<'src> From<AllowedBound<'src>> for UnsatisfiedBound<'src> {
 }
 
 impl Reason for UnsatisfiedBoundReason<'_> {
+    type AliasesNeeded<'a>
+        = std::iter::Chain<
+        std::option::IntoIter<&'a TypeBound<'a>>,
+        std::option::IntoIter<&'a TypeBound<'a>>,
+    >
+    where
+        Self: 'a;
+
     fn name(&self) -> &'static str {
         match self {
             Self::Denied { .. } => "Denied",
@@ -1044,6 +1153,29 @@ impl Reason for UnsatisfiedBoundReason<'_> {
             Self::ShapeFails { .. } => "ShapeFails",
             Self::Unsupported { .. } => "Unsupported",
             Self::Unsatisfies { .. } => "Unsatisfies",
+        }
+    }
+
+    fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
+        match self {
+            Self::NotAll(BoundCheck { bound, .. }) => std::iter::chain(Some(bound), None),
+
+            Self::OverOne((BoundCheck { bound: first, .. }, BoundCheck { bound: second, .. })) => {
+                std::iter::chain(Some(first), Some(second))
+            }
+
+            Self::Denied(_)
+            | Self::Unrequired(_)
+            | Self::NotAny
+            | Self::NotOne
+            | Self::NotNot(_)
+            | Self::Unequal
+            | Self::MissingMember
+            | Self::MemberFails(_)
+            | Self::MissingShape
+            | Self::ShapeFails(_)
+            | Self::Unsupported(_)
+            | Self::Unsatisfies(_) => std::iter::chain(None, None),
         }
     }
 
