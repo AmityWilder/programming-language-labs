@@ -20,10 +20,24 @@ impl TypeBound<'_> {
         T: Reason,
     {
         match self {
-            TypeBound::Combo(_, _) => let_if_new(once(self).chain(reason.aliases_needed()), f),
+            &TypeBound::Combo(kind, ref all_bounds) => let_if_new(
+                once((self, None)).chain({
+                    reason
+                        .aliases_needed()
+                        .into_iter()
+                        .map(|x| {
+                            let i = all_bounds
+                                .iter()
+                                .position(|b| b == x) // remember that combo bounds aren't necessarily ordered
+                                .expect("every item output by aliases_needed on a Combo should be an element of the Combo vec");
+                            (x, Some((Some((i, kind)), self)))
+                        })
+                }),
+                f,
+            ),
 
             TypeBound::Exactly(x) => {
-                let items: [&dyn AliasPrefix; 2] = [self, x];
+                let items: [(&dyn AliasPrefix, _); 2] = [(self, None), (x, Some((None, self)))];
                 let_if_new(items, f)
             }
 
@@ -31,7 +45,7 @@ impl TypeBound<'_> {
             | TypeBound::Has {
                 member: _,
                 req: Some(x),
-            } => let_if_new([self, x.as_ref()], f),
+            } => let_if_new([(self, None), (x.as_ref(), Some((None, self)))], f),
 
             TypeBound::Has {
                 member: _,
@@ -43,7 +57,7 @@ impl TypeBound<'_> {
                 operands: _,
                 ret: _,
             }
-            | TypeBound::Satisfies(_) => let_if_new(once(self), f),
+            | TypeBound::Satisfies(_) => let_if_new(once((self, None)), f),
         }
     }
 
@@ -162,7 +176,7 @@ mod local_depth {
     /// Returns [`None`] if the name is too short to require an alias.
     /// Boolean field represents whether the name is new.
     pub fn define<T: ?Sized + ToString>(bound: &T) -> Option<(bool, usize)> {
-        const MAX_INLINE_BOUND_CHARS: usize = 1;
+        const MAX_INLINE_BOUND_CHARS: usize = 4;
         DEFS.with_borrow_mut(|table| {
             let key = bound.to_string();
             (key.chars().count() > MAX_INLINE_BOUND_CHARS).then(|| {
@@ -268,13 +282,23 @@ impl<T: ?Sized + Display + AliasPrefix> Display for Aliased<T> {
     }
 }
 
+// TODO: what if we KNOW it's something new? how would we handle name collisions??
 /// Does not add any trailing punctuation
 fn let_if_new<'a, T, I>(iter: I, f: &mut std::fmt::Formatter<'_>) -> Result<bool, std::fmt::Error>
 where
     T: 'a + ?Sized + Display + AliasPrefix,
-    I: 'a + IntoIterator<Item = &'a T>,
+    I: 'a
+        + IntoIterator<
+            Item = (
+                &'a T,
+                Option<(Option<(usize, Combinator)>, &'a TypeBound<'a>)>,
+            ),
+        >,
 {
+    const OVERSIZE_DEF_LEN: usize = 16;
+    let _overflow = LocalDepth::new();
     let mut has_prev = false;
+    let mut line_def_chars = 0;
     let iter = iter.into_iter();
     let (lo, hi) = iter.size_hint();
     let len = lo;
@@ -283,29 +307,63 @@ where
         hi,
         "cannot require ExactSizeIterator because of Chain, but should still be exact size in practice"
     );
-    for (i, x) in iter.enumerate() {
+    for (i, (x, b)) in iter.enumerate() {
         if matches!(define(x), Some((true, _))) {
-            f.write_str(if has_prev {
+            if has_prev {
                 #[expect(
                     clippy::arithmetic_side_effects,
                     reason = "has_prev implies `i` is at least 1"
                 )]
-                if i == len - 1 {
-                    // final item
-                    " and "
+                f.write_str(if i == len - 1 { " and" } else { "," })?;
+                if line_def_chars > OVERSIZE_DEF_LEN {
+                    writeln!(f)?;
+                    Indent.fmt(f)?; // HACK: this is a sneaky lil mf
                 } else {
-                    ", "
+                    f.write_str(" ")?;
                 }
             } else {
                 has_prev = true;
-                "let "
-            })?;
+                f.write_str("let ")?;
+            }
+            line_def_chars = line_def_chars.saturating_add(x.to_string().chars().count());
             write!(
                 f,
                 "`{:#}` be the {} `{x:#}`",
                 Aliased::new(x),
                 x.kind_name()
             )?;
+            if let Some((index, b)) = b {
+                f.write_str(" from the ")?;
+                if let Some((index, kind)) = index {
+                    let style = SYNTAX_STYLE_ANSI.number_literal;
+                    style.begin().fmt(f)?;
+                    if let Some(n) = index.checked_add(1) {
+                        let th = match n % 10 {
+                            1 if n % 100 != 11 => "st",
+                            2 if n % 100 != 12 => "nd",
+                            3 if n % 100 != 13 => "rd",
+                            _ => "th",
+                        };
+                        write!(f, "{n}{th}")
+                    } else {
+                        // an index exists, but overflows usize.
+                        // no worries, instead of using a number, we can say the position!
+                        f.write_str("last")
+                    }?;
+                    style.end().fmt(f)?;
+                    // TODO: keep this up to date with the actual syntax!!
+                    write!(
+                        f,
+                        " `{:#}`-separated sub-bound of ",
+                        SYNTAX_STYLE_ANSI.keyword.alt_style(match kind {
+                            Combinator::All => "+",
+                            Combinator::Any => "|",
+                            Combinator::One => "/",
+                        })
+                    )?;
+                }
+                write!(f, "bound `{:#}`", Aliased::new(b))?;
+            }
         }
     }
     Ok(has_prev)
@@ -506,12 +564,19 @@ impl<T: Reason> BoundCheck<'_, T> {
             Aliased::new(attempt)
         )?;
         reason.write_source(bound, attempt, attempt_var, f)?;
-        write!(
-            f,
-            ", the {} `{:#}` ",
-            attempt.kind_name(),
-            Aliased::new(attempt)
-        )?;
+        match attempt {
+            CheckedType::Abstract(t) => {
+                write!(f, ", the type `{:#}` ", Aliased::new(t))?;
+            }
+
+            CheckedType::Bound(b) => {
+                f.write_str(", ")?;
+                if let Some(t) = attempt_var {
+                    write!(f, "any type `{t:#}` defined by ")?;
+                }
+                write!(f, "the bound `{:#}` ", Aliased::new(b))?;
+            }
+        }
         reason.write_effect(f)?;
         write!(f, " the bound `{:#}`.", Aliased::new(bound))
     }
@@ -1105,7 +1170,7 @@ impl Reason for DeniedBoundReason<'_> {
     }
 
     fn write_effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("directly contradicts")
+        f.write_str("cannot, by definition, satisfy")
     }
 }
 
@@ -1717,31 +1782,27 @@ impl Display for UnsatisfiedBoundError<'_> {
         clear_defs(); // can't trust them to be emptied if Display can error before reaching the end
         let BoundCheck { bound, attempt, .. } = diagnosis;
         {
-            let items: [&dyn AliasPrefix; 2] = [bound, attempt];
+            let items: [(&dyn AliasPrefix, _); 2] = [(bound, None), (attempt, None)];
             let_if_new(items, f)?;
             writeln!(f, ".")?;
         }
         let attempt_var = match attempt {
             CheckedType::Abstract(_) => {
-                writeln!(
-                    f,
-                    "the type `{:#}` does not satisfy the bound `{:#}`.",
-                    Aliased::new(attempt),
-                    Aliased::new(bound),
-                )?;
+                write!(f, "the type `{:#}`", Aliased::new(attempt))?;
                 None
             }
 
             CheckedType::Bound(attempt) => {
                 let t = let_local(attempt, f)?;
-                writeln!(
-                    f,
-                    ". the type `{t:#}` is not guaranteed to satisfy the bound `{:#}`.",
-                    Aliased::new(bound),
-                )?;
+                write!(f, ". the type `{t:#}`")?;
                 Some(t)
             }
         };
+        writeln!(
+            f,
+            " does not satisfy the bound `{:#}`.",
+            Aliased::new(bound)
+        )?;
         writeln!(f, "observe:")?;
         diagnosis.fmt_check(attempt_var, f)
     }
