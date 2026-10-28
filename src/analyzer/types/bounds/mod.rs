@@ -143,6 +143,75 @@ impl Default for TypeBound<'_> {
     }
 }
 
+#[repr(transparent)]
+pub struct TypeBoundDesc<'src>(TypeBound<'src>);
+
+impl<'src> TypeBoundDesc<'src> {
+    pub const fn new<'a>(value: &'a TypeBound<'src>) -> &'a Self {
+        // SAFETY: TypeBoundDesc is a transparent wrapper for TypeBound
+        unsafe { std::mem::transmute(value) }
+    }
+}
+
+impl std::fmt::Display for TypeBoundDesc<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.descriptive_fmt(0, f)
+    }
+}
+
+impl TypeBound<'_> {
+    /// Written in the format "must _"
+    fn descriptive_fmt(&self, depth: usize, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let indent = |f: &mut std::fmt::Formatter<'_>| write!(f, "\n{0:1$} - ", "", depth * 2);
+        match self {
+            Self::Combo(kind, bounds) => {
+                write!(
+                    f,
+                    "satisfy {} of the following:",
+                    match kind {
+                        Combinator::All => "all",
+                        Combinator::Any => "any",
+                        Combinator::One => "one",
+                    }
+                )?;
+                for bound in bounds {
+                    indent(f)?;
+                    bound.descriptive_fmt(depth + 1, f)?;
+                }
+                Ok(())
+            }
+
+            Self::Not(bound) => {
+                write!(f, "not:")?;
+                indent(f)?;
+                bound.descriptive_fmt(depth + 1, f)
+            }
+
+            Self::Exactly(ty) => {
+                write!(f, "be exactly {ty:#}")
+            }
+
+            Self::Has { member, req } => {
+                write!(f, "have a member named `{member}`")?;
+                if let Some(req) = req {
+                    write!(f, " which must:")?;
+                    indent(f)?;
+                    req.descriptive_fmt(depth + 1, f)?;
+                }
+                Ok(())
+            }
+
+            Self::Shape(shape) => {
+                write!(f, "be callable with the signature {shape:#}")
+            }
+
+            Self::Supports { .. } => todo!(),
+
+            Self::Satisfies(_) => todo!(),
+        }
+    }
+}
+
 impl Display for TypeBound<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn parenthesize_if_needed(

@@ -1813,7 +1813,10 @@ impl std::error::Error for UnsatisfiedBoundError<'_> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::types::{StaticType, bounds::Requiredness};
+    use crate::analyzer::types::{
+        StaticType,
+        bounds::{Requiredness, TypeBoundDesc},
+    };
 
     #[test]
     fn test_bounds_error_display() {
@@ -1877,6 +1880,8 @@ mod tests {
             .to_vec(),
         );
         a.simplify();
+        println!("{a:#}:\n{}", TypeBoundDesc::new(&a));
+        println!();
 
         let mut b = TypeBound::Combo(
             Combinator::One,
@@ -1921,6 +1926,7 @@ mod tests {
             .to_vec(),
         );
         b.simplify();
+        println!("{b:#}:\n{}", TypeBoundDesc::new(&b));
 
         let error = UnsatisfiedBoundError::try_from(a.satisfaction_of(&b)).unwrap_or_else(|ok| {
             panic!("expected an error, found: {ok}");
@@ -1948,6 +1954,8 @@ mod tests {
             .to_vec(),
         );
         a.simplify();
+        println!("{a:#}:\n{}", TypeBoundDesc::new(&a));
+        println!();
 
         let mut b = TypeBound::Combo(
             Combinator::Any,
@@ -1964,6 +1972,7 @@ mod tests {
             .to_vec(),
         );
         b.simplify();
+        println!("{b:#}:\n{}", TypeBoundDesc::new(&b));
 
         let error = UnsatisfiedBoundError::try_from(a.satisfaction_of(&b)).unwrap_or_else(|ok| {
             panic!("expected an error, found: {ok}");
