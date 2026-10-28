@@ -215,6 +215,224 @@ impl Display for TypeBound<'_> {
     }
 }
 
+pub trait TypeSatisfaction<'src> {
+    fn satisfaction_of(&self, bound: &TypeBound<'src>) -> TypeBoundSatisfaction<'src>;
+}
+
+impl<'src, T: TypeCompatible<'src>> TypeSatisfaction<'src> for T {
+    fn satisfaction_of(&self, bound: &TypeBound<'src>) -> TypeBoundSatisfaction<'src> {
+        use Satisfaction::{Failing, Passing, Unclear};
+        let reason: TypeBoundSatisfactionReason = match bound {
+            TypeBound::Combo(kind, bounds) => match kind {
+                Combinator::All => {
+                    let mut res = None;
+                    for item in bounds.iter().map(|bound| self.satisfaction_of(bound)) {
+                        // failure takes priority over uncertainty
+                        match item {
+                            Unclear(_) => {
+                                if res.is_none() {
+                                    res = Some(item);
+                                }
+                            }
+
+                            Failing(_) => {
+                                res = Some(item);
+                                break;
+                            }
+
+                            Passing(_) => {} // not enough on its own
+                        }
+                    }
+                    if let Some(res) = res {
+                        match res {
+                            Unclear(x) => Unclear(AllowedBoundReason::IncompleteAll(Box::new(x))),
+
+                            Failing(x) => Failing(UnsatisfiedBoundReason::NotAll(Box::new(x))),
+
+                            Passing(_) => unreachable!(),
+                        }
+                    } else {
+                        Passing(SatisfiedBoundReason::All)
+                    }
+                }
+
+                Combinator::Any => {
+                    let mut res = None;
+                    for item in bounds.iter().map(|bound| self.satisfaction_of(bound)) {
+                        // even if an unclear exists, there might be a passing item, and that would guarantee success.
+                        match item {
+                            Passing(_) => {
+                                res = Some(item);
+                                break;
+                            }
+
+                            Unclear(_) => {
+                                if res.is_none() {
+                                    res = Some(item);
+                                }
+                            }
+
+                            Failing(_) => {} // not enough on its own
+                        }
+                    }
+                    if let Some(res) = res {
+                        match res {
+                            Passing(x) => Passing(SatisfiedBoundReason::Any(Box::new(x))),
+                            Unclear(x) => Unclear(AllowedBoundReason::AnyBestAllowed(Box::new(x))),
+                            Failing(_) => unreachable!(),
+                        }
+                    } else {
+                        Failing(UnsatisfiedBoundReason::NotAny)
+                    }
+                }
+
+                Combinator::One => {
+                    let mut first = None;
+                    let mut second = None;
+                    for item in bounds.iter().map(|bound| self.satisfaction_of(bound)) {
+                        // passing takes priority over unclear
+                        match item {
+                            Passing(_) => {
+                                if first.is_none() {
+                                    first = Some(item);
+                                } else {
+                                    second = Some(item);
+                                    break;
+                                }
+                            }
+
+                            Unclear(_) => {
+                                if first.is_none() {
+                                    first = Some(item);
+                                } else if second.is_none() {
+                                    second = Some(item);
+                                }
+                            }
+
+                            Failing(_) => {} // not enough on its own
+                        }
+                    }
+                    if let Some(first) = first {
+                        if let Some(second) = second {
+                            // multiple
+                            match (first, second) {
+                                (Passing(first), Passing(second)) => Failing(
+                                    UnsatisfiedBoundReason::OverOne(Box::new((first, second))),
+                                ),
+
+                                (Passing(passing), Unclear(unclear))
+                                | (Unclear(unclear), Passing(passing)) => {
+                                    Unclear(AllowedBoundReason::OnePassingMultipleAllowed(
+                                        Box::new((passing, unclear)),
+                                    ))
+                                }
+
+                                (Unclear(first), Unclear(second)) => {
+                                    Unclear(AllowedBoundReason::OneAllowsMultiple(Box::new((
+                                        first, second,
+                                    ))))
+                                }
+
+                                (Failing(_), _) | (_, Failing(_)) => unreachable!(),
+                            }
+                        } else {
+                            // one
+                            match first {
+                                Passing(x) => Passing(SatisfiedBoundReason::One(Box::new(x))),
+
+                                Unclear(x) => {
+                                    Unclear(AllowedBoundReason::OneBestAllowed(Box::new(x)))
+                                }
+
+                                Failing(_) => unreachable!(),
+                            }
+                        }
+                    } else {
+                        Failing(UnsatisfiedBoundReason::NotOne)
+                    }
+                }
+            },
+
+            TypeBound::Not(bound) => match self.satisfaction_of(bound) {
+                Passing(reason) => Failing(UnsatisfiedBoundReason::NotNot(Box::new(reason))),
+
+                Unclear(reason) => Unclear(AllowedBoundReason::IneffectiveNot(Box::new(reason))),
+
+                Failing(reason) => Passing(SatisfiedBoundReason::Not(Box::new(reason))),
+            },
+
+            TypeBound::Exactly(target) => {
+                if self.is_type_eq(target) {
+                    Passing(SatisfiedBoundReason::Exactly)
+                } else {
+                    Failing(UnsatisfiedBoundReason::Unequal)
+                }
+            }
+
+            TypeBound::Has { member, req } => {
+                if let Some(attempt) = self.get_member(member) {
+                    if let Some(req) = req.as_deref() {
+                        let res: TypeBoundSatisfaction = match &attempt {
+                            CheckedType::Abstract(ty) => ty.satisfaction_of(req),
+
+                            CheckedType::Bound(b) => {
+                                b.satisfaction_of(req);
+                                todo!()
+                            }
+                        };
+                        match res {
+                            Passing(x) => Passing(SatisfiedBoundReason::HasMatching(Box::new(x))),
+                            Unclear(x) => Unclear(AllowedBoundReason::HasAllowed(Box::new(x))),
+                            Failing(x) => Failing(UnsatisfiedBoundReason::MemberFails(Box::new(x))),
+                        }
+                    } else {
+                        Passing(SatisfiedBoundReason::Has)
+                    }
+                } else {
+                    Failing(UnsatisfiedBoundReason::MissingMember)
+                }
+            }
+
+            TypeBound::Shape(shape) => {
+                if let Some(actual) = self.shape() {
+                    if *shape == actual {
+                        Passing(SatisfiedBoundReason::Shape)
+                    } else {
+                        Failing(UnsatisfiedBoundReason::ShapeFails(actual))
+                    }
+                } else {
+                    Failing(UnsatisfiedBoundReason::MissingShape)
+                }
+            }
+
+            TypeBound::Supports { .. } => todo!("type bound needs environment access"),
+
+            TypeBound::Satisfies(_) => todo!("type bound needs code access"),
+        };
+
+        // ew, so much recursive cloning...
+        let bound = bound.clone();
+        let attempt = CheckedType::Abstract(self.to_abstract());
+        match reason {
+            Passing(reason) => Passing(BoundCheck {
+                bound,
+                attempt,
+                reason,
+            }),
+            Unclear(reason) => Unclear(BoundCheck {
+                bound,
+                attempt,
+                reason,
+            }),
+            Failing(reason) => Failing(BoundCheck {
+                bound,
+                attempt,
+                reason,
+            }),
+        }
+    }
+}
+
 impl<'src> TypeBound<'src> {
     pub const fn is_empty(&self) -> bool {
         matches!(self, Self::Combo(_, []))
@@ -307,214 +525,6 @@ impl<'src> TypeBound<'src> {
             && matches!(self.satisfaction_of(self), Requiredness::Require(_))
     }
 
-    pub fn is_satisfied_by<T: TypeCompatible<'src>>(&self, ty: &T) -> TypeBoundSatisfaction<'src> {
-        use Satisfaction::{Failing, Passing, Unclear};
-        let reason: TypeBoundSatisfactionReason = match self {
-            Self::Combo(kind, bounds) => match kind {
-                Combinator::All => {
-                    let mut res = None;
-                    for item in bounds.iter().map(|bound| bound.is_satisfied_by(ty)) {
-                        // failure takes priority over uncertainty
-                        match item {
-                            Unclear(_) => {
-                                res = Some(item);
-                            }
-
-                            Failing(_) => {
-                                res = Some(item);
-                                break;
-                            }
-
-                            Passing(_) => {} // not enough on its own
-                        }
-                    }
-                    if let Some(res) = res {
-                        match res {
-                            Unclear(x) => Unclear(AllowedBoundReason::IncompleteAll(Box::new(x))),
-
-                            Failing(x) => Failing(UnsatisfiedBoundReason::NotAll(Box::new(x))),
-
-                            Passing(_) => unreachable!(),
-                        }
-                    } else {
-                        Passing(SatisfiedBoundReason::All)
-                    }
-                }
-
-                Combinator::Any => {
-                    let mut res = None;
-                    for item in bounds.iter().map(|bound| bound.is_satisfied_by(ty)) {
-                        // even if an unclear exists, there might be a passing item, and that would guarantee success.
-                        match item {
-                            Passing(_) => {
-                                res = Some(item);
-                                break;
-                            }
-
-                            Unclear(_) => {
-                                res = Some(item);
-                            }
-
-                            Failing(_) => {} // not enough on its own
-                        }
-                    }
-                    if let Some(res) = res {
-                        match res {
-                            Passing(x) => Passing(SatisfiedBoundReason::Any(Box::new(x))),
-                            Unclear(x) => Unclear(AllowedBoundReason::AnyBestAllowed(Box::new(x))),
-                            Failing(_) => unreachable!(),
-                        }
-                    } else {
-                        Failing(UnsatisfiedBoundReason::NotAny)
-                    }
-                }
-
-                Combinator::One => {
-                    let mut first = None;
-                    let mut second = None;
-                    for item in bounds.iter().map(|bound| bound.is_satisfied_by(ty)) {
-                        // passing takes priority over unclear
-                        match item {
-                            Passing(_) => {
-                                if first.is_none() {
-                                    first = Some(item);
-                                } else {
-                                    second = Some(item);
-                                    break;
-                                }
-                            }
-
-                            Unclear(_) => {
-                                if first.is_none() {
-                                    first = Some(item);
-                                } else if second.is_none() {
-                                    second = Some(item);
-                                }
-                            }
-
-                            Failing(_) => {} // not enough on its own
-                        }
-                    }
-                    if let Some(first) = first {
-                        if let Some(second) = second {
-                            // multiple
-                            match (first, second) {
-                                (Passing(first), Passing(second)) => Failing(
-                                    UnsatisfiedBoundReason::OverOne(Box::new((first, second))),
-                                ),
-
-                                (Passing(passing), Unclear(unclear))
-                                | (Unclear(unclear), Passing(passing)) => {
-                                    Unclear(AllowedBoundReason::OnePassingMultipleAllowed(
-                                        Box::new((passing, unclear)),
-                                    ))
-                                }
-
-                                (Unclear(first), Unclear(second)) => {
-                                    Unclear(AllowedBoundReason::OneAllowsMultiple(Box::new((
-                                        first, second,
-                                    ))))
-                                }
-
-                                (Failing(_), _) | (_, Failing(_)) => unreachable!(),
-                            }
-                        } else {
-                            // one
-                            match first {
-                                Passing(x) => Passing(SatisfiedBoundReason::One(Box::new(x))),
-
-                                Unclear(x) => {
-                                    Unclear(AllowedBoundReason::OneOnlyAllowed(Box::new(x)))
-                                }
-
-                                Failing(_) => unreachable!(),
-                            }
-                        }
-                    } else {
-                        Failing(UnsatisfiedBoundReason::NotOne)
-                    }
-                }
-            },
-
-            Self::Not(bound) => match bound.is_satisfied_by(ty) {
-                Passing(reason) => Failing(UnsatisfiedBoundReason::NotNot(Box::new(reason))),
-
-                Unclear(reason) => Unclear(AllowedBoundReason::IneffectiveNot(Box::new(reason))),
-
-                Failing(reason) => Passing(SatisfiedBoundReason::Not(Box::new(reason))),
-            },
-
-            Self::Exactly(target) => {
-                if ty.is_type_eq(target) {
-                    Passing(SatisfiedBoundReason::Exactly)
-                } else {
-                    Failing(UnsatisfiedBoundReason::Unequal)
-                }
-            }
-
-            Self::Has { member, req } => {
-                if let Some(attempt) = ty.get_member(member) {
-                    if let Some(req) = req.as_deref() {
-                        let res: TypeBoundSatisfaction = match &attempt {
-                            CheckedType::Abstract(ty) => req.is_satisfied_by(&ty),
-
-                            CheckedType::Bound(b) => {
-                                b.satisfaction_of(req);
-                                todo!()
-                            }
-                        };
-                        match res {
-                            Passing(x) => Passing(SatisfiedBoundReason::HasMatching(Box::new(x))),
-                            Unclear(x) => Unclear(AllowedBoundReason::HasAllowed(Box::new(x))),
-                            Failing(x) => Failing(UnsatisfiedBoundReason::MemberFails(Box::new(x))),
-                        }
-                    } else {
-                        Passing(SatisfiedBoundReason::Has)
-                    }
-                } else {
-                    Failing(UnsatisfiedBoundReason::MissingMember)
-                }
-            }
-
-            Self::Shape(shape) => {
-                if let Some(actual) = ty.shape() {
-                    if *shape == actual {
-                        Passing(SatisfiedBoundReason::Shape)
-                    } else {
-                        Failing(UnsatisfiedBoundReason::ShapeFails(actual))
-                    }
-                } else {
-                    Failing(UnsatisfiedBoundReason::MissingShape)
-                }
-            }
-
-            Self::Supports { .. } => todo!("type bound needs environment access"),
-
-            Self::Satisfies(_) => todo!("type bound needs code access"),
-        };
-
-        // ew, so much recursive cloning...
-        let bound = self.clone();
-        let attempt = CheckedType::Abstract(ty.to_abstract());
-        match reason {
-            Passing(reason) => Passing(BoundCheck {
-                bound,
-                attempt,
-                reason,
-            }),
-            Unclear(reason) => Unclear(BoundCheck {
-                bound,
-                attempt,
-                reason,
-            }),
-            Failing(reason) => Failing(BoundCheck {
-                bound,
-                attempt,
-                reason,
-            }),
-        }
-    }
-
     pub fn satisfaction_of(&self, req: &TypeBound<'src>) -> TypeBoundRequiredness<'src> {
         use Requiredness::{Allow, Deny, Require};
         use Satisfaction::{Failing, Passing, Unclear};
@@ -577,15 +587,17 @@ impl<'src> TypeBound<'src> {
                                 }
 
                                 Allow(x) => {
-                                    res = Some(Allow(match kind {
-                                        Combinator::All => unreachable!(),
-                                        Combinator::Any => {
-                                            AllowedBoundReason::OneOfAny(Box::new(x))
-                                        }
-                                        Combinator::One => {
-                                            AllowedBoundReason::OneOfOne(Box::new(x))
-                                        }
-                                    }));
+                                    if res.is_none() {
+                                        res = Some(Allow(match kind {
+                                            Combinator::All => unreachable!(),
+                                            Combinator::Any => {
+                                                AllowedBoundReason::OneOfAny(Box::new(x))
+                                            }
+                                            Combinator::One => {
+                                                AllowedBoundReason::OneOfOne(Box::new(x))
+                                            }
+                                        }));
+                                    }
                                 }
 
                                 Require(_) => {}
@@ -622,7 +634,7 @@ impl<'src> TypeBound<'src> {
             //
             // because the type must be exactly this one, if this one does not satisfy the requirement,
             // the requirement cannot be satisfied in any case where the type must be this one.
-            Self::Exactly(ty) => match req.is_satisfied_by(ty) {
+            Self::Exactly(ty) => match ty.satisfaction_of(req) {
                 Passing(x) => Require(RequiredBoundReason::Exactly(Box::new(x))),
                 Unclear(u) => Allow(AllowedBoundReason::ExactlyAllowed(Box::new(u))),
                 Failing(e) => Deny(DeniedBoundReason::ExactlyUnsatisfying(Box::new(e))),
@@ -948,7 +960,7 @@ mod tests {
                 ],
             );
             let ty = AbstractType::Text;
-            assert!(bound.is_satisfied_by(&ty).is_passing());
+            assert!(ty.satisfaction_of(&bound).is_passing());
         }
 
         #[test]

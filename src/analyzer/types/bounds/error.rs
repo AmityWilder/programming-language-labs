@@ -1,3 +1,5 @@
+#![allow(dead_code, reason = "under construction")]
+
 use crate::{
     SYNTAX_STYLE_ANSI, Todo,
     analyzer::types::{
@@ -89,7 +91,7 @@ impl TypeBound<'_> {
                     has_prev = true;
                     write!(f, "`{param:#}`")?;
                 }
-                write!(f, "for an output of `{ret:#}`")
+                write!(f, " for an output of `{ret:#}`")
             }
 
             Self::Supports { .. } => todo!(),
@@ -184,17 +186,11 @@ use local_depth::{Indent, LocalDepth, clear_defs, create_var, define};
 
 trait AliasPrefix: Display {
     fn kind_name(&self) -> &'static str;
-
-    fn prefix(&self) -> char;
 }
 
 impl<T: ?Sized + AliasPrefix> AliasPrefix for &T {
     fn kind_name(&self) -> &'static str {
         (*self).kind_name()
-    }
-
-    fn prefix(&self) -> char {
-        (*self).prefix()
     }
 }
 
@@ -202,19 +198,11 @@ impl AliasPrefix for AbstractType<'_> {
     fn kind_name(&self) -> &'static str {
         "type"
     }
-
-    fn prefix(&self) -> char {
-        'T'
-    }
 }
 
 impl AliasPrefix for TypeBound<'_> {
     fn kind_name(&self) -> &'static str {
         "bound"
-    }
-
-    fn prefix(&self) -> char {
-        'B'
     }
 }
 
@@ -223,13 +211,6 @@ impl AliasPrefix for CheckedType<'_> {
         match self {
             Self::Abstract(t) => t.kind_name(),
             Self::Bound(b) => b.kind_name(),
-        }
-    }
-
-    fn prefix(&self) -> char {
-        match self {
-            Self::Abstract(t) => t.prefix(),
-            Self::Bound(b) => b.prefix(),
         }
     }
 }
@@ -330,6 +311,19 @@ where
     Ok(has_prev)
 }
 
+fn let_local(
+    bound: &TypeBound<'_>,
+    f: &mut std::fmt::Formatter<'_>,
+) -> Result<MetaType, std::fmt::Error> {
+    let t = MetaType(create_var());
+    write!(
+        f,
+        "let `{t:#}` be a type satisfying the bound `{:#}`",
+        Aliased::new(bound)
+    )
+    .map(|()| t)
+}
+
 /// Assumes every local is an [`AbstractType`].
 fn let_locals<'a, I>(
     iter: I,
@@ -409,8 +403,6 @@ trait Reason {
     where
         Self: 'a;
 
-    fn name(&self) -> &'static str;
-
     /// If `self` represents a [`TypeBound::Combo`], returns an iterator over specifically the bounds used in reasoning
     fn aliases_needed(&self) -> Self::AliasesNeeded<'_>;
 
@@ -433,9 +425,12 @@ trait Reason {
 
     /// Comes after the [`TypeBound`] requirement but before [`Self::write_source`].
     /// The start of each line should be indented.
+    // WARNING: need to carefully review which cases should use `bound` and which should use `attempt`!
     fn write_nested(
         &self,
         bound: &TypeBound<'_>,
+        attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result;
 
@@ -443,6 +438,8 @@ trait Reason {
     fn write_source(
         &self,
         bound: &TypeBound<'_>,
+        attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result;
 
@@ -456,6 +453,13 @@ pub struct BoundCheck<'src, T> {
     pub bound: TypeBound<'src>,
     pub attempt: CheckedType<'src>,
     pub reason: T,
+}
+
+/// Do not default to this, use [`BoundCheck::fmt_check`] if possible to give the most info
+impl<T: Reason> Display for BoundCheck<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fmt_check(None, f)
+    }
 }
 
 impl<T: Reason> BoundCheck<'_, T> {
@@ -493,7 +497,7 @@ impl<T: Reason> BoundCheck<'_, T> {
             }
         }
         writeln!(f, ".")?;
-        reason.write_nested(bound, f)?;
+        reason.write_nested(bound, attempt, attempt_var, f)?;
         Indent.fmt(f)?;
         write!(
             f,
@@ -501,7 +505,7 @@ impl<T: Reason> BoundCheck<'_, T> {
             attempt.kind_name(),
             Aliased::new(attempt)
         )?;
-        reason.write_source(bound, f)?;
+        reason.write_source(bound, attempt, attempt_var, f)?;
         write!(
             f,
             ", the {} `{:#}` ",
@@ -545,21 +549,15 @@ impl Reason for RequiredBoundReason<'_> {
     where
         Self: 'a;
 
-    fn name(&self) -> &'static str {
-        match self {
-            Self::OneOfAll { .. } => "OneOfAll",
-            Self::AllOfAny { .. } => "AllOfAny",
-            Self::AllOfOne { .. } => "AllOfOne",
-            Self::Exactly { .. } => "Exactly",
-            Self::Has { .. } => "Has",
-            Self::HasMatching { .. } => "HasMatching",
-            Self::Shape { .. } => "Shape",
-        }
-    }
-
     fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
         match self {
-            Self::OneOfAll(BoundCheck { bound, .. }) => Some(bound),
+            Self::OneOfAll(BoundCheck { attempt, .. }) => {
+                if let CheckedType::Bound(attempt) = attempt {
+                    Some(attempt)
+                } else {
+                    unimplemented!()
+                }
+            }
 
             Self::AllOfAny
             | Self::AllOfOne
@@ -573,32 +571,39 @@ impl Reason for RequiredBoundReason<'_> {
     fn write_nested(
         &self,
         _bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
             Self::OneOfAll(req) => {
-                // TODO: this is a default
+                Indent.fmt(f)?;
+                writeln!(
+                    f,
+                    "one of these bounds is `{:#}`.",
+                    Aliased::new(&req.attempt)
+                )?;
                 {
                     let _depth = LocalDepth::new();
-                    req.fmt_check(None, f)?;
+                    req.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
 
             Self::Exactly(req) => {
-                // TODO: this is a default
+                todo!("this is a default");
                 {
                     let _depth = LocalDepth::new();
-                    req.fmt_check(None, f)?;
+                    req.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
 
             Self::HasMatching(req) => {
-                // TODO: this is a default
+                todo!("this is a default");
                 {
                     let _depth = LocalDepth::new();
-                    req.fmt_check(None, f)?;
+                    req.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -610,11 +615,13 @@ impl Reason for RequiredBoundReason<'_> {
     fn write_source(
         &self,
         _bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        _attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
             Self::OneOfAll(BoundCheck {
-                bound: fulfilled, ..
+                attempt: fulfilled, ..
             }) => {
                 write!(
                     f,
@@ -629,7 +636,7 @@ impl Reason for RequiredBoundReason<'_> {
                 )
             }
 
-            Self::Exactly(BoundCheck { bound: _req, .. }) => {
+            Self::Exactly(BoundCheck { attempt: _req, .. }) => {
                 write!(
                     f,
                     "must be a specific type which verifiably satisfies the bound"
@@ -640,7 +647,7 @@ impl Reason for RequiredBoundReason<'_> {
                 write!(f, "necessarily requires a member by the same name")
             }
 
-            Self::HasMatching(BoundCheck { bound: req, .. }) => {
+            Self::HasMatching(BoundCheck { attempt: req, .. }) => {
                 write!(
                     f,
                     "necessarily requires a member by the same name, and requires that member to satisfy `{req:#}`"
@@ -668,7 +675,7 @@ pub enum AllowedBoundReason<'src> {
     /// One of the bounds in a [`TypeBound::Combo`] with [`Combinator::Any`] neither requires nor denies the bound
     AnyBestAllowed(Box<AllowedBound<'src>>),
     /// One of the bounds in a [`TypeBound::Combo`] with [`Combinator::One`] neither requires nor denies the bound
-    OneOnlyAllowed(Box<AllowedBound<'src>>),
+    OneBestAllowed(Box<AllowedBound<'src>>),
     /// One of the bounds in a [`TypeBound::Combo`] with [`Combinator::One`] requires the bound, but another allows it
     OnePassingMultipleAllowed(Box<(SatisfiedBound<'src>, AllowedBound<'src>)>),
     /// Multiple bounds in a [`TypeBound::Combo`] with [`Combinator::One`] allow the bound
@@ -703,35 +710,19 @@ impl Reason for AllowedBoundReason<'_> {
     where
         Self: 'a;
 
-    fn name(&self) -> &'static str {
-        match self {
-            Self::NoneOfAll { .. } => "NoneOfAll",
-            Self::IncompleteAll { .. } => "IncompleteAll",
-            Self::AnyBestAllowed { .. } => "AnyBestAllowed",
-            Self::OneOnlyAllowed { .. } => "OneOnlyAllowed",
-            Self::OnePassingMultipleAllowed { .. } => "OnePassingMultipleAllowed",
-            Self::OneAllowsMultiple { .. } => "OneAllowsMultiple",
-            Self::OneOfAny { .. } => "OneOfAny",
-            Self::OneOfOne { .. } => "OneOfOne",
-            Self::NotDenied { .. } => "NotDenied",
-            Self::IneffectiveNot { .. } => "IneffectiveNot",
-            Self::NotRequired { .. } => "NotRequired",
-            Self::ExactlyAllowed { .. } => "ExactlyAllowed",
-            Self::MayHave { .. } => "MayHave",
-            Self::MayAlsoHave { .. } => "MayAlsoHave",
-            Self::HasUndenied { .. } => "HasUndenied",
-            Self::HasAllowed { .. } => "HasAllowed",
-            Self::ShapeUndenied { .. } => "ShapeUndenied",
-        }
-    }
-
     fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
         match self {
-            Self::IncompleteAll(BoundCheck { bound, .. })
-            | Self::AnyBestAllowed(BoundCheck { bound, .. })
-            | Self::OneOnlyAllowed(BoundCheck { bound, .. })
-            | Self::OneOfAny(BoundCheck { bound, .. })
-            | Self::OneOfOne(BoundCheck { bound, .. }) => Some(bound),
+            Self::IncompleteAll(BoundCheck { attempt, .. })
+            | Self::AnyBestAllowed(BoundCheck { attempt, .. })
+            | Self::OneBestAllowed(BoundCheck { attempt, .. })
+            | Self::OneOfAny(BoundCheck { attempt, .. })
+            | Self::OneOfOne(BoundCheck { attempt, .. }) => {
+                if let CheckedType::Bound(attempt) = attempt {
+                    Some(attempt)
+                } else {
+                    unimplemented!();
+                }
+            }
 
             Self::NoneOfAll
             | Self::OnePassingMultipleAllowed(_)
@@ -750,18 +741,221 @@ impl Reason for AllowedBoundReason<'_> {
 
     fn write_nested(
         &self,
-        bound: &TypeBound<'_>,
+        _bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        todo!()
+        match self {
+            Self::IncompleteAll(insufficient)
+            | Self::AnyBestAllowed(insufficient)
+            | Self::OneBestAllowed(insufficient)
+            | Self::OneOfAny(insufficient) // TBD: how are these different?
+            | Self::OneOfOne(insufficient) => {
+                Indent.fmt(f)?;
+                writeln!(
+                    f,
+                    "one of these bounds is `{:#}`.",
+                    Aliased::new(&insufficient.attempt)
+                )?;
+                {
+                    let _depth = LocalDepth::new();
+                    insufficient.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)
+            }
+
+            Self::OnePassingMultipleAllowed((best, insufficient)) => {
+                Indent.fmt(f)?;
+                writeln!(
+                    f,
+                    "one of these bounds is `{:#}`:",
+                    Aliased::new(&best.attempt)
+                )?;
+                {
+                    let _depth = LocalDepth::new();
+                    best.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)?;
+                Indent.fmt(f)?;
+                writeln!(f, "another is `{:#}`:", Aliased::new(&insufficient.attempt))?;
+                {
+                    let _depth = LocalDepth::new();
+                    insufficient.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)
+            }
+
+            Self::OneAllowsMultiple((first, second)) => {
+                Indent.fmt(f)?;
+                writeln!(
+                    f,
+                    "one of these bounds is `{:#}`:",
+                    Aliased::new(&first.attempt)
+                )?;
+                {
+                    let _depth = LocalDepth::new();
+                    first.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)?;
+                Indent.fmt(f)?;
+                writeln!(f, "another is `{:#}`:", Aliased::new(&second.attempt))?;
+                {
+                    let _depth = LocalDepth::new();
+                    second.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)
+            }
+
+            Self::NotDenied(insufficient) => {
+                {
+                    let _depth = LocalDepth::new();
+                    insufficient.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)
+            }
+
+            Self::IneffectiveNot(insufficient) => {
+                {
+                    let _depth = LocalDepth::new();
+                    insufficient.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)
+            }
+
+            Self::NotRequired(required) => {
+                {
+                    let _depth = LocalDepth::new();
+                    required.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)
+            }
+
+            Self::ExactlyAllowed(insufficient) => {
+                todo!();
+                {
+                    let _depth = LocalDepth::new();
+                    insufficient.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)
+            }
+
+            Self::HasAllowed(insufficient) => {
+                todo!();
+                {
+                    let _depth = LocalDepth::new();
+                    insufficient.fmt_check(attempt_var, f)?;
+                }
+                writeln!(f)
+            }
+
+            Self::NoneOfAll
+            | Self::MayHave
+            | Self::MayAlsoHave
+            | Self::HasUndenied
+            | Self::ShapeUndenied => Ok(()),
+        }
     }
 
+    // TODO: needs review
+    // TODO: would be nice to get access to a `MetaType`
     fn write_source(
         &self,
         bound: &TypeBound<'_>,
+        attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        todo!()
+        match self {
+            Self::NoneOfAll => {
+                write!(
+                    f,
+                    "neither requires nor denies `{:#}` through any of its bounds",
+                    Aliased::new(bound)
+                )
+            }
+
+            Self::IncompleteAll(BoundCheck { bound, .. }) => todo!(),
+
+            Self::AnyBestAllowed(BoundCheck { bound, .. }) => todo!(),
+
+            Self::OneBestAllowed(BoundCheck { bound, .. }) => todo!(),
+
+            Self::OnePassingMultipleAllowed((
+                BoundCheck { bound: best, .. },
+                BoundCheck {
+                    bound: insufficient,
+                    ..
+                },
+            )) => write!(
+                f,
+                "would ideally only be `{:#}`, but is compatible with `{:#}`, it might satisfy both; failing exclusivity. thus",
+                Aliased::new(best),
+                Aliased::new(insufficient)
+            ),
+
+            Self::OneAllowsMultiple((
+                BoundCheck { bound: first, .. },
+                BoundCheck { bound: second, .. },
+            )) => write!(
+                f,
+                "is compatible with both `{:#}` and `{:#}`, it might satisfy both; failing exclusivity. thus",
+                Aliased::new(first),
+                Aliased::new(second)
+            ),
+
+            Self::OneOfOne(BoundCheck { bound, .. }) | Self::OneOfAny(BoundCheck { bound, .. }) => {
+                write!(f, "might only satisfy `{:#}`", Aliased::new(bound))
+            }
+
+            Self::NotDenied(BoundCheck { bound, .. }) => {
+                write!(
+                    f,
+                    "negates the rejection of `{:#}`, it has the possibility to fulfill the bound. \
+                    however, this does not guarantee it, therefore",
+                    Aliased::new(bound)
+                )
+            }
+
+            Self::IneffectiveNot(BoundCheck { bound, .. }) => todo!(),
+
+            Self::NotRequired(BoundCheck { bound, .. }) => {
+                write!(
+                    f,
+                    "negates the requirement of `{:#}`, it cannot be guaranteed. thus",
+                    Aliased::new(bound)
+                )
+            }
+
+            Self::ExactlyAllowed(BoundCheck { bound, .. }) => todo!(),
+
+            Self::MayHave => {
+                let CheckedType::Bound(TypeBound::Has { member, req: _ }) = attempt else {
+                    unimplemented!()
+                };
+                write!(
+                    f,
+                    "neither requires nor denies a type from having the member `{:#}`",
+                    SYNTAX_STYLE_ANSI.variable.alt_style(member),
+                )
+            }
+
+            Self::MayAlsoHave => todo!(),
+
+            Self::HasUndenied => todo!(),
+
+            Self::HasAllowed(BoundCheck { bound, .. }) => todo!(),
+
+            Self::ShapeUndenied => {
+                // let TypeBound::Shape(expected) = bound else {
+                //     unimplemented!("expected a shape bound, found {bound:#}");
+                // };
+                write!(
+                    f,
+                    "neither requires nor denies a type from being called with the required shape",
+                )
+            }
+        }
     }
 
     fn write_effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -792,22 +986,17 @@ impl Reason for DeniedBoundReason<'_> {
     where
         Self: 'a;
 
-    fn name(&self) -> &'static str {
-        match self {
-            Self::OneOfAll { .. } => "OneOfAll",
-            Self::OneOfAny { .. } => "OneOfAny",
-            Self::OneOfOne { .. } => "OneOfOne",
-            Self::ExactlyUnsatisfying { .. } => "ExactlyUnsatisfying",
-            Self::CantHave { .. } => "CantHave",
-            Self::HasConflicting { .. } => "HasConflicting",
-        }
-    }
-
     fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
         match self {
-            Self::OneOfAll(BoundCheck { bound, .. })
-            | Self::OneOfAny(BoundCheck { bound, .. })
-            | Self::OneOfOne(BoundCheck { bound, .. }) => Some(bound),
+            Self::OneOfAll(BoundCheck { attempt, .. })
+            | Self::OneOfAny(BoundCheck { attempt, .. })
+            | Self::OneOfOne(BoundCheck { attempt, .. }) => {
+                if let CheckedType::Bound(attempt) = attempt {
+                    Some(attempt)
+                } else {
+                    unimplemented!("expected a bound, found {attempt:#}")
+                }
+            }
 
             Self::ExactlyUnsatisfying(_) | Self::CantHave(_) | Self::HasConflicting(_) => None,
         }
@@ -816,59 +1005,47 @@ impl Reason for DeniedBoundReason<'_> {
     fn write_nested(
         &self,
         _bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
-            Self::OneOfAll(denial) => {
-                // TODO: this is a default
+            Self::OneOfAll(denial) | Self::OneOfAny(denial) | Self::OneOfOne(denial) => {
+                Indent.fmt(f)?;
+                writeln!(
+                    f,
+                    "one of these bounds is `{:#}`:",
+                    Aliased::new(&denial.attempt)
+                )?;
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt_check(None, f)?;
-                }
-                writeln!(f)
-            }
-
-            Self::OneOfAny(denial) => {
-                // TODO: this is a default
-                {
-                    let _depth = LocalDepth::new();
-                    denial.fmt_check(None, f)?;
-                }
-                writeln!(f)
-            }
-
-            Self::OneOfOne(denial) => {
-                // TODO: this is a default
-                {
-                    let _depth = LocalDepth::new();
-                    denial.fmt_check(None, f)?;
+                    denial.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
 
             Self::ExactlyUnsatisfying(unsatisfied) => {
-                // TODO: this is a default
                 {
                     let _depth = LocalDepth::new();
-                    unsatisfied.fmt_check(None, f)?;
+                    unsatisfied.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
 
             Self::CantHave(denial) => {
-                // TODO: this is a default
+                todo!();
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt_check(None, f)?;
+                    denial.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
 
             Self::HasConflicting(denial) => {
-                // TODO: this is a default
+                todo!();
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt_check(None, f)?;
+                    denial.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -878,18 +1055,26 @@ impl Reason for DeniedBoundReason<'_> {
     fn write_source(
         &self,
         _bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        _attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
-            Self::OneOfAll(BoundCheck { bound: denied, .. }) => {
+            Self::OneOfAll(BoundCheck {
+                attempt: denied, ..
+            }) => {
                 write!(f, "necessarily rejects `{:#}`", Aliased::new(denied))
             }
 
-            Self::OneOfAny(BoundCheck { bound: denied, .. }) => {
+            Self::OneOfAny(BoundCheck {
+                attempt: denied, ..
+            }) => {
                 write!(f, "can be satisfied by `{:#}`", Aliased::new(denied))
             }
 
-            Self::OneOfOne(BoundCheck { bound: denied, .. }) => {
+            Self::OneOfOne(BoundCheck {
+                attempt: denied, ..
+            }) => {
                 write!(f, "could be specifically `{:#}`", Aliased::new(denied))
             }
 
@@ -904,12 +1089,16 @@ impl Reason for DeniedBoundReason<'_> {
             }
 
             // TODO: where is this constructed?
-            Self::CantHave(BoundCheck { bound: denied, .. }) => {
+            Self::CantHave(BoundCheck {
+                attempt: denied, ..
+            }) => {
                 todo!()
             }
 
             // TODO: where is this constructed?
-            Self::HasConflicting(BoundCheck { bound: denied, .. }) => {
+            Self::HasConflicting(BoundCheck {
+                attempt: denied, ..
+            }) => {
                 todo!()
             }
         }
@@ -962,22 +1151,6 @@ impl Reason for SatisfiedBoundReason<'_> {
         = Option<&'a TypeBound<'a>>
     where
         Self: 'a;
-
-    fn name(&self) -> &'static str {
-        match self {
-            Self::Required { .. } => "Required",
-            Self::All { .. } => "All",
-            Self::Any { .. } => "Any",
-            Self::One { .. } => "One",
-            Self::Not { .. } => "Not",
-            Self::Exactly { .. } => "Exactly",
-            Self::Has { .. } => "Has",
-            Self::HasMatching { .. } => "HasMatching",
-            Self::Shape { .. } => "Shape",
-            Self::Supports { .. } => "Supports",
-            Self::Satisfies { .. } => "Satisfies",
-        }
-    }
 
     fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
         match self {
@@ -1034,13 +1207,15 @@ impl Reason for SatisfiedBoundReason<'_> {
     fn write_nested(
         &self,
         _bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
             Self::Required(requirement) => {
                 {
                     let _depth = LocalDepth::new();
-                    requirement.fmt_check(None, f)?;
+                    requirement.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -1054,7 +1229,7 @@ impl Reason for SatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    fulfilled.fmt_check(None, f)?;
+                    fulfilled.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -1062,14 +1237,14 @@ impl Reason for SatisfiedBoundReason<'_> {
             Self::Not(unfulfilled) => {
                 {
                     let _depth = LocalDepth::new();
-                    unfulfilled.fmt_check(None, f)?;
+                    unfulfilled.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
 
             Self::HasMatching(fulfilled) => {
                 let TypeBound::Has { member, req: _ } = fulfilled.bound else {
-                    unreachable!()
+                    unimplemented!()
                 };
                 Indent.fmt(f)?;
                 writeln!(
@@ -1079,7 +1254,7 @@ impl Reason for SatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    fulfilled.fmt_check(None, f)?;
+                    fulfilled.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -1096,6 +1271,8 @@ impl Reason for SatisfiedBoundReason<'_> {
     fn write_source(
         &self,
         bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
@@ -1133,7 +1310,7 @@ impl Reason for SatisfiedBoundReason<'_> {
 
             Self::Has => {
                 let TypeBound::Has { member, req: None } = bound else {
-                    unreachable!()
+                    unimplemented!()
                 };
                 write!(
                     f,
@@ -1148,7 +1325,7 @@ impl Reason for SatisfiedBoundReason<'_> {
                     req: Some(_),
                 } = bound
                 else {
-                    unreachable!()
+                    unimplemented!()
                 };
                 write!(
                     f,
@@ -1225,6 +1402,19 @@ impl<'src> From<AllowedBound<'src>> for UnsatisfiedBound<'src> {
     }
 }
 
+impl<'src> TryFrom<super::TypeBoundRequiredness<'src>> for UnsatisfiedBound<'src> {
+    /// Unexpectedly success
+    type Error = RequiredBound<'src>;
+
+    fn try_from(value: super::TypeBoundRequiredness<'src>) -> Result<Self, Self::Error> {
+        match value {
+            super::Requiredness::Require(x) => Err(x),
+            super::Requiredness::Allow(x) => Ok(Self::from(x)),
+            super::Requiredness::Deny(x) => Ok(Self::from(x)),
+        }
+    }
+}
+
 impl Reason for UnsatisfiedBoundReason<'_> {
     type AliasesNeeded<'a>
         = std::iter::Chain<
@@ -1233,25 +1423,6 @@ impl Reason for UnsatisfiedBoundReason<'_> {
     >
     where
         Self: 'a;
-
-    fn name(&self) -> &'static str {
-        match self {
-            Self::Denied { .. } => "Denied",
-            Self::Unrequired { .. } => "Unrequired",
-            Self::NotAll { .. } => "NotAll",
-            Self::NotAny { .. } => "NotAny",
-            Self::NotOne { .. } => "NotOne",
-            Self::OverOne { .. } => "OverOne",
-            Self::NotNot { .. } => "NotNot",
-            Self::Unequal { .. } => "Unequal",
-            Self::MissingMember { .. } => "MissingMember",
-            Self::MemberFails { .. } => "MemberFails",
-            Self::MissingShape { .. } => "MissingShape",
-            Self::ShapeFails { .. } => "ShapeFails",
-            Self::Unsupported { .. } => "Unsupported",
-            Self::Unsatisfies { .. } => "Unsatisfies",
-        }
-    }
 
     fn aliases_needed(&self) -> Self::AliasesNeeded<'_> {
         match self {
@@ -1330,13 +1501,15 @@ impl Reason for UnsatisfiedBoundReason<'_> {
     fn write_nested(
         &self,
         bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
             Self::Denied(denial) => {
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt_check(None, f)?;
+                    denial.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -1344,7 +1517,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
             Self::Unrequired(denial) => {
                 {
                     let _depth = LocalDepth::new();
-                    denial.fmt_check(None, f)?;
+                    denial.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -1358,7 +1531,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    unfulfilled.fmt_check(None, f)?;
+                    unfulfilled.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -1372,14 +1545,14 @@ impl Reason for UnsatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    first.fmt_check(None, f)?;
+                    first.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)?;
                 Indent.fmt(f)?;
                 writeln!(f, "another is `{:#}`:", Aliased::new(&second.bound))?;
                 {
                     let _depth = LocalDepth::new();
-                    second.fmt_check(None, f)?;
+                    second.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -1387,14 +1560,14 @@ impl Reason for UnsatisfiedBoundReason<'_> {
             Self::NotNot(fulfilled) => {
                 {
                     let _depth = LocalDepth::new();
-                    fulfilled.fmt_check(None, f)?;
+                    fulfilled.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
 
             Self::MemberFails(unfulfilled) => {
                 let TypeBound::Has { member, .. } = bound else {
-                    unreachable!()
+                    unimplemented!()
                 };
                 Indent.fmt(f)?;
                 writeln!(
@@ -1404,7 +1577,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
                 )?;
                 {
                     let _depth = LocalDepth::new();
-                    unfulfilled.fmt_check(None, f)?;
+                    unfulfilled.fmt_check(attempt_var, f)?;
                 }
                 writeln!(f)
             }
@@ -1423,6 +1596,8 @@ impl Reason for UnsatisfiedBoundReason<'_> {
     fn write_source(
         &self,
         bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        _attempt_var: Option<MetaType>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
@@ -1463,7 +1638,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
 
             Self::MissingMember => {
                 let TypeBound::Has { member, .. } = bound else {
-                    unreachable!()
+                    unimplemented!()
                 };
                 write!(
                     f,
@@ -1478,7 +1653,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
                     req: Some(req),
                 } = bound
                 else {
-                    unreachable!()
+                    unimplemented!()
                 };
                 write!(
                     f,
@@ -1490,7 +1665,6 @@ impl Reason for UnsatisfiedBoundReason<'_> {
 
             Self::MissingShape => f.write_str("cannot be called"),
 
-            // TODO: show what its shape *is*
             Self::ShapeFails(actual) => write!(f, "is instead called as `{actual:#}`"),
 
             Self::Unsupported(_) => todo!(),
@@ -1528,6 +1702,15 @@ impl<'src> From<AllowedBound<'src>> for UnsatisfiedBoundError<'src> {
     }
 }
 
+impl<'src> TryFrom<super::TypeBoundRequiredness<'src>> for UnsatisfiedBoundError<'src> {
+    /// Unexpectedly success
+    type Error = RequiredBound<'src>;
+
+    fn try_from(value: super::TypeBoundRequiredness<'src>) -> Result<Self, Self::Error> {
+        UnsatisfiedBound::try_from(value).map(Self::from)
+    }
+}
+
 impl Display for UnsatisfiedBoundError<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { diagnosis } = self;
@@ -1550,18 +1733,13 @@ impl Display for UnsatisfiedBoundError<'_> {
             }
 
             CheckedType::Bound(attempt) => {
-                if let [Some(RangeInclusive { start, last })] = let_locals(once((attempt, 1)), f)? {
-                    debug_assert_eq!(start, last, "should only produce one");
-                    let t = MetaType(start);
-                    writeln!(
-                        f,
-                        ". the type `{t:#}` is not guaranteed to satisfy the bound `{:#}`.",
-                        Aliased::new(bound),
-                    )?;
-                    Some(t)
-                } else {
-                    unreachable!("one in should yeild one out")
-                }
+                let t = let_local(attempt, f)?;
+                writeln!(
+                    f,
+                    ". the type `{t:#}` is not guaranteed to satisfy the bound `{:#}`.",
+                    Aliased::new(bound),
+                )?;
+                Some(t)
             }
         };
         writeln!(f, "observe:")?;
@@ -1611,7 +1789,10 @@ mod tests {
                 ))),
             },
         };
-        println!("{error}");
+        println!("\n{error}\n");
+        println!(
+            "NOTE: this unit test passing does not guarantee correctness. the output must be rated manually"
+        );
     }
 
     #[test]
@@ -1680,11 +1861,55 @@ mod tests {
         );
         b.simplify();
 
-        let res = a.satisfaction_of(&b);
-        let Requiredness::Deny(e) = res else {
-            panic!("illegal should error");
-        };
-        let error = UnsatisfiedBoundError::from(e);
-        println!("{error}");
+        let error = UnsatisfiedBoundError::try_from(a.satisfaction_of(&b)).unwrap_or_else(|ok| {
+            panic!("expected an error, found: {ok}");
+        });
+        println!("\n{error}\n");
+        println!(
+            "NOTE: this unit test passing does not guarantee correctness. the output must be rated manually"
+        );
+    }
+
+    #[test]
+    fn test_non_guaranteeing_error_display() {
+        let mut a = TypeBound::Combo(
+            Combinator::Any,
+            [
+                TypeBound::Has {
+                    member: "foo",
+                    req: Some(Box::new(TypeBound::Exactly(AbstractType::Uint))),
+                },
+                TypeBound::Shape(FunShape {
+                    params: [StaticType::Bool, StaticType::Uint].to_vec(),
+                    ret: StaticType::None,
+                }),
+            ]
+            .to_vec(),
+        );
+        a.simplify();
+
+        let mut b = TypeBound::Combo(
+            Combinator::Any,
+            [
+                TypeBound::Has {
+                    member: "bar",
+                    req: None,
+                },
+                TypeBound::Shape(FunShape {
+                    params: Vec::new(),
+                    ret: StaticType::None,
+                }),
+            ]
+            .to_vec(),
+        );
+        b.simplify();
+
+        let error = UnsatisfiedBoundError::try_from(a.satisfaction_of(&b)).unwrap_or_else(|ok| {
+            panic!("expected an error, found: {ok}");
+        });
+        println!("\n{error}\n");
+        println!(
+            "NOTE: this unit test passing does not guarantee correctness. the output must be rated manually"
+        );
     }
 }
