@@ -2363,8 +2363,8 @@ mod tests {
                         TypeBound::Has {
                             member: "join",
                             req: Some(Box::new(TypeBound::Shape(FunShape {
-                                params: [StaticType::Text, StaticType::Text].to_vec(),
-                                ret: StaticType::Text,
+                                params: [AbstractType::Text, AbstractType::Text].to_vec(),
+                                ret: AbstractType::Text,
                             }))),
                         },
                         TypeBound::Not(Box::new(TypeBound::Has {
@@ -2416,8 +2416,8 @@ mod tests {
                     req: Some(Box::new(TypeBound::Exactly(AbstractType::Uint))),
                 },
                 TypeBound::Shape(FunShape {
-                    params: [StaticType::Bool, StaticType::Uint].to_vec(),
-                    ret: StaticType::None,
+                    params: [AbstractType::Bool, AbstractType::Uint].to_vec(),
+                    ret: AbstractType::None,
                 }),
             ]
             .to_vec(),
@@ -2435,7 +2435,7 @@ mod tests {
                 },
                 TypeBound::Shape(FunShape {
                     params: Vec::new(),
-                    ret: StaticType::None,
+                    ret: AbstractType::None,
                 }),
             ]
             .to_vec(),

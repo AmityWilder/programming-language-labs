@@ -1,8 +1,10 @@
 use crate::{
+    analyzer::types::bounds::Combinator,
     error::OpSide,
     scanner::token::{
         ExpansionData, Lexeme, Lexical, SpecToken, Token,
-        value::{Keyword, LexValue, Operator},
+        punc::Punctuation,
+        value::{Keyword, LexValue, Operator, TokenEq},
     },
 };
 use std::range::Range;
@@ -622,6 +624,12 @@ impl TypenameKeyword {
     }
 }
 
+impl std::fmt::Display for TypenameKeyword {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
 impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, TypenameKeyword> {
     type Error = ();
 
@@ -672,13 +680,91 @@ impl<'src> TryFrom<Token<'src>> for SpecToken<'src, Option<TypenameKeyword>> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct NamespacePathPart<'src> {
+    /// Identifier
+    pub name: Lexeme<'src>,
+    /// `::`
+    pub sep: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for NamespacePathPart<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.name.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.sep.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.name, &self.sep).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.name, &self.sep).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct GenericGroup<'src> {
+    /// `<`
+    pub open: Lexeme<'src>,
+    /// (type, `,`)
+    /// only the last comma will ever be [`None`]
+    pub list: Vec<(TypeExpr<'src>, Option<Lexeme<'src>>)>,
+    /// `>`
+    pub close: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for GenericGroup<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.open.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.close.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.open, &self.close).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.open, &self.close).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct Typename<'src> {
+    pub path: Vec<NamespacePathPart<'src>>,
+    pub name: SpecToken<'src, Option<TypenameKeyword>>,
+    pub args: Option<GenericGroup<'src>>,
+}
+
+impl<'src> AstNode<'src> for Typename<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        (self.path.as_slice(), &self.name).get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        (&self.name, self.args.as_ref()).get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        ((self.path.as_slice(), &self.name), self.args.as_ref()).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        ((self.path.as_slice(), &self.name), self.args.as_ref()).expansion(source)
+    }
+}
+
 /// A concrete type
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct TypeExpr<'src> {
-    // TODO: namespace?
     /// Identifier
-    pub name: SpecToken<'src, Option<TypenameKeyword>>,
-    // TODO: generic arguments?
+    pub name: Typename<'src>,
     pub or_ty: Option<OrType<'src>>,
 }
 
@@ -697,6 +783,338 @@ impl<'src> AstNode<'src> for TypeExpr<'src> {
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
         (&self.name, self.or_ty.as_ref()).expansion(source)
+    }
+}
+
+// uses `TokenEq` instead of `Operator` because i cant make up my mind about the syntax
+impl Combinator {
+    pub const fn new(value: TokenEq) -> Option<Self> {
+        Some(match value {
+            TokenEq::Punctuation(Punctuation::Add) => Self::All,
+            TokenEq::Punctuation(Punctuation::Or) => Self::Any,
+            TokenEq::Punctuation(Punctuation::Div) => Self::One,
+            _ => return None,
+        })
+    }
+
+    pub const fn to_token_eq(self) -> TokenEq {
+        match self {
+            Self::All => TokenEq::Punctuation(Punctuation::Add),
+            Self::Any => TokenEq::Punctuation(Punctuation::Or),
+            Self::One => TokenEq::Punctuation(Punctuation::Div),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.to_token_eq().as_str()
+    }
+}
+
+impl<'src> TryFrom<SpecToken<'src, TokenEq>> for SpecToken<'src, Combinator> {
+    type Error = ();
+
+    fn try_from(
+        SpecToken { lex, mac, val }: SpecToken<'src, TokenEq>,
+    ) -> Result<Self, Self::Error> {
+        Combinator::new(val)
+            .map(|val| Self { lex, mac, val })
+            .ok_or(())
+    }
+}
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, Combinator> {
+    type Error = ();
+
+    fn try_from(value: Token<'src>) -> Result<Self, Self::Error> {
+        <SpecToken<'src, TokenEq>>::try_from(value)?.try_into()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct ComboBound<'src> {
+    pub lhs: TypeBound<'src>,
+    pub sep: SpecToken<'src, Combinator>,
+    pub rhs: TypeBound<'src>,
+}
+
+impl<'src> AstNode<'src> for ComboBound<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.lhs.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.rhs.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.lhs, &self.rhs).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.lhs, &self.rhs).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct NegativeBound<'src> {
+    /// `!`
+    pub not: Lexeme<'src>,
+    pub rhs: TypeBound<'src>,
+}
+
+impl<'src> AstNode<'src> for NegativeBound<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.not.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.rhs.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.not, &self.rhs).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.not, &self.rhs).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct ExactTypeBound<'src> {
+    /// `only`
+    pub kw: Lexeme<'src>,
+    pub ty: TypeExpr<'src>,
+}
+
+impl<'src> AstNode<'src> for ExactTypeBound<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.ty.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.kw, &self.ty).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.kw, &self.ty).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct ColonBound<'src> {
+    /// `:`
+    pub colon: Lexeme<'src>,
+    pub bound: TypeBound<'src>,
+}
+
+impl<'src> AstNode<'src> for ColonBound<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.colon.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.bound.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.colon, &self.bound).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.colon, &self.bound).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct MemberBound<'src> {
+    /// `has`
+    pub kw: Lexeme<'src>,
+    /// Identifier
+    pub member: Lexeme<'src>,
+    pub req: Option<ColonBound<'src>>,
+}
+
+impl<'src> AstNode<'src> for MemberBound<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        (&self.member, self.req.as_ref()).get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.kw, (&self.member, self.req.as_ref())).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.kw, (&self.member, self.req.as_ref())).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct ShapeBound<'src> {
+    /// `fun`
+    pub kw: Lexeme<'src>,
+    /// `(`
+    pub open: Lexeme<'src>,
+    /// (bound, `,`)
+    /// only the last comma will ever be [`None`]
+    pub args: Vec<(TypeExpr<'src>, Option<Lexeme<'src>>)>,
+    /// `)`
+    pub close: Lexeme<'src>,
+    // TBD: should return be optional when none?
+    /// `->`
+    pub arrow: Lexeme<'src>,
+    pub ret: TypeExpr<'src>,
+}
+
+impl<'src> AstNode<'src> for ShapeBound<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.ret.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.kw, &self.ret).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.kw, &self.ret).expansion(source)
+    }
+}
+
+/// UNDER CONSTRUCTION
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct OverloadBound<'src> {
+    _marker: std::marker::PhantomData<&'src str>,
+    // TODO
+}
+
+impl<'src> AstNode<'src> for OverloadBound<'src> {
+    fn get_range_start(&self, _source: &'src str) -> Option<usize> {
+        todo!()
+    }
+
+    fn get_range_end(&self, _source: &'src str) -> Option<usize> {
+        todo!()
+    }
+
+    fn get_range(&self, _source: &'src str) -> Option<Range<usize>> {
+        todo!()
+    }
+
+    fn expansion(&self, _source: &'src str) -> Option<ExpansionData<'src>> {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct ExprBound<'src> {
+    /// `for`
+    pub kw: Lexeme<'src>,
+    /// Identifier
+    pub name: Lexeme<'src>,
+    /// `:`
+    pub colon: Lexeme<'src>,
+    pub expr: Expr<'src>,
+}
+
+impl<'src> AstNode<'src> for ExprBound<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.kw.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.expr.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.kw, &self.expr).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.kw, &self.expr).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct GroupedBound<'src> {
+    /// `(`
+    pub open: Lexeme<'src>,
+    pub inner: TypeBound<'src>,
+    /// `)`
+    pub close: Lexeme<'src>,
+}
+
+impl<'src> AstNode<'src> for GroupedBound<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.open.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.close.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.open, &self.close).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.open, &self.close).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
+pub enum TypeBound<'src> {
+    Combo(Box<ComboBound<'src>>),
+    Not(Box<NegativeBound<'src>>),
+    Exact(Box<ExactTypeBound<'src>>),
+    Has(Box<MemberBound<'src>>),
+    Shape(Box<ShapeBound<'src>>),
+    Supports(Box<OverloadBound<'src>>),
+    Satisfies(Box<ExprBound<'src>>),
+    Group(Box<GroupedBound<'src>>),
+}
+
+impl<'src> TypeBound<'src> {
+    pub fn combo(value: ComboBound<'src>) -> Self {
+        Self::Combo(Box::new(value))
+    }
+
+    pub fn not(value: NegativeBound<'src>) -> Self {
+        Self::Not(Box::new(value))
+    }
+
+    pub fn exact(value: ExactTypeBound<'src>) -> Self {
+        Self::Exact(Box::new(value))
+    }
+
+    pub fn has(value: MemberBound<'src>) -> Self {
+        Self::Has(Box::new(value))
+    }
+
+    pub fn shape(value: ShapeBound<'src>) -> Self {
+        Self::Shape(Box::new(value))
+    }
+
+    pub fn supports(value: OverloadBound<'src>) -> Self {
+        Self::Supports(Box::new(value))
+    }
+
+    pub fn satisfies(value: ExprBound<'src>) -> Self {
+        Self::Satisfies(Box::new(value))
+    }
+
+    pub fn group(value: GroupedBound<'src>) -> Self {
+        Self::Group(Box::new(value))
     }
 }
 
@@ -840,7 +1258,7 @@ impl<'src> BlockExpr<'src> {
         Self::Loop(Box::new(inner))
     }
 
-    pub fn block_expr(inner: BlockStmt<'src>) -> Self {
+    pub const fn block(inner: BlockStmt<'src>) -> Self {
         Self::Block(inner)
     }
 }

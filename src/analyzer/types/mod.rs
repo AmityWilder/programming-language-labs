@@ -11,6 +11,8 @@ use std::{
     range::Range,
 };
 
+// TODO: pre vs post monomorphization types
+
 pub mod bounds;
 use bounds::{TypeBound, TypeSatisfaction};
 
@@ -136,7 +138,7 @@ impl<T: ?Sized + TypeSize> TypeSize for &T {
 /// Like an [`ArrayType`], but the length is determined at runtime
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct ViewType<'src> {
-    pub item: StaticType<'src>,
+    pub item: AbstractType<'src>,
 }
 
 impl TypeSize for ViewType<'_> {}
@@ -165,7 +167,7 @@ impl Display for ViewType<'_> {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct ArrayType<'src> {
-    pub item: StaticType<'src>,
+    pub item: AbstractType<'src>,
     pub len: usize, // TODO: constant expression? bounds?
 }
 
@@ -215,7 +217,7 @@ impl Display for ArrayType<'_> {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Ptr<'src> {
-    pub to: StaticType<'src>,
+    pub to: AbstractType<'src>,
 }
 
 impl TypeSize for Ptr<'_> {
@@ -277,7 +279,7 @@ impl Display for OrType {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Fallible<'src> {
-    pub then: StaticType<'src>,
+    pub then: AbstractType<'src>,
     pub or: OrType,
 }
 
@@ -371,7 +373,7 @@ impl Display for RecType<'_> {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct SupType<'src> {
     pub name: &'src str,
-    pub variants: BTreeSet<StaticType<'src>>,
+    pub variants: BTreeSet<AbstractType<'src>>,
 }
 
 impl TypeSize for SupType<'_> {
@@ -422,7 +424,7 @@ impl Display for SupType<'_> {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct SubType<'src> {
     pub name: &'src str,
-    pub base: StaticType<'src>,
+    pub base: AbstractType<'src>,
     pub req: Box<TypeBound<'src>>,
 }
 
@@ -485,7 +487,7 @@ impl Display for SubType<'_> {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct CatType<'src> {
     pub name: &'src str,
-    pub repr: Box<StaticType<'src>>,
+    pub repr: Box<AbstractType<'src>>,
     pub values: BTreeSet<ConstantValue>,
 }
 
@@ -539,8 +541,8 @@ impl Display for CatType<'_> {
 /// A matcher for any function with the specified combination of parameters and return
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct FunShape<'src> {
-    pub params: Vec<StaticType<'src>>,
-    pub ret: StaticType<'src>,
+    pub params: Vec<AbstractType<'src>>,
+    pub ret: AbstractType<'src>,
     // TBD: captures?
 }
 

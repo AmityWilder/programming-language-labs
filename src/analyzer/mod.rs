@@ -200,7 +200,7 @@ pub enum AnalysisOp<'src> {
 
 impl<'src> GetType<'src> for AnalysisOp<'src> {
     type Output<'ty>
-        = &'ty StaticType<'src>
+        = &'ty AbstractType<'src>
     where
         'src: 'ty;
 
@@ -391,27 +391,27 @@ impl<'src> CoagulateVars<'src> for AnalysisVar<'src> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprType<'src, 'ty> {
-    Static(&'ty StaticType<'src>),
+    AbstractRef(&'ty AbstractType<'src>),
     Literal(PrimitiveType),
-    Directive(AbstractType<'src>),
+    Abstract(AbstractType<'src>),
     Variable(VarType<'src, 'ty>),
 }
 
 impl<'src> TypeCompatible<'src> for ExprType<'src, '_> {
     fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
         match self {
-            Self::Static(t) => t.is_type_eq(other),
+            Self::AbstractRef(t) => t.is_type_eq(other),
             Self::Literal(t) => t.is_type_eq(other),
-            Self::Directive(t) => t.is_type_eq(other),
+            Self::Abstract(t) => t.is_type_eq(other),
             Self::Variable(t) => t.is_type_eq(other),
         }
     }
 
     fn to_abstract(&self) -> AbstractType<'src> {
         match self {
-            Self::Static(t) => t.to_abstract(),
+            Self::AbstractRef(t) => t.to_abstract(),
             Self::Literal(t) => t.to_abstract(),
-            Self::Directive(t) => t.to_abstract(),
+            Self::Abstract(t) => t.to_abstract(),
             Self::Variable(t) => t.to_abstract(),
         }
     }
@@ -419,9 +419,9 @@ impl<'src> TypeCompatible<'src> for ExprType<'src, '_> {
 impl std::fmt::Display for ExprType<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Static(t) => t.fmt(f),
+            Self::AbstractRef(t) => t.fmt(f),
             Self::Literal(t) => t.fmt(f),
-            Self::Directive(t) => t.fmt(f),
+            Self::Abstract(t) => t.fmt(f),
             Self::Variable(t) => t.fmt(f),
         }
     }
@@ -464,33 +464,57 @@ impl<'src> CoagulateVars<'src> for AnalysisAssignment<'src> {
     }
 }
 
-impl<'src> ast::TypeExpr<'src> {
-    fn analyze(&self, _source: &'src str, _env: &StaticEnvironment<'src>) -> AbstractType<'src> {
-        let ok_ty = if let Some(name) = self.name.val {
-            StaticType::Primitive(match name {
-                ast::TypenameKeyword::None => PrimitiveType::None,
-                ast::TypenameKeyword::Nevr => PrimitiveType::Nevr,
-                ast::TypenameKeyword::Fail => PrimitiveType::Fail,
-                ast::TypenameKeyword::Bool => PrimitiveType::Bool,
-                ast::TypenameKeyword::Uint => PrimitiveType::Uint,
-                ast::TypenameKeyword::Sint => PrimitiveType::Sint,
-                ast::TypenameKeyword::Flpt => PrimitiveType::Flpt,
-                ast::TypenameKeyword::Char => PrimitiveType::Char,
-                ast::TypenameKeyword::Text => PrimitiveType::Text,
-            })
+impl<'src> Analyze<'src> for ast::Typename<'src> {
+    type Ouptut = AbstractType<'src>;
+
+    fn analyze(
+        &self,
+        _source: &'src str,
+        _env: &mut StaticEnvironment<'src>,
+        _ret: Option<&AbstractType<'src>>,
+    ) -> Result<'src, Self::Ouptut> {
+        if let Some(name) = self.name.val {
+            if self.path.is_empty() {
+                Ok(AbstractType::Concrete(StaticType::Primitive(match name {
+                    ast::TypenameKeyword::None => PrimitiveType::None,
+                    ast::TypenameKeyword::Nevr => PrimitiveType::Nevr,
+                    ast::TypenameKeyword::Fail => PrimitiveType::Fail,
+                    ast::TypenameKeyword::Bool => PrimitiveType::Bool,
+                    ast::TypenameKeyword::Uint => PrimitiveType::Uint,
+                    ast::TypenameKeyword::Sint => PrimitiveType::Sint,
+                    ast::TypenameKeyword::Flpt => PrimitiveType::Flpt,
+                    ast::TypenameKeyword::Char => PrimitiveType::Char,
+                    ast::TypenameKeyword::Text => PrimitiveType::Text,
+                })))
+            } else {
+                todo!("error: primitive types are global scope")
+            }
         } else {
             todo!("custom types")
-        };
+        }
+    }
+}
 
-        AbstractType::Concrete(if let Some(or_ty) = self.or_ty.as_ref() {
-            StaticType::OrTy(Box::new(Fallible {
+impl<'src> Analyze<'src> for ast::TypeExpr<'src> {
+    type Ouptut = AbstractType<'src>;
+
+    fn analyze(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> Result<'src, Self::Ouptut> {
+        let ok_ty = self.name.analyze(source, env, ret)?;
+
+        Ok(if let Some(or_ty) = self.or_ty.as_ref() {
+            AbstractType::Concrete(StaticType::OrTy(Box::new(Fallible {
                 then: ok_ty,
                 or: match or_ty.ty.val {
                     ast::OrTypeKeyword::None => OrType::None,
                     ast::OrTypeKeyword::Nevr => OrType::Nevr,
                     ast::OrTypeKeyword::Fail => OrType::Fail,
                 },
-            }))
+            })))
         } else {
             ok_ty
         })
@@ -518,11 +542,11 @@ impl<'src> GetType<'src> for AnalysisExpr<'src> {
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         match self {
-            Self::Block(x) => x.get_type(env).map(ExprType::Directive),
+            Self::Block(x) => x.get_type(env).map(ExprType::Abstract),
             Self::Assignment(x) => x.get_type(env).map(ExprType::Literal),
-            Self::Op(x) => x.get_type(env).map(ExprType::Static),
+            Self::Op(x) => x.get_type(env).map(ExprType::AbstractRef),
             Self::Literal(x) => x.get_type(env).map(ExprType::Literal),
-            Self::Directive(x) => x.get_type(env).map(ExprType::Directive),
+            Self::Directive(x) => x.get_type(env).map(ExprType::Abstract),
             Self::Variable(x) => x.get_type(env).map(ExprType::Variable),
         }
     }
@@ -810,18 +834,16 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                 };
 
                 let ty = match ty {
-                    ExprType::Static(ty)
-                    | ExprType::Variable(VarType::Abstract(AbstractType::Concrete(ty))) => {
-                        ty.clone()
-                    }
-                    ExprType::Literal(ty) => StaticType::Primitive(ty),
+                    ExprType::AbstractRef(ty) => ty.clone(),
+                    ExprType::Variable(VarType::Abstract(ty)) => ty.clone(),
+                    ExprType::Literal(ty) => AbstractType::Concrete(StaticType::Primitive(ty)),
                     _ => todo!("generic `exists`"),
                 };
                 Ok(AnalysisOp::UnaryPost(
                     (
                         FunShape {
                             params: vec![ty],
-                            ret: StaticType::Primitive(PrimitiveType::Bool),
+                            ret: AbstractType::Bool,
                         },
                         builtin_ops::interp_exists_def,
                     ),
@@ -965,7 +987,7 @@ impl<'src> ast::Binary<'src> {
     ) -> Result<'src, AnalysisExpr<'src>> {
         let lhs = self.lhs.analyze(source, env, None)?;
         let r_ty = if let ast::Expr::Type(type_expr) = &self.rhs {
-            type_expr.analyze(source, env)
+            type_expr.analyze(source, env, None)?
         } else {
             unimplemented!("should be handled by grammar");
         };
@@ -1884,7 +1906,8 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
         let annotated_type = self
             .ty
             .as_ref()
-            .map(|annotation| annotation.ty.analyze(source, env));
+            .map(|annotation| annotation.ty.analyze(source, env, None))
+            .transpose()?;
         let expr = self
             .assignment
             .as_ref()

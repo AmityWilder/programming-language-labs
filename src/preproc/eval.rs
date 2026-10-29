@@ -444,18 +444,27 @@ where
                     ErrorType::PreOrType,
                 ));
             }
-            match inner.name.val {
-                Some(TypenameKeyword::Bool) => Ok(PpValue::Bool),
-                Some(TypenameKeyword::Sint) => Ok(PpValue::Sint),
-                Some(TypenameKeyword::Uint) => Ok(PpValue::Uint),
-                Some(TypenameKeyword::Flpt) => Ok(PpValue::Flpt),
-                Some(TypenameKeyword::Char) => Ok(PpValue::Char),
-                Some(TypenameKeyword::Text) => Ok(PpValue::Text),
-                _ => Err(ContextError::token_error(
-                    source,
-                    Some(&inner.name),
-                    ErrorType::PreOrType,
-                )),
+            if let Some(x) = inner.name.name.val {
+                if !inner.name.path.is_empty() {
+                    todo!("error: primitives are global scope");
+                }
+                if inner.name.args.is_some() {
+                    todo!("error: primitives do not have generic parameters");
+                }
+                match x {
+                    TypenameKeyword::Bool => Ok(PpValue::Bool),
+                    TypenameKeyword::Sint => Ok(PpValue::Sint),
+                    TypenameKeyword::Uint => Ok(PpValue::Uint),
+                    TypenameKeyword::Flpt => Ok(PpValue::Flpt),
+                    TypenameKeyword::Char => Ok(PpValue::Char),
+                    TypenameKeyword::Text => Ok(PpValue::Text),
+
+                    TypenameKeyword::None | TypenameKeyword::Nevr | TypenameKeyword::Fail => {
+                        todo!("preprocessor does not support `{x}`")
+                    }
+                }
+            } else {
+                todo!("error: custom types do not exist during preprocessing")
             }
         }
     }

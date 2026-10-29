@@ -233,6 +233,9 @@ define_token_eq! {
         #[op_desc([_, _] => "membership")]
         Has = "has",
 
+        /// Used in a type bound to specify that a type parameter must be exactly one type
+        Only = "only",
+
         // ----------------------------
         // Flow
         // ----------------------------

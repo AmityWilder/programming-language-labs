@@ -1205,8 +1205,8 @@ mod tests {
                             TypeBound::Has {
                                 member: "join",
                                 req: Some(Box::new(TypeBound::Shape(FunShape {
-                                    params: [StaticType::Text, StaticType::Text].to_vec(),
-                                    ret: StaticType::Text,
+                                    params: [AbstractType::Text, AbstractType::Text].to_vec(),
+                                    ret: AbstractType::Text,
                                 }))),
                             },
                             TypeBound::Not(Box::new(TypeBound::Has {

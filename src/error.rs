@@ -396,9 +396,12 @@ expected_token! {
         Literal = "a literal",
         ParenExpr = "a parenthesized expression",
         ExprOrRParen = "an expression or `)`",
+        BoundOrRParen = "a type bound or `)`",
+        TypeOrRAngle = "a type or `>`",
         ExprOrRBrack = "an expression or `]`",
         Expr = "an expression",
-        TypeExpr = "a type expression",
+        TypeExpr = "a type",
+        TypeBound = "a type bound",
         OrType = "an \"or-type\" (`fail`, `none`, or `nevr`)",
         FnSource = "a function name or parenthesized function object expression",
         Semi = "a `;`",
@@ -410,6 +413,7 @@ expected_token! {
         InKeyword = "an `in` keyword",
         Statement = "a statement",
         LoopBlock = "a loop block after the label",
+        Arrow = "a `->`",
     }
 }
 

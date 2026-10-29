@@ -1,6 +1,7 @@
 //! Context-free grammar
 
 use crate::{
+    analyzer::types::bounds::Combinator,
     error::{ContextError, ExpectedToken, OpSide},
     grammar::ast::{
         Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DeferParam, DoneStmt, ExprStmt,
@@ -17,8 +18,10 @@ use crate::{
 };
 use Operator::*;
 use ast::{
-    Binary, BindingPattern, DeclDefer, Directive, DirectiveKw, Expr, Grouping, Label, Literal,
-    LoopBlock, LoopKind, OrType, ScopeLabel, SkipStmt, TypeAnnotation, TypeExpr, Unary,
+    Binary, BindingPattern, ColonBound, ComboBound, DeclDefer, Directive, DirectiveKw,
+    ExactTypeBound, Expr, ExprBound, GenericGroup, GroupedBound, Grouping, Label, Literal,
+    LoopBlock, LoopKind, MemberBound, NamespacePathPart, NegativeBound, OrType, ScopeLabel,
+    ShapeBound, SkipStmt, TypeAnnotation, TypeBound, TypeExpr, Typename, Unary,
 };
 
 pub mod ast;
@@ -95,6 +98,88 @@ where
 }
 
 impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
+    /// Returns the next token if it is a `<`, possibly tearing the
+    /// leading `<` off of another token (such as `<<` or `<=`) to do so.
+    ///
+    /// Special case: `<=>` is left unharmed, as it is more likely to be a bound on a generic type than the argument.
+    ///
+    /// Used in generic types
+    fn rip_langle(&mut self) -> Option<Lexeme<'src>> {
+        use Punctuation::{Assign, Iff, Le, Lt, Shl, ShlAssign};
+        const LANGLE: char = '<';
+        self.pull_if_eq(LexValue::Punctuation(Lt)).or_else(|| {
+            self.tokens
+                .peek_mut()
+                .filter(|next| next.lex.starts_with(LANGLE))
+                .and_then(|next| {
+                    next.val = match next.val {
+                        LexValue::Punctuation(Lt) => {
+                            unreachable!("`<` should have been handled by pull_if_eq")
+                        }
+                        LexValue::Punctuation(Iff) => return None,
+
+                        LexValue::Punctuation(Le) => LexValue::Punctuation(Assign),
+                        LexValue::Punctuation(Shl) => LexValue::Punctuation(Lt),
+                        LexValue::Punctuation(ShlAssign) => LexValue::Punctuation(Le),
+
+                        x => {
+                            if cfg!(debug_assertions) {
+                                todo!("unhandled: `{x:?}` starts with `<`")
+                            } else {
+                                return None;
+                            }
+                        }
+                    };
+                    let (torn, rest) = next.lex.split_at(LANGLE.len_utf8());
+                    next.lex = rest;
+                    Some(Lexeme {
+                        lex: torn,
+                        mac: next.mac,
+                    })
+                })
+        })
+    }
+
+    /// Returns the next token if it is a `>`, possibly tearing the
+    /// leading `>` off of another token (such as `>>` or `>=`) to do so.
+    ///
+    /// Used in generic types
+    fn rip_rangle(&mut self) -> Option<Lexeme<'src>> {
+        use Punctuation::{Assign, Ge, Gt, Shr, ShrAssign};
+        const RANGLE: char = '>';
+        self.pull_if_eq(LexValue::Punctuation(Punctuation::Gt))
+            .or_else(|| {
+                self.tokens
+                    .peek_mut()
+                    .filter(|next| next.lex.starts_with(RANGLE))
+                    .and_then(|next| {
+                        next.val = match next.val {
+                            LexValue::Punctuation(Gt) => {
+                                unreachable!("`>` should have been handled by pull_if_eq")
+                            }
+
+                            LexValue::Punctuation(Ge) => LexValue::Punctuation(Assign),
+                            LexValue::Punctuation(Shr) => LexValue::Punctuation(Gt),
+                            LexValue::Punctuation(ShrAssign) => LexValue::Punctuation(Ge),
+
+                            x => {
+                                if cfg!(debug_assertions) {
+                                    todo!("unhandled: `{x:?}` starts with `>`")
+                                } else {
+                                    return None;
+                                }
+                            }
+                        };
+                        let (torn, rest) = next.lex.split_at(RANGLE.len_utf8());
+                        next.lex = rest;
+                        Some(Lexeme {
+                            lex: torn,
+                            mac: next.mac,
+                        })
+                    })
+            })
+    }
+
     /// Optional token
     fn pull_if<P>(&mut self, p: P) -> Option<Token<'src>>
     where
@@ -212,7 +297,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             // start of new statement/definition
             if self.tokens.peek().is_some_and(match_token!(Keyword::{
                 Rec | Sup | Cat | Alt | Sub | Def | Fun | Mem | Let | Uni | Pvt | If |
-                Or | Pick | Rep | For | Loop | Cord | Done | Skip | Give | Fail | Emit
+                Or | Pick | Rep | For | Loop | Cord | Done | Skip | Give | Fail | Emit | Prnt
             })) {
                 break;
             }
@@ -575,10 +660,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         self.if_statement()
             .map(|res| res.map(BlockExpr::if_expr))
             .or_else(|| self.loop_block().map(|res| res.map(BlockExpr::loop_expr)))
-            .or_else(|| {
-                self.block_statement()
-                    .map(|res| res.map(BlockExpr::block_expr))
-            })
+            .or_else(|| self.block_statement().map(|res| res.map(BlockExpr::block)))
             .map(|res| res.map(Expr::Block))
             .unwrap_or_else(|| self.or())
     }
@@ -723,7 +805,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     /// `primary -> literal | group | variable | type_expression`
     ///
-    /// `type_expression` is included as a variant of `primary` in order
+    /// `type_expression`/`type_bound` are included as a variant of `primary` in order
     /// to allow type errors instead of just "wrong token" errors.
     fn primary(&mut self) -> Result<Expr<'src>, ContextError<'src>> {
         self.literal()
@@ -802,9 +884,45 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             })
     }
 
-    /// `type_expression -> ( "nevr" | "bool" | "uint" | "sint" | "flpt" | "char" | "text" | "fail" | IDENTIFIER ) ( "|" ( "fail" | "none" | "nevr" ) )?`
+    /// `generic_group -> "<" ( type_expression ( "," type_expression )* ( "," )? )? ">"`
+    fn generic_group(&mut self) -> Option<Result<GenericGroup<'src>, ContextError<'src>>> {
+        self.rip_langle().map(|open| {
+            let mut list = Vec::new();
+            let close = loop {
+                if let Some(close) = self.rip_rangle() {
+                    break close;
+                }
+                let item = self.type_expression()?;
+                let comma = self.pull_if_eq(LexValue::Punctuation(Punctuation::Comma));
+                list.push((item, comma));
+                if comma.is_none() {
+                    break self
+                        .rip_rangle()
+                        .ok_or_else(|| self.error(ExpectedToken::TypeOrRAngle))
+                        .map_err(|e| {
+                            e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source))
+                        })?;
+                }
+            };
+            Ok(GenericGroup { open, list, close })
+        })
+    }
+
+    /// `type_expression -> ( ( "nevr" | "bool" | "uint" | "sint" | "flpt" | "char" | "text" | "fail" | IDENTIFIER ) "::" )*
+    ///     ( "nevr" | "bool" | "uint" | "sint" | "flpt" | "char" | "text" | "fail" | IDENTIFIER )
+    ///     ( generic_group )?
+    ///     ( "|" ( "fail" | "none" | "nevr" ) )?`
     fn type_expression(&mut self) -> Result<TypeExpr<'src>, ContextError<'src>> {
-        let name = self.try_pull_into(ExpectedToken::TypeExpr)?;
+        let mut path = Vec::new();
+        let mut name = self.try_pull_into(ExpectedToken::TypeExpr)?;
+        while let Some(sep) = self.pull_if_eq(LexValue::Punctuation(Punctuation::PathSep)) {
+            let next = self.try_pull_into(ExpectedToken::TypeExpr)?;
+            let prev = std::mem::replace(&mut name, next);
+            path.push(NamespacePathPart {
+                name: prev.into_lexeme(),
+                sep,
+            });
+        }
         let or_ty = self
             .pull_if_eq(LexValue::Punctuation(Punctuation::Or))
             .map(|pipe| {
@@ -814,8 +932,172 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                 })
             });
         Ok(TypeExpr {
-            name,
+            name: Typename {
+                path: Vec::new(), // TODO
+                name,
+                args: None, // TODO
+            },
             or_ty: or_ty.transpose()?,
         })
+    }
+
+    /// `type_bound ->  exact_bound | member_bound | shape_bound | expr_bound | grouped_bound | or_bound`
+    fn type_bound(&mut self) -> Result<TypeBound<'src>, ContextError<'src>> {
+        self.member_bound()
+            .map(|res| res.map(TypeBound::has))
+            .or_else(|| self.exact_bound().map(|res| res.map(TypeBound::exact)))
+            .or_else(|| self.shape_bound().map(|res| res.map(TypeBound::shape)))
+            .or_else(|| self.expr_bound().map(|res| res.map(TypeBound::satisfies)))
+            .or_else(|| self.grouped_bound().map(|res| res.map(TypeBound::group)))
+            .unwrap_or_else(|| self.or_bound())
+    }
+
+    /// `exact_bound -> "only" type_expression`
+    fn exact_bound(&mut self) -> Option<Result<ExactTypeBound<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Only)).map(|kw| {
+            Ok(ExactTypeBound {
+                kw,
+                ty: self.type_expression()?,
+            })
+        })
+    }
+
+    /// `member_bound -> "has" IDENTIFIER ( colon_bound )?`
+    fn member_bound(&mut self) -> Option<Result<MemberBound<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Has)).map(|kw| {
+            Ok(MemberBound {
+                kw,
+                member: self.try_pull_eq(LexValue::Identifier, ExpectedToken::Ident)?,
+                req: self.colon_bound().transpose()?,
+            })
+        })
+    }
+
+    /// `type_bound -> ":" type_bound`
+    fn colon_bound(&mut self) -> Option<Result<ColonBound<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Punctuation(Punctuation::Colon))
+            .map(|colon| {
+                Ok(ColonBound {
+                    colon,
+                    bound: self.type_bound()?,
+                })
+            })
+    }
+
+    /// `shape_bound -> "fun" "(" ( type_expression ( "," type_expression )* ( "," )? )? ")" "->" type_expression`
+    fn shape_bound(&mut self) -> Option<Result<ShapeBound<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Fun)).map(|kw| {
+            let open = self.try_pull_eq(
+                LexValue::Punctuation(Punctuation::LParen),
+                ExpectedToken::LParen,
+            )?;
+
+            let mut args = Vec::new();
+            let close = loop {
+                if let Some(close) = self.pull_if_eq(LexValue::Punctuation(Punctuation::RParen)) {
+                    break close;
+                }
+                let item = self.type_expression()?;
+                let comma = self.pull_if_eq(LexValue::Punctuation(Punctuation::Comma));
+                args.push((item, comma));
+                if comma.is_none() {
+                    break self
+                        .try_pull_eq(
+                            LexValue::Punctuation(Punctuation::RParen),
+                            ExpectedToken::BoundOrRParen,
+                        )
+                        .map_err(|e| {
+                            e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source))
+                        })?;
+                }
+            };
+
+            Ok(ShapeBound {
+                kw,
+                open,
+                args,
+                close,
+                // TBD: optional?
+                arrow: self.try_pull_eq(
+                    LexValue::Punctuation(Punctuation::Arrow),
+                    ExpectedToken::Arrow,
+                )?,
+                ret: self.type_expression()?,
+            })
+        })
+    }
+
+    /// `expr_bound -> "for" IDENTIFIER ":" expression`
+    fn expr_bound(&mut self) -> Option<Result<ExprBound<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::For)).map(|kw| {
+            Ok(ExprBound {
+                kw,
+                name: self.try_pull_eq(LexValue::Identifier, ExpectedToken::Ident)?,
+                colon: self.try_pull_eq(
+                    LexValue::Punctuation(Punctuation::Colon),
+                    ExpectedToken::Colon,
+                )?,
+                expr: self.expression()?,
+            })
+        })
+    }
+
+    /// `grouped_bound -> "(" type_bound ")"`
+    fn grouped_bound(&mut self) -> Option<Result<GroupedBound<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Punctuation(Punctuation::LParen))
+            .map(|open| {
+                Ok(GroupedBound {
+                    open,
+                    inner: self.type_bound()?,
+                    close: self
+                        .try_pull_eq(
+                            LexValue::Punctuation(Punctuation::RParen),
+                            ExpectedToken::BoundOrRParen,
+                        )
+                        .map_err(|e| {
+                            e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source))
+                        })?,
+                })
+            })
+    }
+
+    /// `or_bound -> xor_bound ( "|" xor_bound )*`
+    fn or_bound(&mut self) -> Result<TypeBound<'src>, ContextError<'src>> {
+        let mut lhs = self.xor_bound()?;
+        while let Some(sep) = self.pull_into_if_in(&[Combinator::Any]) {
+            let rhs = self.xor_bound()?;
+            lhs = TypeBound::combo(ComboBound { lhs, sep, rhs });
+        }
+        Ok(lhs)
+    }
+
+    /// `xor_bound -> and_bound ( "/" and_bound )*`
+    fn xor_bound(&mut self) -> Result<TypeBound<'src>, ContextError<'src>> {
+        let mut lhs = self.or_bound()?;
+        while let Some(sep) = self.pull_into_if_in(&[Combinator::One]) {
+            let rhs = self.or_bound()?;
+            lhs = TypeBound::combo(ComboBound { lhs, sep, rhs });
+        }
+        Ok(lhs)
+    }
+
+    /// `and_bound -> not_bound ( "+" not_bound )*`
+    fn and_bound(&mut self) -> Result<TypeBound<'src>, ContextError<'src>> {
+        let mut lhs = self.not_bound()?;
+        while let Some(sep) = self.pull_into_if_in(&[Combinator::All]) {
+            let rhs = self.not_bound()?;
+            lhs = TypeBound::combo(ComboBound { lhs, sep, rhs });
+        }
+        Ok(lhs)
+    }
+
+    /// `not_bound -> ( "!" )* type_bound`
+    fn not_bound(&mut self) -> Result<TypeBound<'src>, ContextError<'src>> {
+        if let Some(not) = self.pull_if_eq(LexValue::Punctuation(Punctuation::Not)) {
+            let rhs = self.not_bound()?;
+            Ok(TypeBound::not(NegativeBound { not, rhs }))
+        } else {
+            self.type_bound()
+        }
     }
 }

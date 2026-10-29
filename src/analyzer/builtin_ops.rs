@@ -39,10 +39,10 @@ macro_rules! prim_op {
                 output: AbstractType::$output,
                 fun: FunShape {
                     params: vec![
-                        StaticType::$lhs,
-                        StaticType::$rhs,
+                        AbstractType::$lhs,
+                        AbstractType::$rhs,
                     ],
-                    ret: StaticType::$output,
+                    ret: AbstractType::$output,
                 },
                 def: {
                     fn interp<'brw, 'src>(
@@ -95,8 +95,8 @@ macro_rules! prim_op {
                 operands: OperandTypes::UnaryPre(AbstractType::$rhs),
                 output: AbstractType::$output,
                 fun: FunShape {
-                    params: vec![StaticType::$rhs],
-                    ret: StaticType::$output,
+                    params: vec![AbstractType::$rhs],
+                    ret: AbstractType::$output,
                 },
                 def: {
                     fn interp<'brw, 'src>(rhs: InterpValue<'brw, 'src>) -> Result<InterpValue<'brw, 'src>, Failure> {
@@ -133,8 +133,8 @@ macro_rules! prim_op {
                 operands: OperandTypes::UnaryPost(AbstractType::$lhs),
                 output: AbstractType::$output,
                 fun: FunShape {
-                    params: vec![StaticType::$lhs],
-                    ret: StaticType::$output,
+                    params: vec![AbstractType::$lhs],
+                    ret: AbstractType::$output,
                 },
                 def: {
                     fn interp<'brw, 'src>(
@@ -197,8 +197,8 @@ macro_rules! incr_decr_op {
                 operands: OperandTypes::UnaryPost(AbstractType::$rhs),
                 output: AbstractType::$output,
                 fun: FunShape {
-                    params: vec![StaticType::$rhs],
-                    ret: StaticType::$output,
+                    params: vec![AbstractType::$rhs],
+                    ret: AbstractType::$output,
                 },
                 def: {
                     fn interp<'brw, 'src>(rhs: InterpValue<'brw, 'src>) -> Result<InterpValue<'brw, 'src>, Failure> {

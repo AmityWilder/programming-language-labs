@@ -114,21 +114,6 @@ impl LispDisplay for TypeName<'_> {
     }
 }
 
-impl LispDisplay for TypeExpr<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { name, or_ty } = self;
-        if let Some(OrType { pipe, ty }) = or_ty {
-            parenthesize!(
-                f,
-                pipe.lex,
-                [Lisp::new(&TypeName(name.lex)), Lisp::new(&TypeName(ty.lex))]
-            )
-        } else {
-            std::fmt::Display::fmt(Lisp::new(&TypeName(name.lex)), f)
-        }
-    }
-}
-
 impl LispDisplay for Literal<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { value } = self;
@@ -290,7 +275,7 @@ impl LispDisplay for Expr<'_> {
             Self::Directive(inner) => LispDisplay::fmt(inner, f),
             Self::Variable(inner) => LispDisplay::fmt(inner, f),
             Self::Grouping(inner) => LispDisplay::fmt(&**inner, f),
-            Self::Type(inner) => LispDisplay::fmt(&**inner, f),
+            Self::Type(_inner) => todo!(),
         }
     }
 }
