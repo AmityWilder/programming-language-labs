@@ -1,13 +1,16 @@
 use crate::{
-    SYNTAX_STYLE_ANSI, Todo,
+    SYNTAX_STYLE_ANSI,
     analyzer::{
         static_env::EnvKey,
         types::{
             AbstractType, FunShape, TypeCompatible,
-            bounds::error::{
-                AllowedBound, AllowedBoundReason, BoundCheck, CheckedType, DeniedBound,
-                DeniedBoundReason, RequiredBound, RequiredBoundReason, SatisfiedBound,
-                SatisfiedBoundReason, UnsatisfiedBound, UnsatisfiedBoundReason,
+            bounds::{
+                error::{
+                    AllowedBound, AllowedBoundReason, BoundCheck, CheckedType, DeniedBound,
+                    DeniedBoundReason, RequiredBound, RequiredBoundReason, SatisfiedBound,
+                    SatisfiedBoundReason, UnsatisfiedBound, UnsatisfiedBoundReason,
+                },
+                pure::PureExpr,
             },
         },
     },
@@ -17,6 +20,7 @@ use crate::{
 use std::fmt::Display;
 
 pub mod error;
+pub mod pure;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Satisfaction<T, U, E> {
@@ -36,6 +40,10 @@ impl<T, U, E> Satisfaction<T, U, E> {
 
     pub const fn is_failing(&self) -> bool {
         matches!(self, Self::Failing(_))
+    }
+
+    pub const fn is_possible(&self) -> bool {
+        matches!(self, Self::Passing(_) | Self::Unclear(_))
     }
 }
 
@@ -57,6 +65,10 @@ impl<T, U, E> Requiredness<T, U, E> {
 
     pub const fn is_deny(&self) -> bool {
         matches!(self, Self::Deny(_))
+    }
+
+    pub const fn is_possible(&self) -> bool {
+        matches!(self, Self::Require(_) | Self::Allow(_))
     }
 }
 
@@ -134,7 +146,79 @@ pub enum TypeBound<'src> {
 
     /// An expression the type must be guaranteed to satisfy at runtime, such as "x!=0", "x>=0", "6<=x<=10", "x.foo==x.bar", etc.
     /// Mainly enforced by checking if conditions/assertions guard this, or if the user promises it unsafely.
-    Satisfies(Todo),
+    ///
+    /// `Satisfies` can only check pure operations. Only builtin operations are trusted.
+    /// The expression must result in a bool.
+    Satisfies {
+        /// The variable representing any instance of the self type
+        var: &'src str,
+        /// The expression that must be true
+        pred: PureExpr<'src>,
+    },
+}
+
+impl FromIterator<Self> for TypeBound<'_> {
+    fn from_iter<I: IntoIterator<Item = Self>>(iter: I) -> Self {
+        let mut iter = iter.into_iter();
+        if let Some(mut first) = iter.next() {
+            first.extend(iter);
+            first
+        } else {
+            Self::default()
+        }
+    }
+}
+
+impl Extend<Self> for TypeBound<'_> {
+    fn extend<I: IntoIterator<Item = Self>>(&mut self, iter: I) {
+        if let Self::Combo(Combinator::All, existing) = self {
+            for bound in iter {
+                if let Self::Combo(Combinator::All, additional) = bound {
+                    existing.extend(additional);
+                } else {
+                    existing.push(bound);
+                }
+            }
+        } else {
+            *self = Self::Combo(
+                Combinator::All,
+                std::iter::once(self.clone()).chain(iter).collect(),
+            );
+        }
+    }
+}
+
+impl<'a> Extend<&'a Self> for TypeBound<'_> {
+    fn extend_one(&mut self, item: &'a Self) {
+        if let Self::Combo(Combinator::All, existing) = self {
+            if let Self::Combo(Combinator::All, additional) = item {
+                existing.extend_from_slice(additional);
+            } else {
+                existing.push(item.clone());
+            }
+        } else {
+            *self = Self::Combo(Combinator::All, vec![self.clone(), item.clone()]);
+        }
+    }
+
+    fn extend<I: IntoIterator<Item = &'a Self>>(&mut self, iter: I) {
+        if let Self::Combo(Combinator::All, existing) = self {
+            for bound in iter {
+                if let Self::Combo(Combinator::All, additional) = bound {
+                    existing.extend_from_slice(additional);
+                } else {
+                    existing.push(bound.clone());
+                }
+            }
+        } else {
+            *self = Self::Combo(
+                Combinator::All,
+                std::iter::once(self.clone())
+                    .chain(iter.into_iter().cloned())
+                    .collect(),
+            );
+        }
+    }
 }
 
 impl Default for TypeBound<'_> {
@@ -207,7 +291,9 @@ impl TypeBound<'_> {
 
             Self::Supports { .. } => todo!(),
 
-            Self::Satisfies(_) => todo!(),
+            Self::Satisfies { var, pred } => {
+                write!(f, "satisfy {pred:#} for every instance {var:#}")
+            }
         }
     }
 }
@@ -268,7 +354,7 @@ impl Display for TypeBound<'_> {
                 SYNTAX_STYLE_ANSI.keyword.alt_style("has ").fmt(f)?;
                 SYNTAX_STYLE_ANSI.variable.alt_style(member).fmt(f)?;
                 if let Some(req) = req {
-                    f.write_str(": ")?;
+                    SYNTAX_STYLE_ANSI.keyword.alt_style(": ").fmt(f)?;
                     req.fmt(f)
                 } else {
                     Ok(())
@@ -279,7 +365,12 @@ impl Display for TypeBound<'_> {
 
             Self::Supports { .. } => todo!(),
 
-            Self::Satisfies(_) => todo!(),
+            Self::Satisfies { var, pred } => {
+                SYNTAX_STYLE_ANSI.keyword.alt_style("for(").fmt(f)?;
+                SYNTAX_STYLE_ANSI.variable.alt_style(var).fmt(f)?;
+                SYNTAX_STYLE_ANSI.keyword.alt_style("): ").fmt(f)?;
+                pred.fmt(f)
+            }
         }
     }
 }
@@ -476,7 +567,7 @@ impl<'src, T: TypeCompatible<'src>> TypeSatisfaction<'src> for T {
 
             TypeBound::Supports { .. } => todo!("type bound needs environment access"),
 
-            TypeBound::Satisfies(_) => todo!("type bound needs code access"),
+            TypeBound::Satisfies { .. } => todo!("type bound needs code access"),
         };
 
         // ew, so much recursive cloning...
@@ -580,12 +671,15 @@ impl<'src> TypeBound<'src> {
                 }
             }
 
+            Self::Satisfies { .. } => {
+                println!("TODO: simplify expression");
+            }
+
             // do not contain nested bounds
             Self::Exactly(_)
             | Self::Has { req: None, .. }
             | Self::Shape(_)
-            | Self::Supports { .. }
-            | Self::Satisfies(_) => {}
+            | Self::Supports { .. } => {}
         }
     }
 
@@ -758,7 +852,7 @@ impl<'src> TypeBound<'src> {
 
             Self::Supports { .. } => todo!("`supports` needs fleshing out"),
 
-            Self::Satisfies(_) => todo!("`satisfies` needs fleshing out"),
+            Self::Satisfies { var, pred } => todo!("`satisfies`"),
         };
 
         let bound = req.clone();
@@ -1011,12 +1105,78 @@ mod tests {
             )));
             assert_eq!(bound.to_string(), "!(!only bool + only uint)");
         }
+
+        #[test]
+        fn test_satisfies() {
+            use pure::*;
+            let bound = TypeBound::Satisfies {
+                var: "x",
+                pred: PureExpr::Operation(Box::new(PureOperation::Gt(
+                    PureExpr::Operation(Box::new(PureOperation::Mul(
+                        PureExpr::Literal(PureLiteral::Sint(3)),
+                        PureExpr::Variable(PureVariable("x")),
+                    ))),
+                    PureExpr::Operation(Box::new(PureOperation::Add(
+                        PureExpr::Variable(PureVariable("x")),
+                        PureExpr::Literal(PureLiteral::Sint(5)),
+                    ))),
+                ))),
+            };
+            println!("{bound:#}");
+            assert_eq!(bound.to_string(), "for(x): 3*x > x + 5");
+        }
+
+        #[test]
+        fn test_satisfies_precedence1() {
+            use pure::*;
+            let bound = TypeBound::Satisfies {
+                var: "x",
+                pred: PureExpr::Operation(Box::new(PureOperation::Gt(
+                    PureExpr::Operation(Box::new(PureOperation::Mul(
+                        PureExpr::Literal(PureLiteral::Sint(3)),
+                        PureExpr::Variable(PureVariable("x")),
+                    ))),
+                    PureExpr::Operation(Box::new(PureOperation::Mul(
+                        PureExpr::Variable(PureVariable("x")),
+                        PureExpr::Operation(Box::new(PureOperation::Add(
+                            PureExpr::Variable(PureVariable("x")),
+                            PureExpr::Literal(PureLiteral::Sint(5)),
+                        ))),
+                    ))),
+                ))),
+            };
+            println!("{bound:#}");
+            assert_eq!(bound.to_string(), "for(x): 3*x > x*(x + 5)");
+        }
+
+        #[test]
+        fn test_satisfies_precedence2() {
+            use pure::*;
+            let bound = TypeBound::Satisfies {
+                var: "x",
+                pred: PureExpr::Operation(Box::new(PureOperation::Gt(
+                    PureExpr::Operation(Box::new(PureOperation::Mul(
+                        PureExpr::Literal(PureLiteral::Sint(3)),
+                        PureExpr::Variable(PureVariable("x")),
+                    ))),
+                    PureExpr::Operation(Box::new(PureOperation::Mul(
+                        PureExpr::Variable(PureVariable("x")),
+                        PureExpr::Operation(Box::new(PureOperation::Mul(
+                            PureExpr::Variable(PureVariable("x")),
+                            PureExpr::Literal(PureLiteral::Sint(5)),
+                        ))),
+                    ))),
+                ))),
+            };
+            println!("{bound:#}");
+            assert_eq!(bound.to_string(), "for(x): 3*x > x*x*5");
+        }
     }
 
     // NOT PASSING
     mod checking {
         use super::*;
-        use crate::analyzer::types::StaticType;
+        use crate::analyzer::types::{StaticType, bounds::error::UnsatisfiedBoundError};
 
         #[test]
         fn test_match_one() {
@@ -1033,7 +1193,7 @@ mod tests {
         }
 
         #[test]
-        fn test_bound_reflexive() {
+        fn test_bound_illegal() {
             let mut numeric = TypeBound::Combo(
                 Combinator::One,
                 [
@@ -1079,7 +1239,7 @@ mod tests {
                 .to_vec(),
             );
             numeric.simplify();
-            assert!(numeric.is_legal());
+            assert!(!numeric.is_legal());
         }
 
         #[test]
@@ -1102,7 +1262,11 @@ mod tests {
                 ],
             );
             assert!(integral.is_legal());
-            assert!(!numeric.satisfaction_of(&integral).is_deny());
+            let res = numeric.satisfaction_of(&integral);
+            if let Ok(e) = UnsatisfiedBoundError::try_from(res) {
+                println!("{e}");
+                panic!("should be satisfied");
+            }
         }
     }
 }

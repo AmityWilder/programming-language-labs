@@ -8,7 +8,68 @@ use crate::{
     },
     highlight::style::StyleWrapper,
 };
-use std::{assert_matches, fmt::Display, iter::once, range::RangeInclusive};
+use std::{
+    assert_matches, borrow::Cow, collections::BTreeMap, fmt::Display, iter::once,
+    range::RangeInclusive,
+};
+
+/// WARNING: this method may cause a memory leak unless the number of names written are tracked.
+/// It will allocate strings until the spare capacity without pushing them, so the vec won't know to drop them.
+fn silly_names() -> impl Iterator<Item = Cow<'static, str>> {
+    const EZ: [&str; 4] = ["Foo", "Bar", "Baz", "Bat"];
+    EZ.into_iter().map(Cow::Borrowed).chain(
+        // after we run out of hard-coded names, start naming them
+        // `Foo1`, `Bar1`, `Baz1`, `Foo2`, `Bar2`, `Baz2`, etc.
+        (1..)
+            .flat_map(|i| std::iter::repeat(i).zip(EZ))
+            .map(|(i, name)| Cow::Owned(format!("{name}{i}"))),
+    )
+}
+
+/// WARNING: this method may cause a memory leak unless the number of names written are tracked.
+/// It will allocate strings until the spare capacity without pushing them, so the vec won't know to drop them.
+fn _silly_names(buf: &mut Vec<String>) -> impl Iterator<Item = &str> {
+    const EZ: [&str; 4] = ["Foo", "Bar", "Baz", "Bat"];
+    std::iter::chain(
+        EZ,
+        // after we run out of hard-coded names, start naming them
+        // `Foo1`, `Bar1`, `Baz1`, `Foo2`, `Bar2`, `Baz2`, etc.
+        (1..)
+            .flat_map(|i| std::iter::repeat(i).zip(EZ))
+            .zip(buf.spare_capacity_mut())
+            .map(|((i, name), slot)| slot.write(format!("{name}{i}")).as_str()),
+    )
+}
+
+/// A wrapper for [`silly_names`] that automatically tracks the added names so they can be safely dropped.
+#[derive(Debug)]
+struct NameGenerator {
+    buf: Vec<String>,
+    names_used: usize,
+}
+
+impl Drop for NameGenerator {
+    fn drop(&mut self) {
+        // SAFETY: `names_used` is equal to `buf.len()` + the number of elements that were written to it
+        unsafe {
+            self.buf.set_len(self.names_used);
+        }
+    }
+}
+
+impl NameGenerator {
+    pub const fn new(buf: Vec<String>) -> Self {
+        Self {
+            names_used: buf.len(),
+            buf,
+        }
+    }
+
+    pub fn iter(&mut self) -> impl Iterator<Item = &str> {
+        _silly_names(&mut self.buf)
+            .inspect(|_| self.names_used = self.names_used.strict_add(self.names_used))
+    }
+}
 
 impl TypeBound<'_> {
     fn let_statements<T>(
@@ -57,11 +118,11 @@ impl TypeBound<'_> {
                 operands: _,
                 ret: _,
             }
-            | TypeBound::Satisfies(_) => let_if_new(once((self, None)), f),
+            | TypeBound::Satisfies { ..} => let_if_new(once((self, None)), f),
         }
     }
 
-    fn write_requirement(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn requirement(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "the bound `{:#}` requires ", Aliased::new(self))?;
         match self {
             Self::Combo(kind, _) => {
@@ -110,7 +171,7 @@ impl TypeBound<'_> {
 
             Self::Supports { .. } => todo!(),
 
-            Self::Satisfies(_) => todo!(),
+            Self::Satisfies { .. } => todo!(),
         }
     }
 }
@@ -265,7 +326,7 @@ impl Display for MetaType {
 struct Aliased<T: ?Sized>(T);
 
 impl<T: ?Sized> Aliased<T> {
-    fn new(value: &T) -> &Self {
+    const fn new(value: &T) -> &Self {
         // SAFETY: `Aliased` is a transparent wrapper for `T`
         unsafe { std::mem::transmute(value) }
     }
@@ -442,9 +503,234 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum ExampleTypeRef<'brw, 'nam, 'ty, 'src> {
+    Abstract(&'brw AbstractType<'src>),
+    Bound(&'brw TypeBound<'src>),
+    Rec(&'brw ExampleRec<'nam, 'ty, 'src>),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ExampleTypeMut<'brw, 'nam, 'ty, 'src> {
+    Abstract(&'brw mut AbstractType<'src>),
+    Bound(&'brw mut TypeBound<'src>),
+    Rec(&'brw mut ExampleRec<'nam, 'ty, 'src>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExampleType<'nam, 'ty, 'src> {
+    Abstract(Cow<'ty, AbstractType<'src>>),
+    Bound(Cow<'ty, TypeBound<'src>>),
+    Checked(Cow<'ty, CheckedType<'src>>),
+    Rec(ExampleRec<'nam, 'ty, 'src>),
+}
+
+impl<'nam, 'ty, 'src> ExampleType<'nam, 'ty, 'src> {
+    pub const fn as_ref(&self) -> ExampleTypeRef<'_, 'nam, 'ty, 'src> {
+        match self {
+            Self::Abstract(Cow::Borrowed(x)) => ExampleTypeRef::Abstract(x),
+
+            Self::Abstract(Cow::Owned(x))
+            | Self::Checked(
+                Cow::Borrowed(CheckedType::Abstract(x)) | Cow::Owned(CheckedType::Abstract(x)),
+            ) => ExampleTypeRef::Abstract(x),
+
+            Self::Bound(Cow::Borrowed(x)) => ExampleTypeRef::Bound(x),
+
+            Self::Bound(Cow::Owned(x))
+            | Self::Checked(
+                Cow::Borrowed(CheckedType::Bound(x)) | Cow::Owned(CheckedType::Bound(x)),
+            ) => ExampleTypeRef::Bound(x),
+
+            Self::Rec(x) => ExampleTypeRef::Rec(x),
+        }
+    }
+
+    pub fn to_mut(&mut self) -> ExampleTypeMut<'_, 'nam, 'ty, 'src> {
+        match self {
+            Self::Abstract(cow) => ExampleTypeMut::Abstract(cow.to_mut()),
+            Self::Bound(cow) => ExampleTypeMut::Bound(cow.to_mut()),
+            Self::Checked(cow) => match cow.to_mut() {
+                CheckedType::Abstract(t) => ExampleTypeMut::Abstract(t),
+                CheckedType::Bound(b) => ExampleTypeMut::Bound(b),
+            },
+            Self::Rec(x) => ExampleTypeMut::Rec(x),
+        }
+    }
+}
+
+impl Display for ExampleType<'_, '_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Abstract(x) => x.fmt(f),
+            Self::Bound(x) => x.fmt(f),
+            Self::Checked(x) => x.fmt(f),
+            Self::Rec(x) => x.fmt(f),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ExampleRec<'nam, 'ty, 'src> {
+    pub name: Cow<'nam, str>,
+    pub members: BTreeMap<&'src str, Option<ExampleType<'nam, 'ty, 'src>>>,
+}
+
+impl Display for ExampleRec<'_, '_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.name.fmt(f)?;
+        f.write_str(" {")?;
+        let mut has_prev = false;
+        for (key, val) in &self.members {
+            if has_prev {
+                f.write_str(", ")?;
+            } else {
+                has_prev = true;
+                f.write_str(" ")?;
+            }
+            SYNTAX_STYLE_ANSI.variable.alt_style(key).fmt(f)?;
+            if let Some(val) = val {
+                f.write_str(": ")?;
+                val.fmt(f)?;
+            }
+        }
+        f.write_str(" }")
+    }
+}
+
+impl<'src> TypeBound<'src> {
+    /// If an example of a type satisfying the bound exists, presents it.
+    pub const fn trivial_example(&self) -> Option<&AbstractType<'src>> {
+        if let Self::Exactly(t) = self {
+            Some(t)
+        } else {
+            None
+        }
+    }
+
+    /// Produces an example involving a made-up Foo/Bar type specifically constructed to fulfill the bound, if possible
+    ///
+    /// Should not consume a name if [`None`] is returned.
+    pub fn foobar_example<'nam, 'ty, I>(
+        &'ty self,
+        names: &mut I,
+    ) -> Option<ExampleType<'nam, 'ty, 'src>>
+    where
+        I: 'nam + Iterator<Item = Cow<'nam, str>>,
+    {
+        match self {
+            Self::Combo(kind, bounds) => match kind {
+                Combinator::All => {
+                    if let Some(t) = bounds.iter().find_map(|bound| bound.trivial_example()) {
+                        // assuming the restraint is legal, this type should satisfy all other bounds on its own.
+                        // TODO: what if the example is being used to show why the restraint ISN'T legal?
+                        Some(ExampleType::Abstract(Cow::Borrowed(t)))
+                    } else {
+                        let mut bounds = bounds.iter();
+                        let mut base = bounds
+                            .find(|bound| matches!(bound, Self::Has { .. }))?
+                            .foobar_example(names)
+                            .expect("`has` should succeed");
+                        {
+                            let ExampleType::Rec(base) = &mut base else {
+                                unreachable!("filtered to `has`")
+                            };
+                            for bound in bounds {
+                                // TODO: what if `has foo + !has foo`?
+                                match bound {
+                                    Self::Combo(_kind, _bounds) => todo!(),
+
+                                    Self::Has { member, req } => {
+                                        let ty = base.members.entry(member).or_default();
+                                        if let Some(req) = req {
+                                            if let Some(ty) = ty {
+                                                match ty.to_mut() {
+                                                    ExampleTypeMut::Abstract(_)
+                                                    | ExampleTypeMut::Rec(_) => {
+                                                        todo!(
+                                                            "additional restraints on explicit type"
+                                                        )
+                                                    }
+
+                                                    ExampleTypeMut::Bound(b) => {
+                                                        b.extend_one(req.as_ref());
+                                                        b.simplify();
+                                                    }
+                                                }
+                                            } else {
+                                                *ty = Some(req.foobar_example(names).unwrap_or(
+                                                    ExampleType::Bound(Cow::Borrowed(req)),
+                                                ));
+                                            }
+                                        }
+                                    }
+
+                                    Self::Exactly(_) => {
+                                        unreachable!("should be handled by other branch")
+                                    }
+
+                                    // TOOD: aren't these bounds important?
+                                    Self::Not(_)
+                                    | Self::Shape(_)
+                                    | Self::Supports { .. }
+                                    | Self::Satisfies { .. } => {}
+                                }
+                            }
+                        }
+                        Some(base)
+                    }
+                }
+
+                Combinator::Any | Combinator::One => {
+                    bounds.iter().find_map(|bound| bound.foobar_example(names))
+                }
+            },
+
+            Self::Exactly(t) => Some(ExampleType::Abstract(Cow::Borrowed(t))),
+
+            Self::Has { member, req } => Some(ExampleType::Rec(ExampleRec {
+                name: names.next().expect("ran out of silly names"),
+                members: BTreeMap::from_iter([(
+                    *member,
+                    req.as_deref().map(|req| {
+                        req.foobar_example(names)
+                            .unwrap_or(ExampleType::Bound(Cow::Borrowed(req)))
+                    }),
+                )]),
+            })),
+
+            Self::Not(_) | Self::Shape(_) | Self::Supports { .. } | Self::Satisfies { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum CheckedType<'src> {
     Abstract(AbstractType<'src>),
     Bound(TypeBound<'src>),
+}
+
+impl<'src> CheckedType<'src> {
+    /// If an example of a type satisfying the bound exists, presents it.
+    pub const fn trivial_example(&self) -> Option<&AbstractType<'src>> {
+        match self {
+            Self::Abstract(t) => Some(t),
+            Self::Bound(b) => b.trivial_example(),
+        }
+    }
+
+    /// Produces an example involving a made-up Foo/Bar type specifically constructed to fulfill the bound, if possible
+    pub fn foobar_example<'nam, 'ty, I>(
+        &'ty self,
+        names: &mut I,
+    ) -> Option<ExampleType<'nam, 'ty, 'src>>
+    where
+        I: 'nam + Iterator<Item = Cow<'nam, str>>,
+    {
+        match self {
+            Self::Abstract(t) => Some(ExampleType::Abstract(Cow::Borrowed(t))),
+            Self::Bound(b) => b.foobar_example(names),
+        }
+    }
 }
 
 impl Display for CheckedType<'_> {
@@ -484,7 +770,21 @@ trait Reason {
     /// Comes after the [`TypeBound`] requirement but before [`Self::write_source`].
     /// The start of each line should be indented.
     // WARNING: need to carefully review which cases should use `bound` and which should use `attempt`!
-    fn write_nested(
+    fn nested(
+        &self,
+        bound: &TypeBound<'_>,
+        attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result;
+
+    fn has_consideration(&self) -> bool;
+
+    /// Describes a hypothetical scenario which would fail to satisfy the bound while satisfying the attempt.
+    ///
+    /// Should be written so that "consider: the type `{attempt_var} | {attempt}` might `{consideration}`." makes sense.
+    /// This method is allowed to panic if [`has_consideration`] would have been false.
+    fn consideration(
         &self,
         bound: &TypeBound<'_>,
         attempt: &CheckedType<'_>,
@@ -493,7 +793,7 @@ trait Reason {
     ) -> std::fmt::Result;
 
     /// Should be written so that "since the `{attempt}` `{write_source}`, ..." makes sense.
-    fn write_source(
+    fn since(
         &self,
         bound: &TypeBound<'_>,
         attempt: &CheckedType<'_>,
@@ -502,7 +802,7 @@ trait Reason {
     ) -> std::fmt::Result;
 
     /// Should be written so that "the `{attempt}` `{write_effect}` the bound `{bound}`." makes sense.
-    fn write_effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+    fn effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -542,7 +842,7 @@ impl<T: Reason> BoundCheck<'_, T> {
                         writeln!(f, ".")?;
                         Indent.fmt(f)?;
                     }
-                    bound.write_requirement(f)?;
+                    bound.requirement(f)?;
                 }
 
                 CheckedType::Bound(attempt_bound) => {
@@ -550,12 +850,29 @@ impl<T: Reason> BoundCheck<'_, T> {
                         writeln!(f, ".")?;
                         Indent.fmt(f)?;
                     }
-                    attempt_bound.write_requirement(f)?;
+                    attempt_bound.requirement(f)?;
                 }
             }
         }
         writeln!(f, ".")?;
-        reason.write_nested(bound, attempt, attempt_var, f)?;
+        reason.nested(bound, attempt, attempt_var, f)?;
+        if reason.has_consideration() {
+            Indent.fmt(f)?;
+            match attempt {
+                CheckedType::Abstract(t) => {
+                    write!(f, "consider: the type `{:#}` might ", Aliased::new(t))?;
+                    reason.consideration(bound, attempt, None, f)?;
+                }
+                CheckedType::Bound(b) => {
+                    let t = let_local(b, f)?;
+                    writeln!(f, ".")?;
+                    Indent.fmt(f)?;
+                    write!(f, "consider: the type `{t:#}` might ")?;
+                    reason.consideration(bound, attempt, Some(t), f)?;
+                }
+            }
+            writeln!(f)?;
+        }
         Indent.fmt(f)?;
         write!(
             f,
@@ -563,7 +880,7 @@ impl<T: Reason> BoundCheck<'_, T> {
             attempt.kind_name(),
             Aliased::new(attempt)
         )?;
-        reason.write_source(bound, attempt, attempt_var, f)?;
+        reason.since(bound, attempt, attempt_var, f)?;
         match attempt {
             CheckedType::Abstract(t) => {
                 write!(f, ", the type `{:#}` ", Aliased::new(t))?;
@@ -577,7 +894,7 @@ impl<T: Reason> BoundCheck<'_, T> {
                 write!(f, "the bound `{:#}` ", Aliased::new(b))?;
             }
         }
-        reason.write_effect(f)?;
+        reason.effect(f)?;
         write!(f, " the bound `{:#}`.", Aliased::new(bound))
     }
 }
@@ -606,6 +923,8 @@ pub enum RequiredBoundReason<'src> {
     HasMatching(Box<RequiredBound<'src>>),
     /// A [`TypeBound::Shape`] satisfies the bound by requiring the same shape
     Shape,
+    /// A [`TypeBound::Satisfies`] satisfies the bound by requiring a subset or equivalent to the requirements
+    Expression,
 }
 
 impl Reason for RequiredBoundReason<'_> {
@@ -629,11 +948,12 @@ impl Reason for RequiredBoundReason<'_> {
             | Self::Exactly(_)
             | Self::Has
             | Self::HasMatching(_)
-            | Self::Shape => None,
+            | Self::Shape
+            | Self::Expression => None,
         }
     }
 
-    fn write_nested(
+    fn nested(
         &self,
         _bound: &TypeBound<'_>,
         _attempt: &CheckedType<'_>,
@@ -673,11 +993,25 @@ impl Reason for RequiredBoundReason<'_> {
                 writeln!(f)
             }
 
-            Self::AllOfAny | Self::AllOfOne | Self::Has | Self::Shape => Ok(()),
+            Self::AllOfAny | Self::AllOfOne | Self::Has | Self::Shape | Self::Expression => Ok(()),
         }
     }
 
-    fn write_source(
+    fn has_consideration(&self) -> bool {
+        false
+    }
+
+    fn consideration(
+        &self,
+        _bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        _attempt_var: Option<MetaType>,
+        _f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        unimplemented!("requiredness has no hypotheticals")
+    }
+
+    fn since(
         &self,
         _bound: &TypeBound<'_>,
         _attempt: &CheckedType<'_>,
@@ -722,10 +1056,14 @@ impl Reason for RequiredBoundReason<'_> {
             Self::Shape => {
                 write!(f, "necessarily requires the described shape")
             }
+
+            Self::Expression => {
+                todo!()
+            }
         }
     }
 
-    fn write_effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("by definition requires")
     }
 }
@@ -767,6 +1105,8 @@ pub enum AllowedBoundReason<'src> {
     HasAllowed(Box<AllowedBound<'src>>),
     /// A [`TypeBound`] places no bounds on whether its type has the [`TypeBound::Shape`]
     ShapeUndenied,
+    /// A [`TypeBound`] does not restrict the expression, but it could be satisfied at runtime
+    RuntimeExpression,
 }
 
 impl Reason for AllowedBoundReason<'_> {
@@ -800,11 +1140,12 @@ impl Reason for AllowedBoundReason<'_> {
             | Self::MayAlsoHave
             | Self::HasUndenied
             | Self::HasAllowed(_)
-            | Self::ShapeUndenied => None,
+            | Self::ShapeUndenied
+            | Self::RuntimeExpression => None,
         }
     }
 
-    fn write_nested(
+    fn nested(
         &self,
         _bound: &TypeBound<'_>,
         _attempt: &CheckedType<'_>,
@@ -918,13 +1259,48 @@ impl Reason for AllowedBoundReason<'_> {
             | Self::MayHave
             | Self::MayAlsoHave
             | Self::HasUndenied
-            | Self::ShapeUndenied => Ok(()),
+            | Self::ShapeUndenied
+            | Self::RuntimeExpression => Ok(()),
+        }
+    }
+
+    fn has_consideration(&self) -> bool {
+        matches!(self, Self::MayHave | Self::MayAlsoHave)
+    }
+
+    fn consideration(
+        &self,
+        bound: &TypeBound<'_>,
+        attempt: &CheckedType<'_>,
+        _attempt_var: Option<MetaType>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        // after this assertion, any failures are *this* function's fault, not the caller's.
+        debug_assert!(self.has_consideration(), "has no consideration");
+        match self {
+            Self::MayHave => {
+                // let generator = NameGenerator::new(Vec::with_capacity(128));
+                let example = attempt
+                    .foobar_example(&mut silly_names())
+                    .expect("`has` should produce an example"); // TODO: does `attempt` guarantee `TypeBound::Has`?
+                write!(
+                    f,
+                    "be `{example:#}`, which would fulfill `{:#}` but not `{:#}`",
+                    Aliased::new(attempt),
+                    Aliased::new(bound)
+                )?;
+                Ok(())
+            }
+
+            Self::MayAlsoHave => todo!(),
+
+            _ => Ok(()),
         }
     }
 
     // TODO: needs review
     // TODO: would be nice to get access to a `MetaType`
-    fn write_source(
+    fn since(
         &self,
         bound: &TypeBound<'_>,
         attempt: &CheckedType<'_>,
@@ -1020,10 +1396,12 @@ impl Reason for AllowedBoundReason<'_> {
                     "neither requires nor denies a type from being called with the required shape",
                 )
             }
+
+            Self::RuntimeExpression => todo!(),
         }
     }
 
-    fn write_effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("neither requires nor denies")
     }
 }
@@ -1043,6 +1421,8 @@ pub enum DeniedBoundReason<'src> {
     CantHave(Box<DeniedBound<'src>>),
     /// A [`TypeBound::Has`] requires the member, but denies the bounds placed on it
     HasConflicting(Box<DeniedBound<'src>>),
+    /// A [`TypeBound::Satisfies`] contradicts the bound
+    ExprContradiction(Todo),
 }
 
 impl Reason for DeniedBoundReason<'_> {
@@ -1063,11 +1443,14 @@ impl Reason for DeniedBoundReason<'_> {
                 }
             }
 
-            Self::ExactlyUnsatisfying(_) | Self::CantHave(_) | Self::HasConflicting(_) => None,
+            Self::ExactlyUnsatisfying(_)
+            | Self::CantHave(_)
+            | Self::HasConflicting(_)
+            | Self::ExprContradiction(_) => None,
         }
     }
 
-    fn write_nested(
+    fn nested(
         &self,
         _bound: &TypeBound<'_>,
         _attempt: &CheckedType<'_>,
@@ -1114,10 +1497,54 @@ impl Reason for DeniedBoundReason<'_> {
                 }
                 writeln!(f)
             }
+
+            Self::ExprContradiction(_) => todo!(),
         }
     }
 
-    fn write_source(
+    fn has_consideration(&self) -> bool {
+        matches!(self, Self::OneOfAny(_) | Self::OneOfOne(_))
+    }
+
+    fn consideration(
+        &self,
+        bound: &TypeBound<'_>,
+        attempt: &CheckedType<'_>,
+        _attempt_var: Option<MetaType>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        // after this assertion, any failures are *this* function's fault, not the caller's.
+        debug_assert!(self.has_consideration(), "has no consideration");
+        match self {
+            Self::OneOfAny(BoundCheck {
+                attempt: denied, ..
+            })
+            | Self::OneOfOne(BoundCheck {
+                attempt: denied, ..
+            }) => {
+                // non-aliasing here is intentional
+                match denied
+                    .foobar_example(&mut silly_names())
+                    .unwrap_or(ExampleType::Checked(Cow::Borrowed(denied)))
+                    .as_ref()
+                {
+                    ExampleTypeRef::Abstract(t) => write!(f, "be the explicit type `{t:#}`"),
+                    ExampleTypeRef::Bound(b) => write!(f, "exclusively satisfy the bound `{b:#}`"),
+                    ExampleTypeRef::Rec(t) => write!(f, "be some type `{t:#}`"),
+                }?;
+                write!(
+                    f,
+                    ": this would fulfill the bound `{:#}`, but not the bound `{:#}`",
+                    Aliased::new(attempt),
+                    Aliased::new(bound),
+                )
+            }
+
+            _ => todo!(),
+        }
+    }
+
+    fn since(
         &self,
         _bound: &TypeBound<'_>,
         _attempt: &CheckedType<'_>,
@@ -1166,10 +1593,12 @@ impl Reason for DeniedBoundReason<'_> {
             }) => {
                 todo!()
             }
+
+            Self::ExprContradiction(_) => todo!(),
         }
     }
 
-    fn write_effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("cannot, by definition, satisfy")
     }
 }
@@ -1196,8 +1625,10 @@ pub enum SatisfiedBoundReason<'src> {
     Shape,
     /// Satisfied [`TypeBound::Supports`].
     Supports(Todo),
+    /// Satisfied [`TypeBound::Satisfies`] with an expression which can never be false.
+    Tautology,
     /// Satisfied [`TypeBound::Satisfies`].
-    Satisfies(Todo),
+    Satisfies,
 }
 
 impl<'src> From<RequiredBound<'src>> for SatisfiedBound<'src> {
@@ -1231,7 +1662,8 @@ impl Reason for SatisfiedBoundReason<'_> {
             | Self::HasMatching(_)
             | Self::Shape
             | Self::Supports(_)
-            | Self::Satisfies(_) => None,
+            | Self::Tautology
+            | Self::Satisfies { .. } => None,
         }
     }
 
@@ -1269,7 +1701,7 @@ impl Reason for SatisfiedBoundReason<'_> {
         }
     }
 
-    fn write_nested(
+    fn nested(
         &self,
         _bound: &TypeBound<'_>,
         _attempt: &CheckedType<'_>,
@@ -1329,11 +1761,26 @@ impl Reason for SatisfiedBoundReason<'_> {
             | Self::Has
             | Self::Shape
             | Self::Supports(_)
-            | Self::Satisfies(_) => Ok(()),
+            | Self::Tautology
+            | Self::Satisfies { .. } => Ok(()),
         }
     }
 
-    fn write_source(
+    fn has_consideration(&self) -> bool {
+        false
+    }
+
+    fn consideration(
+        &self,
+        _bound: &TypeBound<'_>,
+        _attempt: &CheckedType<'_>,
+        _attempt_var: Option<MetaType>,
+        _f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        unimplemented!("satisfaction has no hypotheticals")
+    }
+
+    fn since(
         &self,
         bound: &TypeBound<'_>,
         _attempt: &CheckedType<'_>,
@@ -1404,11 +1851,13 @@ impl Reason for SatisfiedBoundReason<'_> {
 
             Self::Supports(_) => todo!(),
 
-            Self::Satisfies(_) => todo!(),
+            Self::Tautology => todo!(),
+
+            Self::Satisfies { .. } => todo!(),
         }
     }
 
-    fn write_effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("satisfies")
     }
 }
@@ -1441,8 +1890,10 @@ pub enum UnsatisfiedBoundReason<'src> {
     ShapeFails(FunShape<'src>),
     /// Failed [`TypeBound::Supports`].
     Unsupported(Todo),
+    /// Failed [`TypeBound::Satisfies`] because the expression can never be true.
+    SelfContradiction(Todo),
     /// Failed [`TypeBound::Satisfies`].
-    Unsatisfies(Todo),
+    Contradiction(Todo),
 }
 
 impl<'src> From<DeniedBound<'src>> for UnsatisfiedBound<'src> {
@@ -1508,7 +1959,8 @@ impl Reason for UnsatisfiedBoundReason<'_> {
             | Self::MissingShape
             | Self::ShapeFails(_)
             | Self::Unsupported(_)
-            | Self::Unsatisfies(_) => std::iter::chain(None, None),
+            | Self::SelfContradiction(_)
+            | Self::Contradiction(_) => std::iter::chain(None, None),
         }
     }
 
@@ -1534,7 +1986,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
                 let t = attempt_var.expect("attempt_var should be Some if attempt is a Bound");
                 write!(
                     f,
-                    "for `{t:#}` to fulfill the bound `{:#}`, the definition of `{:#}` cannot require the negation of `{:#}`",
+                    "for `{t:#}` to fulfill the bound `{:#}`, the definition of `{:#}` cannot contradict `{:#}`",
                     Aliased::new(bound),
                     Aliased::new(attempt),
                     Aliased::new(bound),
@@ -1563,7 +2015,7 @@ impl Reason for UnsatisfiedBoundReason<'_> {
         }
     }
 
-    fn write_nested(
+    fn nested(
         &self,
         bound: &TypeBound<'_>,
         _attempt: &CheckedType<'_>,
@@ -1654,11 +2106,29 @@ impl Reason for UnsatisfiedBoundReason<'_> {
             | Self::MissingShape
             | Self::ShapeFails { .. }
             | Self::Unsupported(_)
-            | Self::Unsatisfies(_) => Ok(()),
+            | Self::SelfContradiction(_)
+            | Self::Contradiction(_) => Ok(()),
         }
     }
 
-    fn write_source(
+    fn has_consideration(&self) -> bool {
+        false
+    }
+
+    fn consideration(
+        &self,
+        bound: &TypeBound<'_>,
+        attempt: &CheckedType<'_>,
+        attempt_var: Option<MetaType>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        // after this assertion, any failures are *this* function's fault, not the caller's.
+        debug_assert!(self.has_consideration(), "has no consideration");
+        // TODO
+        Ok(())
+    }
+
+    fn since(
         &self,
         bound: &TypeBound<'_>,
         _attempt: &CheckedType<'_>,
@@ -1734,11 +2204,13 @@ impl Reason for UnsatisfiedBoundReason<'_> {
 
             Self::Unsupported(_) => todo!(),
 
-            Self::Unsatisfies(_) => todo!(),
+            Self::SelfContradiction(_) => todo!(),
+
+            Self::Contradiction(_) => todo!(),
         }
     }
 
-    fn write_effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn effect(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("does not satisfy")
     }
 }
@@ -1813,10 +2285,7 @@ impl std::error::Error for UnsatisfiedBoundError<'_> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::types::{
-        StaticType,
-        bounds::{Requiredness, TypeBoundDesc},
-    };
+    use crate::analyzer::types::{StaticType, bounds::TypeBoundDesc};
 
     #[test]
     fn test_bounds_error_display() {

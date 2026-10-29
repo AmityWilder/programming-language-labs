@@ -12,7 +12,7 @@ use std::{
 };
 
 pub mod bounds;
-use bounds::TypeBound;
+use bounds::{TypeBound, TypeSatisfaction};
 
 /// The context in which a type must be statically sized
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -191,6 +191,8 @@ impl<'src> TypeCompatible<'src> for ArrayType<'src> {
         matches!(other, AbstractType::Concrete(StaticType::Arr(other)) if *self == **other)
     }
 
+    // TBD: can array coerce to view?
+
     fn to_abstract(&self) -> AbstractType<'src> {
         self.clone().into()
     }
@@ -330,7 +332,7 @@ impl Display for Fallible<'_> {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct RecType<'src> {
     pub name: &'src str,
-    pub fields: BTreeMap<&'src str, StaticType<'src>>,
+    pub fields: BTreeMap<&'src str, AbstractType<'src>>,
 }
 
 impl TypeSize for RecType<'_> {
@@ -390,6 +392,8 @@ impl<'src> TypeCompatible<'src> for SupType<'src> {
         matches!(other, AbstractType::Concrete(StaticType::Sup(other)) if self == other)
     }
 
+    // TBD: coercion into variants?
+
     fn to_abstract(&self) -> AbstractType<'src> {
         self.clone().into()
     }
@@ -422,6 +426,13 @@ pub struct SubType<'src> {
     pub req: Box<TypeBound<'src>>,
 }
 
+impl SubType<'_> {
+    /// If a subtype cannot **possibly** be satisfied by its base, it cannot be satisfied at all
+    pub fn is_insatiable(&self) -> bool {
+        self.base.satisfaction_of(&self.req).is_failing()
+    }
+}
+
 impl TypeSize for SubType<'_> {
     fn size(&self) -> Option<Result<usize, TypeSizeError>> {
         // TODO: can unsized types be in subtypes?
@@ -438,12 +449,25 @@ impl<'src> TypeCompatible<'src> for SubType<'src> {
     }
 
     // TODO: needs to also support methods
-    fn get_member(&self, _member: &str) -> Option<CheckedType<'src>> {
-        todo!("must prove the member isnt erased by req")
+    fn get_member(&self, member: &str) -> Option<CheckedType<'src>> {
+        self.base.get_member(member).filter(|x| {
+            TypeBound::Has {
+                member,
+                // ew, allocating a box and cloning just to test satisfaction
+                req: Some(Box::new(match x {
+                    CheckedType::Abstract(t) => TypeBound::Exactly(t.clone()),
+                    CheckedType::Bound(b) => b.clone(),
+                })),
+            }
+            .satisfaction_of(self.req.as_ref())
+            .is_possible()
+        })
     }
 
     fn shape(&self) -> Option<FunShape<'src>> {
-        todo!("must prove the member isnt erased by req")
+        self.base
+            .shape()
+            .filter(|x| x.satisfaction_of(self.req.as_ref()).is_possible())
     }
 }
 impl<'src> From<SubType<'src>> for AbstractType<'src> {
@@ -492,6 +516,7 @@ impl<'src> TypeCompatible<'src> for CatType<'src> {
     }
 
     fn get_member(&self, member: &str) -> Option<CheckedType<'src>> {
+        // TODO: what if the cat type has members that arent on repr?
         self.repr.get_member(member)
     }
 
@@ -741,7 +766,18 @@ impl TypeSize for StaticType<'_> {
 }
 impl<'src> TypeCompatible<'src> for StaticType<'src> {
     fn is_type_eq(&self, other: &AbstractType<'_>) -> bool {
-        matches!(other, AbstractType::Concrete(other) if self == other)
+        match self {
+            Self::Primitive(t) => t.is_type_eq(other),
+            Self::View(t) => t.is_type_eq(other),
+            Self::Arr(t) => t.is_type_eq(other),
+            Self::Ptr(t) => t.is_type_eq(other),
+            Self::OrTy(t) => t.is_type_eq(other),
+            Self::Rec(t) => t.is_type_eq(other),
+            Self::Sup(t) => t.is_type_eq(other),
+            Self::Sub(t) => t.is_type_eq(other),
+            Self::Cat(t) => t.is_type_eq(other),
+            Self::Fun(t) => t.is_type_eq(other),
+        }
     }
 
     fn to_abstract(&self) -> AbstractType<'src> {
@@ -928,7 +964,7 @@ impl Display for AbstractType<'_> {
         match self {
             Self::Concrete(t) => t.fmt(f),
             Self::Opaque(t) => {
-                f.write_str("opaque ")?;
+                SYNTAX_STYLE_ANSI.keyword.alt_style("opaque ").fmt(f)?;
                 t.fmt(f)
             }
             Self::Generic(t) => t.fmt(f),

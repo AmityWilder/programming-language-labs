@@ -3,6 +3,7 @@
 pub use super::{keyword::Keyword, punc::Punctuation};
 use crate::{
     error::{ErrorType, IntKind, NumErrorKind},
+    grammar::ast::ExprPrecedence,
     scanner::{
         symbols::{
             BIN_PREFIX, BYTE_SUFFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX,
@@ -517,6 +518,41 @@ impl Operator {
     // pub fn op_description(self, operands: &[ValueType]) -> &'static str {
     //     self.to_token_eq().op_description(operands)
     // }
+
+    pub const fn precedence(&self) -> ExprPrecedence {
+        match self {
+            Self::Assign
+            | Self::AndAssign
+            | Self::OrAssign
+            | Self::XorAssign
+            | Self::NandAssign
+            | Self::NorAssign
+            | Self::XnorAssign
+            | Self::AddAssign
+            | Self::SubAssign
+            | Self::MulAssign
+            | Self::PowAssign
+            | Self::DivAssign
+            | Self::RemAssign
+            | Self::ShlAssign
+            | Self::ShrAssign
+            | Self::RotlAssign
+            | Self::RotrAssign => ExprPrecedence::Assignment,
+            Self::And | Self::Nand => ExprPrecedence::And,
+            Self::Or | Self::Nor => ExprPrecedence::Or,
+            Self::Xor | Self::Xnor => ExprPrecedence::Xor,
+            Self::Not | Self::Exists | Self::Ref | Self::Szof => ExprPrecedence::UnaryPre,
+            Self::Add => ExprPrecedence::Term,
+            Self::Incr | Self::Decr | Self::Coalesce => ExprPrecedence::UnaryPost,
+            Self::SubNeg => unimplemented!(), // depends on unary vs binary
+            Self::Mul | Self::Div | Self::Rem => ExprPrecedence::Factor,
+            Self::Pow => ExprPrecedence::Exponent,
+            Self::Shl | Self::Shr | Self::Rotl | Self::Rotr => ExprPrecedence::Shift,
+            Self::Lt | Self::Gt | Self::Le | Self::Ge => ExprPrecedence::Comparison,
+            Self::Ne | Self::Eq => ExprPrecedence::Equality,
+            Self::Convert | Self::Transmute => ExprPrecedence::Conversion,
+        }
+    }
 }
 
 impl std::fmt::Display for Operator {

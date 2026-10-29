@@ -7,6 +7,26 @@ use crate::{
 };
 use std::range::Range;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum ExprPrecedence {
+    #[default]
+    Statement,
+    Assignment,
+    Or,
+    Xor,
+    And,
+    Equality,
+    Comparison,
+    Shift,
+    Term,
+    Factor,
+    UnaryPre,
+    Exponent,
+    Conversion,
+    UnaryPost,
+    Primary,
+}
+
 /// Allows the AST to combine the full range of its tokens, for use in errors.
 ///
 /// Implementors must define either
@@ -340,6 +360,16 @@ pub struct Binary<'src> {
     pub rhs: Expr<'src>,
 }
 
+impl Binary<'_> {
+    pub const fn precedence(&self) -> ExprPrecedence {
+        if matches!(self.op.val, Operator::Sub) {
+            ExprPrecedence::Term
+        } else {
+            self.op.val.precedence()
+        }
+    }
+}
+
 impl<'src> AstNode<'src> for Binary<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
         self.lhs.get_range_start(source)
@@ -364,6 +394,16 @@ pub struct Unary<'src> {
     pub op: SpecToken<'src, Operator>,
     pub operand: Expr<'src>,
     pub side: OpSide,
+}
+
+impl Unary<'_> {
+    pub const fn precedence(&self) -> ExprPrecedence {
+        if matches!(self.op.val, Operator::Neg) {
+            ExprPrecedence::UnaryPre
+        } else {
+            self.op.val.precedence()
+        }
+    }
 }
 
 impl<'src> AstNode<'src> for Unary<'src> {
@@ -788,6 +828,10 @@ pub enum BlockExpr<'src> {
 }
 
 impl<'src> BlockExpr<'src> {
+    pub const fn precedence(&self) -> ExprPrecedence {
+        ExprPrecedence::Or
+    }
+
     pub fn if_expr(inner: IfStmt<'src>) -> Self {
         Self::If(Box::new(inner))
     }
@@ -814,6 +858,17 @@ pub enum Expr<'src> {
 }
 
 impl<'src> Expr<'src> {
+    pub const fn precedence(&self) -> ExprPrecedence {
+        match self {
+            Self::Block(inner) => inner.precedence(),
+            Self::Binary(inner) => inner.precedence(),
+            Self::Unary(inner) => inner.precedence(),
+            Self::Directive(_inner) => todo!(),
+            Self::Literal(_) | Self::Variable(_) | Self::Grouping(_) => ExprPrecedence::Primary,
+            Self::Type(_inner) => todo!(),
+        }
+    }
+
     pub fn binary(inner: Binary<'src>) -> Self {
         Self::Binary(Box::new(inner))
     }

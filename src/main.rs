@@ -21,6 +21,7 @@
     macro_derive,
     deref_patterns,
     char_to_u32,
+    extend_one,
 )]
 #![forbid(
     clippy::missing_safety_doc,
