@@ -1,38 +1,13 @@
-use super::{AnalysisBlockStmt, AnalysisFnDef, BlockStmt};
 use crate::{
-    Todo,
     analyzer::{
-        GetType,
-        types::{AbstractType, FunShape, StaticTypeSize, TypeCompatible, TypeSize, TypeSizeError},
+        AnalysisBlockStmt, AnalysisFnDef, GetType,
+        static_env::{ConstantValue, VarId},
+        types::{AbstractType, FunShape, TypeCompatible, TypeSize, TypeSizeError},
     },
     grammar::ast::AstNodeFinal,
     scanner::token::value::Operator,
 };
 use std::range::Range;
-
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct ConstantValue(Todo);
-
-impl TypeSize for ConstantValue {
-    fn size(&self) -> Option<Result<usize, TypeSizeError>> {
-        Some(self.static_size())
-    }
-}
-impl StaticTypeSize for ConstantValue {
-    fn static_size(&self) -> Result<usize, TypeSizeError> {
-        todo!("constants must be statically sized")
-    }
-}
-impl<'src> GetType<'src> for ConstantValue {
-    type Output<'ty>
-        = &'ty AbstractType<'src>
-    where
-        'src: 'ty;
-
-    fn get_type<'ty>(&self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        todo!()
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum VarType<'src, 'ty> {
@@ -200,9 +175,6 @@ pub struct OpOverload<'src> {
     pub def: AnalysisFnDef<'src>,
 }
 
-/// A unique [`EnvItem`] ID
-pub type VarId = usize;
-
 /// A unique [`Scope`] ID
 pub type ScopeId = usize;
 
@@ -264,7 +236,7 @@ impl<'src> StaticEnvironment<'src> {
     }
 
     pub fn get_decl(&self, id: VarId) -> Option<&StaticItem<'src>> {
-        self.decls.get(id).map(|decl| &decl.item)
+        self.decls.get(id.0).map(|decl| &decl.item)
     }
 
     /// Returns [`None`] if not currently in a function
@@ -296,7 +268,7 @@ impl<'src> StaticEnvironment<'src> {
         // items: 2, ids: [0]: [1]
         // items: 2, ids: [1, 0]: [0, 0]
         // items: 3, ids: [2, 0]: [0, 1]
-        let mut prev = num_items;
+        let mut prev = VarId(num_items);
         move |id| {
             let prev = std::mem::replace(&mut prev, id);
             assert!(
@@ -308,7 +280,7 @@ impl<'src> StaticEnvironment<'src> {
             );
             #[expect(clippy::arithmetic_side_effects, reason = "asserted")]
             {
-                prev - id - 1
+                prev.0 - id.0 - 1
             }
         }
     }
@@ -409,7 +381,7 @@ impl<'src> StaticEnvironment<'src> {
             .search()
             .find(|(_, item)| matches!(item.val, EnvItem::Var(_, _) | EnvItem::Pvt(_)))
             .map(|(id, _)| id);
-        let id = self.decls.len();
+        let id = VarId(self.decls.len());
         let decl = self.decls.push_mut(DeclItem {
             loc: MemLoc { atop, range: None },
             item: StaticItem { key, val, node },
@@ -486,9 +458,9 @@ impl<'src> StaticEnvironment<'src> {
 
     pub fn finalize_vars(&mut self) -> Result<(), Vec<VarId>> {
         let mut unresolved = Vec::new();
-        for id in 0..self.decls.len() {
-            let prev_end = if let Some(atop) = self.decls[id].loc.atop {
-                if let Some(range) = self.decls[atop].loc.range {
+        for id in (0..self.decls.len()).map(VarId) {
+            let prev_end = if let Some(atop) = self.decls[id.0].loc.atop {
+                if let Some(range) = self.decls[atop.0].loc.range {
                     range.end
                 } else {
                     println!("ambiguous type position cascade");
@@ -497,7 +469,7 @@ impl<'src> StaticEnvironment<'src> {
             } else {
                 0
             };
-            let size = match self.decls[id].item.val.get_type(self) {
+            let size = match self.decls[id.0].item.val.get_type(self) {
                 Some(VarType::Fun(_)) => {
                     // TODO: function sizes
                     0
@@ -509,12 +481,12 @@ impl<'src> StaticEnvironment<'src> {
                         .map_err(|e| vec![todo!("error: {e}")])? // TODO: how do we report this?
                 }
                 _ => {
-                    println!("error: type never resolved for {:?}", self.decls[id]);
+                    println!("error: type never resolved for {:?}", self.decls[id.0]);
                     unresolved.push(id);
                     continue;
                 }
             };
-            self.decls[id].loc.range = Some(Range {
+            self.decls[id.0].loc.range = Some(Range {
                 start: prev_end,
                 end: prev_end + size,
             });

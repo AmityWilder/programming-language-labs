@@ -1,10 +1,6 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    analyzer::{
-        Analyze,
-        static_env::StaticEnvironment,
-        types::{AbstractType, StaticType},
-    },
+    analyzer::{static_env::old::StaticEnvironment, types::AbstractType},
     grammar::ast::{self, ExprPrecedence},
     highlight::{style::StyleWrapper, write_highlight},
     scanner::{token::value::Operator, tokenize},

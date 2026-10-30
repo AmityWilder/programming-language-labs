@@ -1,7 +1,10 @@
 use crate::{
     analyzer::{
         static_env::{
-            EnvItem, EnvKey, OpOverload, OperandTypes, StaticEnvironment, StaticItem, VarType,
+            VarId,
+            old::{
+                EnvItem, EnvKey, OpOverload, OperandTypes, StaticEnvironment, StaticItem, VarType,
+            },
         },
         types::{
             AbstractType, Fallible, FunShape, FunType, OrType, PrimitiveType, StaticType,
@@ -335,7 +338,7 @@ impl<'src> Analyze<'src> for ast::Directive<'src> {
 /// Has no actual memory location, since its type may not have been determined yet
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisVar<'src> {
-    pub unique_id: usize,
+    pub unique_id: VarId,
     pub ident: &'src str,
     pub is_global: bool,
     #[cfg(debug_assertions)]

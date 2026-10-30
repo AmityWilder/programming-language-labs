@@ -1,7 +1,7 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::{
-        static_env::EnvKey,
+        static_env::old::EnvKey,
         types::{
             AbstractType, FunShape, TypeCompatible,
             bounds::{
@@ -87,7 +87,7 @@ pub type TypeBoundRequiredness<'src> =
 pub type TypeBoundRequirednessReason<'src> =
     Requiredness<RequiredBoundReason<'src>, AllowedBoundReason<'src>, DeniedBoundReason<'src>>;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
 pub enum OpBound<'src> {
     Unary(OpSide),
     Binary { rhs: Option<Box<TypeBound<'src>>> },
@@ -106,7 +106,7 @@ pub enum Combinator {
 
 /// A single [`TypeBound`] can include multiple bounds through [`Self::Combo`],
 /// so prefer [`Box<TypeBound>`] over [`Vec<TypeBound>`]
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
 pub enum TypeBound<'src> {
     /// Satisfies a combination of conditions
     ///
@@ -1176,7 +1176,7 @@ mod tests {
     // NOT PASSING
     mod checking {
         use super::*;
-        use crate::analyzer::types::{StaticType, bounds::error::UnsatisfiedBoundError};
+        use crate::analyzer::types::bounds::error::UnsatisfiedBoundError;
 
         #[test]
         fn test_match_one() {
@@ -1243,7 +1243,7 @@ mod tests {
         }
 
         #[test]
-        fn test_bound_overlap() {
+        fn test_bound_overlap_bad() {
             let numeric = TypeBound::Combo(
                 Combinator::One,
                 vec![
@@ -1263,9 +1263,43 @@ mod tests {
             );
             assert!(integral.is_legal());
             let res = numeric.satisfaction_of(&integral);
+            match res {
+                Requiredness::Deny(_) => {
+                    // success
+                }
+                Requiredness::Require(reason) => {
+                    panic!("should be denied because flpt is not an integer\n{reason}")
+                }
+                Requiredness::Allow(reason) => {
+                    panic!("should be denied because flpt is not an integer\n{reason}")
+                }
+            }
+        }
+
+        #[test]
+        fn test_bound_overlap() {
+            let numeric = TypeBound::Combo(
+                Combinator::One,
+                vec![
+                    TypeBound::Exactly(AbstractType::Byte),
+                    TypeBound::Exactly(AbstractType::Uint),
+                    TypeBound::Exactly(AbstractType::Sint),
+                    TypeBound::Exactly(AbstractType::Flpt),
+                ],
+            );
+            assert!(numeric.is_legal());
+            let integral = TypeBound::Combo(
+                Combinator::Any,
+                vec![
+                    TypeBound::Exactly(AbstractType::Byte),
+                    TypeBound::Exactly(AbstractType::Uint),
+                    TypeBound::Exactly(AbstractType::Sint),
+                ],
+            );
+            assert!(integral.is_legal());
+            let res = integral.satisfaction_of(&numeric);
             if let Ok(e) = UnsatisfiedBoundError::try_from(res) {
-                println!("{e}");
-                panic!("should be satisfied");
+                panic!("should be satisfied\n{e}");
             }
         }
     }

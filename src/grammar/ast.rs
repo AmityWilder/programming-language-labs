@@ -37,7 +37,7 @@ pub enum ExprPrecedence {
 /// - or all three
 ///
 /// Consider implementing [`AstNodeFinal`] if the conversion cannot fail.
-pub trait AstNode<'src> {
+pub trait AstNode<'src>: std::fmt::Debug {
     /// For when there is a less expensive implementation for ranges that are one-sided
     ///
     /// Returns [`None`] if the range is empty
@@ -320,7 +320,7 @@ impl<'src> AstNode<'src> for Lexeme<'src> {
 }
 impl<'src> AstNodeFinal<'src> for Lexeme<'src> {}
 
-impl<'src, T> AstNode<'src> for SpecToken<'src, T> {
+impl<'src, T: std::fmt::Debug> AstNode<'src> for SpecToken<'src, T> {
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
         Some(self.lex_range(source))
     }
@@ -329,7 +329,7 @@ impl<'src, T> AstNode<'src> for SpecToken<'src, T> {
         self.mac
     }
 }
-impl<'src, T> AstNodeFinal<'src> for SpecToken<'src, T> {}
+impl<'src, T: std::fmt::Debug> AstNodeFinal<'src> for SpecToken<'src, T> {}
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct BindingPattern<'src> {

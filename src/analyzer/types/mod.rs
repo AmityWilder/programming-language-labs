@@ -136,7 +136,7 @@ impl<T: ?Sized + TypeSize> TypeSize for &T {
 }
 
 /// Like an [`ArrayType`], but the length is determined at runtime
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct ViewType<'src> {
     pub item: AbstractType<'src>,
 }
@@ -165,7 +165,7 @@ impl Display for ViewType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct ArrayType<'src> {
     pub item: AbstractType<'src>,
     pub len: usize, // TODO: constant expression? bounds?
@@ -215,7 +215,7 @@ impl Display for ArrayType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct Ptr<'src> {
     pub to: AbstractType<'src>,
 }
@@ -255,7 +255,7 @@ impl Display for Ptr<'_> {
 }
 
 /// Alternative for operations that can fail
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum OrType {
     /// Produces null on fail
     None,
@@ -277,7 +277,7 @@ impl Display for OrType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct Fallible<'src> {
     pub then: AbstractType<'src>,
     pub or: OrType,
@@ -331,7 +331,7 @@ impl Display for Fallible<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct RecType<'src> {
     pub name: &'src str,
     pub fields: BTreeMap<&'src str, AbstractType<'src>>,
@@ -370,7 +370,7 @@ impl Display for RecType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct SupType<'src> {
     pub name: &'src str,
     pub variants: BTreeSet<AbstractType<'src>>,
@@ -421,7 +421,7 @@ impl Display for SupType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct SubType<'src> {
     pub name: &'src str,
     pub base: AbstractType<'src>,
@@ -484,7 +484,7 @@ impl Display for SubType<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct CatType<'src> {
     pub name: &'src str,
     pub repr: Box<AbstractType<'src>>,
@@ -539,7 +539,7 @@ impl Display for CatType<'_> {
 }
 
 /// A matcher for any function with the specified combination of parameters and return
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct FunShape<'src> {
     pub params: Vec<AbstractType<'src>>,
     pub ret: AbstractType<'src>,
@@ -586,7 +586,7 @@ impl Display for FunShape<'_> {
 }
 
 /// A specific, concrete function
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct FunType<'src> {
     pub name: &'src str,
     pub shape: FunShape<'src>,
@@ -704,7 +704,7 @@ impl Display for PrimitiveType {
 }
 
 /// Monomorphized or concrete type
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
 pub enum StaticType<'src> {
     /// Language-defined
     Primitive(PrimitiveType),
@@ -865,7 +865,7 @@ impl<'src> From<Box<FunType<'src>>> for StaticType<'src> {
 }
 
 /// A type with generic parameters
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct GenericType<'src> {
     pub ident: &'src str,
     pub params: Vec<GenericParam<'src>>,
@@ -898,7 +898,7 @@ impl<'src> TypeCompatible<'src> for GenericType<'src> {
 }
 
 /// A type that is not yet known
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct GenericParam<'src> {
     pub ident: &'src str,
     pub req: Box<TypeBound<'src>>,
@@ -920,7 +920,7 @@ impl<'src> TypeCompatible<'src> for GenericParam<'src> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
 pub enum AbstractType<'src> {
     /// All types should be this variant after monomorphization
     Concrete(StaticType<'src>),

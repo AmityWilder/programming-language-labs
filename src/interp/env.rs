@@ -4,7 +4,7 @@ use crate::{
 };
 use std::{cell::RefCell, collections::HashMap};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InterpVar<'src> {
     pub ident: &'src str,
     pub id: VarId,
