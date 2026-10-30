@@ -886,26 +886,28 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
     /// `generic_group -> "<" ( type_expression ( "," type_expression )* ( "," )? )? ">"`
     fn generic_group(&mut self) -> Option<Result<GenericGroup<'src>, ContextError<'src>>> {
-        self.rip_langle().map(|open| {
-            let mut list = Vec::new();
-            let close = loop {
-                if let Some(close) = self.rip_rangle() {
-                    break close;
-                }
-                let item = self.type_expression()?;
-                let comma = self.pull_if_eq(LexValue::Punctuation(Punctuation::Comma));
-                list.push((item, comma));
-                if comma.is_none() {
-                    break self
-                        .rip_rangle()
-                        .ok_or_else(|| self.error(ExpectedToken::TypeOrRAngle))
-                        .map_err(|e| {
-                            e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source))
-                        })?;
-                }
-            };
-            Ok(GenericGroup { open, list, close })
-        })
+        // TBD: should `<<` be allowed? can `<...>` be used without a generic type?
+        self.pull_if_eq(LexValue::Punctuation(Punctuation::Lt))
+            .map(|open| {
+                let mut list = Vec::new();
+                let close = loop {
+                    if let Some(close) = self.rip_rangle() {
+                        break close;
+                    }
+                    let item = self.type_expression()?;
+                    let comma = self.pull_if_eq(LexValue::Punctuation(Punctuation::Comma));
+                    list.push((item, comma));
+                    if comma.is_none() {
+                        break self
+                            .rip_rangle()
+                            .ok_or_else(|| self.error(ExpectedToken::TypeOrRAngle))
+                            .map_err(|e| {
+                                e.into_bracket_mismatch(Bracket::Paren, open.lex_range(self.source))
+                            })?;
+                    }
+                };
+                Ok(GenericGroup { open, list, close })
+            })
     }
 
     /// `type_expression -> ( ( "nevr" | "bool" | "uint" | "sint" | "flpt" | "char" | "text" | "fail" | IDENTIFIER ) "::" )*
