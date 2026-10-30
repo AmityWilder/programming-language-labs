@@ -3,9 +3,12 @@
 use crate::{
     error::{ContextError, ErrorType},
     regex::{FauxRegex, digit_char, word_char},
-    scanner::symbols::{
-        BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
-        MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM,
+    scanner::{
+        symbols::{
+            BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
+            MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM,
+        },
+        token::Lexeme,
     },
 };
 use std::range::Range;
@@ -199,10 +202,13 @@ impl<'src> Scanner<'src> {
     ///
     /// # Panics
     /// This method will panic if `len` splits `self.source` partway through a character or beyond the end of the source string.
-    fn split_off(&mut self, len: usize) -> Option<&'src str> {
+    fn split_off(&mut self, len: usize) -> Option<Lexeme<'src>> {
         self.source.split_at_checked(len).map(|(front, back)| {
             self.source = back;
-            front
+            Lexeme {
+                src: front,
+                mac: None, // tokens do not have a macro expansion until the preprocessor
+            }
         })
     }
 
@@ -247,7 +253,6 @@ impl<'src> Scanner<'src> {
                 .split_off(len)
                 .expect("find and len should return safe positions within source"),
             val: LexValue::Whitespace,
-            mac: None,
         })
     }
 
@@ -270,7 +275,6 @@ impl<'src> Scanner<'src> {
             Token {
                 lex,
                 val: LexValue::Macro,
-                mac: None,
             }
         })
     }
@@ -295,7 +299,6 @@ impl<'src> Scanner<'src> {
             Token {
                 lex,
                 val: LexValue::MacroParam,
-                mac: None,
             }
         })
     }
@@ -358,16 +361,14 @@ impl<'src> Scanner<'src> {
                     .split_off(len)
                     .expect("find and len should return safe positions to split at");
                 match open_delim {
-                    TEXT_DELIM => LexValue::text_literal(lex).map(|val| Token {
+                    TEXT_DELIM => LexValue::text_literal(lex.src).map(|val| Token {
                         lex,
                         val,
-                        mac: None,
                     }).map_err(ErrorType::InvalidEscape),
 
-                    CHAR_DELIM => LexValue::char_literal(lex).map(|val| Token {
+                    CHAR_DELIM => LexValue::char_literal(lex.src).map(|val| Token {
                         lex,
                         val,
-                        mac: None,
                     }),
 
                     _ => unreachable!("should be guarded by if condition"),
@@ -393,10 +394,10 @@ impl<'src> Scanner<'src> {
         let lex = self
             .split_off(len)
             .expect("find and len should return safe positions to split at");
-        let val = if let Some(kw) = Keyword::try_from_str(lex) {
+        let val = if let Some(kw) = Keyword::try_from_str(lex.src) {
             LexValue::Keyword(kw)
         } else {
-            match lex {
+            match lex.src {
                 "true" => LexValue::BoolLiteral(true),
                 "fals" => LexValue::BoolLiteral(false),
                 _ => {
@@ -410,11 +411,7 @@ impl<'src> Scanner<'src> {
                 }
             }
         };
-        Some(Token {
-            lex,
-            val,
-            mac: None,
-        })
+        Some(Token { lex, val })
     }
 
     /// Split off a number literal from the start of the source code
@@ -426,12 +423,8 @@ impl<'src> Scanner<'src> {
             .split_off(len)
             .expect("should be a safe position to split at");
         Some(
-            LexValue::number_literal(lex)
-                .map(|val| Token {
-                    lex,
-                    val,
-                    mac: None,
-                })
+            LexValue::number_literal(lex.src)
+                .map(|val| Token { lex, val })
                 .map_err(|err| self.error_prev(len, ErrorType::InvalidNumLiteral(err))),
         )
     }
@@ -454,7 +447,6 @@ impl<'src> Scanner<'src> {
                 .split_off(len)
                 .expect("should be a safe position to split at"),
             val: LexValue::Comment,
-            mac: None,
         })
     }
 
@@ -492,7 +484,6 @@ impl<'src> Scanner<'src> {
                     .split_off(len)
                     .expect("should be a safe position to split at"),
                 val: LexValue::Comment,
-                mac: None,
             })
             .ok_or_else(|| self.error_here(self.source.len(), ErrorType::EndlessBlockComment)),
         )
@@ -509,7 +500,6 @@ impl<'src> Scanner<'src> {
             Token {
                 lex,
                 val: LexValue::Punctuation(punc),
-                mac: None,
             }
         })
     }

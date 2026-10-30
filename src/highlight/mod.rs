@@ -14,7 +14,7 @@ use crate::{
             BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, LINE_COMMENT_OPEN, TEXT_DELIM,
         },
         token::{
-            Lexical, Token,
+            Token,
             value::{CharLiteral, Escapes, LexValue, TextLiteral},
         },
     },
@@ -367,7 +367,7 @@ where
 
 impl<'src> TokenHighlight<'src> for Token<'src> {
     fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
-        (self.lex, self.syntax(), self.val)
+        (self.lex.src, self.syntax(), self.val)
     }
 }
 

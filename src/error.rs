@@ -19,7 +19,7 @@ use crate::{
             OCT_PREFIX, TEXT_DELIM,
         },
         token::{
-            ExpansionData, Lexical, Token, escape_char,
+            ExpansionData, Token, escape_char,
             value::{Keyword, Operator, TokenEq},
         },
         tokenize,
@@ -1224,19 +1224,6 @@ impl<'src> ContextError<'src> {
         Self::error(source, node.get_range(source), node.expansion(source), err)
     }
 
-    /// Produce an error on an optional token (the range will be its lexeme)
-    pub fn token_error<T>(source: &'src str, token: Option<&T>, err: ErrorType<'src>) -> Self
-    where
-        T: ?Sized + Lexical<'src>,
-    {
-        Self::error(
-            source,
-            token.map(|token| token.lex_range(source)),
-            token.and_then(Lexical::mac),
-            err,
-        )
-    }
-
     /// Map the [`ErrorType`] of a [`ContextError`]
     pub fn map_type<F>(mut self, f: F) -> Self
     where
@@ -1288,18 +1275,20 @@ impl<'src> ContextError<'src> {
     }
 
     /// A token was found but not the right kind
+    #[deprecated = "inline"]
     pub fn unexpected(token: &Token<'src>, source: &'src str, expect: ExpectedToken) -> Self {
-        Self::token_error(
+        Self::node_error(
             source,
-            Some(token),
+            token,
             ErrorType::UnexpectedToken {
                 expect,
-                actual: token.lex,
+                actual: token.lex.src,
             },
         )
     }
 
     /// No token was found despite expecting one
+    #[deprecated = "inline"]
     pub fn missing(source: &'src str, expect: ExpectedToken) -> Self {
         Self::error(
             source,

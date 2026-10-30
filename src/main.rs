@@ -79,7 +79,7 @@ use crate::{
     preproc::preprocess,
     scanner::{
         token::{
-            Lexical, Token,
+            Token,
             value::{CharLiteral, LexValue, TextLiteral},
         },
         tokenize,
@@ -132,7 +132,6 @@ mod preproc;
 mod regex;
 mod scanner;
 mod spec_ops;
-mod ternary;
 mod types;
 
 #[cfg(test)] // only include testing module in test builds

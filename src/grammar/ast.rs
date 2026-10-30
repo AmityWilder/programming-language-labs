@@ -2,7 +2,7 @@ use crate::{
     analyzer::types::bounds::Combinator,
     error::OpSide,
     scanner::token::{
-        ExpansionData, Lexeme, Lexical, SpecToken, Token,
+        ExpansionData, Lexeme, SpecToken, Token,
         punc::Punctuation,
         value::{Keyword, LexValue, Operator, TokenEq},
     },
@@ -532,11 +532,9 @@ impl OrTypeKeyword {
 impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, OrTypeKeyword> {
     type Error = ();
 
-    fn try_from(
-        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(SpecToken { lex, val }: SpecToken<'src, Keyword>) -> Result<Self, Self::Error> {
         OrTypeKeyword::new(val)
-            .map(|val| Self { lex, mac, val })
+            .map(|val| Self { lex, val })
             .ok_or(())
     }
 }
@@ -633,11 +631,9 @@ impl std::fmt::Display for TypenameKeyword {
 impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, TypenameKeyword> {
     type Error = ();
 
-    fn try_from(
-        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(SpecToken { lex, val }: SpecToken<'src, Keyword>) -> Result<Self, Self::Error> {
         TypenameKeyword::new(val)
-            .map(|val| Self { lex, mac, val })
+            .map(|val| Self { lex, val })
             .ok_or(())
     }
 }
@@ -651,13 +647,11 @@ impl<'src> TryFrom<Token<'src>> for SpecToken<'src, TypenameKeyword> {
 impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, Option<TypenameKeyword>> {
     type Error = ();
 
-    fn try_from(
-        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(SpecToken { lex, val }: SpecToken<'src, Keyword>) -> Result<Self, Self::Error> {
         TypenameKeyword::new(val)
             .map(|val| Self {
                 lex,
-                mac,
+
                 val: Some(val),
             })
             .ok_or(())
@@ -667,14 +661,10 @@ impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, Option<Typename
 impl<'src> TryFrom<Token<'src>> for SpecToken<'src, Option<TypenameKeyword>> {
     type Error = ();
 
-    fn try_from(Token { lex, mac, val }: Token<'src>) -> Result<Self, Self::Error> {
+    fn try_from(Token { lex, val }: Token<'src>) -> Result<Self, Self::Error> {
         match val {
-            LexValue::Identifier => Ok(SpecToken {
-                lex,
-                mac,
-                val: None,
-            }),
-            LexValue::Keyword(val) => SpecToken::<'src, Keyword> { lex, mac, val }.try_into(),
+            LexValue::Identifier => Ok(SpecToken { lex, val: None }),
+            LexValue::Keyword(val) => SpecToken::<'src, Keyword> { lex, val }.try_into(),
             _ => Err(()),
         }
     }
@@ -838,12 +828,8 @@ impl Combinator {
 impl<'src> TryFrom<SpecToken<'src, TokenEq>> for SpecToken<'src, Combinator> {
     type Error = ();
 
-    fn try_from(
-        SpecToken { lex, mac, val }: SpecToken<'src, TokenEq>,
-    ) -> Result<Self, Self::Error> {
-        Combinator::new(val)
-            .map(|val| Self { lex, mac, val })
-            .ok_or(())
+    fn try_from(SpecToken { lex, val }: SpecToken<'src, TokenEq>) -> Result<Self, Self::Error> {
+        Combinator::new(val).map(|val| Self { lex, val }).ok_or(())
     }
 }
 impl<'src> TryFrom<Token<'src>> for SpecToken<'src, Combinator> {
@@ -1199,12 +1185,8 @@ impl std::fmt::Display for DirectiveKw {
 impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, DirectiveKw> {
     type Error = ();
 
-    fn try_from(
-        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
-    ) -> Result<Self, Self::Error> {
-        DirectiveKw::new(val)
-            .map(|val| Self { lex, mac, val })
-            .ok_or(())
+    fn try_from(SpecToken { lex, val }: SpecToken<'src, Keyword>) -> Result<Self, Self::Error> {
+        DirectiveKw::new(val).map(|val| Self { lex, val }).ok_or(())
     }
 }
 impl<'src> TryFrom<Token<'src>> for SpecToken<'src, DirectiveKw> {
@@ -1886,12 +1868,8 @@ impl VarKeyword {
 impl<'src> TryFrom<SpecToken<'src, Keyword>> for SpecToken<'src, VarKeyword> {
     type Error = ();
 
-    fn try_from(
-        SpecToken { lex, mac, val }: SpecToken<'src, Keyword>,
-    ) -> Result<Self, Self::Error> {
-        VarKeyword::new(val)
-            .map(|val| Self { lex, mac, val })
-            .ok_or(())
+    fn try_from(SpecToken { lex, val }: SpecToken<'src, Keyword>) -> Result<Self, Self::Error> {
+        VarKeyword::new(val).map(|val| Self { lex, val }).ok_or(())
     }
 }
 impl<'src> TryFrom<Token<'src>> for SpecToken<'src, VarKeyword> {

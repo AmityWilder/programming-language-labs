@@ -3,10 +3,7 @@ use crate::{
     error::ExpectedToken,
     scanner::{
         Bracket, Scanner,
-        token::{
-            Lexical,
-            value::{Keyword, LexValue, Punctuation},
-        },
+        token::value::{Keyword, LexValue, Punctuation},
     },
 };
 use std::range::Range;
@@ -99,9 +96,11 @@ macro_rules! spoof_tokens {
             Scanner::new($source).collect();
 
         let expected = [$(Ok(Token {
-            lex: $lex,
+            lex: $crate::scanner::token::Lexeme {
+                src: $lex,
+                mac: None,
+            },
             val: LexValue::$Variant$(($val))?$(($Variant::$SubVariant))?,
-            mac: None,
         })),*];
 
         for (i, (actual, expected)) in tokens.iter().zip(expected.iter()).enumerate() {
@@ -129,12 +128,14 @@ macro_rules! spoof_tokens {
         let expected = [$(
             $Result(
                 $(Token {
-                    lex: $pp_lex,
+                    lex: $crate::scanner::token::Lexeme {
+                        src: $pp_lex,
+                        mac: optional!($(ExpansionData {
+                            range: std::range::Range::from($macro_range),
+                            arg: optional!($(($idx, $name))?),
+                        })?),
+                    },
                     val: LexValue::$PpVariant$(($pp_val))?$(($PpVariant::$PpSubVariant))?,
-                    mac: optional!($(ExpansionData {
-                        range: std::range::Range::from($macro_range),
-                        arg: optional!($(($idx, $name))?),
-                    })?),
                 })?
                 $(ContextError::error($($err)+))?
             )

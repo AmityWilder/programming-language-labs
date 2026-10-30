@@ -6,7 +6,7 @@ use crate::{
     },
     scanner::{
         Bracket,
-        token::{ExpansionData, Lexical, Token, punc::Punctuation, value::LexValue},
+        token::{ExpansionData, Token, punc::Punctuation, value::LexValue},
     },
 };
 use std::{collections::VecDeque, range::Range};
@@ -437,8 +437,8 @@ impl<'src> PreprocessorStream<'src> {
         F: FnOnce(&'src str) -> Option<usize>,
     {
         self.pull_if_next(match_token!(Macro)).map(|name| {
-            let expected_count = arg_count(name.lex).ok_or_else(|| {
-                ContextError::token_error(self.source, Some(&name), ErrorType::MacroUndefined)
+            let expected_count = arg_count(name.lex.src).ok_or_else(|| {
+                ContextError::node_error(self.source, &name, ErrorType::MacroUndefined)
             })?;
             Ok(MacroExpansion {
                 name,

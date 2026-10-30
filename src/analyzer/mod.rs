@@ -154,7 +154,7 @@ impl<'src> Analyze<'src> for ast::Label<'src> {
     ) -> Result<'src, Self::Ouptut> {
         // TODO: validation? of any kind?
         Ok(AnalysisLabel {
-            name: self.name.lex,
+            name: self.name.src,
         })
     }
 }
@@ -696,9 +696,9 @@ impl<'src> Analyze<'src> for ast::Literal<'src> {
             LexValue::TextLiteral(x) => Literal::Text(
                 x.process()
                     .map_err(|esc| {
-                        vec![ContextError::token_error(
+                        vec![ContextError::node_error(
                             source,
-                            Some(&self.value),
+                            &self.value,
                             ErrorType::InvalidEscape(esc),
                         )]
                     })?
@@ -730,7 +730,7 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>, // TODO
     ) -> Result<'src, Self::Ouptut> {
-        let ident = self.ident.lex;
+        let ident = self.ident.src;
         let (unique_id, ty, is_global) = env
             .lookup_mut(ident)
             .find_map(|(unique_id, item)| match &mut item.val {
@@ -738,9 +738,9 @@ impl<'src> Analyze<'src> for ast::Variable<'src> {
                 _ => None,
             })
             .ok_or_else(|| {
-                vec![ContextError::token_error(
+                vec![ContextError::node_error(
                     source,
-                    Some(&self.ident),
+                    &self.ident,
                     ErrorType::UnknownVar,
                 )]
             })?;
@@ -1737,7 +1737,7 @@ where
                     .param
                     .as_ref()
                     .map(|x| {
-                        let ident = x.param.ident.lex;
+                        let ident = x.param.ident.src;
                         env.decl_var(
                             ident,
                             ret.cloned(),
@@ -1948,7 +1948,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
         {
             return Err(vec![e]);
         }
-        let ident = self.binding.ident.lex; // TODO: what if there's multiple?
+        let ident = self.binding.ident.src; // TODO: what if there's multiple?
         let annotated_type = self
             .ty
             .as_ref()
@@ -1966,7 +1966,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
 
         #[cfg(debug_assertions)]
         {
-            print!("{}: ", self.binding.ident.lex); // TODO: what if there's multiple?
+            print!("{}: ", self.binding.ident.src); // TODO: what if there's multiple?
             if let Some(annotated_type) = &annotated_type {
                 print!("{annotated_type}");
             } else {

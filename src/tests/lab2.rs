@@ -9,70 +9,86 @@ macro_rules! token {
     // Special cases where the lex is in a field instead of being the entire value
     (CharLiteral($ch:expr, $is_esc:expr) $(,)?) => {
         $crate::scanner::token::Token {
-            lex: stringify!($ch),
+            lex: $crate::scanner::token::Lexeme {
+                src: stringify!($ch),
+                mac: None,
+            },
             val: $crate::scanner::token::value::LexValue::CharLiteral(
                 $crate::scanner::token::value::CharLiteral { ch: $ch, is_escaped: $is_esc }),
-            mac: None
         }
     };
     (TextLiteral($content:expr) $(,)?) => {
         $crate::scanner::token::Token {
-            lex: stringify!($content),
+            lex: $crate::scanner::token::Lexeme {
+                src: stringify!($content),
+                mac: None,
+            },
             val: $crate::scanner::token::value::LexValue::TextLiteral(
                 $crate::scanner::token::value::TextLiteral { content: $content }),
-            mac: None
         }
     };
 
     // Special cases where the value is already stringified
     (Identifier($name:expr)) => {
         $crate::scanner::token::Token {
-            lex: $name,
+            lex: $crate::scanner::token::Lexeme {
+                src: $name,
+                mac: None,
+            },
             val: $crate::scanner::token::value::LexValue::Identifier,
-            mac: None
         }
     };
     // TODO: to be deprecated
     (Callable($name:expr)) => {
         $crate::scanner::token::Token {
-            lex: $name,
+            lex: $crate::scanner::token::Lexeme {
+                src: $name,
+                mac: None,
+            },
             val: $crate::scanner::token::value::LexValue::Callable,
-            mac: None
         }
     };
     (Macro($name:expr)) => {
         $crate::scanner::token::Token {
-            lex: $name,
+            lex: $crate::scanner::token::Lexeme {
+                src: $name,
+                mac: None,
+            },
             val: $crate::scanner::token::value::LexValue::Macro,
-            mac: None
         }
     };
     (MacroParam($name:expr)) => {
         $crate::scanner::token::Token {
-            lex: $name,
+            lex: $crate::scanner::token::Lexeme {
+                src: $name,
+                mac: None,
+            },
             val: $crate::scanner::token::value::LexValue::MacroParam,
-            mac: None
         }
     };
     (Lexeme($value:expr)) => {
         $crate::scanner::token::Lexeme {
-            lex: $value,
+            src: $value,
             mac: None
         }
     };
     (Operator::$Variant:ident $(,)?) => {
         $crate::scanner::token::SpecToken {
-            lex: $crate::scanner::token::value::Operator::$Variant.as_str(),
+            lex: $crate::scanner::token::Lexeme {
+                src: $crate::scanner::token::value::Operator::$Variant.as_str(),
+                mac: None,
+            },
             val: $crate::scanner::token::value::Operator::$Variant,
-            mac: None
         }
     };
 
     ($Variant:ident$(($val:expr))? $(::$SubVariant:ident)? $(, $name:expr)? $(,)?) => {
         $crate::scanner::token::SpecToken {
-            lex: $(stringify!($val))? $($Variant::$SubVariant.as_str())? $($name)?,
+            lex: $crate::scanner::token::Lexeme {
+                src: $(stringify!($val))? $($Variant::$SubVariant.as_str())? $($name)?,
+                mac: None,
+            },
             val: LexValue::$Variant $(($val))? $(($Variant::$SubVariant))?,
-            mac: None
         }
     };
 }

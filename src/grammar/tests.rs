@@ -18,66 +18,82 @@ fn test_parse0() {
         &[Expr::binary(Binary {
             lhs: Expr::literal(Literal {
                 value: Token {
-                    lex: "5",
+                    lex: Lexeme {
+                        src: "5",
+                        mac: None
+                    },
                     val: LexValue::SIntLiteral(5),
-                    mac: None
                 }
             }),
             op: SpecToken {
-                lex: "+",
+                lex: Lexeme {
+                    src: "+",
+                    mac: None
+                },
                 val: Operator::Add,
-                mac: None
             },
             rhs: Expr::binary(Binary {
                 lhs: Expr::unary(Unary {
                     side: OpSide::Prefix,
                     op: SpecToken {
-                        lex: "-",
+                        lex: Lexeme {
+                            src: "-",
+                            mac: None
+                        },
                         val: Operator::SubNeg,
-                        mac: None
                     },
                     operand: Expr::grouping(Grouping {
                         open: Lexeme {
-                            lex: "(",
+                            src: "(",
                             mac: None
                         },
                         expr: Expr::binary(Binary {
                             lhs: Expr::literal(Literal {
                                 value: Token {
-                                    lex: "7",
+                                    lex: Lexeme {
+                                        src: "7",
+                                        mac: None
+                                    },
                                     val: LexValue::SIntLiteral(7),
-                                    mac: None
                                 }
                             }),
                             op: SpecToken {
-                                lex: "/",
+                                lex: Lexeme {
+                                    src: "/",
+                                    mac: None
+                                },
                                 val: Operator::Div,
-                                mac: None
                             },
                             rhs: Expr::literal(Literal {
                                 value: Token {
-                                    lex: "8",
+                                    lex: Lexeme {
+                                        src: "8",
+                                        mac: None
+                                    },
                                     val: LexValue::SIntLiteral(8),
-                                    mac: None
                                 }
                             })
                         }),
                         close: Lexeme {
-                            lex: ")",
+                            src: ")",
                             mac: None
                         }
                     })
                 }),
                 op: SpecToken {
-                    lex: "*",
+                    lex: Lexeme {
+                        src: "*",
+                        mac: None
+                    },
                     val: Operator::Mul,
-                    mac: None
                 },
                 rhs: Expr::Literal(Literal {
                     value: Token {
-                        lex: "3",
+                        lex: Lexeme {
+                            src: "3",
+                            mac: None
+                        },
                         val: LexValue::SIntLiteral(3),
-                        mac: None
                     }
                 })
             })
@@ -89,9 +105,8 @@ macro_rules! spoof_scan {
     [$(($lex:expr, $Variant:ident$(($val:expr))?$(.$SubVariant:ident)? $(,)?)),* $(,)?] => {
         (concat!($($lex),*), [$(
             Token {
-                lex: $lex,
+                lex: Lexeme { src: $lex, mac: None },
                 val: LexValue::$Variant$(($val))?$(($Variant::$SubVariant))?,
-                mac: None,
             }
         ),*])
     };

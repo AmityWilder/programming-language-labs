@@ -4,7 +4,7 @@
 use crate::{
     error::{ContextError, ErrorType},
     scanner::{
-        token::{Token, punc::Punctuation, value::LexValue},
+        token::{Lexeme, Token, punc::Punctuation, value::LexValue},
         tokenize,
     },
 };
@@ -37,9 +37,11 @@ mod scan {
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
-                    lex: SOURCE,
+                    lex: Lexeme {
+                        src: SOURCE,
+                        mac: None,
+                    },
                     val: LexValue::Whitespace,
-                    mac: None
                 })]
             );
         }
@@ -50,9 +52,11 @@ mod scan {
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
-                    lex: SOURCE,
+                    lex: Lexeme {
+                        src: SOURCE,
+                        mac: None,
+                    },
                     val: LexValue::Whitespace,
-                    mac: None
                 })]
             );
         }
@@ -72,9 +76,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::Comment,
-                        mac: None
                     })]
                 );
             }
@@ -86,14 +92,18 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[
                         Ok(Token {
-                            lex: "// apple",
+                            lex: Lexeme {
+                                src: "// apple",
+                                mac: None,
+                            },
                             val: LexValue::Comment,
-                            mac: None
                         }),
                         Ok(Token {
-                            lex: "\n",
+                            lex: Lexeme {
+                                src: "\n",
+                                mac: None,
+                            },
                             val: LexValue::Whitespace,
-                            mac: None
                         })
                     ]
                 );
@@ -114,9 +124,11 @@ mod scan {
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
-                    lex: SOURCE,
+                    lex: Lexeme {
+                        src: SOURCE,
+                        mac: None,
+                    },
                     val: LexValue::Identifier,
-                    mac: None
                 })]
             );
         }
@@ -127,9 +139,11 @@ mod scan {
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
-                    lex: SOURCE,
+                    lex: Lexeme {
+                        src: SOURCE,
+                        mac: None,
+                    },
                     val: LexValue::Identifier,
-                    mac: None
                 })]
             );
         }
@@ -140,9 +154,11 @@ mod scan {
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
-                    lex: SOURCE,
+                    lex: Lexeme {
+                        src: SOURCE,
+                        mac: None,
+                    },
                     val: LexValue::Identifier,
-                    mac: None
                 })]
             );
         }
@@ -162,9 +178,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::SIntLiteral(5),
-                        mac: None
                     })]
                 );
             }
@@ -175,9 +193,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::SIntLiteral(35),
-                        mac: None
                     })]
                 );
             }
@@ -188,9 +208,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::SIntLiteral(35),
-                        mac: None
                     })]
                 );
             }
@@ -201,9 +223,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::SIntLiteral(35),
-                        mac: None
                     })]
                 );
             }
@@ -214,9 +238,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::SIntLiteral(-5),
-                        mac: None
                     })]
                 );
             }
@@ -227,9 +253,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(2.5),
-                        mac: None
                     })]
                 );
             }
@@ -240,9 +268,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(25.25),
-                        mac: None
                     })]
                 );
             }
@@ -253,9 +283,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(-25.25),
-                        mac: None
                     })]
                 );
             }
@@ -266,9 +298,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(25.25),
-                        mac: None
                     })]
                 );
             }
@@ -284,9 +318,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(5e0),
-                        mac: None
                     })]
                 );
             }
@@ -297,9 +333,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(55e0),
-                        mac: None
                     })]
                 );
             }
@@ -310,9 +348,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(5e-5),
-                        mac: None
                     })]
                 );
             }
@@ -323,9 +363,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(5e+5),
-                        mac: None
                     })]
                 );
             }
@@ -336,9 +378,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(5e-50),
-                        mac: None
                     })]
                 );
             }
@@ -349,9 +393,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(-5e-50),
-                        mac: None
                     })]
                 );
             }
@@ -362,9 +408,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::FlptLiteral(5e-5_0),
-                        mac: None
                     })]
                 );
             }
@@ -376,19 +424,25 @@ mod scan {
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[
                         Ok(Token {
-                            lex: "-5e-5",
+                            lex: Lexeme {
+                                src: "-5e-5",
+                                mac: None,
+                            },
                             val: LexValue::FlptLiteral(-5e-5),
-                            mac: None
                         }),
                         Ok(Token {
-                            lex: "-",
+                            lex: Lexeme {
+                                src: "-",
+                                mac: None,
+                            },
                             val: LexValue::Punctuation(Punctuation::SubNeg),
-                            mac: None
                         }),
                         Ok(Token {
-                            lex: "3",
+                            lex: Lexeme {
+                                src: "3",
+                                mac: None,
+                            },
                             val: LexValue::SIntLiteral(3),
-                            mac: None
                         })
                     ]
                 );
@@ -409,14 +463,18 @@ mod scan {
                         // what's important is just that everything after the e ISN'T part of the flpt literal,
                         // and that it isn't used up. it doesn't matter what it actually resolves to.
                         Ok(Token {
-                            lex: "--",
+                            lex: Lexeme {
+                                src: "--",
+                                mac: None,
+                            },
                             val: LexValue::Punctuation(Punctuation::Decr),
-                            mac: None
                         }),
                         Ok(Token {
-                            lex: "5",
+                            lex: Lexeme {
+                                src: "5",
+                                mac: None,
+                            },
                             val: LexValue::SIntLiteral(5),
-                            mac: None
                         })
                     ]
                 );
@@ -433,9 +491,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::SIntLiteral(0x9f),
-                        mac: None
                     })]
                 );
             }
@@ -465,9 +525,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::SIntLiteral(0o253),
-                        mac: None
                     })]
                 );
             }
@@ -497,9 +559,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::SIntLiteral(0b1101_1011),
-                        mac: None
                     })]
                 );
             }
@@ -530,12 +594,14 @@ mod scan {
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
-                    lex: SOURCE,
+                    lex: Lexeme {
+                        src: SOURCE,
+                        mac: None,
+                    },
                     val: LexValue::CharLiteral(CharLiteral {
                         ch: 'a',
                         is_escaped: false
                     }),
-                    mac: None
                 })]
             );
         }
@@ -591,12 +657,14 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::CharLiteral(CharLiteral {
                             ch: '\0',
                             is_escaped: true
                         }),
-                        mac: None
                     })]
                 );
             }
@@ -607,12 +675,14 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::CharLiteral(CharLiteral {
                             ch: '\x1b',
                             is_escaped: true
                         }),
-                        mac: None
                     })]
                 );
             }
@@ -657,9 +727,11 @@ mod scan {
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
-                    lex: SOURCE,
+                    lex: Lexeme {
+                        src: SOURCE,
+                        mac: None,
+                    },
                     val: LexValue::TextLiteral(TextLiteral { content: "a" }),
-                    mac: None
                 })]
             );
         }
@@ -670,9 +742,11 @@ mod scan {
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
-                    lex: SOURCE,
+                    lex: Lexeme {
+                        src: SOURCE,
+                        mac: None,
+                    },
                     val: LexValue::TextLiteral(TextLiteral { content: "aa" }),
-                    mac: None
                 })]
             );
         }
@@ -683,9 +757,11 @@ mod scan {
             assert_eq!(
                 tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                 &[Ok(Token {
-                    lex: SOURCE,
+                    lex: Lexeme {
+                        src: SOURCE,
+                        mac: None,
+                    },
                     val: LexValue::TextLiteral(TextLiteral { content: "" }),
-                    mac: None
                 })]
             );
         }
@@ -713,9 +789,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::TextLiteral(TextLiteral { content: "\\0" }),
-                        mac: None
                     })]
                 );
             }
@@ -726,9 +804,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::TextLiteral(TextLiteral { content: "\\x1b" }),
-                        mac: None
                     })]
                 );
             }
@@ -739,9 +819,11 @@ mod scan {
                 assert_eq!(
                     tokenize(SOURCE).collect::<Vec<_>>().as_slice(),
                     &[Ok(Token {
-                        lex: SOURCE,
+                        lex: Lexeme {
+                            src: SOURCE,
+                            mac: None,
+                        },
                         val: LexValue::TextLiteral(TextLiteral { content: "\\1b" }),
-                        mac: None
                     })]
                 );
             }

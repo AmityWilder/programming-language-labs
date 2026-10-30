@@ -7,7 +7,7 @@ use crate::{
         eval::{PpValue, preproc_eval},
         stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
     },
-    scanner::token::{ExpansionData, Lexical, Token, value::LexValue},
+    scanner::token::{ExpansionData, Token, value::LexValue},
 };
 use std::collections::HashMap;
 
@@ -48,7 +48,7 @@ where
                         .arg_map
                         .iter()
                         .enumerate()
-                        .find(|(_, (name, _))| name == &token.lex)
+                        .find(|(_, (name, _))| *name == token.lex.src)
                 {
                     self.curr_param = (pos, name);
                     self.curr_arg = arg.clone().into_iter();
@@ -197,11 +197,11 @@ impl<'src> Preprocessor<'src> {
         definition: MacroDefinition<'src>,
     ) -> MacroDefResult<'src, impl 'src + FnMut(Token<'src>) -> Option<ContextError<'src>>> {
         const fn is_recursive(token: &Token<'_>, name: &str) -> bool {
-            token_matches!(token, Macro) && token.lex == name
+            token_matches!(token, Macro) && token.lex.src == name
         }
 
         fn is_unknown_param(token: &Token<'_>, params: &[&str]) -> bool {
-            token_matches!(token, MacroParam) && !params.contains(&token.lex)
+            token_matches!(token, MacroParam) && !params.contains(&token.lex.src)
         }
 
         let MacroDefinition {
@@ -211,11 +211,11 @@ impl<'src> Preprocessor<'src> {
             body,
         } = definition;
 
-        let head = name.lex;
+        let head = name.lex.src;
         let body = body.content;
         let params: Vec<&str> = params
             .into_iter()
-            .flat_map(|list| list.list.into_iter().map(|token| token.lex))
+            .flat_map(|list| list.list.into_iter().map(|token| token.lex.src))
             .collect();
 
         // if there are any errors, return an iterator over all of them
@@ -227,18 +227,18 @@ impl<'src> Preprocessor<'src> {
             let source = self.stream.source;
             Err(body.into_iter().filter_map(move |token| {
                 if is_recursive(&token, head) {
-                    Some(ContextError::token_error(
+                    Some(ContextError::node_error(
                         source,
-                        Some(&token),
+                        &token,
                         ErrorType::RecursiveMacro { head_range },
                     ))
                 } else if is_unknown_param(&token, &params) {
-                    Some(ContextError::token_error(
+                    Some(ContextError::node_error(
                         source,
-                        Some(&token),
+                        &token,
                         ErrorType::MacroParamUndefined {
                             head_range: Some(head_range),
-                            param_name: token.lex,
+                            param_name: token.lex.src,
                         },
                     ))
                 } else {
@@ -255,7 +255,7 @@ impl<'src> Preprocessor<'src> {
     fn expand_macro(&mut self, expansion: MacroExpansion<'src>) {
         let macro_def = self
             .macros
-            .get(expansion.name.lex)
+            .get(expansion.name.lex.src)
             .expect("should have errored when determining the number of parameters to expect");
 
         let macro_range = expansion.range(self.stream.source);

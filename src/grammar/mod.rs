@@ -10,7 +10,7 @@ use crate::{
     scanner::{
         Bracket,
         token::{
-            Lexeme, Lexical, SpecToken, Token,
+            Lexeme, SpecToken, Token,
             punc::Punctuation,
             value::{Keyword, LexValue, Operator},
         },
@@ -130,10 +130,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                             }
                         }
                     };
-                    let (torn, rest) = next.lex.split_at(LANGLE.len_utf8());
-                    next.lex = rest;
+                    let torn;
+                    (torn, next.lex.src) = next.lex.src.split_at(LANGLE.len_utf8());
                     Some(Lexeme {
-                        lex: torn,
+                        src: torn,
                         mac: next.mac,
                     })
                 })
@@ -170,10 +170,10 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
                                 }
                             }
                         };
-                        let (torn, rest) = next.lex.split_at(RANGLE.len_utf8());
-                        next.lex = rest;
+                        let torn;
+                        (torn, next.lex.src) = next.lex.src.split_at(RANGLE.len_utf8());
                         Some(Lexeme {
-                            lex: torn,
+                            src: torn,
                             mac: next.mac,
                         })
                     })

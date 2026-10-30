@@ -23,9 +23,9 @@ impl<'src> PpOpError<'src> {
         rhs: Option<&Expr<'src>>,
     ) -> ContextError<'src> {
         match self {
-            Self::Incompatible { l, r } => ContextError::token_error(
+            Self::Incompatible { l, r } => ContextError::node_error(
                 source,
-                Some(op),
+                op,
                 ErrorType::PreIncompatible {
                     op: op.val,
                     l_range: lhs.expect("binary should have lhs").range(source),
@@ -34,9 +34,9 @@ impl<'src> PpOpError<'src> {
                     r_ty: r.as_type(),
                 },
             ),
-            Self::Unsupported { x } => ContextError::token_error(
+            Self::Unsupported { x } => ContextError::node_error(
                 source,
-                Some(op),
+                op,
                 ErrorType::PreUnsupported {
                     op: op.val,
                     r_ty: x.as_type(),
@@ -346,9 +346,9 @@ where
                     }),
 
                 _ => {
-                    return Err(ContextError::token_error(
+                    return Err(ContextError::node_error(
                         source,
-                        Some(op),
+                        op,
                         ErrorType::InvalidPreOperator,
                     ));
                 }
@@ -361,9 +361,9 @@ where
 
             match side {
                 OpSide::Postfix => {
-                    return Err(ContextError::token_error(
+                    return Err(ContextError::node_error(
                         source,
-                        Some(op),
+                        op,
                         ErrorType::InvalidPreOperator,
                     ));
                 }
@@ -382,9 +382,9 @@ where
                         .map(PpValue::BoolLiteral),
 
                     _ => {
-                        return Err(ContextError::token_error(
+                        return Err(ContextError::node_error(
                             source,
-                            Some(op),
+                            op,
                             ErrorType::InvalidPreOperator,
                         ));
                     }
@@ -399,29 +399,29 @@ where
                 LexValue::UIntLiteral(x) => Ok(PpValue::UIntLiteral(x)),
                 LexValue::SIntLiteral(x) => Ok(PpValue::SIntLiteral(x)),
                 LexValue::BoolLiteral(x) => Ok(PpValue::BoolLiteral(x)),
-                LexValue::Macro => Ok(PpValue::Macro(value.lex)),
+                LexValue::Macro => Ok(PpValue::Macro(value.lex.src)),
 
-                _ => Err(ContextError::token_error(
+                _ => Err(ContextError::node_error(
                     source,
-                    Some(value),
+                    value,
                     ErrorType::InvalidPreLiteral,
                 )),
             }
         }
 
-        Expr::Directive(inner) => Err(ContextError::token_error(
+        Expr::Directive(inner) => Err(ContextError::node_error(
             source,
-            Some(&inner.kw),
+            &inner.kw,
             ErrorType::InvalidPreOperator, // TODO: this isn't an operator
         )),
 
-        Expr::Block(inner) => Err(ContextError::token_error(
+        Expr::Block(inner) => Err(ContextError::node_error(
             source,
-            Some(match inner {
+            match inner {
                 BlockExpr::If(inner) => &inner.if_kw,
                 BlockExpr::Loop(inner) => &inner.kw,
                 BlockExpr::Block(inner) => &inner.open,
-            }),
+            },
             ErrorType::InvalidPreOperator, // TODO: this isn't an operator
         )),
 

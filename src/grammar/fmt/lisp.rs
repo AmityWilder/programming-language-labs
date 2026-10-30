@@ -120,7 +120,7 @@ impl LispDisplay for Literal<'_> {
         if f.alternate() {
             write_highlight(std::iter::once(value), f, &SYNTAX_STYLE_ANSI)
         } else {
-            f.write_str(value.lex)
+            f.write_str(value.lex.src)
         }
     }
 }
@@ -129,9 +129,9 @@ impl LispDisplay for Directive<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { kw } = self;
         if f.alternate() {
-            std::fmt::Display::fmt(&SYNTAX_STYLE_ANSI[Syntax::Keyword].style(self.kw.lex), f)
+            std::fmt::Display::fmt(&SYNTAX_STYLE_ANSI[Syntax::Keyword].style(self.kw), f)
         } else {
-            f.write_str(kw.lex)
+            f.write_str(kw.lex.src)
         }
     }
 }
@@ -140,9 +140,9 @@ impl LispDisplay for Variable<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self { ident } = self;
         if f.alternate() {
-            std::fmt::Display::fmt(&SYNTAX_STYLE_ANSI[Syntax::Variable].style(ident.lex), f)
+            std::fmt::Display::fmt(&SYNTAX_STYLE_ANSI[Syntax::Variable].style(ident.src), f)
         } else {
-            f.write_str(ident.lex)
+            f.write_str(ident.src)
         }
     }
 }
@@ -167,7 +167,7 @@ impl LispDisplay for IfStmt<'_> {
         } = self;
         lisp(
             f,
-            &if_kw.lex,
+            &if_kw.src,
             ([LispDyn::new(pred), LispDyn::new(then)])
                 .into_iter()
                 .chain(or.as_deref().into_iter().map(|or| LispDyn::new(or))),
@@ -184,7 +184,7 @@ impl LispDisplay for LoopBlock<'_> {
             block,
         } = self;
         match kind {
-            LoopKind::Loop | LoopKind::Cord => lisp(f, &kw.lex, std::iter::once(Lisp::new(block))),
+            LoopKind::Loop | LoopKind::Cord => lisp(f, &kw.src, std::iter::once(Lisp::new(block))),
 
             LoopKind::Rep { .. } | LoopKind::For { .. } => {
                 Err(std::fmt::Error) // not an expression
@@ -212,7 +212,7 @@ impl LispDisplay for DeclVar<'_> {
         }
         f.write_str(" ")?;
         std::fmt::Display::fmt(
-            &crate::SYNTAX_STYLE_ANSI[Syntax::Variable].style(binding.ident.lex),
+            &crate::SYNTAX_STYLE_ANSI[Syntax::Variable].style(binding.ident.src),
             f,
         )?;
         if let Some(assignment) = assignment {
