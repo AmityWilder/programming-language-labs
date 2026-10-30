@@ -736,6 +736,31 @@ impl<'src> AstNode<'src> for GenericGroup<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
+pub struct IffClause<'src> {
+    /// `<=>`
+    pub iff: Lexeme<'src>,
+    pub bound: TypeBound<'src>,
+}
+
+impl<'src> AstNode<'src> for IffClause<'src> {
+    fn get_range_start(&self, source: &'src str) -> Option<usize> {
+        self.iff.get_range_start(source)
+    }
+
+    fn get_range_end(&self, source: &'src str) -> Option<usize> {
+        self.bound.get_range_end(source)
+    }
+
+    fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
+        (&self.iff, &self.bound).get_range(source)
+    }
+
+    fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
+        (&self.iff, &self.bound).expansion(source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeF)]
 pub struct Typename<'src> {
     pub path: Vec<NamespacePathPart<'src>>,
     pub name: SpecToken<'src, Option<TypenameKeyword>>,

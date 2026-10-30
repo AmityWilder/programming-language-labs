@@ -19,9 +19,9 @@ use crate::{
 use Operator::*;
 use ast::{
     Binary, BindingPattern, ColonBound, ComboBound, DeclDefer, Directive, DirectiveKw,
-    ExactTypeBound, Expr, ExprBound, GenericGroup, GroupedBound, Grouping, Label, Literal,
-    LoopBlock, LoopKind, MemberBound, NamespacePathPart, NegativeBound, OrType, ScopeLabel,
-    ShapeBound, SkipStmt, TypeAnnotation, TypeBound, TypeExpr, Typename, Unary,
+    ExactTypeBound, Expr, ExprBound, GenericGroup, GroupedBound, Grouping, IffClause, Label,
+    Literal, LoopBlock, LoopKind, MemberBound, NamespacePathPart, NegativeBound, OrType,
+    ScopeLabel, ShapeBound, SkipStmt, TypeAnnotation, TypeBound, TypeExpr, Typename, Unary,
 };
 
 pub mod ast;
@@ -943,7 +943,18 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `type_bound ->  exact_bound | member_bound | shape_bound | expr_bound | grouped_bound | or_bound`
+    /// `iff_clause -> "<=>" type_bound`
+    fn iff_clause(&mut self) -> Option<Result<IffClause<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Punctuation(Punctuation::Iff))
+            .map(|sym| {
+                Ok(IffClause {
+                    iff: sym,
+                    bound: self.type_bound()?,
+                })
+            })
+    }
+
+    /// `type_bound -> exact_bound | member_bound | shape_bound | expr_bound | grouped_bound | or_bound`
     fn type_bound(&mut self) -> Result<TypeBound<'src>, ContextError<'src>> {
         self.member_bound()
             .map(|res| res.map(TypeBound::has))

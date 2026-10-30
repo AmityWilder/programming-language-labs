@@ -1,6 +1,11 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    grammar::ast::ExprPrecedence,
+    analyzer::{
+        Analyze,
+        static_env::StaticEnvironment,
+        types::{AbstractType, StaticType},
+    },
+    grammar::ast::{self, ExprPrecedence},
     highlight::{style::StyleWrapper, write_highlight},
     scanner::{token::value::Operator, tokenize},
     types::{byte, sint, uint},
@@ -53,6 +58,28 @@ pub enum PureOperation<'src> {
     BitNot(PureExpr<'src>),
     Neg(PureExpr<'src>),
     Szof(PureExpr<'src>),
+}
+
+impl<'src> ast::Binary<'src> {
+    fn analyze_pure(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> crate::analyzer::Result<'src, PureOperation<'src>> {
+        todo!()
+    }
+}
+
+impl<'src> ast::Unary<'src> {
+    fn analyze_pure(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> crate::analyzer::Result<'src, PureOperation<'src>> {
+        todo!()
+    }
 }
 
 impl<'src> PureOperation<'src> {
@@ -253,6 +280,17 @@ pub enum PureLiteral {
     Text(String),
 }
 
+impl<'src> ast::Literal<'src> {
+    fn analyze_pure(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> crate::analyzer::Result<'src, PureLiteral> {
+        todo!()
+    }
+}
+
 impl Display for PureLiteral {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let style = match self {
@@ -277,6 +315,17 @@ impl Display for PureLiteral {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct PureVariable<'src>(pub &'src str);
 
+impl<'src> ast::Variable<'src> {
+    fn analyze_pure(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> crate::analyzer::Result<'src, PureVariable<'src>> {
+        todo!()
+    }
+}
+
 impl Display for PureVariable<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         SYNTAX_STYLE_ANSI.variable.alt_style(self.0).fmt(f)
@@ -288,6 +337,37 @@ pub enum PureExpr<'src> {
     Operation(Box<PureOperation<'src>>),
     Literal(PureLiteral),
     Variable(PureVariable<'src>),
+}
+
+impl<'src> ast::Expr<'src> {
+    fn analyze_pure(
+        &self,
+        source: &'src str,
+        env: &mut StaticEnvironment<'src>,
+        ret: Option<&AbstractType<'src>>,
+    ) -> crate::analyzer::Result<'src, PureExpr<'src>> {
+        match self {
+            Self::Binary(x) => x
+                .analyze_pure(source, env, ret)
+                .map(Box::new)
+                .map(PureExpr::Operation),
+
+            Self::Unary(x) => x
+                .analyze_pure(source, env, ret)
+                .map(Box::new)
+                .map(PureExpr::Operation),
+
+            Self::Literal(x) => x.analyze_pure(source, env, ret).map(PureExpr::Literal),
+
+            Self::Variable(x) => x.analyze_pure(source, env, ret).map(PureExpr::Variable),
+
+            Self::Grouping(x) => x.expr.analyze_pure(source, env, ret),
+
+            Self::Block(_) => todo!("error: cannot have a block expression in a pure expression"),
+            Self::Directive(_) => todo!("error: cannot have a directive in a pure expression"),
+            Self::Type(_) => todo!(),
+        }
+    }
 }
 
 impl PureExpr<'_> {
