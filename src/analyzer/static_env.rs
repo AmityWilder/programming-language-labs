@@ -99,22 +99,27 @@ pub enum EnvKey<'src> {
     Op(Operator),
 }
 
-pub trait EnvKeyEq {
-    fn is_matching(&self, key: &EnvKey<'_>) -> bool;
-}
-impl<T: ?Sized + EnvKeyEq> EnvKeyEq for &T {
-    fn is_matching(&self, key: &EnvKey<'_>) -> bool {
-        (*self).is_matching(key)
+impl PartialEq<str> for EnvKey<'_> {
+    fn eq(&self, other: &str) -> bool {
+        matches!(self, EnvKey::Ident(name) if other == *name)
     }
 }
-impl EnvKeyEq for str {
-    fn is_matching(&self, key: &EnvKey<'_>) -> bool {
-        matches!(key, EnvKey::Ident(name) if self == *name)
+
+impl PartialEq<Operator> for EnvKey<'_> {
+    fn eq(&self, other: &Operator) -> bool {
+        matches!(self, EnvKey::Op(op) if other == op)
     }
 }
-impl EnvKeyEq for Operator {
-    fn is_matching(&self, key: &EnvKey<'_>) -> bool {
-        matches!(key, EnvKey::Op(op) if self == op)
+
+impl PartialEq<EnvKey<'_>> for str {
+    fn eq(&self, other: &EnvKey<'_>) -> bool {
+        other.eq(self)
+    }
+}
+
+impl PartialEq<EnvKey<'_>> for Operator {
+    fn eq(&self, other: &EnvKey<'_>) -> bool {
+        other.eq(self)
     }
 }
 
@@ -351,17 +356,16 @@ impl<'src> StaticEnvironment<'src> {
 
     pub fn lookup<Q>(&self, key: &Q) -> impl Iterator<Item = (VarId, &StaticItem<'src>)>
     where
-        Q: ?Sized + EnvKeyEq,
+        Q: ?Sized + for<'a> PartialEq<EnvKey<'a>>,
     {
-        self.search().filter(|(_, item)| key.is_matching(&item.key))
+        self.search().filter(|(_, item)| *key == item.key)
     }
 
     pub fn lookup_mut<Q>(&mut self, key: &Q) -> impl Iterator<Item = (VarId, &mut StaticItem<'src>)>
     where
-        Q: ?Sized + EnvKeyEq,
+        Q: ?Sized + for<'a> PartialEq<EnvKey<'a>>,
     {
-        self.search_mut()
-            .filter(|(_, item)| key.is_matching(&item.key))
+        self.search_mut().filter(|(_, item)| *key == item.key)
     }
 
     /// Entering a function definition

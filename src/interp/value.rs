@@ -455,16 +455,69 @@ pub enum InterpVal<'src> {
     Fun(FunVal),
 }
 
+impl<'src> TryFrom<InterpVal<'src>> for Result<InterpVal<'src>, fail> {
+    type Error = ();
+
+    fn try_from(value: InterpVal<'src>) -> Result<Self, Self::Error> {
+        if let InterpVal::OrFail(x) = value {
+            Ok(match x {
+                OrVal::Ok(x) => Ok(x),
+                OrVal::Or(FailObject(e)) => Err(e),
+            })
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl<'src> TryFrom<InterpVal<'src>> for Result<InterpVal<'src>, none> {
+    type Error = ();
+
+    fn try_from(value: InterpVal<'src>) -> Result<Self, Self::Error> {
+        if let InterpVal::OrNone(x) = value {
+            Ok(match x {
+                OrVal::Ok(x) => Ok(x),
+                OrVal::Or(NoneObject(e)) => Err(e),
+            })
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl<'src, T> From<Result<T, fail>> for InterpVal<'src>
+where
+    T: Into<InterpVal<'src>>,
+{
+    fn from(value: Result<T, fail>) -> Self {
+        InterpVal::OrFail(Box::new(
+            value.map_or_else(|e| OrVal::Or(FailObject(e)), |x| OrVal::Ok(x.into())),
+        ))
+    }
+}
+
+impl<'src, T> From<Option<T>> for InterpVal<'src>
+where
+    T: Into<InterpVal<'src>>,
+{
+    fn from(value: Option<T>) -> Self {
+        InterpVal::OrNone(Box::new(
+            value.map_or_else(|| OrVal::Or(NoneObject(())), |x| OrVal::Ok(x.into())),
+        ))
+    }
+}
+
 macro_rules! convert_interp_primitive {
     ($($(#[$ctor:meta])? $Primitive:ident($Object:ident($Type:ty))),* $(,)?) => {$(
         impl TryFrom<InterpVal<'_>> for $Type {
             type Error = ();
 
             fn try_from(value: InterpVal<'_>) -> Result<Self, Self::Error> {
-                match value {
+                if let InterpVal::Primitive(PrimitiveVal::$Primitive($Object(value))) = value {
                     $(#[$ctor])?
-                    InterpVal::Primitive(PrimitiveVal::$Primitive($Object(value))) => Ok(value),
-                    _ => Err(()),
+                    Ok(value)
+                } else {
+                    Err(())
                 }
             }
         }
@@ -473,10 +526,11 @@ macro_rules! convert_interp_primitive {
             type Error = ();
 
             fn try_from(value: &'a InterpVal<'_>) -> Result<Self, Self::Error> {
-                match value {
+                if let InterpVal::Primitive(PrimitiveVal::$Primitive($Object(value))) = value {
                     $(#[$ctor])?
-                    InterpVal::Primitive(PrimitiveVal::$Primitive($Object(value))) => Ok(value),
-                    _ => Err(()),
+                    Ok(value)
+                } else {
+                    Err(())
                 }
             }
         }

@@ -9,10 +9,128 @@ use super::{
     PrimitiveType, StaticType, types::FunShape,
 };
 use crate::{
-    interp::value::{InterpVal, InterpValue, PrimitiveVal},
+    analyzer::{
+        AnalysisFnDef,
+        types::{Fallible, OrType},
+    },
+    interp::value::{InterpBinaryOpFn, InterpUnaryOpFn, InterpVal, InterpValue, PrimitiveVal},
     spec_ops::{BitRotate, BitShift},
     types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
+
+fn op_overload<'src>(
+    operands: OperandTypes<'src>,
+    output: AbstractType<'src>,
+    def: AnalysisFnDef<'src>,
+) -> OpOverload<'src> {
+    OpOverload {
+        fun: FunShape {
+            params: match &operands {
+                OperandTypes::Binary(l, r) => vec![l.clone(), r.clone()],
+                OperandTypes::UnaryPost(x) | OperandTypes::UnaryPre(x) => vec![x.clone()],
+            },
+            ret: output.clone(),
+        },
+        operands,
+        output,
+        def,
+    }
+}
+
+fn binary_overload<'src>(
+    lhs: AbstractType<'src>,
+    rhs: AbstractType<'src>,
+    output: AbstractType<'src>,
+    def: InterpBinaryOpFn,
+) -> OpOverload<'src> {
+    op_overload(
+        OperandTypes::Binary(lhs, rhs),
+        output,
+        AnalysisFnDef::LangOpB(def),
+    )
+}
+
+fn unary_pre_overload<'src>(
+    rhs: AbstractType<'src>,
+    output: AbstractType<'src>,
+    def: InterpUnaryOpFn,
+) -> OpOverload<'src> {
+    op_overload(
+        OperandTypes::UnaryPre(rhs),
+        output,
+        AnalysisFnDef::LangOpU(def),
+    )
+}
+
+fn unary_post_overload<'src>(
+    lhs: AbstractType<'src>,
+    output: AbstractType<'src>,
+    def: InterpUnaryOpFn,
+) -> OpOverload<'src> {
+    op_overload(
+        OperandTypes::UnaryPost(lhs),
+        output,
+        AnalysisFnDef::LangOpU(def),
+    )
+}
+
+macro_rules! concat_operands {
+    ($Lhs:ty, $Rhs:ty) => {
+        concat!(stringify!($Lhs), ", ", stringify!($Rhs))
+    };
+
+    ($Unary:ty $(,)?) => {
+        stringify!($Lhs)
+    };
+}
+
+macro_rules! operator_fn {
+    (fn $Op:ident($($lhs:ident: $Lhs:ty)? $(, $rhs:ident: $Rhs:ty)? $(,)?) -> $Out:ty { $def:expr }) => {{
+        fn def<'brw, 'src>(
+            $($lhs: InterpValue<'brw, 'src>,)?
+            $($rhs: InterpValue<'brw, 'src>,)?
+        ) -> Result<InterpValue<'brw, 'src>, Failure> {
+            const OPERANDS: &str = concat_operands!($($Lhs,)? $($Rhs)?);
+
+            #[allow(unused_imports)]
+            { use Operator::$Op; }
+
+            $(
+                let $lhs = $lhs.into_ref();
+                let $lhs: $Lhs = $lhs.as_ref().ensure_ok()?.try_into().unwrap_or_else(|_| {
+                    panic!(
+                        "{}({OPERANDS})->{} lhs type mismatch; should be caught by static analysis\
+                        \n expected: {}\
+                        \n    found: {:?}",
+                        stringify!($Op),
+                        stringify!($Out),
+                        stringify!($Lhs),
+                        $lhs,
+                    )
+                });
+            )?
+
+            $(
+                let $rhs = $rhs.into_ref();
+                let $rhs: $Rhs = $rhs.as_ref().ensure_ok()?.try_into().unwrap_or_else(|_| {
+                    panic!(
+                        "{}({OPERANDS})->{} rhs type mismatch; should be caught by static analysis\
+                        \n expected: {}\
+                        \n    found: {:?}",
+                        stringify!($Op),
+                        stringify!($Out),
+                        stringify!($Rhs),
+                        $rhs,
+                    )
+                });
+            )?
+
+            let res: $Out = $def;
+            Ok(InterpValue::Prvalue(res.into()))
+        }
+        def
+    }};
+}
 
 pub fn interp_exists_def<'brw, 'src>(
     lhs: InterpValue<'brw, 'src>,
@@ -388,7 +506,10 @@ pub fn builtin_ops<'src>()
         Add(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l + r } // TBD: should overflow result in a failure?
         Sub(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l - r } // TBD: should overflow result in a failure?
         Mul(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l * r } // TBD: should overflow result in a failure?
-        Pow(Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint { l.pow(*r as u32) } // TBD: should overflow result in a failure?
+        Pow(Sint, Uint) -> Sint as fn(l: sint, r: uint) -> sint {
+            #[expect(clippy::cast_possible_truncation, reason = "2.pow(u32::MAX) already overflows, more bits is overkill.")]
+            l.pow(*r as u32)
+        }
         Div(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.checked_div(*r).ok_or(Failure::DivByZero)? }
         Rem(Sint, Sint) -> Sint as fn(l: sint, r: sint) -> sint { l.checked_rem(*r).ok_or(Failure::DivByZero)? }
 
@@ -449,7 +570,14 @@ pub fn builtin_ops<'src>()
         Add(Flpt, Text) -> Text as fn(l: flpt, r: text) -> text { format!("{l}{r}") }
         Add(Char, Text) -> Text as fn(l: char, r: text) -> text { format!("{l}{r}") }
         Add(Text, Text) -> Text as fn(l: text, r: text) -> text { format!("{l}{r}") }
-    ].into_iter().chain([
+    ].into_iter()
+        .chain(builtin_iterators())
+        .chain(builtin_conversions())
+}
+
+fn builtin_iterators<'src>()
+-> impl IntoIterator<IntoIter: DoubleEndedIterator, Item = (Operator, OpOverload<'src>)> {
+    [
         incr_decr_op!((Bool)Incr -> Bool as fn(rhs: bool) -> bool {
             std::mem::replace(rhs, if *rhs { todo!("iterator finality") } else { true })
         }),
@@ -483,5 +611,190 @@ pub fn builtin_ops<'src>()
         incr_decr_op!((Text)Incr -> Char as fn(rhs: text) -> char {
             if rhs.is_empty() { todo!("iterator finality") } else { rhs.remove(0) }
         }),
-    ])
+    ]
+}
+
+fn builtin_conversions<'src>()
+-> impl IntoIterator<IntoIter: DoubleEndedIterator, Item = (Operator, OpOverload<'src>)> {
+    macro_rules! or_type {
+        ($then:expr, $or:ident) => {
+            AbstractType::Concrete(StaticType::OrTy(Box::new(Fallible {
+                then: $then,
+                or: OrType::$or,
+            })))
+        };
+    }
+    [
+        // stringify
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Bool,
+                AbstractType::Text,
+                operator_fn!(
+                    fn Convert(lhs: &bool) -> text {
+                        lhs.to_string()
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Byte,
+                AbstractType::Text,
+                operator_fn!(
+                    fn Convert(lhs: &byte) -> text {
+                        lhs.to_string()
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Uint,
+                AbstractType::Text,
+                operator_fn!(
+                    fn Convert(lhs: &uint) -> text {
+                        lhs.to_string()
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Sint,
+                AbstractType::Text,
+                operator_fn!(
+                    fn Convert(lhs: &sint) -> text {
+                        lhs.to_string()
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Flpt,
+                AbstractType::Text,
+                operator_fn!(
+                    fn Convert(lhs: &flpt) -> text {
+                        lhs.to_string()
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Char,
+                AbstractType::Text,
+                operator_fn!(
+                    fn Convert(lhs: &char) -> text {
+                        lhs.to_string()
+                    }
+                ),
+            ),
+        ),
+        // parse
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Text,
+                or_type!(AbstractType::Bool, Fail),
+                operator_fn!(
+                    fn Convert(lhs: &text) -> Result<bool, fail> {
+                        (*lhs).parse().map_err(Failure::from)
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Text,
+                or_type!(AbstractType::Byte, Fail),
+                operator_fn!(
+                    fn Convert(lhs: &text) -> Result<byte, fail> {
+                        (*lhs).parse().map_err(Failure::from)
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Text,
+                or_type!(AbstractType::Uint, Fail),
+                operator_fn!(
+                    fn Convert(lhs: &text) -> Result<uint, fail> {
+                        (*lhs).parse().map_err(Failure::from)
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Text,
+                or_type!(AbstractType::Sint, Fail),
+                operator_fn!(
+                    fn Convert(lhs: &text) -> Result<sint, fail> {
+                        (*lhs).parse().map_err(Failure::from)
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Text,
+                or_type!(AbstractType::Flpt, Fail),
+                operator_fn!(
+                    fn Convert(lhs: &text) -> Result<flpt, fail> {
+                        (*lhs).parse().map_err(Failure::from)
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Text,
+                or_type!(AbstractType::Char, Fail),
+                operator_fn!(
+                    fn Convert(lhs: &text) -> Result<char, fail> {
+                        (*lhs).parse().map_err(Failure::from)
+                    }
+                ),
+            ),
+        ),
+        // other
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Sint,
+                or_type!(AbstractType::Uint, Fail),
+                operator_fn!(
+                    fn Convert(lhs: &sint) -> Result<uint, Failure> {
+                        (*lhs).try_into().map_err(Failure::from)
+                    }
+                ),
+            ),
+        ),
+        (
+            Operator::Convert,
+            unary_post_overload(
+                AbstractType::Sint,
+                or_type!(AbstractType::Uint, Fail),
+                operator_fn!(
+                    fn Convert(lhs: &sint) -> Result<uint, Failure> {
+                        (*lhs).try_into().map_err(Failure::from)
+                    }
+                ),
+            ),
+        ),
+    ]
 }

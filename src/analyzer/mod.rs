@@ -474,21 +474,23 @@ impl<'src> Analyze<'src> for ast::Typename<'src> {
         _ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
         if let Some(name) = self.name.val {
-            if self.path.is_empty() {
-                Ok(AbstractType::Concrete(StaticType::Primitive(match name {
-                    ast::TypenameKeyword::None => PrimitiveType::None,
-                    ast::TypenameKeyword::Nevr => PrimitiveType::Nevr,
-                    ast::TypenameKeyword::Fail => PrimitiveType::Fail,
-                    ast::TypenameKeyword::Bool => PrimitiveType::Bool,
-                    ast::TypenameKeyword::Uint => PrimitiveType::Uint,
-                    ast::TypenameKeyword::Sint => PrimitiveType::Sint,
-                    ast::TypenameKeyword::Flpt => PrimitiveType::Flpt,
-                    ast::TypenameKeyword::Char => PrimitiveType::Char,
-                    ast::TypenameKeyword::Text => PrimitiveType::Text,
-                })))
-            } else {
+            if !self.path.is_empty() {
                 todo!("error: primitive types are global scope")
             }
+            if self.args.is_some() {
+                todo!("error: primitive types have no generic parameters")
+            }
+            Ok(AbstractType::Concrete(StaticType::Primitive(match name {
+                ast::TypenameKeyword::None => PrimitiveType::None,
+                ast::TypenameKeyword::Nevr => PrimitiveType::Nevr,
+                ast::TypenameKeyword::Fail => PrimitiveType::Fail,
+                ast::TypenameKeyword::Bool => PrimitiveType::Bool,
+                ast::TypenameKeyword::Uint => PrimitiveType::Uint,
+                ast::TypenameKeyword::Sint => PrimitiveType::Sint,
+                ast::TypenameKeyword::Flpt => PrimitiveType::Flpt,
+                ast::TypenameKeyword::Char => PrimitiveType::Char,
+                ast::TypenameKeyword::Text => PrimitiveType::Text,
+            })))
         } else {
             todo!("custom types")
         }
@@ -614,10 +616,10 @@ impl<'src> GetType<'src> for AnalysisBlockExpr<'src> {
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
         // TODO: that's a lot of cloning
         match self {
-            BlockExpr::If(stmt) => stmt.get_type(env).map(|x| x.to_abstract()),
-            BlockExpr::Loop(stmt) => stmt.get_type(env).map(|x| x.to_abstract()),
-            BlockExpr::Cord(stmt) => stmt.get_type(env).map(|x| x.to_abstract()),
-            BlockExpr::Block(stmt) => stmt.get_type(env).map(|x| x.to_abstract()),
+            BlockExpr::If(stmt) => stmt.get_type(env).cloned(),
+            BlockExpr::Loop(stmt) => stmt.get_type(env).cloned(),
+            BlockExpr::Cord(stmt) => stmt.get_type(env).cloned(),
+            BlockExpr::Block(stmt) => stmt.get_type(env).cloned(),
         }
     }
 }
@@ -834,8 +836,9 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
                 };
 
                 let ty = match ty {
-                    ExprType::AbstractRef(ty) => ty.clone(),
-                    ExprType::Variable(VarType::Abstract(ty)) => ty.clone(),
+                    ExprType::AbstractRef(ty) | ExprType::Variable(VarType::Abstract(ty)) => {
+                        ty.clone()
+                    }
                     ExprType::Literal(ty) => AbstractType::Concrete(StaticType::Primitive(ty)),
                     _ => todo!("generic `exists`"),
                 };
@@ -986,24 +989,79 @@ impl<'src> ast::Binary<'src> {
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, AnalysisExpr<'src>> {
         let lhs = self.lhs.analyze(source, env, None)?;
-        let r_ty = if let ast::Expr::Type(type_expr) = &self.rhs {
+        let ret_ty = if let ast::Expr::Type(type_expr) = &self.rhs {
             type_expr.analyze(source, env, None)?
         } else {
-            unimplemented!("should be handled by grammar");
+            unimplemented!("should be handled by grammar"); // TODO: is this true?
         };
         let l_ty = lhs.get_type(env).map(|t| t.to_abstract());
-        if let Some(l_ty) = l_ty {
-            print!("{l_ty}");
+        if let Some(l_ty) = &l_ty {
+            print!("{l_ty:#}");
         } else {
             print!("<implicit>");
         }
-        print!(" {} {r_ty}", self.op.lex);
+        print!(" {} {ret_ty:#}", self.op.lex);
         if let Some(ret) = ret {
-            println!("{{hint: {ret}}}");
+            println!("{{hint: {ret:#}}}");
         } else {
             println!();
         }
-        todo!("conversion");
+        let l_ty = l_ty.ok_or_else(|| {
+            [ContextError::node_error(
+                source,
+                &self.lhs,
+                ErrorType::TypeAmbiguity,
+            )]
+            .to_vec()
+        })?;
+        // conversion/transmutation is treated as binary in the AST, but unary in runtime.
+        match self.op.val {
+            Operator::Convert => env
+                .lookup(&self.op.val)
+                .find_map(|(_, item)| {
+                    let EnvItem::Op(overload) = &item.val else {
+                        panic!("operator key should only produce operator items")
+                    };
+                    if matches!(&overload.operands, OperandTypes::UnaryPost(t) if *t == l_ty)
+                        && overload.output.is_type_eq(&ret_ty)
+                    {
+                        Some(overload)
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| {
+                    let defined = env
+                        .lookup(&self.op.val)
+                        .map(|(_, StaticItem { val, .. })| {
+                            if let EnvItem::Op(overload) = val {
+                                format!("{:#}", overload.fun)
+                            } else {
+                                panic!("operator key should only produce operator items")
+                            }
+                        }).collect::<Vec<_>>().join("\n  ");
+                    todo!("error: no conversion defined between `{l_ty:#}` and `{ret_ty:#}`\ndefined conversions:\n  {defined}");
+                })
+                .map(|overload| {
+                    let interp_def = match &overload.def {
+                        FnDef::LangOpU(interp_def) => interp_def,
+                        FnDef::LangOpB(_) | FnDef::UserDef(_) => {
+                            unimplemented!()
+                        }
+                    };
+                    Expr::Op(Box::new(AnalysisOp::UnaryPost(
+                        (overload.fun.clone(), *interp_def),
+                        lhs,
+                    )))
+                }),
+
+            // transmutation cant be overloaded, it's always directly bitwise.
+            Operator::Transmute => todo!("transmutation"),
+
+            _ => unimplemented!(
+                "should only call analyze_conversion for conversion or transmutation"
+            ),
+        }
     }
 
     fn analyze_op(
@@ -1166,22 +1224,7 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
         // TBD: should there be a "display" operator that can be overloaded?
         self.group
             .expr
-            .analyze(
-                source,
-                env,
-                Some(&AbstractType::Opaque(Box::new(TypeBound::Combo(
-                    Combinator::One, // TBD: whats the difference between `Any` and `One` for opaque types?
-                    vec![
-                        TypeBound::Exactly(AbstractType::Bool),
-                        TypeBound::Exactly(AbstractType::Byte),
-                        TypeBound::Exactly(AbstractType::Uint),
-                        TypeBound::Exactly(AbstractType::Sint),
-                        TypeBound::Exactly(AbstractType::Flpt),
-                        TypeBound::Exactly(AbstractType::Char),
-                        TypeBound::Exactly(AbstractType::Text),
-                    ],
-                )))),
-            )
+            .analyze(source, env, Some(&AbstractType::Text)) // TODO: this shouldn't be opaque (opaque is for returns), but it should be generic
             .and_then(|expr| {
                 if let Some(ty) = expr.get_type(env) {
                     ty.expect_type(EXPR_TY, source, &self.group.expr)
@@ -1928,7 +1971,7 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
             }
             print!(" = ");
             if let Some(expr_ty) = expr.as_ref().and_then(|x| x.get_type(env)) {
-                println!("{expr_ty}");
+                println!("{expr_ty:#}");
             } else {
                 println!("<late>");
             }
