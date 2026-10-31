@@ -921,7 +921,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             let next = self.try_pull_into(ExpectedToken::TypeExpr)?;
             let prev = std::mem::replace(&mut name, next);
             path.push(NamespacePathPart {
-                name: prev.into_lexeme(),
+                name: prev.lex,
                 sep,
             });
         }

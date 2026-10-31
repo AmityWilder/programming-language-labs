@@ -253,13 +253,6 @@ impl<T: std::fmt::Debug> std::fmt::Debug for SpecToken<'_, T> {
     }
 }
 
-impl<'src, T> SpecToken<'src, T> {
-    #[deprecated = "inline"]
-    pub fn into_lexeme(self) -> Lexeme<'src> {
-        self.lex
-    }
-}
-
 impl<'src, T> From<SpecToken<'src, T>> for Lexeme<'src> {
     fn from(value: SpecToken<'src, T>) -> Self {
         value.lex
