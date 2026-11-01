@@ -22,6 +22,7 @@
     deref_patterns,
     char_to_u32,
     extend_one,
+    deref_pure_trait,
 )]
 #![forbid(
     clippy::missing_safety_doc,
@@ -30,6 +31,7 @@
     reason = "write sound code"
 )]
 #![deny(
+    clippy::multiple_unsafe_ops_per_block,
     unused_unsafe,
     clippy::unnecessary_safety_doc,
     clippy::unnecessary_safety_comment,
@@ -132,6 +134,7 @@ mod preproc;
 mod regex;
 mod scanner;
 mod spec_ops;
+mod src_code;
 mod types;
 
 #[cfg(test)] // only include testing module in test builds
