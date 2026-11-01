@@ -22,7 +22,10 @@ pub const fn uspan_to_usize(n: uspan) -> usize {
 
         _ => {
             const {
-                assert!(uspan::BITS <= usize::BITS);
+                assert!(
+                    uspan::BITS <= usize::BITS,
+                    "`uspan` should be at most pointer-width"
+                );
             }
             n as usize
         }
@@ -164,7 +167,7 @@ impl<T> RelSpan<T> {
             ((start, border1), (border2, end)) | ((border2, end), (start, border1))
                 if border1 == border2 =>
             {
-                return Some(Self(Range { start, end }));
+                Some(Self(Range { start, end }))
             }
 
             _ => None,
@@ -216,22 +219,24 @@ impl Span {
 
     pub const fn intersection(self, other: Self) -> Option<Self> {
         let file = self.file;
-        if file == other.file {
-            if let Some(rel) = self.rel.intersection(other.rel) {
-                return Some(Self { file, rel });
-            }
+        if file == other.file
+            && let Some(rel) = self.rel.intersection(other.rel)
+        {
+            Some(Self { file, rel })
+        } else {
+            None
         }
-        None
     }
 
     pub const fn union(self, other: Self) -> Option<Self> {
         let file = self.file;
-        if file == other.file {
-            if let Some(rel) = self.rel.union(other.rel) {
-                return Some(Self { file, rel });
-            }
+        if file == other.file
+            && let Some(rel) = self.rel.union(other.rel)
+        {
+            Some(Self { file, rel })
+        } else {
+            None
         }
-        None
     }
 
     pub const fn super_union(self, other: Self) -> Option<Self> {

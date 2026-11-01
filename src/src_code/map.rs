@@ -35,7 +35,7 @@ pub fn charnum_range(s: &str, range: Range<usize>) -> Option<Range<usize>> {
         if range.end == range.start {
             return Some(Range { start, end: start });
         }
-        debug_assert!(range.start < range.end);
+        debug_assert!(range.start < range.end, "range fields should be ordered");
         charnum_iter(&mut it, range.end).map(|end| Range { start, end })
     })
 }
@@ -146,16 +146,18 @@ impl SourceCode {
 
     /// Returns [`None`] if `pos` is not within the source.
     pub fn linenum_of(&self, pos: usize) -> Option<NonZero<usize>> {
-        todo!()
-        // self.lines
-        //     .iter()
-        //     .copied()
-        //     .map({
-        //         let mut prev_end = 0;
-        //         move |len| std::mem::replace(&mut prev_end, prev_end + len)
-        //     })
-        //     .position(|start| pos >= start)
-        //     .map(|n| NonZero::new(n.strict_add(1)).expect("adding 1 should ensure non-zero"))
+        self.lines
+            .iter()
+            .copied()
+            .position({
+                let mut prev_end = 0;
+                move |len| {
+                    let is_beyond = pos >= prev_end;
+                    prev_end = prev_end.strict_add(len);
+                    is_beyond
+                }
+            })
+            .map(|n| NonZero::new(n.strict_add(1)).expect("adding 1 should ensure non-zero"))
     }
 }
 
