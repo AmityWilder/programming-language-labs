@@ -37,7 +37,7 @@ pub enum ExprPrecedence {
 /// - or all three
 ///
 /// Consider implementing [`AstNodeFinal`] if the conversion cannot fail.
-#[deprecated = "use [`crate::src_span::TrySrcSpan`] instead"]
+#[deprecated = "use span instead"]
 pub trait AstNode<'src>: std::fmt::Debug {
     /// For when there is a less expensive implementation for ranges that are one-sided
     ///
@@ -72,7 +72,7 @@ pub trait AstNode<'src>: std::fmt::Debug {
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>>;
 }
 
-#[deprecated = "use [`crate::src_span::SrcSpan`] instead"]
+#[deprecated = "use span instead"]
 pub trait AstNodeFinal<'src>: AstNode<'src> {
     /// # Panics
     /// This method may panic if [`Self::get_range`] returns [`None`]
