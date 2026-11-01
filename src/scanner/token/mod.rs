@@ -209,7 +209,7 @@ impl<'src, T> std::ops::Deref for SpecToken<'src, T> {
     }
 }
 
-impl<'src, T> std::ops::DerefMut for SpecToken<'src, T> {
+impl<T> std::ops::DerefMut for SpecToken<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.lex
     }
