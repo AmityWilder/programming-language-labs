@@ -15,8 +15,8 @@ fn test_parse0() {
     .expect("this example should be a valid expression");
     assert_eq!(
         expr.as_slice(),
-        &[Expr::binary(Binary {
-            lhs: Expr::literal(Literal {
+        &[ast::Expr::binary(ast::Binary {
+            lhs: ast::Expr::literal(ast::Literal {
                 value: Token {
                     lex: Lexeme {
                         src: "5",
@@ -32,8 +32,8 @@ fn test_parse0() {
                 },
                 val: Operator::Add,
             },
-            rhs: Expr::binary(Binary {
-                lhs: Expr::unary(Unary {
+            rhs: ast::Expr::binary(ast::Binary {
+                lhs: ast::Expr::unary(ast::Unary {
                     side: OpSide::Prefix,
                     op: SpecToken {
                         lex: Lexeme {
@@ -42,13 +42,13 @@ fn test_parse0() {
                         },
                         val: Operator::SubNeg,
                     },
-                    operand: Expr::grouping(Grouping {
+                    operand: ast::Expr::grouping(ast::Grouping {
                         open: Lexeme {
                             src: "(",
                             mac: None
                         },
-                        expr: Expr::binary(Binary {
-                            lhs: Expr::literal(Literal {
+                        expr: ast::Expr::binary(ast::Binary {
+                            lhs: ast::Expr::literal(ast::Literal {
                                 value: Token {
                                     lex: Lexeme {
                                         src: "7",
@@ -64,7 +64,7 @@ fn test_parse0() {
                                 },
                                 val: Operator::Div,
                             },
-                            rhs: Expr::literal(Literal {
+                            rhs: ast::Expr::literal(ast::Literal {
                                 value: Token {
                                     lex: Lexeme {
                                         src: "8",
@@ -87,7 +87,7 @@ fn test_parse0() {
                     },
                     val: Operator::Mul,
                 },
-                rhs: Expr::Literal(Literal {
+                rhs: ast::Expr::Literal(ast::Literal {
                     value: Token {
                         lex: Lexeme {
                             src: "3",
@@ -124,14 +124,14 @@ fn test_assoc_add() {
     let ast: Vec<_> = parse(source, tokens).collect();
     assert_eq!(
         ast,
-        [Ok(Expr::binary(Binary {
-            lhs: Expr::binary(Binary {
-                lhs: Expr::literal(Literal { value: a }),
+        [Ok(ast::Expr::binary(ast::Binary {
+            lhs: ast::Expr::binary(ast::Binary {
+                lhs: ast::Expr::literal(ast::Literal { value: a }),
                 op: b.try_into().expect("+ is an operator"),
-                rhs: Expr::literal(Literal { value: c }),
+                rhs: ast::Expr::literal(ast::Literal { value: c }),
             }),
             op: d.try_into().expect("+ is an operator"),
-            rhs: Expr::literal(Literal { value: e }),
+            rhs: ast::Expr::literal(ast::Literal { value: e }),
         }))]
     );
 }
@@ -148,13 +148,13 @@ fn test_precedence() {
     let ast: Vec<_> = parse(source, tokens).collect();
     assert_eq!(
         ast,
-        [Ok(Expr::binary(Binary {
-            lhs: Expr::literal(Literal { value: a }),
+        [Ok(ast::Expr::binary(ast::Binary {
+            lhs: ast::Expr::literal(ast::Literal { value: a }),
             op: b.try_into().expect("+ is an operator"),
-            rhs: Expr::binary(Binary {
-                lhs: Expr::literal(Literal { value: c }),
+            rhs: ast::Expr::binary(ast::Binary {
+                lhs: ast::Expr::literal(ast::Literal { value: c }),
                 op: d.try_into().expect("* is an operator"),
-                rhs: Expr::literal(Literal { value: e }),
+                rhs: ast::Expr::literal(ast::Literal { value: e }),
             }),
         }))]
     );

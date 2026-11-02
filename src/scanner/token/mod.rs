@@ -1,98 +1,10 @@
 //! Definitions of tokens and their values.
 
+#![deprecated = "use `lex` instead"]
+
+pub use crate::lex::token::{keyword, punc};
 use crate::scanner::{symbols::ESCAPE, token::value::LexValue};
 use std::range::Range;
-
-/// Helper macro for preventing issues with missed variants when adding new ones
-///
-/// Variants should be in the order they should be tested
-macro_rules! define_token_eq {
-    (
-        $(#[$em:meta])*
-        $vis:vis enum $Enum:ident = $name:ident {$(
-            $(#[doc = $doc:expr])*
-            $(#[op_desc($($operands_pat:pat => $op_desc:expr),+ $(,)?)])?
-            $Variant:ident = $value:literal
-        ),+ $(,)?}
-    ) => {
-        $(#[$em])*
-        $vis enum $Enum {$(
-            #[doc = concat!("`", $value, "`\n")]
-            $(#[doc = $doc])*
-            $Variant,
-        )+}
-
-        #[allow(dead_code, reason = "not always used in all expressions of this macro")]
-        impl $Enum {
-            /// Matches the prefix of `s` to a variant of [`Self`], finding the longest match possible.
-            pub fn from_prefix(s: &str) -> Option<Self> {
-                $name::OPTIONS
-                    .into_iter()
-                    .filter(|(pat, _)| s.starts_with(pat))
-                    .max_by_key(|(pat, _)| pat.len()) // maximal munch
-                    .map(|(_, punc)| punc)
-            }
-
-            /// Like [`Self::from_prefix`], but matches the full string
-            pub const fn try_from_str(s: &str) -> Option<Self> {
-                match s {
-                    $($value => Some(Self::$Variant),)+
-                    _ => None,
-                }
-            }
-
-            /// The constant string name of the token
-            pub const fn as_str(self) -> &'static str {
-                match self {
-                    $(Self::$Variant => $value),+
-                }
-            }
-
-            // #[allow(unused)]
-            // pub fn op_description(self, operands: &[$crate::exec::eval::ValueType]) -> &'static str {
-            //     match self {
-            //         $($(Self::$Variant => match operands {
-            //             $($operands_pat => $op_desc,)*
-            //             _ => unimplemented!("invalid combination of operands"),
-            //         },)?)*
-            //         _ =>unimplemented!("not an operator"),
-            //     }
-            // }
-        }
-
-        impl std::fmt::Display for $Enum {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(self.as_str())
-            }
-        }
-
-        pub mod $name {
-            use super::*;
-
-            pub static OPTIONS: std::sync::LazyLock<[(&str, $Enum); [$($Enum::$Variant),+].len()]> = std::sync::LazyLock::new(||{
-                let mut list: [(&'static str, $Enum); _] = [
-                    $(($value, $Enum::$Variant),)+
-                ];
-                list.sort_by_key(|(name, _)| *name);
-                list
-            });
-
-            #[cfg(test)]
-            #[expect(non_snake_case)]
-            mod tests {
-                use super::*;
-
-                $(#[test]
-                fn $Variant() {
-                    assert_eq!($Enum::from_prefix($value), Some($Enum::$Variant));
-                })+
-            }
-        }
-    };
-}
-
-pub mod keyword;
-pub mod punc;
 pub mod value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
