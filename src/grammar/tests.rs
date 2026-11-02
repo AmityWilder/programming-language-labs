@@ -1,7 +1,10 @@
 use super::*;
-use crate::scanner::{
-    token::{Lexeme, punc::Punctuation, value::Operator},
-    tokenize,
+use crate::{
+    lex::token::Operator,
+    scanner::{
+        token::{Lexeme, punc::Punctuation},
+        tokenize,
+    },
 };
 
 #[test]

@@ -4,7 +4,7 @@ use crate::{
         types::{AbstractType, FunShape},
     },
     grammar::ast::AstNodeFinal,
-    scanner::token::value::Operator,
+    lex::token::Operator,
 };
 use std::{
     collections::{HashMap, HashSet},

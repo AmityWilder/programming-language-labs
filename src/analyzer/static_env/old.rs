@@ -5,7 +5,7 @@ use crate::{
         types::{AbstractType, FunShape, TypeCompatible, TypeSize, TypeSizeError},
     },
     grammar::ast::AstNodeFinal,
-    scanner::token::value::Operator,
+    lex::token::Operator,
 };
 use std::range::Range;
 

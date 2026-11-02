@@ -75,10 +75,10 @@ macro_rules! token {
     (Operator::$Variant:ident $(,)?) => {
         $crate::scanner::token::SpecToken {
             lex: $crate::scanner::token::Lexeme {
-                src: $crate::scanner::token::value::Operator::$Variant.as_str(),
+                src: $crate::lex::token::Operator::$Variant.as_str(),
                 mac: None,
             },
-            val: $crate::scanner::token::value::Operator::$Variant,
+            val: $crate::lex::token::Operator::$Variant,
         }
     };
 

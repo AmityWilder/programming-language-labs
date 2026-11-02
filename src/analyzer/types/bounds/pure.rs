@@ -1,9 +1,11 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::{static_env::old::StaticEnvironment, types::AbstractType},
-    grammar::ast::{self, ExprPrecedence},
+    grammar::ast::{self},
     highlight::{style::StyleWrapper, write_highlight},
-    scanner::{token::value::Operator, tokenize},
+    lex::token::Operator,
+    parse::ast::ExprPrecedence,
+    scanner::tokenize,
     types::{byte, sint, uint},
 };
 use std::fmt::Display;

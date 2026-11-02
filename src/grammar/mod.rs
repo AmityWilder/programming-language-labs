@@ -1,16 +1,19 @@
 //! Context-free grammar
 
+#![deprecated = "use crate::parse instead"]
+
 use crate::{
     analyzer::types::bounds::Combinator,
     grammar::ast::{
         Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DeferParam, DoneStmt, ExprStmt,
         IfStmt, OrBody, OrStmt, PrintStmt, Program, Statement, Variable,
     },
+    lex::token::Operator,
     old_error::{ContextError, ExpectedToken},
     scanner::token::{
         Lexeme, SpecToken, Token,
         punc::{Bracket, OpSide, Punctuation},
-        value::{Keyword, LexValue, Operator},
+        value::{Keyword, LexValue},
     },
 };
 use Operator::*;

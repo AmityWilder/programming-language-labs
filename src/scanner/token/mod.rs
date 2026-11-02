@@ -3,7 +3,10 @@
 #![deprecated = "use `lex` instead"]
 
 pub use crate::lex::token::{keyword, punc};
-use crate::scanner::{symbols::ESCAPE, token::value::LexValue};
+use crate::{
+    lex::token::TokenEq,
+    scanner::{symbols::ESCAPE, token::value::LexValue},
+};
 use std::range::Range;
 pub mod value;
 
@@ -190,51 +193,53 @@ spec_token_conversions! {
     Punctuation => value::Punctuation,
 }
 
-impl<'src> From<SpecToken<'src, value::Punctuation>> for SpecToken<'src, value::TokenEq> {
+impl<'src> From<SpecToken<'src, value::Punctuation>> for SpecToken<'src, TokenEq> {
     fn from(SpecToken { lex, val }: SpecToken<'src, value::Punctuation>) -> Self {
         Self {
             lex,
-            val: value::TokenEq::Punctuation(val),
+            val: TokenEq::Punctuation(val),
         }
     }
 }
 
-impl<'src> From<SpecToken<'src, value::Keyword>> for SpecToken<'src, value::TokenEq> {
+impl<'src> From<SpecToken<'src, value::Keyword>> for SpecToken<'src, TokenEq> {
     fn from(SpecToken { lex, val }: SpecToken<'src, value::Keyword>) -> Self {
         Self {
             lex,
-            val: value::TokenEq::Keyword(val),
+            val: TokenEq::Keyword(val),
         }
     }
 }
 
-impl<'src> TryFrom<SpecToken<'src, value::Punctuation>> for SpecToken<'src, value::Operator> {
+impl<'src> TryFrom<SpecToken<'src, value::Punctuation>>
+    for SpecToken<'src, crate::lex::token::Operator>
+{
     type Error = ();
 
     fn try_from(value: SpecToken<'src, value::Punctuation>) -> Result<Self, Self::Error> {
-        <SpecToken<'src, value::TokenEq>>::from(value).try_into()
+        <SpecToken<'src, TokenEq>>::from(value).try_into()
     }
 }
 
-impl<'src> TryFrom<SpecToken<'src, value::Keyword>> for SpecToken<'src, value::Operator> {
+impl<'src> TryFrom<SpecToken<'src, value::Keyword>>
+    for SpecToken<'src, crate::lex::token::Operator>
+{
     type Error = ();
 
     fn try_from(value: SpecToken<'src, value::Keyword>) -> Result<Self, Self::Error> {
-        <SpecToken<'src, value::TokenEq>>::from(value).try_into()
+        <SpecToken<'src, TokenEq>>::from(value).try_into()
     }
 }
 
-impl<'src> TryFrom<SpecToken<'src, value::TokenEq>> for SpecToken<'src, value::Operator> {
+impl<'src> TryFrom<SpecToken<'src, TokenEq>> for SpecToken<'src, crate::lex::token::Operator> {
     type Error = ();
 
-    fn try_from(
-        SpecToken { lex, val }: SpecToken<'src, value::TokenEq>,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(SpecToken { lex, val }: SpecToken<'src, TokenEq>) -> Result<Self, Self::Error> {
         val.to_operator().map(|val| Self { lex, val }).ok_or(())
     }
 }
 
-impl<'src> TryFrom<Token<'src>> for SpecToken<'src, value::TokenEq> {
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, TokenEq> {
     type Error = ();
 
     fn try_from(SpecToken { lex, val }: Token<'src>) -> Result<Self, Self::Error> {
@@ -242,11 +247,11 @@ impl<'src> TryFrom<Token<'src>> for SpecToken<'src, value::TokenEq> {
     }
 }
 
-impl<'src> TryFrom<Token<'src>> for SpecToken<'src, value::Operator> {
+impl<'src> TryFrom<Token<'src>> for SpecToken<'src, crate::lex::token::Operator> {
     type Error = ();
 
     fn try_from(value: Token<'src>) -> Result<Self, Self::Error> {
-        <SpecToken<'src, value::TokenEq>>::try_from(value).and_then(TryInto::try_into)
+        <SpecToken<'src, TokenEq>>::try_from(value).and_then(TryInto::try_into)
     }
 }
 

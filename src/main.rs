@@ -132,6 +132,7 @@ mod highlight;
 mod interp;
 mod lex;
 mod old_error;
+mod parse;
 mod preproc;
 mod regex;
 mod scanner;

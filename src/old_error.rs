@@ -14,6 +14,7 @@ use crate::{
         syntax::Syntax,
         write_highlight,
     },
+    lex::token::{Operator, TokenEq},
     preproc::eval::{PpType, PpValue},
     scanner::{
         self, rfind_block_comment,
@@ -24,7 +25,7 @@ use crate::{
         token::{
             ExpansionData, Token, escape_char,
             punc::{BadBracketCombo, Bracket, OpSide},
-            value::{Keyword, Operator, TokenEq},
+            value::Keyword,
         },
         tokenize,
     },

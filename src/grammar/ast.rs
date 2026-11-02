@@ -1,32 +1,14 @@
 use crate::{
     analyzer::types::bounds::Combinator,
+    lex::token::{Operator, TokenEq},
+    parse::ast::ExprPrecedence,
     scanner::token::{
         ExpansionData, Lexeme, SpecToken, Token,
         punc::{OpSide, Punctuation},
-        value::{Keyword, LexValue, Operator, TokenEq},
+        value::{Keyword, LexValue},
     },
 };
 use std::range::Range;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum ExprPrecedence {
-    #[default]
-    Statement,
-    Assignment,
-    Or,
-    Xor,
-    And,
-    Equality,
-    Comparison,
-    Shift,
-    Term,
-    Factor,
-    UnaryPre,
-    Exponent,
-    Conversion,
-    UnaryPost,
-    Primary,
-}
 
 /// Allows the AST to combine the full range of its tokens, for use in errors.
 ///
