@@ -1,9 +1,8 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     grammar::ast::{
-        Binary, BlockExpr, BlockStmt, DeclDefer, DeclVar, Declaration, Directive, Expr, Grouping,
-        IfStmt, Literal, LoopBlock, LoopKind, OrBody, OrStmt, OrType, Statement, TypeExpr, Unary,
-        Variable,
+        Binary, BlockExpr, BlockStmt, DeclVar, Declaration, Directive, Expr, Grouping, IfStmt,
+        Literal, LoopBlock, LoopKind, OrBody, OrStmt, Statement, Unary, Variable,
     },
     highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
 };

@@ -1,20 +1,14 @@
-use crate::{
-    error::{ContextError, ErrorType, OpSide},
-    grammar::ast::{AstNodeFinal, Binary, BlockExpr, Expr, Literal, TypenameKeyword, Unary},
-    scanner::token::{
-        SpecToken,
-        value::{LexValue, Operator},
-    },
-    types::fsize,
-};
+use crate::{Todo, types::fsize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum PpOpError<'src> {
-    Incompatible { l: PpValue<'src>, r: PpValue<'src> },
-    Unsupported { x: PpValue<'src> },
+#[deprecated]
+enum PpOpError {
+    Incompatible { l: PpValue, r: PpValue },
+    Unsupported { x: PpValue },
 }
 
-impl<'src> PpOpError<'src> {
+#[cfg(fals)]
+impl PpOpError {
     fn contextualize(
         self,
         source: &'src str,
@@ -47,7 +41,7 @@ impl<'src> PpOpError<'src> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub enum PpType {
     Typename,
     Bool,
@@ -74,8 +68,8 @@ impl std::fmt::Display for PpType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PpValue<'src> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub enum PpValue {
     // types (for size operations)
     Bool,
     Uint,
@@ -90,10 +84,10 @@ pub enum PpValue<'src> {
     SIntLiteral(isize),
 
     // macro name (only useable in "exists" operation)
-    Macro(&'src str),
+    Macro(Todo), // String or Span?
 }
 
-impl<'src> PpValue<'src> {
+impl PpValue {
     const fn as_type(self) -> PpType {
         match self {
             Self::Bool | Self::Uint | Self::Sint | Self::Flpt | Self::Char | Self::Text => {
@@ -106,7 +100,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn and(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    const fn and(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(l & r)),
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(l & r)),
@@ -115,7 +109,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn or(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    const fn or(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(l | r)),
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(l | r)),
@@ -124,7 +118,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn xor(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    const fn xor(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(l ^ r)),
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(l ^ r)),
@@ -133,7 +127,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn nand(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    const fn nand(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(!(l & r))),
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(!(l & r))),
@@ -142,7 +136,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn nor(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    const fn nor(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(!(l | r))),
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(!(l | r))),
@@ -151,7 +145,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn xnor(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    const fn xnor(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(Self::BoolLiteral(!(l ^ r))),
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(Self::UIntLiteral(!(l ^ r))),
@@ -160,7 +154,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn add(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    const fn add(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
                 Ok(Self::UIntLiteral(l.saturating_add(r)))
@@ -172,7 +166,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn sub(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    const fn sub(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
                 Ok(Self::UIntLiteral(l.saturating_sub(r)))
@@ -184,7 +178,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn mul(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    const fn mul(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
                 Ok(Self::UIntLiteral(l.saturating_mul(r)))
@@ -196,7 +190,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    fn div(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    fn div(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
                 Ok(Self::UIntLiteral(l.checked_div(r).unwrap_or(usize::MAX)))
@@ -208,7 +202,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    fn rem(self, rhs: Self) -> Result<Self, PpOpError<'src>> {
+    fn rem(self, rhs: Self) -> Result<Self, PpOpError> {
         match (self, rhs) {
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => {
                 Ok(Self::UIntLiteral(l.checked_rem(r).unwrap_or(0)))
@@ -220,7 +214,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn eq(self, rhs: Self) -> Result<bool, PpOpError<'src>> {
+    const fn eq(self, rhs: Self) -> Result<bool, PpOpError> {
         match (self, rhs) {
             (Self::BoolLiteral(l), Self::BoolLiteral(r)) => Ok(l == r),
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(l == r),
@@ -229,7 +223,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn cmp(self, rhs: Self) -> Result<std::cmp::Ordering, PpOpError<'src>> {
+    const fn cmp(self, rhs: Self) -> Result<std::cmp::Ordering, PpOpError> {
         match (self, rhs) {
             (Self::UIntLiteral(l), Self::UIntLiteral(r)) => Ok(l.cmp(&r)),
             (Self::SIntLiteral(l), Self::SIntLiteral(r)) => Ok(l.cmp(&r)),
@@ -250,14 +244,14 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    const fn neg(self) -> Result<Self, PpOpError<'src>> {
+    const fn neg(self) -> Result<Self, PpOpError> {
         match self {
             Self::SIntLiteral(x) => Ok(Self::SIntLiteral(x.saturating_neg())),
             x => Err(PpOpError::Unsupported { x }),
         }
     }
 
-    const fn not(self) -> Result<Self, PpOpError<'src>> {
+    const fn not(self) -> Result<Self, PpOpError> {
         match self {
             Self::UIntLiteral(x) => Ok(Self::UIntLiteral(!x)),
             Self::SIntLiteral(x) => Ok(Self::SIntLiteral(!x)),
@@ -266,7 +260,7 @@ impl<'src> PpValue<'src> {
         }
     }
 
-    fn exists<F>(self, macro_exists: F) -> Result<bool, PpOpError<'src>>
+    fn exists<F>(self, macro_exists: F) -> Result<bool, PpOpError>
     where
         F: FnOnce(&str) -> bool,
     {
@@ -277,11 +271,12 @@ impl<'src> PpValue<'src> {
     }
 }
 
-pub fn preproc_eval<'src, F>(
+#[cfg(false)]
+pub fn preproc_eval<F>(
     source: &'src str,
     expr: &Expr<'src>,
     mexists: &mut F,
-) -> Result<PpValue<'src>, ContextError<'src>>
+) -> Result<PpValue, ContextError<'src>>
 where
     F: FnMut(&str) -> bool,
 {

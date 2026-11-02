@@ -3,10 +3,7 @@
 use crate::{
     error::{ContextError, ErrorType},
     grammar::{ast::AstNodeFinal, parse, token_matches},
-    preproc::{
-        eval::{PpValue, preproc_eval},
-        stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
-    },
+    preproc::stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
     scanner::token::{ExpansionData, Token, value::LexValue},
 };
 use std::collections::HashMap;
@@ -168,6 +165,8 @@ impl<'src> Preprocessor<'src> {
                 let mut parser = parse(self.stream.source, pred_preproc);
                 let expr = parser.expression()?;
                 assert!(parser.next().is_none(), "leftover tokens"); // TODO: make this an error
+                todo!("preproc_eval");
+                #[cfg(false)]
                 match preproc_eval(self.stream.source, &expr, &mut |name| {
                     self.macros.contains_key(name)
                 })? {

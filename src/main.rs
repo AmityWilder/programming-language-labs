@@ -130,6 +130,8 @@ mod error;
 mod grammar;
 mod highlight;
 mod interp;
+mod lex;
+mod new_error;
 mod preproc;
 mod regex;
 mod scanner;

@@ -255,3 +255,89 @@ define_token_eq! {
         RotrAssign = "[>>]=",
     }
 }
+
+/// A bracket character
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub enum Bracket {
+    /// `[`/`]`
+    Brack,
+    /// `(`/`)`
+    Paren,
+    /// `{`/`}`
+    Brace,
+}
+
+impl Bracket {
+    /// The open partner of the bracket
+    #[must_use]
+    pub const fn open(self) -> char {
+        match self {
+            Self::Brack => '[',
+            Self::Paren => '(',
+            Self::Brace => '{',
+        }
+    }
+
+    /// The close partner of the bracket
+    #[must_use]
+    pub const fn close(self) -> char {
+        match self {
+            Self::Brack => ']',
+            Self::Paren => ')',
+            Self::Brace => '}',
+        }
+    }
+}
+
+/// An invalid combination of brackets (order matters)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub enum BadBracketCombo {
+    /// `[`/`)`
+    BrackParen,
+    /// `[`/`}`
+    BrackBrace,
+    /// `(`/`]`
+    ParenBrack,
+    /// `(`/`}`
+    ParenBrace,
+    /// `{`/`]`
+    BraceParen,
+    /// `{`/`)`
+    BraceBrack,
+}
+
+impl BadBracketCombo {
+    #[must_use]
+    pub const fn new(open: Bracket, close: Bracket) -> Option<Self> {
+        match (open, close) {
+            (Bracket::Brack, Bracket::Paren) => Some(Self::BrackParen),
+            (Bracket::Brack, Bracket::Brace) => Some(Self::BrackBrace),
+            (Bracket::Paren, Bracket::Brack) => Some(Self::ParenBrack),
+            (Bracket::Paren, Bracket::Brace) => Some(Self::ParenBrace),
+            (Bracket::Brace, Bracket::Brack) => Some(Self::BraceBrack),
+            (Bracket::Brace, Bracket::Paren) => Some(Self::BraceParen),
+
+            _ => None,
+        }
+    }
+
+    /// (open, close)
+    #[must_use]
+    pub const fn decompose(self) -> (Bracket, Bracket) {
+        match self {
+            Self::BrackParen => (Bracket::Brack, Bracket::Paren),
+            Self::BrackBrace => (Bracket::Brack, Bracket::Brace),
+            Self::ParenBrack => (Bracket::Paren, Bracket::Brack),
+            Self::ParenBrace => (Bracket::Paren, Bracket::Brace),
+            Self::BraceParen => (Bracket::Brace, Bracket::Brack),
+            Self::BraceBrack => (Bracket::Brace, Bracket::Paren),
+        }
+    }
+}
+
+impl From<BadBracketCombo> for (Bracket, Bracket) {
+    #[inline]
+    fn from(value: BadBracketCombo) -> Self {
+        value.decompose()
+    }
+}

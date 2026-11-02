@@ -13,13 +13,14 @@ use crate::{
     },
     preproc::eval::{PpType, PpValue},
     scanner::{
-        self, BadBracketCombo, Bracket, rfind_block_comment,
+        self, rfind_block_comment,
         symbols::{
             BIN_PREFIX, BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, HEX_PREFIX,
             OCT_PREFIX, TEXT_DELIM,
         },
         token::{
             ExpansionData, Token, escape_char,
+            punc::{BadBracketCombo, Bracket},
             value::{Keyword, Operator, TokenEq},
         },
         tokenize,
@@ -28,7 +29,7 @@ use crate::{
 };
 use std::range::Range;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash, Default)]
 pub enum ImmutableAssignment {
     #[default]
     Expression,
@@ -37,7 +38,7 @@ pub enum ImmutableAssignment {
     Keyword(Keyword),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub enum IntKind {
     Byte,
     Uint,
@@ -71,7 +72,7 @@ impl IntKind {
 }
 
 /// The standard library is allergic to letting me construct its error types, so I've made my own version
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub enum NumErrorKind {
     InvalidInt,
     InvalidFlpt,
@@ -381,7 +382,7 @@ macro_rules! expected_token {
 }
 
 expected_token! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
     pub enum ExpectedToken {
         MacroIdent = "a macro identifier (like a regular identifier, but starts with `\\`",
         MacroParamOrRParen = "a macro parameter (like a regular identifier, but starts with `$`) or `)`",
@@ -529,6 +530,7 @@ macro_rules! CtxErrType {{
 CtxErrType! {
 /// The kind of error describing a [`ContextError`]
 #[derive(Debug, Clone, PartialEq)]
+#[deprecated = "use new_error"]
 pub enum ErrorType<'src> {
     // ----------------------------
     // lex
@@ -762,7 +764,7 @@ pub enum ErrorType<'src> {
         }
     })]
     NonBoolPrePredicate {
-        actual: PpValue<'src>,
+        actual: PpValue,
     },
 
     #[code(PRE, 25)]
@@ -1182,6 +1184,7 @@ impl std::error::Error for ErrorType<'_> {}
 
 /// A code error with the range of the error in the source code
 #[derive(Clone, PartialEq)]
+#[deprecated = "use new_error"]
 pub struct ContextError<'src> {
     /// A string view of the FULL, ENTIRE source code
     pub source: &'src str,
@@ -1446,7 +1449,7 @@ struct RefStyle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-enum RefStyleKind {
+pub(super) enum RefStyleKind {
     #[default]
     Info,
     #[expect(dead_code, reason = "reserved for use in static analysis")]
@@ -1478,7 +1481,7 @@ impl RefStyleKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum LineRefMsg<'src, 'err> {
+pub(super) enum LineRefMsg<'src, 'err> {
     Text(&'static str),
     InlineErr(InlineErrMsg<'src, 'err>),
     TypeResolution(TypeResolutionMsg<'src>),
@@ -1523,7 +1526,7 @@ impl std::fmt::Display for LineRefMsg<'_, '_> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct LineRef<'src, 'err> {
+pub(super) struct LineRef<'src, 'err> {
     pub style: RefStyleKind,
     pub range: Range<usize>,
     pub block: Range<usize>,
@@ -2151,7 +2154,7 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
 }
 
 /// Runtime error - essentially an exception
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Hash)]
 pub enum Failure {
     ParseBool,
     ParseInt,

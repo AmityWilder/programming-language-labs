@@ -2,8 +2,11 @@ use super::*;
 use crate::{
     error::ExpectedToken,
     scanner::{
-        Bracket, Scanner,
-        token::value::{Keyword, LexValue, Punctuation},
+        Scanner,
+        token::{
+            punc::Bracket,
+            value::{Keyword, LexValue, Punctuation},
+        },
     },
 };
 use std::range::Range;
