@@ -215,6 +215,8 @@ pub enum Bracket {
     Paren,
     /// `{`/`}`
     Brace,
+    /// `<`/`>`
+    Angle,
 }
 
 impl Bracket {
@@ -225,6 +227,7 @@ impl Bracket {
             Self::Brack => '[',
             Self::Paren => '(',
             Self::Brace => '{',
+            Self::Angle => '<',
         }
     }
 
@@ -235,6 +238,28 @@ impl Bracket {
             Self::Brack => ']',
             Self::Paren => ')',
             Self::Brace => '}',
+            Self::Angle => '>',
+        }
+    }
+    /// The open partner of the bracket
+    #[must_use]
+    pub const fn open_punc(self) -> Punctuation {
+        match self {
+            Self::Brack => Punctuation::LBrack,
+            Self::Paren => Punctuation::LParen,
+            Self::Brace => Punctuation::LBrace,
+            Self::Angle => Punctuation::Lt,
+        }
+    }
+
+    /// The close partner of the bracket
+    #[must_use]
+    pub const fn close_punc(self) -> Punctuation {
+        match self {
+            Self::Brack => Punctuation::RBrack,
+            Self::Paren => Punctuation::RParen,
+            Self::Brace => Punctuation::RBrace,
+            Self::Angle => Punctuation::Gt,
         }
     }
 }
@@ -254,6 +279,13 @@ pub enum BadBracketCombo {
     BraceParen,
     /// `{`/`)`
     BraceBrack,
+    // angle bracket can only open, because a closing angle-bracket could just be part of an expression.
+    /// `<`/`]`
+    AngleBrack,
+    /// `<`/`)`
+    AngleParen,
+    /// `<`/`}`
+    AngleBrace,
 }
 
 impl BadBracketCombo {
@@ -266,6 +298,9 @@ impl BadBracketCombo {
             (Bracket::Paren, Bracket::Brace) => Some(Self::ParenBrace),
             (Bracket::Brace, Bracket::Brack) => Some(Self::BraceBrack),
             (Bracket::Brace, Bracket::Paren) => Some(Self::BraceParen),
+            (Bracket::Angle, Bracket::Brack) => Some(Self::AngleBrack),
+            (Bracket::Angle, Bracket::Paren) => Some(Self::AngleParen),
+            (Bracket::Angle, Bracket::Brace) => Some(Self::AngleBrace),
 
             _ => None,
         }
@@ -281,6 +316,9 @@ impl BadBracketCombo {
             Self::ParenBrace => (Bracket::Paren, Bracket::Brace),
             Self::BraceParen => (Bracket::Brace, Bracket::Brack),
             Self::BraceBrack => (Bracket::Brace, Bracket::Paren),
+            Self::AngleBrack => (Bracket::Angle, Bracket::Brack),
+            Self::AngleParen => (Bracket::Angle, Bracket::Paren),
+            Self::AngleBrace => (Bracket::Angle, Bracket::Brace),
         }
     }
 }

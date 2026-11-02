@@ -3,8 +3,8 @@ use crate::{
     analyzer::types::{AbstractType, SizeReq},
     error::fail::Failure,
     highlight::{style::StyleWrapper, syntax::Syntax},
-    lex::token::{Operator, TokenTable},
-    old_error::{ExpectedToken, ImmutableAssignment, NumErrorKind},
+    lex::token::{Operator, TokenKind, TokenTable},
+    old_error::{ImmutableAssignment, NumErrorKind},
     preproc::eval::{PpType, PpValue},
     scanner::{
         symbols::{
@@ -80,6 +80,97 @@ fn invalid_num_suffix(src: &str) -> (&str, NumberBase) {
         .expect("should contain an invalid digit");
     let suffix = &digits[mid..];
     (suffix, base)
+}
+
+macro_rules! expected_token {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $Enum:ident {$(
+            $(#[$vm:meta])*
+            $Variant:ident = $desc:expr
+        ),* $(,)?}
+    ) => {
+        $(#[$meta])*
+        $vis enum $Enum {
+            Verbatim(TokenKind),
+        $(
+            $(#[$vm])*
+            $Variant
+        ),*}
+
+        impl $Enum {
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    Self::Verbatim(x) => x.expectation_name(),
+                    $(Self::$Variant => $desc),*
+                }
+            }
+        }
+    };
+}
+
+expected_token! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+    pub enum ExpectedToken {
+        MacroIdent = "a macro identifier (like a regular identifier, but starts with `\\`",
+        MacroParamOrRParen = "a macro parameter (like a regular identifier, but starts with `$`) or `)`",
+        MacroDefLBrace = "a `{` for macro definition",
+        MacroArgLBrace = "a `{` for macro argument",
+        MacroPredLBrace = "a `{` for a macro predicate",
+        MacroCondLBrace = "a `{` for a macro condition body",
+
+        #[deprecated = "use ExpectedToken::Verbatim"]
+        Colon = "a `:`",
+        #[deprecated = "use ExpectedToken::Verbatim"]
+        LParen = "a `(`",
+        CommaOrRParen = "a `,` or `)`",
+        Literal = "a literal",
+        ParenExpr = "a parenthesized expression",
+        ExprOrRParen = "an expression or `)`",
+        BoundOrRParen = "a type bound or `)`",
+        TypeOrRAngle = "a type or `>`",
+        ExprOrRBrack = "an expression or `]`",
+        Expr = "an expression",
+        TypeExpr = "a type",
+        TypeBound = "a type bound",
+        OrType = "an \"or-type\" (`fail`, `none`, or `nevr`)",
+        FnSource = "a function name or parenthesized function object expression",
+        #[deprecated = "use ExpectedToken::Verbatim"]
+        Semi = "a `;`",
+        Declaration = "a declaration or statement",
+        #[deprecated = "use ExpectedToken::Verbatim"]
+        Ident = "an identifier",
+        Pattern = "a binding pattern",
+        BlockStmt = "a block statement",
+        BlockOrIf = "an `if` keyword or a block statement",
+        #[deprecated = "use ExpectedToken::Verbatim"]
+        InKeyword = "an `in` keyword",
+        Statement = "a statement",
+        LoopBlock = "a loop block after the label",
+        #[deprecated = "use ExpectedToken::Verbatim"]
+        Arrow = "a `->`",
+    }
+}
+
+impl std::fmt::Display for ExpectedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Remove an article ("a ", "an ", "a(n) ", "the ", or "") from the beginning of a string
+#[expect(
+    dead_code,
+    reason = "reserved for if error expectations ever need to replace \"a\"/\"an\" with \"the\""
+)]
+fn trim_article(s: &str) -> &str {
+    const ARTICLES: [&str; 4] = ["a ", "an ", "a(n) ", "the "];
+    for article in ARTICLES {
+        if let Some(trimmed) = s.strip_prefix(article) {
+            return trimmed;
+        }
+    }
+    s
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -195,16 +286,14 @@ pub enum ErrorKind {
     MissingToken {
         /// The token pattern expected - should start with the proper article
         /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
-        expect: ExpectedToken,
+        expected: ExpectedToken,
     },
 
     /// A token was expected, but instead found `actual`
     UnexpectedToken {
         /// The token pattern expected - should start with the proper article
         /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
-        expect: ExpectedToken,
-        /// The token found
-        actual: Span,
+        expected: ExpectedToken,
     },
 
     // ----------------------------
@@ -543,14 +632,18 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
                     expect.close()
                 )
             }
-            ErrorKind::MissingToken { expect, .. } => {
+            ErrorKind::MissingToken {
+                expected: expect, ..
+            } => {
                 write!(f, "missing {expect}")
             }
-            ErrorKind::UnexpectedToken { expect, actual, .. } => {
+            ErrorKind::UnexpectedToken {
+                expected: expect, ..
+            } => {
                 write!(
                     f,
                     "expected {expect}, found `{}`",
-                    self.source.span_str(*actual)
+                    self.source.span_str(self.error.span)
                 )
             }
             ErrorKind::DivByZero { .. } => {
@@ -886,11 +979,11 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
                     expect.open(),
                 )
             }
-            ErrorKind::MissingToken { expect, .. } => {
+            ErrorKind::MissingToken { expected: expect, .. } => {
                 write!(f, "try inserting {expect}")
             }
-            ErrorKind::UnexpectedToken { expect, actual, .. } => {
-                let actual = self.source.span_str(*actual);
+            ErrorKind::UnexpectedToken { expected: expect, .. } => {
+                let actual = self.source.span_str(self.error.span);
                 write!(
                     f,
                     "try inserting {expect} before the `{actual}` or remove the `{actual}`"

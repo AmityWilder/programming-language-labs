@@ -1,11 +1,30 @@
 use crate::{
     analyzer::types::bounds::Combinator,
+    error::ExpectedToken,
     lex::token::{Operator, TokenKind, punc::OpSide},
     scanner::token::value::Keyword,
     src_code::span::Span,
 };
 
 // TBD: can RelSpan be used instead of Span? will an AST ever contain spans from multiple separate files?
+
+pub trait Expectable {
+    const EXPECTED: ExpectedToken;
+}
+
+pub trait ExpectableExt: Sized {
+    type Item;
+
+    fn ok_or_expected(self) -> Result<Self::Item, ExpectedToken>;
+}
+
+impl<T: Expectable> ExpectableExt for Option<T> {
+    type Item = T;
+
+    fn ok_or_expected(self) -> Result<Self::Item, ExpectedToken> {
+        self.ok_or(T::EXPECTED)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum ExprPrecedence {
@@ -31,6 +50,10 @@ pub enum ExprPrecedence {
 pub struct BindingPattern {
     // TBD: what else can a pattern be?
     pub ident: Span,
+}
+
+impl Expectable for BindingPattern {
+    const EXPECTED: ExpectedToken = ExpectedToken::Pattern;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,12 +93,25 @@ impl Unary {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Delimited<T> {
+    /// caller-defined
+    pub open: Span,
+    pub inner: T,
+    /// caller-defined
+    pub close: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Grouping {
     /// `(`
     pub open: Span,
     pub expr: Expr,
     /// `)`
     pub close: Span,
+}
+
+impl Expectable for Grouping {
+    const EXPECTED: ExpectedToken = ExpectedToken::ParenExpr;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,6 +129,10 @@ pub enum OrTypeKeyword {
     None,
     Nevr,
     Fail,
+}
+
+impl Expectable for OrTypeKeyword {
+    const EXPECTED: ExpectedToken = ExpectedToken::OrType;
 }
 
 impl OrTypeKeyword {
@@ -115,6 +155,25 @@ impl OrTypeKeyword {
 
     pub const fn as_str(self) -> &'static str {
         self.to_keyword().as_str()
+    }
+}
+impl TryFrom<Keyword> for OrTypeKeyword {
+    type Error = ();
+
+    fn try_from(value: Keyword) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or(())
+    }
+}
+
+impl TryFrom<TokenKind> for OrTypeKeyword {
+    type Error = ();
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        if let TokenKind::Keyword(value) = value {
+            Self::try_from(value)
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -183,6 +242,46 @@ impl std::fmt::Display for TypenameKeyword {
     }
 }
 
+impl TryFrom<Keyword> for TypenameKeyword {
+    type Error = ();
+
+    fn try_from(value: Keyword) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or(())
+    }
+}
+
+impl TryFrom<TokenKind> for TypenameKeyword {
+    type Error = ();
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        if let TokenKind::Keyword(value) = value {
+            Self::try_from(value)
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl TryFrom<Keyword> for Option<TypenameKeyword> {
+    type Error = ();
+
+    fn try_from(value: Keyword) -> Result<Self, Self::Error> {
+        TypenameKeyword::new(value).map(Some).ok_or(())
+    }
+}
+
+impl TryFrom<TokenKind> for Option<TypenameKeyword> {
+    type Error = ();
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        match value {
+            TokenKind::Ident => Ok(None),
+            TokenKind::Keyword(value) => Self::try_from(value),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamespacePathPart {
     /// Identifier
@@ -195,9 +294,7 @@ pub struct NamespacePathPart {
 pub struct GenericGroup {
     /// `<`
     pub open: Span,
-    /// (type, `,`)
-    /// only the last comma will ever be [`None`]
-    pub list: Vec<(TypeExpr, Option<Span>)>,
+    pub list: Vec<TypeExpr>,
     /// `>`
     pub close: Span,
 }
@@ -223,6 +320,10 @@ pub struct TypeExpr {
     /// Identifier
     pub name: Typename,
     pub or_ty: Option<OrType>,
+}
+
+impl Expectable for TypeExpr {
+    const EXPECTED: ExpectedToken = ExpectedToken::TypeExpr;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -318,10 +419,18 @@ pub enum TypeBound {
     Group(Box<GroupedBound>),
 }
 
+impl Expectable for TypeBound {
+    const EXPECTED: ExpectedToken = ExpectedToken::TypeBound;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Literal {
     pub kind: TokenKind,
     pub span: Span,
+}
+
+impl Expectable for Literal {
+    const EXPECTED: ExpectedToken = ExpectedToken::Literal;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -351,6 +460,26 @@ impl DirectiveKw {
 impl std::fmt::Display for DirectiveKw {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         self.as_str().fmt(f)
+    }
+}
+
+impl TryFrom<Keyword> for DirectiveKw {
+    type Error = ();
+
+    fn try_from(value: Keyword) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or(())
+    }
+}
+
+impl TryFrom<TokenKind> for DirectiveKw {
+    type Error = ();
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        if let TokenKind::Keyword(value) = value {
+            Self::try_from(value)
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -386,23 +515,31 @@ pub enum Expr {
     Type(Box<TypeExpr>),
 }
 
+impl Expectable for Expr {
+    const EXPECTED: ExpectedToken = ExpectedToken::Expr;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum OrBody {
     More(IfStmt),
     Last(BlockStmt),
 }
 
+impl Expectable for OrBody {
+    const EXPECTED: ExpectedToken = ExpectedToken::BlockOrIf;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrStmt {
     /// `or`
-    pub or_kw: Span,
+    pub kw: Span,
     pub body: OrBody,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     /// `if`
-    pub if_kw: Span,
+    pub kw: Span,
     pub pred: Expr,
     pub then: BlockStmt,
     pub or: Option<Box<OrStmt>>,
@@ -461,6 +598,10 @@ pub struct LoopBlock {
     pub block: BlockStmt,
 }
 
+impl Expectable for LoopBlock {
+    const EXPECTED: ExpectedToken = ExpectedToken::LoopBlock;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DoneStmt {
     /// `done`
@@ -489,6 +630,10 @@ pub struct BlockStmt {
     pub close: Span,
 }
 
+impl Expectable for BlockStmt {
+    const EXPECTED: ExpectedToken = ExpectedToken::BlockStmt;
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExprStmt {
     pub expr: Expr,
@@ -515,6 +660,10 @@ pub enum Statement {
     Done(DoneStmt),
     Skip(SkipStmt),
     Block(BlockStmt),
+}
+
+impl Expectable for Statement {
+    const EXPECTED: ExpectedToken = ExpectedToken::Statement;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -624,6 +773,26 @@ impl VarKeyword {
     }
 }
 
+impl TryFrom<Keyword> for VarKeyword {
+    type Error = ();
+
+    fn try_from(value: Keyword) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or(())
+    }
+}
+
+impl TryFrom<TokenKind> for VarKeyword {
+    type Error = ();
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        if let TokenKind::Keyword(value) = value {
+            Self::try_from(value)
+        } else {
+            Err(())
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclVar {
     /// `uni`, `let`, or `pvt`
@@ -642,4 +811,8 @@ pub enum Declaration {
     Var(DeclVar),
     Defer(DeclDefer),
     Stmt(Statement),
+}
+
+impl Expectable for Declaration {
+    const EXPECTED: ExpectedToken = ExpectedToken::Declaration;
 }

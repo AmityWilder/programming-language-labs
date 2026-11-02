@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    old_error::ExpectedToken,
+    error::ExpectedToken,
     scanner::{
         Scanner,
         token::{
