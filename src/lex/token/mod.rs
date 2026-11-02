@@ -12,7 +12,7 @@ macro_rules! define_token_eq {
         $(#[$em:meta])*
         $vis:vis enum $Enum:ident = $name:ident {$(
             $(#[doc = $doc:expr])*
-            $Variant:ident = $value:literal
+            $Variant:ident = $value:expr
         ),+ $(,)?}
     ) => {
         $(#[$em])*
@@ -45,6 +45,12 @@ macro_rules! define_token_eq {
             pub const fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$Variant => $value),+
+                }
+            }
+
+            pub const fn expectation_name(self) -> &'static str {
+                match self {
+                    $(Self::$Variant => concat!("`", $value, "`")),+
                 }
             }
         }
@@ -144,6 +150,46 @@ pub enum TokenKind {
     Punc(Punctuation),
 }
 
+impl From<Keyword> for TokenKind {
+    fn from(value: Keyword) -> Self {
+        Self::Keyword(value)
+    }
+}
+
+impl From<Punctuation> for TokenKind {
+    fn from(value: Punctuation) -> Self {
+        Self::Punc(value)
+    }
+}
+
+impl TokenKind {
+    pub const fn expectation_name(self) -> &'static str {
+        match self {
+            Self::Invalid => panic!("not implemented: should not expect an invalid token"),
+            Self::Newline | Self::WSpace => panic!("not implemented: should not expect whitespace"),
+            Self::Comment => panic!("not implemented: should not expect a comment"),
+
+            Self::BoolLit => "a boolean literal",
+            Self::NumberLit => "a number literal",
+            Self::CharLit => "a character literal",
+            Self::TextLit => "a text literal",
+            Self::Ident => "an identifier",
+            Self::Macro => "a macro name",
+            Self::MParam => "a macro parameter",
+            Self::Keyword(keyword) => keyword.expectation_name(),
+            Self::Punc(punc) => punc.expectation_name(),
+        }
+    }
+
+    pub const fn to_token_eq(self) -> Option<TokenEq> {
+        match self {
+            Self::Keyword(kw) => Some(TokenEq::Keyword(kw)),
+            Self::Punc(punc) => Some(TokenEq::Punctuation(punc)),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TokenSpans<'a> {
     acc: uspan,
@@ -234,9 +280,9 @@ macro_rules! define_operators {
 
         impl Operator {
             pub const fn from_token_eq(value: $Base) -> Option<Self> {
-                $(use $BaseVariant::$Variant;)*
+                $(#[allow(unused_imports)] use $BaseVariant::$Variant;)*
                 Some(match value {
-                    $($Base::$BaseVariant($Variant) => Self::$Variant,)*
+                    $($Base::$BaseVariant($BaseVariant::$Variant) => Self::$Variant,)*
                     _ => return None,
                 })
             }
@@ -316,6 +362,22 @@ pub enum Operator : TokenEq {
 
     Keyword::Szof,
 }
+}
+
+impl TryFrom<TokenEq> for Operator {
+    type Error = ();
+
+    fn try_from(value: TokenEq) -> Result<Self, Self::Error> {
+        value.to_operator().ok_or(())
+    }
+}
+
+impl TryFrom<TokenKind> for Operator {
+    type Error = ();
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        value.to_token_eq().and_then(|x| x.to_operator()).ok_or(())
+    }
 }
 
 impl Operator {

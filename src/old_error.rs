@@ -6,7 +6,7 @@ use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::types::{AbstractType, SizeReq},
     arrayvec::ArrayVec,
-    error::fail::Failure,
+    error::{ExpectedToken, fail::Failure},
     grammar::ast::AstNode,
     highlight::{
         highlight,
@@ -361,86 +361,6 @@ fn invalid_num_suffix(src: &str) -> (&str, &'static str) {
         let suffix = &src[pos..];
         (suffix, "decimal")
     }
-}
-
-macro_rules! expected_token {
-    (
-        $(#[$meta:meta])*
-        $vis:vis enum $Enum:ident {$(
-            $Variant:ident = $desc:expr
-        ),* $(,)?}
-    ) => {
-        $(#[$meta])*
-        $vis enum $Enum {$(
-            $Variant
-        ),*}
-
-        impl $Enum {
-            pub const fn as_str(self) -> &'static str {
-                match self {
-                    $(Self::$Variant => $desc),*
-                }
-            }
-        }
-    };
-}
-
-expected_token! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
-    pub enum ExpectedToken {
-        MacroIdent = "a macro identifier (like a regular identifier, but starts with `\\`",
-        MacroParamOrRParen = "a macro parameter (like a regular identifier, but starts with `$`) or `)`",
-        MacroDefLBrace = "a `{` for macro definition",
-        MacroArgLBrace = "a `{` for macro argument",
-        MacroPredLBrace = "a `{` for a macro predicate",
-        MacroCondLBrace = "a `{` for a macro condition body",
-
-        Colon = "a `:`",
-        LParen = "a `(`",
-        CommaOrRParen = "a `,` or `)`",
-        Literal = "a literal",
-        ParenExpr = "a parenthesized expression",
-        ExprOrRParen = "an expression or `)`",
-        BoundOrRParen = "a type bound or `)`",
-        TypeOrRAngle = "a type or `>`",
-        ExprOrRBrack = "an expression or `]`",
-        Expr = "an expression",
-        TypeExpr = "a type",
-        TypeBound = "a type bound",
-        OrType = "an \"or-type\" (`fail`, `none`, or `nevr`)",
-        FnSource = "a function name or parenthesized function object expression",
-        Semi = "a `;`",
-        Declaration = "a declaration or statement",
-        Ident = "an identifier",
-        Pattern = "a binding pattern",
-        BlockStmt = "a block statement",
-        BlockOrIf = "an `if` keyword or a block statement",
-        InKeyword = "an `in` keyword",
-        Statement = "a statement",
-        LoopBlock = "a loop block after the label",
-        Arrow = "a `->`",
-    }
-}
-
-impl std::fmt::Display for ExpectedToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// Remove an article ("a ", "an ", "a(n) ", "the ", or "") from the beginning of a string
-#[expect(
-    dead_code,
-    reason = "reserved for if error expectations ever need to replace \"a\"/\"an\" with \"the\""
-)]
-fn trim_article(s: &str) -> &str {
-    const ARTICLES: [&str; 4] = ["a ", "an ", "a(n) ", "the "];
-    for article in ARTICLES {
-        if let Some(trimmed) = s.strip_prefix(article) {
-            return trimmed;
-        }
-    }
-    s
 }
 
 macro_rules! CtxErrType {{

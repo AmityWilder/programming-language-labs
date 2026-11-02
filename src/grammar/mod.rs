@@ -4,12 +4,13 @@
 
 use crate::{
     analyzer::types::bounds::Combinator,
+    error::ExpectedToken,
     grammar::ast::{
         Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DeferParam, DoneStmt, ExprStmt,
         IfStmt, OrBody, OrStmt, PrintStmt, Program, Statement, Variable,
     },
     lex::token::Operator,
-    old_error::{ContextError, ExpectedToken},
+    old_error::ContextError,
     scanner::token::{
         Lexeme, SpecToken, Token,
         punc::{Bracket, OpSide, Punctuation},
