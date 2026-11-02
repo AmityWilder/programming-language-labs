@@ -7,13 +7,10 @@ use crate::{
         Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DeferParam, DoneStmt, ExprStmt,
         IfStmt, OrBody, OrStmt, PrintStmt, Program, Statement, Variable,
     },
-    scanner::{
-        Bracket,
-        token::{
-            Lexeme, SpecToken, Token,
-            punc::Punctuation,
-            value::{Keyword, LexValue, Operator},
-        },
+    scanner::token::{
+        Lexeme, SpecToken, Token,
+        punc::{Bracket, Punctuation},
+        value::{Keyword, LexValue, Operator},
     },
 };
 use Operator::*;

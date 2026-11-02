@@ -17,7 +17,7 @@ pub mod bounds;
 use bounds::{TypeBound, TypeSatisfaction};
 
 /// The context in which a type must be statically sized
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub enum SizeReq {
     ArrayElement,
 }

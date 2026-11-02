@@ -144,7 +144,7 @@ impl<'src> std::ops::Deref for Lexeme<'src> {
     }
 }
 
-impl<'src> std::ops::DerefMut for Lexeme<'src> {
+impl std::ops::DerefMut for Lexeme<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.src
     }
@@ -174,13 +174,6 @@ impl<'src> Lexeme<'src> {
 
     /// Returns a boolean representing whether the lexeme is the exact same position in source,
     /// without needing to lookup within the source
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "will be used in semantic highlighting, once that's fixed"
-        )
-    )]
     pub fn lex_eq(&self, other: &Self) -> bool {
         std::ptr::eq(self.src, other.src)
     }

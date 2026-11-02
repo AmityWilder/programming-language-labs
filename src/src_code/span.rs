@@ -36,6 +36,18 @@ pub const fn uspan_to_usize(n: uspan) -> usize {
 #[repr(transparent)]
 pub struct RelSpan<T = uspan>(pub Range<T>);
 
+impl<T> From<Range<T>> for RelSpan<T> {
+    fn from(value: Range<T>) -> Self {
+        Self(value)
+    }
+}
+
+impl<T> From<std::ops::Range<T>> for RelSpan<T> {
+    fn from(value: std::ops::Range<T>) -> Self {
+        Self(value.into())
+    }
+}
+
 impl<T> From<RelSpan<T>> for Range<T> {
     fn from(value: RelSpan<T>) -> Self {
         value.0
@@ -185,41 +197,50 @@ impl<T> RelSpan<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub struct FileId(pub uspan);
+
+impl FileId {
+    pub(super) const fn into_usize(self) -> usize {
+        uspan_to_usize(self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
-    pub file: uspan,
+    pub file: FileId,
     pub rel: RelSpan<uspan>,
 }
 
 impl PartialOrd for Span {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match self.file.cmp(&other.file) {
-            std::cmp::Ordering::Equal => self.rel.partial_cmp(&other.rel),
-            ord => Some(ord),
+        match self.file.partial_cmp(&other.file) {
+            Some(std::cmp::Ordering::Equal) => self.rel.partial_cmp(&other.rel),
+            ord => ord,
         }
     }
 }
 
 impl Span {
     pub const fn contains(self, other: Self) -> bool {
-        self.file == other.file && self.rel.contains(other.rel)
+        self.file.0 == other.file.0 && self.rel.contains(other.rel)
     }
 
     pub const fn is_disjoint(self, other: Self) -> bool {
-        self.file == other.file && self.rel.is_disjoint(other.rel)
+        self.file.0 == other.file.0 && self.rel.is_disjoint(other.rel)
     }
 
     pub const fn overlaps(self, other: Self) -> bool {
-        self.file == other.file && self.rel.overlaps(other.rel)
+        self.file.0 == other.file.0 && self.rel.overlaps(other.rel)
     }
 
     pub const fn is_joint(self, next: Self) -> bool {
-        self.file == next.file && self.rel.is_joint(next.rel)
+        self.file.0 == next.file.0 && self.rel.is_joint(next.rel)
     }
 
     pub const fn intersection(self, other: Self) -> Option<Self> {
         let file = self.file;
-        if file == other.file
+        if file.0 == other.file.0
             && let Some(rel) = self.rel.intersection(other.rel)
         {
             Some(Self { file, rel })
@@ -230,7 +251,7 @@ impl Span {
 
     pub const fn union(self, other: Self) -> Option<Self> {
         let file = self.file;
-        if file == other.file
+        if file.0 == other.file.0
             && let Some(rel) = self.rel.union(other.rel)
         {
             Some(Self { file, rel })
@@ -241,7 +262,7 @@ impl Span {
 
     pub const fn super_union(self, other: Self) -> Option<Self> {
         let file = self.file;
-        if file == other.file {
+        if file.0 == other.file.0 {
             Some(Self {
                 file,
                 rel: self.rel.super_union(other.rel),

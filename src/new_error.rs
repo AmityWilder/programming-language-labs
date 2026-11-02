@@ -1,0 +1,1182 @@
+use crate::{
+    SYNTAX_STYLE_ANSI,
+    analyzer::types::{AbstractType, SizeReq},
+    error::{ExpectedToken, Failure, ImmutableAssignment, NumErrorKind, OpSide},
+    highlight::{style::StyleWrapper, syntax::Syntax},
+    lex::token::TokenTable,
+    preproc::eval::{PpType, PpValue},
+    scanner::{
+        symbols::{
+            BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM,
+        },
+        token::{
+            escape_char,
+            punc::{BadBracketCombo, Bracket},
+            value::{Keyword, Operator},
+        },
+    },
+    src_code::{map::SourceMap, span::Span},
+};
+use std::fmt::{self, Display, Formatter};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum NumberBase {
+    Bin,
+    Oct,
+    #[default]
+    Dec,
+    Hex,
+}
+
+impl NumberBase {
+    pub const fn as_num(self) -> u8 {
+        match self {
+            Self::Bin => 2,
+            Self::Oct => 8,
+            Self::Dec => 10,
+            Self::Hex => 16,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Bin => "binary",
+            Self::Oct => "octal",
+            Self::Dec => "decimal",
+            Self::Hex => "hexadecimal",
+        }
+    }
+}
+
+impl From<NumberBase> for u8 {
+    fn from(value: NumberBase) -> Self {
+        value.as_num()
+    }
+}
+
+fn invalid_num_suffix(src: &str) -> (&str, NumberBase) {
+    #![expect(
+        clippy::string_slice,
+        reason = "find should not be within a UTF-8 character"
+    )]
+    let src = src.strip_prefix('-').unwrap_or(src);
+    let mut chars = src.chars();
+    let base = match chars.nth(1) {
+        Some('x') => NumberBase::Hex,
+        Some('o') => NumberBase::Oct,
+        Some('b') => NumberBase::Bin,
+        _ => NumberBase::Dec,
+    };
+    let digits = if base == NumberBase::Dec {
+        src
+    } else {
+        chars.as_str()
+    };
+    let mid = digits
+        .find(|ch: char| !ch.is_digit(base.as_num().into()))
+        .expect("should contain an invalid digit");
+    let suffix = &digits[mid..];
+    (suffix, base)
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum ErrorKind {
+    // ----------------------------
+    // lex
+    // ----------------------------
+    /// Token type could not be identified from the initial character, and so is not a valid token
+    UnknownToken,
+
+    /// A block comment has no `*/` to end it
+    EndlessBlockComment,
+
+    /// A macro name that is just `\`
+    EmptyMacroName,
+
+    /// A macro parameter that is just `$`
+    EmptyMacroParam,
+
+    /// A character literal that is just `''`
+    EmptyCharLiteral,
+
+    /// A character literal with multiple codepoints
+    MultiCharLiteral,
+
+    /// A character literal has no `'` to end it
+    EndlessCharLiteral,
+
+    /// A character literal has no `'` to end it, but contains a `\'`
+    EscapedCharLiteralEnd,
+
+    /// A string literal has no `"` to end it
+    EndlessStringLiteral,
+
+    /// A string literal has no `"` to end it, but contains a `\"`
+    EscapedStringLiteralEnd,
+
+    /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
+    InvalidEscape,
+
+    /// A number literal could not be evaluated as a number
+    InvalidNumLiteral(NumErrorKind),
+
+    // ----------------------------
+    // preprocessor
+    // ----------------------------
+    /// A macro was encountered that has not been defined
+    MacroUndefined,
+
+    MacroParamUndefined {
+        /// [`None`] if not in a macro definition
+        head: Option<Span>,
+    },
+
+    RecursiveMacro {
+        head: Span,
+    },
+
+    NonBoolPrePredicate {
+        actual: PpValue,
+    },
+
+    InvalidPreOperator,
+
+    /// The operands in a binary operation are of incompatible type
+    PreIncompatible {
+        /// The binary operator
+        op: Operator,
+        l_range: Span,
+        l_ty: PpType,
+        r_range: Span,
+        r_ty: PpType,
+    },
+
+    /// The operand in a unary operation is of an unsupported type
+    PreUnsupported {
+        /// The unary operator
+        op: Operator,
+        r_range: Span,
+        /// The type of the value on the right side of the operator
+        r_ty: PpType,
+    },
+
+    InvalidPreLiteral,
+
+    InvalidPreType,
+
+    PreOrType,
+
+    // ----------------------------
+    // parse
+    // ----------------------------
+    /// A closing bracket is of the wrong type for the open bracket at its depth
+    IncorrectCloseBracket {
+        /// The bracket type being expected based on the opening side
+        open_range: Span,
+        failure: BadBracketCombo,
+    },
+
+    /// A closing bracket was found with no open bracket
+    ExcessCloseBracket {
+        /// The bracket type that was found
+        actual: Bracket,
+    },
+
+    /// An open bracket was found with no close bracket
+    MissingCloseBracket {
+        open_range: Span,
+        expect: Bracket,
+    },
+
+    /// A token was expected, but instead found EOF
+    MissingToken {
+        /// The token pattern expected - should start with the proper article
+        /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
+        expect: ExpectedToken,
+    },
+
+    /// A token was expected, but instead found `actual`
+    UnexpectedToken {
+        /// The token pattern expected - should start with the proper article
+        /// ('a ', 'an ', 'a(n) ', 'the ', or ''), which will be stripped away
+        expect: ExpectedToken,
+        /// The token found
+        actual: Span,
+    },
+
+    // ----------------------------
+    // analysis
+    // ----------------------------
+    /// Attempted to find the quotient or remainder with a denominator of 0
+    DivByZero {
+        /// The range of the expression evaluating to zero
+        zero: Span,
+    },
+
+    /// The operands in a binary operation are of incompatible type
+    Incompatible {
+        /// The binary operator
+        op: Operator,
+        l_range: Span,
+        l_ty: AbstractType<'static>,
+        r_range: Span,
+        r_ty: AbstractType<'static>,
+        candidates: Vec<(
+            (AbstractType<'static>, AbstractType<'static>),
+            AbstractType<'static>,
+        )>,
+    },
+
+    /// The operand in a unary operation is of an unsupported type
+    Unsupported {
+        /// The unary operator
+        op: Operator,
+        side: OpSide,
+        /// The type of the value on the right side of the operator
+        ty: AbstractType<'static>,
+        range: Span,
+        candidates: Vec<((AbstractType<'static>,), AbstractType<'static>)>,
+    },
+
+    /// Unsigned cannot be negated
+    UnsignedNeg,
+
+    // TODO: make this more helpful
+    UnknownVar,
+
+    // TODO: make this more helpful
+    /// `.0`: expected
+    /// `.1`: actual
+    TypeMismatch(
+        Box<(
+            AbstractType<'static>, // expected
+            AbstractType<'static>, // actual
+        )>,
+    ),
+
+    // TODO: make this more helpful
+    TypeAmbiguity,
+
+    AssignImmutable(ImmutableAssignment),
+
+    // TODO: make this more helpful
+    FallibleBlockExpr,
+
+    TypeTooBig, // TODO: recursive type should have a separate error
+
+    // TODO: make this more helpful
+    IllegalUnsized(SizeReq),
+
+    // TODO: need an error for undefined conversion
+
+    // ----------------------------
+    // runtime
+    // ----------------------------
+    Fail(Failure),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ErrorCategory {
+    Lexical,
+    Preprocessor,
+    Grammatical,
+    StaticAnalysis,
+    Runtime,
+}
+
+impl ErrorCategory {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Lexical => "LEX",
+            Self::Preprocessor => "PRE",
+            Self::Grammatical => "GRA",
+            Self::StaticAnalysis => "CMP",
+            Self::Runtime => "RUN",
+        }
+    }
+}
+
+impl Display for ErrorCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+impl ErrorKind {
+    pub const fn category(&self) -> ErrorCategory {
+        match self {
+            Self::UnknownToken { .. }
+            | Self::EndlessBlockComment { .. }
+            | Self::EmptyMacroName { .. }
+            | Self::EmptyMacroParam { .. }
+            | Self::EmptyCharLiteral { .. }
+            | Self::MultiCharLiteral { .. }
+            | Self::EndlessCharLiteral { .. }
+            | Self::EscapedCharLiteralEnd { .. }
+            | Self::EndlessStringLiteral { .. }
+            | Self::EscapedStringLiteralEnd { .. }
+            | Self::InvalidEscape { .. }
+            | Self::InvalidNumLiteral { .. } => ErrorCategory::Lexical,
+
+            Self::MacroUndefined { .. }
+            | Self::MacroParamUndefined { .. }
+            | Self::RecursiveMacro { .. }
+            | Self::NonBoolPrePredicate { .. }
+            | Self::InvalidPreOperator { .. }
+            | Self::PreIncompatible { .. }
+            | Self::PreUnsupported { .. }
+            | Self::InvalidPreLiteral { .. }
+            | Self::InvalidPreType { .. }
+            | Self::PreOrType { .. } => ErrorCategory::Preprocessor,
+
+            Self::IncorrectCloseBracket { .. }
+            | Self::ExcessCloseBracket { .. }
+            | Self::MissingCloseBracket { .. }
+            | Self::MissingToken { .. }
+            | Self::UnexpectedToken { .. } => ErrorCategory::Grammatical,
+
+            Self::DivByZero { .. }
+            | Self::Incompatible { .. }
+            | Self::Unsupported { .. }
+            | Self::UnsignedNeg { .. }
+            | Self::UnknownVar { .. }
+            | Self::TypeMismatch { .. }
+            | Self::TypeAmbiguity { .. }
+            | Self::AssignImmutable { .. }
+            | Self::FallibleBlockExpr { .. }
+            | Self::TypeTooBig { .. }
+            | Self::IllegalUnsized { .. } => ErrorCategory::StaticAnalysis,
+
+            Self::Fail { .. } => ErrorCategory::Runtime,
+        }
+    }
+
+    pub const fn num(&self) -> u32 {
+        const START: u32 = line!() + 1; // +1 because of `match` line
+        (match self {
+            Self::UnknownToken { .. } => line!(),
+            Self::EndlessBlockComment { .. } => line!(),
+            Self::EmptyMacroName { .. } => line!(),
+            Self::EmptyMacroParam { .. } => line!(),
+            Self::EmptyCharLiteral { .. } => line!(),
+            Self::MultiCharLiteral { .. } => line!(),
+            Self::EndlessCharLiteral { .. } => line!(),
+            Self::EscapedCharLiteralEnd { .. } => line!(),
+            Self::EndlessStringLiteral { .. } => line!(),
+            Self::EscapedStringLiteralEnd { .. } => line!(),
+            Self::InvalidEscape { .. } => line!(),
+            Self::InvalidNumLiteral { .. } => line!(),
+            Self::MacroUndefined { .. } => line!(),
+            Self::MacroParamUndefined { .. } => line!(),
+            Self::RecursiveMacro { .. } => line!(),
+            Self::NonBoolPrePredicate { .. } => line!(),
+            Self::InvalidPreOperator { .. } => line!(),
+            Self::PreIncompatible { .. } => line!(),
+            Self::PreUnsupported { .. } => line!(),
+            Self::InvalidPreLiteral { .. } => line!(),
+            Self::InvalidPreType { .. } => line!(),
+            Self::PreOrType { .. } => line!(),
+            Self::IncorrectCloseBracket { .. } => line!(),
+            Self::ExcessCloseBracket { .. } => line!(),
+            Self::MissingCloseBracket { .. } => line!(),
+            Self::MissingToken { .. } => line!(),
+            Self::UnexpectedToken { .. } => line!(),
+            Self::DivByZero { .. } => line!(),
+            Self::Incompatible { .. } => line!(),
+            Self::Unsupported { .. } => line!(),
+            Self::UnsignedNeg { .. } => line!(),
+            Self::UnknownVar { .. } => line!(),
+            Self::TypeMismatch { .. } => line!(),
+            Self::TypeAmbiguity { .. } => line!(),
+            Self::AssignImmutable { .. } => line!(),
+            Self::FallibleBlockExpr { .. } => line!(),
+            Self::TypeTooBig { .. } => line!(),
+            Self::IllegalUnsized { .. } => line!(),
+            Self::Fail { .. } => line!(),
+        }) - START
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct Error {
+    pub span: Span,
+    pub kind: ErrorKind,
+}
+
+impl Error {
+    pub const fn new(span: Span, kind: ErrorKind) -> Self {
+        Self { span, kind }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ContextError<'smap, 'tt, 'err> {
+    source: &'smap SourceMap,
+    tokens: &'tt TokenTable,
+    error: &'err Error,
+}
+
+impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
+    pub const fn new(
+        source: &'smap SourceMap,
+        tokens: &'tt TokenTable,
+        error: &'err Error,
+    ) -> Self {
+        Self {
+            source,
+            tokens,
+            error,
+        }
+    }
+
+    fn code(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let cat = self.error.kind.category();
+        let num = self.error.kind.num();
+        write!(f, "err[{cat}.{num:>03}]")
+    }
+
+    fn err(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.error.kind {
+            ErrorKind::UnknownToken => write!(f, "unknown token"),
+            ErrorKind::EndlessBlockComment => {
+                write!(
+                    f,
+                    "block comment opens (`/*`) but never closes (missing `*/`)"
+                )
+            }
+            ErrorKind::EmptyMacroName => write!(f, "invalid macro name"),
+            ErrorKind::EmptyMacroParam => write!(f, "invalid macro parameter name"),
+            ErrorKind::EmptyCharLiteral => write!(f, "empty character literal"),
+            ErrorKind::MultiCharLiteral => {
+                write!(f, "character literal may only contain one codepoint")
+            }
+            ErrorKind::EndlessCharLiteral => {
+                write!(
+                    f,
+                    "char literal opens (`'`) but never closes (missing unescaped `'`)"
+                )
+            }
+            ErrorKind::EscapedCharLiteralEnd => {
+                write!(
+                    f,
+                    "char literal opens (`'`) but never closes (missing unescaped `'`)"
+                )
+            }
+            ErrorKind::EndlessStringLiteral => {
+                write!(
+                    f,
+                    "string literal opens (`\"`) but never closes (missing unescaped `\"`)"
+                )
+            }
+            ErrorKind::EscapedStringLiteralEnd => {
+                write!(
+                    f,
+                    "string literal opens (`\"`) but never closes (missing unescaped `\"`)"
+                )
+            }
+            ErrorKind::InvalidEscape => {
+                write!(
+                    f,
+                    "unknown character escape: {:?}",
+                    self.source.span_str(self.error.span)
+                )
+            }
+            ErrorKind::InvalidNumLiteral(e) => {
+                write!(f, "invalid number literal: {e}")
+            }
+            ErrorKind::MacroUndefined => {
+                write!(f, "macro has not been defined at this point")
+            }
+            ErrorKind::MacroParamUndefined { .. } => {
+                write!(f, "macro parameter not in scope")
+            }
+            ErrorKind::RecursiveMacro { .. } => {
+                write!(f, "macro call cannot be recursive")
+            }
+            ErrorKind::NonBoolPrePredicate { .. } => {
+                write!(f, "preprocessor predicate must evaluate to a boolean")
+            }
+            ErrorKind::InvalidPreOperator { .. } => {
+                write!(f, "invalid preprocessor operator")
+            }
+            ErrorKind::PreIncompatible { op, l_ty, r_ty, .. } => {
+                write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`")
+            }
+            ErrorKind::PreUnsupported { op, r_ty, .. } => {
+                write!(f, "`{op}` is not supported for {r_ty}")
+            }
+            ErrorKind::InvalidPreLiteral { .. } => {
+                write!(f, "invalid preprocessor literal")
+            }
+            ErrorKind::InvalidPreType { .. } => {
+                write!(f, "invalid preprocessor type")
+            }
+            ErrorKind::PreOrType { .. } => {
+                write!(f, "invalid preprocessor type")
+            }
+            ErrorKind::IncorrectCloseBracket { failure, .. } => {
+                let (expect, actual) = failure.decompose();
+                write!(
+                    f,
+                    "incorrect close bracket: expected `{}`, found `{}`",
+                    expect.close(),
+                    actual.close(),
+                )
+            }
+            ErrorKind::ExcessCloseBracket { actual, .. } => {
+                write!(
+                    f,
+                    "too many close brackets: expected none, found `{}`",
+                    actual.close()
+                )
+            }
+            ErrorKind::MissingCloseBracket { expect, .. } => {
+                write!(
+                    f,
+                    "missing close bracket: expected `{}`, found none",
+                    expect.close()
+                )
+            }
+            ErrorKind::MissingToken { expect, .. } => {
+                write!(f, "missing {expect}")
+            }
+            ErrorKind::UnexpectedToken { expect, actual, .. } => {
+                write!(
+                    f,
+                    "expected {expect}, found `{}`",
+                    self.source.span_str(*actual)
+                )
+            }
+            ErrorKind::DivByZero { .. } => {
+                write!(f, "divide by zero")
+            }
+            ErrorKind::Incompatible { op, l_ty, r_ty, .. } => {
+                write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`")
+            }
+            ErrorKind::Unsupported { op, ty, .. } => {
+                write!(f, "`{op}` is not supported for {ty}")
+            }
+            ErrorKind::UnsignedNeg => {
+                write!(f, "unsigned integer cannot be negated")
+            }
+            ErrorKind::UnknownVar => {
+                write!(f, "cannot find variable within this scope")
+            }
+            ErrorKind::TypeMismatch(ts) => {
+                write!(f, "type mismatch: expected {}, found {}", ts.0, ts.1)
+            }
+            ErrorKind::TypeAmbiguity => {
+                write!(f, "type is ambiguous")
+            }
+            ErrorKind::AssignImmutable(_) => {
+                write!(f, "cannot assign to immutable")
+            }
+            ErrorKind::FallibleBlockExpr => {
+                write!(f, "only `loop` and `cord` are supported loop expressions")
+            }
+            ErrorKind::TypeTooBig => {
+                write!(
+                    f,
+                    "type size exceeds what can be stored on a {}-bit system",
+                    usize::BITS
+                )
+            }
+            ErrorKind::IllegalUnsized(_) => {
+                write!(
+                    f,
+                    "runtime-sized type stored in a statically-sized location"
+                )
+            }
+            ErrorKind::Fail(_) => {
+                write!(f, "unhandled failure")
+            }
+        }
+    }
+
+    fn inline(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.error.kind {
+            ErrorKind::UnknownToken => write!(f, "what is this?"),
+            ErrorKind::EndlessBlockComment => write!(f, "never ends"),
+            ErrorKind::EmptyMacroName => write!(f, "macro prefix, but no name"),
+            ErrorKind::EmptyMacroParam => write!(f, "macro parameter prefix, but no name"),
+            ErrorKind::EmptyCharLiteral => write!(f, "empty"),
+            ErrorKind::MultiCharLiteral => write!(f, "a char should be 1 char"),
+            ErrorKind::EndlessCharLiteral => write!(f, "never ends"),
+            ErrorKind::EscapedCharLiteralEnd => write!(f, "never ends, unless you remove the `\\`"),
+            ErrorKind::EndlessStringLiteral => write!(f, "never ends"),
+            ErrorKind::EscapedStringLiteralEnd => {
+                write!(f, "never ends, unless you remove the `\\`")
+            }
+            ErrorKind::InvalidEscape => write!(f, "invalid escape sequence"),
+            ErrorKind::InvalidNumLiteral(_) => write!(f, "not a valid number"),
+            ErrorKind::MacroUndefined => write!(f, "not defined"),
+            ErrorKind::MacroParamUndefined { .. } => write!(f, "unknown macro parameter"),
+            ErrorKind::RecursiveMacro { .. } => write!(f, "macro calls itself here"),
+            ErrorKind::NonBoolPrePredicate { actual, .. } => {
+                write!(f, "expected a boolean value, found ")?;
+                match actual {
+                    PpValue::Bool => f.write_str(
+                        "the typename `bool` (which is not a boolean \x1b[1mvalue\x1b[22m)",
+                    ),
+                    PpValue::Uint => f.write_str("the typename `uint`"),
+                    PpValue::Sint => f.write_str("the typename `sint`"),
+                    PpValue::Flpt => f.write_str("the typename `flpt`"),
+                    PpValue::Char => f.write_str("the typename `char`"),
+                    PpValue::Text => f.write_str("the typename `text`"),
+                    PpValue::UIntLiteral(x) => {
+                        write!(f, "the unsigned integer {x}")
+                    }
+                    PpValue::SIntLiteral(x) => {
+                        write!(f, "the signed integer {x}")
+                    }
+                    PpValue::Macro(x) => {
+                        write!(f, "the unexpanded macro `{}`", self.source.span_str(*x))
+                    }
+                    PpValue::BoolLiteral(_) => {
+                        unimplemented!("should not produce this error on a boolean value");
+                    }
+                }
+            }
+            ErrorKind::InvalidPreOperator { .. } => {
+                write!(f, "this operator is not defined within preprocessing")
+            }
+            ErrorKind::PreIncompatible { .. } => write!(
+                f,
+                "operation is not supported between operands of these types"
+            ),
+
+            ErrorKind::PreUnsupported { .. } => {
+                write!(f, "operation is not supported for operands of this type")
+            }
+            ErrorKind::InvalidPreLiteral { .. } => {
+                write!(f, "this literal type is not valid within preprocessing")
+            }
+            ErrorKind::InvalidPreType { .. } => {
+                write!(f, "this type is not valid within preprocessing")
+            }
+            ErrorKind::PreOrType { .. } => write!(f, "this type is not valid within preprocessing"),
+            ErrorKind::IncorrectCloseBracket { .. } => write!(f, "incorrect partner"),
+            ErrorKind::ExcessCloseBracket { .. } => write!(f, "missing a partner"),
+            ErrorKind::MissingCloseBracket { .. } => write!(f, "missing close bracket"),
+            ErrorKind::MissingToken { .. } => write!(f, "missing token"),
+            ErrorKind::UnexpectedToken { .. } => write!(f, "wrong token"),
+            ErrorKind::DivByZero { .. } => write!(f, "dividing by 0"),
+            ErrorKind::Incompatible { .. } => write!(
+                f,
+                "operation is not supported between operands of these types"
+            ),
+            ErrorKind::Unsupported { .. } => {
+                write!(f, "operation is not supported for operand of this type")
+            }
+            ErrorKind::UnsignedNeg => write!(f, "uint can't be negated"),
+            ErrorKind::UnknownVar => write!(f, "unknown variable"),
+            ErrorKind::TypeMismatch(_) => write!(f, "incorrect type"),
+            ErrorKind::TypeAmbiguity => write!(f, "type must be known at this point"),
+            ErrorKind::AssignImmutable(_) => write!(f, "does not resolve to a mutable value"),
+            ErrorKind::FallibleBlockExpr => write!(f, "may finish without a result"),
+            ErrorKind::TypeTooBig => write!(f, "type size exceeds {} bytes", usize::MAX),
+            ErrorKind::IllegalUnsized(x) => write!(f, "{x} must have static size"),
+            ErrorKind::Fail(_) => write!(f, "failed operation"),
+        }
+    }
+
+    fn help(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let src = self.source.span_str(self.error.span);
+        match &self.error.kind {
+            ErrorKind::UnknownToken => {
+                write!(f, "try removing the character")
+            }
+            ErrorKind::EndlessBlockComment => {
+                write!(f, "try adding `{BLOCK_COMMENT_CLOSE}`")
+            }
+            ErrorKind::EmptyMacroName => write!(f, "try adding an identifier after the {MACRO_PREFIX}" ),
+            ErrorKind::EmptyMacroParam => write!(f, "try adding an identifier after the {MACRO_PARAM_PREFIX}" ),
+            ErrorKind::EmptyCharLiteral => {
+                write!(
+                    f,
+                    "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` with `{TEXT_DELIM}{TEXT_DELIM}` or insert a character"
+                )
+            }
+            ErrorKind::MultiCharLiteral => {
+                    let inner = src
+                        .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
+                        .expect("char literals should include delimiters");
+                    let (first, rest) = inner.split_at(match escape_char(inner){
+                        Some((len, _)) => len,
+                        None => inner.chars().next().expect("should have at least one character if MultiCharLiteral instead of EmptyCharLiteral").len_utf8(),
+                    });
+                    write!(f,
+                        "try removing the character(s) after `{first}` (remove trailing `{rest}`) \
+                    or change this to a string ({TEXT_DELIM}{inner}{TEXT_DELIM})"
+                    )
+
+            }
+            ErrorKind::EndlessCharLiteral => {
+                write!(f, "try adding a `{CHAR_DELIM}` to the end of the char")
+            }
+            ErrorKind::EscapedCharLiteralEnd => {
+                    let substr = src.strip_prefix(CHAR_DELIM).expect("string literal should include at least the open delimiter, in EscapedCharLiteralEnd").split_once("\\'").expect("should be EscapedCharLiteralEnd if this is not present").0;
+                    write!(f, "there is a closing single-quote candidate, but it is escaped (`{ESCAPE}{CHAR_DELIM}`). \n\
+                char literals cannot end with an unescaped backslash (`{ESCAPE}`), \
+                it is indistinguishable from an escaped single-quote (`{ESCAPE}{CHAR_DELIM}`). \n\
+                try adding a `{CHAR_DELIM}` to the end of the char or remove the `{ESCAPE}` from `{ESCAPE}{CHAR_DELIM}` \
+                to make the char `{CHAR_DELIM}{substr}{CHAR_DELIM}`")
+
+            }
+            ErrorKind::EndlessStringLiteral => {
+                write!(f, "try adding a `{TEXT_DELIM}` to the end of the string")
+            }
+            ErrorKind::EscapedStringLiteralEnd => {
+                    let substr = src
+                        .strip_prefix(TEXT_DELIM)
+                        .expect("string literal should include delimiter")
+                        .split_once("\\\"")
+                        .expect("should be EndlessStringLiteral if this is not present")
+                        .0;
+                    write!(f, "there is a closing double-quote candidate, but it is escaped (`{ESCAPE}{TEXT_DELIM}`).\n\
+                string literals cannot end with an unescaped backslash (`{ESCAPE}`), \
+                it is indistinguishable from an escaped double-quote (`{ESCAPE}{TEXT_DELIM}`).\n\
+                try adding a `{TEXT_DELIM}` to the end of the string or remove the `{ESCAPE}` from `{ESCAPE}{TEXT_DELIM}` \
+                to make the string `{TEXT_DELIM}{substr}{TEXT_DELIM}`")
+
+            }
+            ErrorKind::InvalidEscape => {
+                    let mut iter = src
+                        .strip_prefix(ESCAPE)
+                        .expect("InvalidEscape should include `\\`")
+                        .chars();
+                    let ch = iter.next().expect(
+                        "should have at least 2 characters or else be an EscapedStringLiteralEnd",
+                    );
+                    if ch == 'x' {
+                        let n = iter.take(2).filter(char::is_ascii_hexdigit).count();
+                        debug_assert_ne!(n, 2, "should be an error");
+                        write!(f, "`\\x` should be followed by 2 hexadecimal digits ([0-9a-fA-F]), this escape sequence has {n}")
+                    } else if ch == 'o' {
+                        let n = iter.take(3).filter(|ch| ch.is_digit(8)).count();
+                        assert_ne!(n, 3, "should be an error");
+                        write!(f, "`\\o` should be followed by 3 octal digits ([0-7]), this escape sequence has {n}")
+                    } else if ch.is_alphabetic() {
+                        write!(f, "`\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, and `\\v` are the only supported ASCII letters that can be escape sequences")
+                    } else if ch.is_numeric() {
+                        write!(f, "only ascii digits (0-9) are supported for decimal (base-10) numeric escape sequences")
+                    } else {
+                        write!(f, "supported escape sequences: `\\a`, `\\b`, `\\e`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`, `\\0`-`\\9`, `\\x##` (where # is a hexadecimal digit), `\\o###` (where # is an octal digit)")
+                    }
+
+            }
+            ErrorKind::InvalidNumLiteral(e) => {
+                match e {
+                    NumErrorKind::InvalidInt => {
+                        let (suffix, base) = invalid_num_suffix(src);
+                        write!(f, "the suffix `{suffix}` is not valid for {} unsigned integer literals", base.name())
+                    }
+                    NumErrorKind::PosOverflow(kind) => write!(f,
+                        "the largest supported {} value is {}",
+                        kind.name(),
+                        kind.max()
+                    ),
+                    NumErrorKind::NegOverflow(kind) => write!(f,
+                        "the smallest supported {} value is {}",
+                        kind.name(),
+                        kind.min()
+                    ),
+                    NumErrorKind::NegUnsigned => {
+                        f.write_str("unsigned integers cannot be negative")
+                    }
+                    NumErrorKind::InvalidFlpt => write!(f,
+                        "I'm not sure how to help with this yet"
+                    ),
+                }
+            }
+            ErrorKind::MacroUndefined => {
+                write!(
+                    f,
+                    "try moving the definition ahead of this usage or fix the errors in the definition"
+                )
+            }
+            ErrorKind::MacroParamUndefined { head, .. } => {
+                    if head.is_some() {
+                        write!(f,
+                            "try adding this parameter to the macro, "
+                        )?;
+                    }
+                    write!(f, "remove the `$` if it isn't for a macro, or check if a macro is expanding incorrectly")
+
+            }
+            ErrorKind::RecursiveMacro { .. } => {
+                write!(
+                    f,
+                    "macros can't be defined recursively. they do not have base cases, so it will always be infinite recursion"
+                )
+            }
+            ErrorKind::NonBoolPrePredicate { actual, .. } => {
+                match actual {
+                    PpValue::Bool|PpValue::Uint|PpValue::Sint|PpValue::Flpt|PpValue::Char|PpValue::Text => f.write_str("typenames are not values, and especially not booleans. \
+                        if you are trying to compare the size of a type with some number, \
+                        use the `szof` keyword to get the type's size, and add a comparison operator to get a boolean.\n\n\
+                        if you are trying to convert a value to a boolean, you would normally need a `-:>` or `=:>` operator;
+                        conversions/reinterpretations are not supported in the preprocessor however, so this is not possible."),
+                    PpValue::UIntLiteral(_)|PpValue::SIntLiteral(_) => f.write_str("integers do not coerce to booleans on their own. \
+                        try comparing it (`==`, `!=`, `<`, `>`, `<=`, or `>=`) with another number to get a boolean."),
+                    PpValue::Macro(_) => f.write_str("if you meant to expand this macro to an expression, remove the `~` operator. \
+                        if you are trying to test if the macro exists, add an `!!` (\"exists\") operator in front of the `~`."),
+                    PpValue::BoolLiteral(_) => {
+                        unimplemented!("should not produce this error on a boolean value");
+                    },
+                }
+            }
+            ErrorKind::InvalidPreOperator { .. } => {
+                write!(
+                    f,
+                    "some operations that are valid at runtime are not valid in preprocessing. check if the operation is supported, or if you may have made a typo."
+                )
+            }
+            ErrorKind::PreIncompatible { op, l_ty, r_ty, .. } => {
+
+                    write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
+                    match op {
+                        Operator::And|Operator::Xor|Operator::Or|Operator::Nand|Operator::Nor|Operator::Xnor if (*l_ty == PpType::Bool) != (*r_ty == PpType::Bool) => write!(f, "\n\nit looks like you may have been trying to perform a bitwise operation, but one side resolves to a boolean. bitwise/logic operations have lower precedence than comparisons, so you may need to wrap the bitwise operation in parentheses."),
+                        _ => Ok(())
+                    }
+
+            }
+            ErrorKind::PreUnsupported { .. } => {
+                write!(f, "try a different operator or convert the type")
+            }
+            ErrorKind::InvalidPreLiteral { .. } => {
+                write!(
+                    f,
+                    "only bool, uint, sint, and macro names are legal literal types within preprocessing."
+                )
+            }
+            ErrorKind::InvalidPreType { .. } => {
+                write!(
+                    f,
+                    "only `bool`, `uint`, `sint`, `flpt`, `char`, and `text` are valid typenames within preprocessing."
+                )
+            }
+            ErrorKind::PreOrType { .. } => {
+                write!(f, "\"or-types\" are not legal within preprocessing.")
+            }
+            ErrorKind::IncorrectCloseBracket { failure, .. } => {
+                    let (expect, actual) = failure.decompose();
+                    write!(f, "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or the `{}`", expect.close(), actual.close(), actual.open(), expect.open(), expect.open(), actual.close())
+
+            }
+            ErrorKind::ExcessCloseBracket { actual, .. } => {
+                write!(
+                    f,
+                    "try removing the `{}` or add a `{}` before it",
+                    actual.close(),
+                    actual.open()
+                )
+            }
+            ErrorKind::MissingCloseBracket { expect, .. } => {
+                write!(
+                    f,
+                    "try inserting a `{}` or remove the `{}`",
+                    expect.close(),
+                    expect.open(),
+                )
+            }
+            ErrorKind::MissingToken { expect, .. } => {
+                write!(f, "try inserting {expect}")
+            }
+            ErrorKind::UnexpectedToken { expect, actual, .. } => {
+                let actual = self.source.span_str(*actual);
+                write!(
+                    f,
+                    "try inserting {expect} before the `{actual}` or remove the `{actual}`"
+                )
+            }
+            ErrorKind::DivByZero { .. } => {
+                write!(f, "ensure the right side cannot be 0")
+            }
+            ErrorKind::Incompatible { candidates, op, .. } => {
+                    write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
+                    if candidates.is_empty() {
+                        writeln!(f,
+                            "\nno overload exists for `{op}` in this position"
+                        )
+                    } else {
+                        writeln!(f, "\nthe following overloads exist:")?;
+                        let mut buf = String::new();
+                        for ((lhs, rhs), ret) in candidates {
+                            use std::fmt::Write;
+                            buf.clear();
+                            _ = buf
+                                .write_fmt(core::format_args!("fun {op}({lhs}, {rhs}) -> {ret}"));
+                            write!(f, "  ")?;
+                            // TODO: just use the token table
+                            // for (lexeme, syntax) in highlight(tokenize(&buf)) {
+                            //     _ = write!(f,
+                            //         "{}",
+                            //         SYNTAX_STYLE_ANSI[syntax].style(lexeme)
+                            //     );
+                            // }
+                            write!(f, "\n")?;
+                        }
+                        Ok(())
+                    }
+
+            }
+            ErrorKind::Unsupported {
+                candidates,
+                op,
+                side,
+                ..
+            } => {
+                let f = f;
+                let _src = src;
+                {
+                    write!(f,
+                        "try a different operator or convert the type"
+                    )?;
+                    if candidates.is_empty() {
+                        writeln!(f,
+                            "\nno overload exists for `{op}` in this position"
+                        )
+                    } else {
+                        writeln!(f, "\nthe following overloads exist:")?;
+                        for ((arg,), ret) in candidates {
+                            SYNTAX_STYLE_ANSI[Syntax::Keyword].style(Keyword::Fun).fmt(f);
+
+                            f.write_str(" ")?;
+                            if *side == OpSide::Prefix {
+                                write!(f, "{op:#}")?; // TODO: highlight
+                            }
+
+                            f.write_str("(")?;
+                            write!(f, "{arg:#}");
+                            f.write_str(")")?;
+
+                            if *side == OpSide::Postfix {
+                                write!(f, "{op:#}")?; // TODO: highlight
+                            }
+
+                            writeln!(f, " -> {ret:#}")?;
+                        }
+                        Ok(())
+                    }
+                }
+            }
+            ErrorKind::UnsignedNeg => {
+                write!(f, "remove the `-` or convert the integer to signed")
+            }
+            ErrorKind::UnknownVar => {
+                write!(
+                    f,
+                    "check if the variable is in a tighter scope than where you are trying to use it"
+                )
+            }
+            ErrorKind::TypeMismatch(_) => {
+                write!(
+                    f,
+                    "check if you are using a different type from what you intended, or create a new variable to shadow this one"
+                )
+            }
+            ErrorKind::TypeAmbiguity => {
+                write!(
+                    f,
+                    "try annotating the type or use an expression with an explicit type"
+                )
+            }
+            ErrorKind::AssignImmutable(x) => {
+                let f = f;
+                let _src = src;
+                {
+                    match x {
+                        ImmutableAssignment::Expression => write!(f, "try replacing this with an expression that resolves to a mutable reference"),
+                        ImmutableAssignment::Assignment => write!(f, "assignments cannot be chained, try breaking them up into separate statements"),
+                        ImmutableAssignment::Literal => write!(f, "literals cannot be assigned, perhaps you meant to put this on the right side?"),
+                        ImmutableAssignment::Keyword(kw) => write!(f, "`{kw}` is a reserved keyword, and doesn't resolve to a mutable value"),
+                    }
+                }
+            }
+            ErrorKind::FallibleBlockExpr => {
+                write!(
+                    f,
+                    "try changing the expression to a `loop` or `cord` or remove the assignment"
+                )
+            }
+            ErrorKind::TypeTooBig => {
+                write!(
+                    f,
+                    "consider making the type smaller (I have no idea how it got so big)"
+                )
+            }
+            ErrorKind::IllegalUnsized(_) => {
+                write!(
+                    f,
+                    "try adding indirection, or replace the type with a statically-sized one"
+                )
+            }
+            ErrorKind::Fail(_) => {
+                write!(f, "try handling the error")
+            }
+        }
+    }
+
+    // fn info(&self) -> Vec<LineRef<'_, '_>> {
+    //     match &self.error.kind {
+    //         ErrorKind::MacroParamUndefined { head, .. } => {
+    //             for (range, msg) in (head.iter().map(|&range| (range, "macro defined here"))) {
+    //                 visit(LineRef::new(
+    //                     self.source,
+    //                     RefStyleKind::Info,
+    //                     range,
+    //                     msg.into(),
+    //                 ));
+    //             }
+    //         }
+    //         ErrorKind::RecursiveMacro { head, .. } => {
+    //             for (range, msg) in [(*head, "macro defined here")] {
+    //                 visit(LineRef::new(
+    //                     self.source,
+    //                     RefStyleKind::Info,
+    //                     range,
+    //                     msg.into(),
+    //                 ));
+    //             }
+    //         }
+    //         ErrorKind::IncorrectCloseBracket { open_range, .. } => {
+    //             for (range, msg) in [(*open_range, "bracket type introduced here")] {
+    //                 visit(LineRef::new(
+    //                     self.source,
+    //                     RefStyleKind::Info,
+    //                     range,
+    //                     msg.into(),
+    //                 ));
+    //             }
+    //         }
+    //         ErrorKind::MissingCloseBracket { open_range, .. } => {
+    //             for (range, msg) in [(*open_range, "missing a partner")] {
+    //                 visit(LineRef::new(
+    //                     self.source,
+    //                     RefStyleKind::Info,
+    //                     range,
+    //                     msg.into(),
+    //                 ));
+    //             }
+    //         }
+    //         ErrorKind::DivByZero { zero, .. } => {
+    //             for (range, msg) in [(*zero, "this expression evaluates to 0")] {
+    //                 visit(LineRef::new(
+    //                     self.source,
+    //                     RefStyleKind::Info,
+    //                     range,
+    //                     msg.into(),
+    //                 ));
+    //             }
+    //         }
+    //         ErrorKind::Incompatible {
+    //             l_ty,
+    //             l_range,
+    //             r_ty,
+    //             r_range,
+    //             ..
+    //         } => {
+    //             for (range, msg) in [
+    //                 (
+    //                     *l_range,
+    //                     TypeResolutionMsg {
+    //                         side: OpSide::Postfix,
+    //                         ty: l_ty.clone(),
+    //                     },
+    //                 ),
+    //                 (
+    //                     *r_range,
+    //                     TypeResolutionMsg {
+    //                         side: OpSide::Prefix,
+    //                         ty: r_ty.clone(),
+    //                     },
+    //                 ),
+    //             ] {
+    //                 visit(LineRef::new(
+    //                     self.source,
+    //                     RefStyleKind::Info,
+    //                     range,
+    //                     msg.into(),
+    //                 ));
+    //             }
+    //         }
+    //         ErrorKind::Unsupported {
+    //             ty, range, side, ..
+    //         } => {
+    //             for (range, msg) in [(
+    //                 *range,
+    //                 TypeResolutionMsg {
+    //                     side: *side,
+    //                     ty: ty.clone(),
+    //                 },
+    //             )] {
+    //                 visit(LineRef::new(
+    //                     self.source,
+    //                     RefStyleKind::Info,
+    //                     range,
+    //                     msg.into(),
+    //                 ));
+    //             }
+    //         }
+    //         _ => {}
+    //     }
+    // }
+}
+
+impl Display for ContextError<'_, '_, '_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        const INDENT: &str = "          ";
+        write!(f, "  \x1b[91m");
+        self.code(f)?;
+        write!(f, ":\x1b[0m ")?;
+        self.err(f)?;
+        writeln!(f)?;
+
+        // TODO
+        // render
+        // {
+        //     const MAX_ERROR_REFS: usize = 1;
+        //     const MAX_MACRO_REFS: usize = 1;
+        //     const MAX_INFO_REFS: usize = 2;
+        //     let mut refs =
+        //         <ArrayVec<LineRef, { MAX_ERROR_REFS + MAX_MACRO_REFS + MAX_INFO_REFS }>>::new();
+
+        //     refs.push_mut(LineRef::new(
+        //         self.0.source,
+        //         RefStyleKind::Error,
+        //         self.0.range,
+        //         LineRefMsg::InlineErr(InlineErrMsg(&self.0.err)),
+        //     )).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
+
+        //     if let Some(macro_range) = self.0.mac {
+        //         refs.push_mut(LineRef::new(
+        //             self.0.source,
+        //             RefStyleKind::Info,
+        //             macro_range,
+        //             LineRefMsg::Text("within this macro expansion"),
+        //         )).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
+        //     }
+
+        //     self.0.info_line(|item| {
+        //         refs.push_mut(item).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
+        //     });
+
+        //     refs.sort_by_key(|item| (item.span.start, item.span.end));
+
+        //     LineRefs::new(self.0.source, &refs).fmt(f)?;
+        // }
+
+        write!(f, "    \x1b[92mhelp:\x1b[0m ")?;
+        let mut has_prev = false;
+        self.help(f)?;
+        // for line in self.help().to_string().lines() {
+        //     if has_prev {
+        //         write!(f, "{INDENT}");
+        //     }
+        //     writeln!(f, "{line}");
+        //     has_prev = true;
+        // }
+        Ok(())
+    }
+}

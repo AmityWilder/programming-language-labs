@@ -4,9 +4,10 @@ use crate::{
         ast::{AstNode, AstNodeF},
         match_token, token_matches,
     },
-    scanner::{
-        Bracket,
-        token::{ExpansionData, Token, punc::Punctuation, value::LexValue},
+    scanner::token::{
+        ExpansionData, Token,
+        punc::{Bracket, Punctuation},
+        value::LexValue,
     },
 };
 use std::{collections::VecDeque, range::Range};
