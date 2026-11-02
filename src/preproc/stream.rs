@@ -1,9 +1,9 @@
 use crate::{
-    error::{ContextError, ErrorType, ExpectedToken},
     grammar::{
         ast::{AstNode, AstNodeF},
         match_token, token_matches,
     },
+    old_error::{ContextError, ErrorType, ExpectedToken},
     scanner::token::{
         ExpansionData, Token,
         punc::{Bracket, Punctuation},

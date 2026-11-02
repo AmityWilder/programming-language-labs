@@ -1,6 +1,6 @@
 use crate::{
+    error::{Error, ErrorKind},
     lex::token::{IdentKind, PuncKind, TokenKind, TokenTable},
-    new_error::{Error, ErrorKind},
     scanner::{
         symbols::{CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM},
         token::punc::Punctuation,

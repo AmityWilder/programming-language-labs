@@ -14,8 +14,8 @@ use crate::{
             },
         },
     },
-    error::OpSide,
     highlight::style::StyleWrapper,
+    scanner::token::punc::OpSide,
 };
 use std::fmt::Display;
 

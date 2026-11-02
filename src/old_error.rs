@@ -1,9 +1,12 @@
 //! Errors regarding code validity
 
+#![deprecated = "use crate::error"]
+
 use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::types::{AbstractType, SizeReq},
     arrayvec::ArrayVec,
+    error::fail::Failure,
     grammar::ast::AstNode,
     highlight::{
         highlight,
@@ -20,7 +23,7 @@ use crate::{
         },
         token::{
             ExpansionData, Token, escape_char,
-            punc::{BadBracketCombo, Bracket},
+            punc::{BadBracketCombo, Bracket, OpSide},
             value::{Keyword, Operator, TokenEq},
         },
         tokenize,
@@ -530,7 +533,6 @@ macro_rules! CtxErrType {{
 CtxErrType! {
 /// The kind of error describing a [`ContextError`]
 #[derive(Debug, Clone, PartialEq)]
-#[deprecated = "use new_error"]
 pub enum ErrorType<'src> {
     // ----------------------------
     // lex
@@ -1184,7 +1186,6 @@ impl std::error::Error for ErrorType<'_> {}
 
 /// A code error with the range of the error in the source code
 #[derive(Clone, PartialEq)]
-#[deprecated = "use new_error"]
 pub struct ContextError<'src> {
     /// A string view of the FULL, ENTIRE source code
     pub source: &'src str,
@@ -1928,28 +1929,6 @@ impl std::fmt::Display for LineRefs<'_, '_, '_> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct InlineErrMsg<'src, 'err>(&'err ErrorType<'src>);
 
-/// Which side of the operator the operand is on
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum OpSide {
-    Postfix,
-    Prefix,
-}
-
-impl OpSide {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Postfix => "lhs",
-            Self::Prefix => "rhs",
-        }
-    }
-}
-
-impl std::fmt::Display for OpSide {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.as_str().fmt(f)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 struct TypeResolutionMsg<'src> {
     side: OpSide,
@@ -2152,75 +2131,3 @@ impl std::fmt::Display for RenderedContextError<'_, '_> {
         Ok(())
     }
 }
-
-/// Runtime error - essentially an exception
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Hash)]
-pub enum Failure {
-    ParseBool,
-    ParseInt,
-    ParseFlt,
-    ParseChar,
-    TryFromInt,
-    Utf8Error,
-    OutOfBounds,
-    DivByZero,
-    UnhandledOrNone,
-    UnhandledOrNevr,
-    FailedRead,
-    Uninitialized, // TODO: change this to be guarded by static analysis
-}
-
-impl From<std::str::ParseBoolError> for Failure {
-    fn from(_: std::str::ParseBoolError) -> Self {
-        Self::ParseBool
-    }
-}
-impl From<std::num::ParseIntError> for Failure {
-    fn from(_value: std::num::ParseIntError) -> Self {
-        Self::ParseInt // TODO: match against more specific errors
-    }
-}
-impl From<std::num::ParseFloatError> for Failure {
-    fn from(_value: std::num::ParseFloatError) -> Self {
-        Self::ParseFlt // TODO: match against more specific errors
-    }
-}
-impl From<std::char::ParseCharError> for Failure {
-    fn from(_value: std::char::ParseCharError) -> Self {
-        Self::ParseChar // TODO: match against more specific errors
-    }
-}
-impl From<std::num::TryFromIntError> for Failure {
-    fn from(_value: std::num::TryFromIntError) -> Self {
-        Self::TryFromInt // TODO: match against more specific errors
-    }
-}
-impl From<std::str::Utf8Error> for Failure {
-    fn from(_value: std::str::Utf8Error) -> Self {
-        Self::Utf8Error // TODO: match against more specific errors
-    }
-}
-
-impl std::fmt::Display for Failure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ParseBool => write!(f, "could not parse boolean"),
-            Self::ParseInt => write!(f, "could not parse integer"),
-            Self::ParseFlt => write!(f, "could not parse float"),
-            Self::ParseChar => write!(f, "could not parse chararcter"),
-            Self::TryFromInt => write!(f, "could not convert integer"),
-            Self::Utf8Error => write!(f, "string contains invalid UTF-8"),
-            Self::OutOfBounds => write!(
-                f,
-                "attempted to access a location outside the bounds of available memory"
-            ),
-            Self::DivByZero => write!(f, "tried to divide by zero"),
-            Self::UnhandledOrNone => write!(f, "tried to perform an operation with none"),
-            Self::UnhandledOrNevr => write!(f, "tried to perform an operation with nevr"),
-            Self::FailedRead => write!(f, "failed to read input"),
-            Self::Uninitialized => write!(f, "attempted to read uninitialized memory"),
-        }
-    }
-}
-
-impl std::error::Error for Failure {}

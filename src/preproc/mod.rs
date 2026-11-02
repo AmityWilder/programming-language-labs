@@ -1,8 +1,8 @@
 //! Preprocessing (macros)
 
 use crate::{
-    error::{ContextError, ErrorType},
     grammar::{ast::AstNodeFinal, parse, token_matches},
+    old_error::{ContextError, ErrorType},
     preproc::stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
     scanner::token::{ExpansionData, Token, value::LexValue},
 };

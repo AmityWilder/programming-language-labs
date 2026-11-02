@@ -1,9 +1,10 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::types::{AbstractType, SizeReq},
-    error::{ExpectedToken, Failure, ImmutableAssignment, NumErrorKind, OpSide},
+    error::fail::Failure,
     highlight::{style::StyleWrapper, syntax::Syntax},
     lex::token::TokenTable,
+    old_error::{ExpectedToken, ImmutableAssignment, NumErrorKind},
     preproc::eval::{PpType, PpValue},
     scanner::{
         symbols::{
@@ -11,13 +12,15 @@ use crate::{
         },
         token::{
             escape_char,
-            punc::{BadBracketCombo, Bracket},
+            punc::{BadBracketCombo, Bracket, OpSide},
             value::{Keyword, Operator},
         },
     },
     src_code::{map::SourceMap, span::Span},
 };
 use std::fmt::{self, Display, Formatter};
+
+pub mod fail;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum NumberBase {

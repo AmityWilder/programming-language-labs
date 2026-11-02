@@ -2,7 +2,7 @@
 //! All of these test cases are hand-written. Mostly on a very bumpy bus ride.
 
 use crate::{
-    error::{ContextError, ErrorType},
+    old_error::{ContextError, ErrorType},
     scanner::{
         token::{Lexeme, Token, punc::Punctuation, value::LexValue},
         tokenize,

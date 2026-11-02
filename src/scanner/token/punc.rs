@@ -341,3 +341,25 @@ impl From<BadBracketCombo> for (Bracket, Bracket) {
         value.decompose()
     }
 }
+
+/// Which side of the operator the operand is on
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OpSide {
+    Postfix,
+    Prefix,
+}
+
+impl OpSide {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Postfix => "lhs",
+            Self::Prefix => "rhs",
+        }
+    }
+}
+
+impl std::fmt::Display for OpSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}

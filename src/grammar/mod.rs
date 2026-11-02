@@ -2,14 +2,14 @@
 
 use crate::{
     analyzer::types::bounds::Combinator,
-    error::{ContextError, ExpectedToken, OpSide},
     grammar::ast::{
         Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DeferParam, DoneStmt, ExprStmt,
         IfStmt, OrBody, OrStmt, PrintStmt, Program, Statement, Variable,
     },
+    old_error::{ContextError, ExpectedToken},
     scanner::token::{
         Lexeme, SpecToken, Token,
-        punc::{Bracket, Punctuation},
+        punc::{Bracket, OpSide, Punctuation},
         value::{Keyword, LexValue, Operator},
     },
 };

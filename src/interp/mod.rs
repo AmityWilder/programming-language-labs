@@ -11,7 +11,7 @@ use crate::{
         InterpPrintStmt, InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal,
         OrStmt,
     },
-    error::Failure,
+    error::fail::Failure,
     interp::value::{InterpValue, InterpVarValue},
     scanner::token::value::Keyword,
     types::{byte, text},
