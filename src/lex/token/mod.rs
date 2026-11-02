@@ -132,16 +132,16 @@ pub enum TokenKind {
     TextLit,
 
     /// An identifier - its value is the lexeme itself
-    Ident(IdentKind),
+    Ident,
     /// An identifier prefixed with `\`
     Macro,
     /// An identifier prefixed with `$`
     MParam,
 
     /// A language keyword
-    Keyword(Keyword, KeywordKind),
+    Keyword(Keyword),
     /// Operators and other non-alphanumeric tokens
-    Punc(Punctuation, PuncKind),
+    Punc(Punctuation),
 }
 
 #[derive(Debug, Clone)]

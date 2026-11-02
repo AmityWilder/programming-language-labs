@@ -62,7 +62,7 @@ impl SourceMap {
         std::iter::from_fn(move || {
             self.source_of(span)
                 .expansion(span.rel)
-                .inspect(|x| span = x.cal)
+                .inspect(|x| span = x.call)
         })
     }
 }

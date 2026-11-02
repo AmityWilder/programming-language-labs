@@ -71,27 +71,62 @@ impl SourceLoc {
     }
 }
 
+/// # Example
+/// ```not_code
+///          vvvv field.param
+/// def \foo($bar) { $bar * 3 }
+/// ^^^^^^^^^^^^^^^^^^^^^^^^^^^ def
+///
+///              vvvvv field.arg
+/// let x = \foo{7 + 2};
+///         ^^^^^^^^^^^ call
+///
+/// // expanded from \foo{7 + 2}
+///
+///         vvvvv exp
+/// let x = 7 + 2 * 3;
+///              ^^^^ exp (for a different instance with field=None)
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExpansionData {
-    /// The span of bytes in this file that were expanded from a macro
+    /// The span of bytes in this file that were expanded from a macro.
     pub exp: RelSpan,
-    /// The macro call that expanded into `exp`
-    pub cal: Span,
-    /// The original definition of the macro used in `cal`
+
+    /// The macro call that expanded into `exp`.
+    pub call: Span,
+
+    /// The original definition of the macro used in `cal`.
     pub def: Span,
-    /// The span of the macro argument that was substituted - same file as `def`.
-    /// [`None`] if from the macro body instead of an argument
-    pub arg: Option<RelSpan>,
+
+    /// [`None`] if from the macro body instead of an argument.
+    pub field: Option<ExpansionField>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExpansionField {
+    /// The span of the macro argument that was substituted - same file as `cal`.
+    pub arg: RelSpan,
+
+    /// The span of the macro parameter that was substituted - same file as `def`.
+    pub param: RelSpan,
 }
 
 impl ExpansionData {
     /// The span of `arg`, absolute to its file
-    pub const fn arg_span(&self) -> Option<Span> {
-        if let Some(rel) = self.arg {
-            Some(Span {
-                file: self.def.file,
-                rel,
-            })
+    pub const fn arg(&self) -> Option<Span> {
+        if let Some(ExpansionField { arg: rel, .. }) = self.field {
+            let file = self.def.file;
+            Some(Span { file, rel })
+        } else {
+            None
+        }
+    }
+
+    /// The span of `par`, absolute to its file
+    pub const fn par(&self) -> Option<Span> {
+        if let Some(ExpansionField { param: rel, .. }) = self.field {
+            let file = self.call.file;
+            Some(Span { file, rel })
         } else {
             None
         }
