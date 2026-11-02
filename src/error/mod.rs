@@ -403,12 +403,15 @@ impl ErrorKind {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Error {
     pub span: Span,
-    pub kind: ErrorKind,
+    pub kind: Box<ErrorKind>,
 }
 
 impl Error {
-    pub const fn new(span: Span, kind: ErrorKind) -> Self {
-        Self { span, kind }
+    pub fn new(span: Span, kind: ErrorKind) -> Self {
+        Self {
+            span,
+            kind: Box::new(kind),
+        }
     }
 }
 

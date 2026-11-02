@@ -5,6 +5,8 @@ use crate::{
     src_code::span::Span,
 };
 
+// TBD: can RelSpan be used instead of Span? will an AST ever contain spans from multiple separate files?
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum ExprPrecedence {
     #[default]
@@ -543,7 +545,7 @@ impl IntoIterator for Program {
     }
 }
 
-impl<'prgm, 'src> IntoIterator for &'prgm Program {
+impl<'prgm> IntoIterator for &'prgm Program {
     type Item = &'prgm Declaration;
     type IntoIter = std::slice::Iter<'prgm, Declaration>;
 
@@ -552,7 +554,7 @@ impl<'prgm, 'src> IntoIterator for &'prgm Program {
     }
 }
 
-impl<'prgm, 'src> IntoIterator for &'prgm mut Program {
+impl<'prgm> IntoIterator for &'prgm mut Program {
     type Item = &'prgm mut Declaration;
     type IntoIter = std::slice::IterMut<'prgm, Declaration>;
 

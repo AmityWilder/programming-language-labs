@@ -153,12 +153,8 @@ impl<'src> Lexer<'src> {
     }
 
     fn punc(&mut self) -> Option<(usize, TokenKind)> {
-        Punctuation::from_prefix(self.source).map(|punc| {
-            (
-                punc.as_str().len(),
-                TokenKind::Punc(punc, PuncKind::default()),
-            )
-        })
+        Punctuation::from_prefix(self.source)
+            .map(|punc| (punc.as_str().len(), TokenKind::Punc(punc)))
     }
 }
 
@@ -226,7 +222,7 @@ impl<'src> Iterator for Lexer<'src> {
 
                 // identifier
                 (ch, _) if ch.is_alphabetic() || ch == '_' => {
-                    (self.ident(), TokenKind::Ident(IdentKind::default()), None)
+                    (self.ident(), TokenKind::Ident, None)
                 }
 
                 // punctuation or give up
