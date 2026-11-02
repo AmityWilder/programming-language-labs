@@ -18,10 +18,11 @@ use crate::{
         env::{InterpEnvironment, InterpVar},
         value::{InterpBinaryOpFn, InterpLabel, InterpOp, InterpUnaryOpFn, InterpVal},
     },
+    lex::token::Operator,
     old_error::{ContextError, ErrorType, ImmutableAssignment},
     scanner::token::{
         punc::OpSide,
-        value::{Keyword, LexValue, Operator},
+        value::{Keyword, LexValue},
     },
     types::{byte, flpt, sint, text, uint},
 };

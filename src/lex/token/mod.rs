@@ -1,5 +1,6 @@
 use crate::{
     lex::token::{keyword::Keyword, punc::Punctuation},
+    parse::ast::ExprPrecedence,
     src_code::span::{RelSpan, uspan},
 };
 
@@ -185,5 +186,205 @@ impl TokenTable {
 
     pub fn spans(&self) -> TokenSpans<'_> {
         TokenSpans::new(&self.tokens)
+    }
+}
+
+/// A [`LexValue`] where the lexeme can be represented by a static string
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub enum TokenEq {
+    Keyword(Keyword),
+    Punctuation(Punctuation),
+}
+
+impl TokenEq {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            TokenEq::Keyword(kw) => kw.as_str(),
+            TokenEq::Punctuation(punc) => punc.as_str(),
+        }
+    }
+
+    // pub fn op_description(self, operands: &[ValueType]) -> &'static str {
+    //     match self {
+    //         TokenEq::Keyword(kw) => kw.op_description(operands),
+    //         TokenEq::Punctuation(punc) => punc.op_description(operands),
+    //     }
+    // }
+}
+
+impl std::fmt::Display for TokenEq {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+macro_rules! define_operators {
+    (
+        $(#[$em:meta])*
+        $vis:vis enum $Enum:ident : $Base:ident {$(
+            $(#[$vm:meta])*
+            $BaseVariant:ident::$Variant:ident
+        ),* $(,)?}
+    ) => {
+        $(#[$em])*
+        $vis enum $Enum {$(
+            $(#[$vm])*
+            $Variant
+        ),*}
+
+        impl Operator {
+            pub const fn from_token_eq(value: $Base) -> Option<Self> {
+                $(use $BaseVariant::$Variant;)*
+                Some(match value {
+                    $($Base::$BaseVariant($Variant) => Self::$Variant,)*
+                    _ => return None,
+                })
+            }
+
+            pub const fn to_token_eq(self) -> $Base {
+                $(use $BaseVariant::$Variant;)*
+                match self {
+                    $(Self::$Variant => $Base::$BaseVariant($Variant),)*
+                }
+            }
+        }
+    };
+}
+
+define_operators! {
+/// Subset of [`TokenEq`] specific to operators
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum Operator : TokenEq {
+    #[default]
+    Punctuation::Assign,
+
+    Punctuation::And,
+    Punctuation::Or,
+    Punctuation::Nand,
+    Punctuation::Nor,
+    Punctuation::Xor,
+    Punctuation::Xnor,
+
+    Punctuation::AndAssign,
+    Punctuation::OrAssign,
+    Punctuation::XorAssign,
+    Punctuation::NandAssign,
+    Punctuation::NorAssign,
+    Punctuation::XnorAssign,
+
+    Punctuation::Not,
+    Punctuation::Exists,
+
+    Punctuation::Add,
+    Punctuation::Incr,
+    Punctuation::SubNeg,
+    Punctuation::Decr,
+    Punctuation::Mul,
+    Punctuation::Pow,
+    Punctuation::Div,
+    Punctuation::Rem,
+
+    Punctuation::AddAssign,
+    Punctuation::SubAssign,
+    Punctuation::MulAssign,
+    Punctuation::PowAssign,
+    Punctuation::DivAssign,
+    Punctuation::RemAssign,
+
+    Punctuation::Shl,
+    Punctuation::Shr,
+    Punctuation::Rotl,
+    Punctuation::Rotr,
+
+    Punctuation::ShlAssign,
+    Punctuation::ShrAssign,
+    Punctuation::RotlAssign,
+    Punctuation::RotrAssign,
+
+    Punctuation::Lt,
+    Punctuation::Gt,
+    Punctuation::Ne,
+    Punctuation::Le,
+    Punctuation::Eq,
+    Punctuation::Ge,
+
+    Punctuation::Coalesce,
+    Punctuation::Ref,
+
+    Punctuation::Convert,
+    Punctuation::Transmute,
+
+    Keyword::Szof,
+}
+}
+
+impl Operator {
+    /// Alias for [`Self::SubNeg`] to better imply what the code is doing
+    #[expect(non_upper_case_globals)]
+    pub const Sub: Self = Self::SubNeg;
+
+    /// Alias for [`Self::SubNeg`] to better imply what the code is doing
+    #[expect(non_upper_case_globals)]
+    pub const Neg: Self = Self::SubNeg;
+
+    pub const fn as_str(self) -> &'static str {
+        self.to_token_eq().as_str()
+    }
+
+    // pub fn op_description(self, operands: &[ValueType]) -> &'static str {
+    //     self.to_token_eq().op_description(operands)
+    // }
+
+    pub const fn precedence(&self) -> ExprPrecedence {
+        match self {
+            Self::Assign
+            | Self::AndAssign
+            | Self::OrAssign
+            | Self::XorAssign
+            | Self::NandAssign
+            | Self::NorAssign
+            | Self::XnorAssign
+            | Self::AddAssign
+            | Self::SubAssign
+            | Self::MulAssign
+            | Self::PowAssign
+            | Self::DivAssign
+            | Self::RemAssign
+            | Self::ShlAssign
+            | Self::ShrAssign
+            | Self::RotlAssign
+            | Self::RotrAssign => ExprPrecedence::Assignment,
+            Self::And | Self::Nand => ExprPrecedence::And,
+            Self::Or | Self::Nor => ExprPrecedence::Or,
+            Self::Xor | Self::Xnor => ExprPrecedence::Xor,
+            Self::Not | Self::Exists | Self::Ref | Self::Szof => ExprPrecedence::UnaryPre,
+            Self::Add => ExprPrecedence::Term,
+            Self::Incr | Self::Decr | Self::Coalesce => ExprPrecedence::UnaryPost,
+            Self::SubNeg => unimplemented!(), // depends on unary vs binary
+            Self::Mul | Self::Div | Self::Rem => ExprPrecedence::Factor,
+            Self::Pow => ExprPrecedence::Exponent,
+            Self::Shl | Self::Shr | Self::Rotl | Self::Rotr => ExprPrecedence::Shift,
+            Self::Lt | Self::Gt | Self::Le | Self::Ge => ExprPrecedence::Comparison,
+            Self::Ne | Self::Eq => ExprPrecedence::Equality,
+            Self::Convert | Self::Transmute => ExprPrecedence::Conversion,
+        }
+    }
+}
+
+impl std::fmt::Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+impl TokenEq {
+    pub const fn to_operator(self) -> Option<Operator> {
+        Operator::from_token_eq(self)
+    }
+}
+
+impl From<Operator> for TokenEq {
+    fn from(value: Operator) -> Self {
+        value.to_token_eq()
     }
 }

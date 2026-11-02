@@ -3,7 +3,7 @@ use crate::{
     analyzer::types::{AbstractType, SizeReq},
     error::fail::Failure,
     highlight::{style::StyleWrapper, syntax::Syntax},
-    lex::token::TokenTable,
+    lex::token::{Operator, TokenTable},
     old_error::{ExpectedToken, ImmutableAssignment, NumErrorKind},
     preproc::eval::{PpType, PpValue},
     scanner::{
@@ -13,7 +13,7 @@ use crate::{
         token::{
             escape_char,
             punc::{BadBracketCombo, Bracket, OpSide},
-            value::{Keyword, Operator},
+            value::Keyword,
         },
     },
     src_code::{map::SourceMap, span::Span},
