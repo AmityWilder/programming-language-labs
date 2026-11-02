@@ -12,13 +12,17 @@ use crate::{
             bounds::{Combinator, TypeBound},
         },
     },
-    error::{ContextError, ErrorType, Failure, ImmutableAssignment, OpSide},
+    error::fail::Failure,
     grammar::ast::{self, AstNode, AstNodeFinal, VarKeyword},
     interp::{
         env::{InterpEnvironment, InterpVar},
         value::{InterpBinaryOpFn, InterpLabel, InterpOp, InterpUnaryOpFn, InterpVal},
     },
-    scanner::token::value::{Keyword, LexValue, Operator},
+    old_error::{ContextError, ErrorType, ImmutableAssignment},
+    scanner::token::{
+        punc::OpSide,
+        value::{Keyword, LexValue, Operator},
+    },
     types::{byte, flpt, sint, text, uint},
 };
 use std::cell::RefCell;

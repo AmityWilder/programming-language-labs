@@ -71,13 +71,13 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
-    error::ContextError,
     grammar::parse,
     highlight::{
         TokenHighlight, highlight,
         style::{Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle, syntax_style},
     },
+    old_error::ContextError,
     preproc::preprocess,
     scanner::{
         token::{
@@ -131,7 +131,7 @@ mod grammar;
 mod highlight;
 mod interp;
 mod lex;
-mod new_error;
+mod old_error;
 mod preproc;
 mod regex;
 mod scanner;

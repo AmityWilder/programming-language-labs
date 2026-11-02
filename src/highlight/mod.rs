@@ -3,11 +3,11 @@
 // TODO: add unit tests for syntax parsing
 
 use crate::{
-    error::ContextError,
     highlight::{
         style::StyleWrapper,
         syntax::{GetSyntax, Syntax, SyntaxStyle},
     },
+    old_error::ContextError,
     scanner::{
         Scanner,
         symbols::{

@@ -2,8 +2,8 @@
 
 pub use super::{keyword::Keyword, punc::Punctuation};
 use crate::{
-    error::{ErrorType, IntKind, NumErrorKind},
     grammar::ast::ExprPrecedence,
+    old_error::{ErrorType, IntKind, NumErrorKind},
     scanner::{
         symbols::{
             BIN_PREFIX, BYTE_SUFFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX,

@@ -1,9 +1,8 @@
 use crate::{
     analyzer::types::bounds::Combinator,
-    error::OpSide,
     scanner::token::{
         ExpansionData, Lexeme, SpecToken, Token,
-        punc::Punctuation,
+        punc::{OpSide, Punctuation},
         value::{Keyword, LexValue, Operator, TokenEq},
     },
 };

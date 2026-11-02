@@ -1,9 +1,10 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::{static_env::ConstantValue, types::bounds::error::CheckedType},
-    error::{ContextError, ErrorType, Failure},
+    error::fail::Failure,
     grammar::ast,
     highlight::style::StyleWrapper,
+    old_error::{ContextError, ErrorType},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},

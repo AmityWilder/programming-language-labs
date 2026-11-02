@@ -1,7 +1,7 @@
 //! The iterator that breaks source code into tokens (which are defined in [`token`] module).
 
 use crate::{
-    error::{ContextError, ErrorType},
+    old_error::{ContextError, ErrorType},
     regex::{FauxRegex, digit_char, word_char},
     scanner::{
         symbols::{

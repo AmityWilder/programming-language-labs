@@ -4,7 +4,7 @@ use crate::{
         static_env::VarId,
         types::{FunShape, StaticType},
     },
-    error::Failure,
+    error::fail::Failure,
     types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
 use std::{
