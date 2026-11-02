@@ -1,5 +1,7 @@
 //! The iterator that breaks source code into tokens (which are defined in [`token`] module).
 
+#![deprecated = "use `lex` instead"]
+
 use crate::{
     old_error::{ContextError, ErrorType},
     regex::{FauxRegex, digit_char, word_char},
@@ -477,7 +479,6 @@ impl<'src> Iterator for Scanner<'src> {
 impl std::iter::FusedIterator for Scanner<'_> {}
 
 /// Create a [`Scanner`] for the provided source code, and contextualize errors if there are any
-#[deprecated = "use `lex` instead"]
 pub const fn tokenize(source: &str) -> Scanner<'_> {
     Scanner::new(source)
 }

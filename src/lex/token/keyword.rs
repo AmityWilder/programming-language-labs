@@ -230,7 +230,6 @@ define_token_eq! {
         ///     // ...
         /// }
         /// ```
-        #[op_desc([_, _] => "membership")]
         Has = "has",
 
         /// Used in a type bound to specify that a type parameter must be exactly one type
@@ -254,7 +253,6 @@ define_token_eq! {
         ///     # statement
         /// after:
         /// ```
-        #[op_desc([_, _] => "conditional")]
         If = "if",
         /// When following an `if` statement, only performs the statement if the condition does not hold.
         /// ### Syntax
@@ -282,7 +280,6 @@ define_token_eq! {
         ///     // statement
         /// }
         /// ```
-        #[op_desc([_, _] => "null replacement")]
         Or = "or",
         /// Preprocessor "else" branch
         /// See [`Self::Rot`]
@@ -295,7 +292,6 @@ define_token_eq! {
         ///     // ...
         /// }
         /// ```
-        #[op_desc(_ => "pattern matching")]
         Pick = "pick",
 
         // ----------------------------
@@ -343,7 +339,6 @@ define_token_eq! {
         ///     // ...
         /// }
         /// ```
-        #[op_desc([_, _] => "iteration")]
         In = "in",
         /// Repeat forever (or until a `stop`/`give`/`fail`).
         /// ### Syntax
@@ -457,7 +452,6 @@ define_token_eq! {
         // ----------------------------
 
         /// Returns the number of bytes in the type (the size of the type)
-        #[op_desc([_] => "size of")]
         Szof = "szof",
 
         /// Outputs the value to stdout (TODO: REPLACE)
