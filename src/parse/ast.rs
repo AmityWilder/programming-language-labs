@@ -93,15 +93,6 @@ impl Unary {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Delimited<T> {
-    /// caller-defined
-    pub open: Span,
-    pub inner: T,
-    /// caller-defined
-    pub close: Span,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Grouping {
     /// `(`
     pub open: Span,
@@ -309,16 +300,21 @@ pub struct IffClause {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Typename {
     pub path: Vec<NamespacePathPart>,
+    /// [`None`] represents `Ident`
     pub name: Option<TypenameKeyword>,
     pub name_span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeInstance {
+    pub name: Typename,
     pub args: Option<GenericGroup>,
 }
 
-/// A concrete type
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeExpr {
     /// Identifier
-    pub name: Typename,
+    pub then_ty: TypeInstance,
     pub or_ty: Option<OrType>,
 }
 
@@ -370,9 +366,7 @@ pub struct ShapeBound {
     pub kw: Span,
     /// `(`
     pub open: Span,
-    /// (bound, `,`)
-    /// only the last comma will ever be [`None`]
-    pub args: Vec<(TypeExpr, Option<Span>)>,
+    pub args: Vec<TypeExpr>,
     /// `)`
     pub close: Span,
     // TBD: should return be optional when none?

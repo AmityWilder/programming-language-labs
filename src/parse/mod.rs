@@ -1,9 +1,10 @@
 use crate::{
+    analyzer::types::bounds::Combinator,
     error::{Error, ErrorKind, ExpectedToken},
     lex::token::{
         Operator, TokenKind,
         keyword::Keyword,
-        punc::{BadBracketCombo, Bracket, Punctuation},
+        punc::{BadBracketCombo, Bracket, OpSide, Punctuation},
     },
     src_code::span::Span,
 };
@@ -224,10 +225,14 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
     }
 
     fn rip_rangle(&mut self) -> Option<Span> {
-        #[expect(clippy::as_conversions, reason = "char.len_utf8() is at most 4")]
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            reason = "char.len_utf8() is at most 4"
+        )]
         const RANGLE_LEN: u32 = '>'.len_utf8() as u32;
-        if let x @ Some(_) = self.pull_if_eq(Punctuation::Gt) {
-            x
+        if let trivial @ Some(_) = self.pull_if_eq(Punctuation::Gt) {
+            trivial
         } else if let Some((span, kind)) = self.tokens.peek_mut() {
             *kind = match kind {
                 TokenKind::Punc(Punctuation::Shr) => TokenKind::Punc(Punctuation::Gt),
@@ -251,9 +256,10 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         }
     }
 
+    /// `pull_if_delim -> brack.open inner brack.close`
     // I know it's a big function, but `brack` should be a literal, so inlining should allow the compiler to cut down on some of the branches
     #[inline]
-    fn pull_if_delim<R, F>(&mut self, brack: Bracket, inner: F) -> Option<Result<ast::Delimited<R>>>
+    fn pull_if_delim<R, F>(&mut self, brack: Bracket, inner: F) -> Option<Result<(Span, R, Span)>>
     where
         F: FnOnce(&mut Self) -> Result<R>,
     {
@@ -295,15 +301,18 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
                     )
                 }
             })?;
-            Ok(ast::Delimited { open, inner, close })
+            Ok((open, inner, close))
         })
     }
 
+    /// - if `trailing` is [`Some`]: `pull_separated -> ( f ( "," f )* )?`
+    /// - if `trailing` is [`None`]: `pull_separated -> ( f ( "," f )* ( "," )? )?`
+    ///
     /// If a trailing separator is **allowed**, `trailing` should be [`None`]. If a trailing separator is **not allowed**,
     /// `trailing` should be the error that occurs if a separator is not followed by another item.
     // I know it's a big function, but `trailing` should be a literal, so inlining should allow the compiler to cut down on some of the branches
     #[inline]
-    fn pull_if_separated<Q, T, F>(
+    fn pull_separated<Q, T, F>(
         &mut self,
         trailing: Option<ExpectedToken>,
         sep: Q,
@@ -466,10 +475,17 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
     ///     | done_statement
     ///     | skip_statement
     ///     | if_statement
-    ///     | loop_statement
+    ///     | loop_block
     ///     | expression_statement`
     pub fn statement(&mut self) -> Result<ast::Statement> {
-        todo!()
+        self.block_statement()
+            .map_inner(ast::Statement::Block)
+            .or_else(|| self.print_statement().map_inner(ast::Statement::Print))
+            .or_else(|| self.done_statement().map_inner(ast::Statement::Done))
+            .or_else(|| self.skip_statement().map_inner(ast::Statement::Skip))
+            .or_else(|| self.if_statement().map_inner(ast::Statement::If))
+            .or_else(|| self.loop_block().map_inner(ast::Statement::Loop))
+            .unwrap_or_else(|| self.expression_statement().map(ast::Statement::Expr))
     }
 
     /// `expression_statement -> assign ";"`
@@ -507,11 +523,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         self.pull_if_delim(Bracket::Paren, |parser| {
             parser.bind_pattern().ok_or_unexpected(parser)
         })
-        .map_inner(|x| ast::DeferParam {
-            open: x.open,
-            param: x.inner,
-            close: x.close,
-        })
+        .map_inner(|(open, param, close)| ast::DeferParam { open, param, close })
     }
 
     /// `if_statement -> "if" expression block_statement ( or_statement )?`
@@ -656,11 +668,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         self.pull_if_delim(Bracket::Brace, |parser| {
             std::iter::from_fn(|| parser.is_next_close().then(|| parser.declaration())).collect()
         })
-        .map_inner(|x| ast::BlockStmt {
-            open: x.open,
-            body: x.inner,
-            close: x.close,
-        })
+        .map_inner(|(open, body, close)| ast::BlockStmt { open, body, close })
     }
 
     /// `assign -> expression (
@@ -872,10 +880,27 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         Ok(expr)
     }
 
-    // TODO: `szof uint 3 ** 2` shouldn't be valid syntax
-    /// `unary_prefix -> ( ( ( "!" | "!!" | "-" ) | "szof" ( type_expression )? ) )* exponent`
+    /// `unary_prefix -> "szof" type_expression | ( "!" | "!!" | "-" )* exponent`
     fn unary_prefix(&mut self) -> Result<ast::Expr> {
-        todo!()
+        use Operator::{Exists, Not, SubNeg, Szof};
+        if let Some((op_span, op)) =
+            self.pull_into_if(|k| matches!(k, Not | Exists | SubNeg | Szof))
+        {
+            let operand = if matches!(op, Szof) {
+                self.type_expression() // TODO: combo error?
+                    .map(|x| ast::Expr::Type(Box::new(x)))
+            } else {
+                self.unary_prefix()
+            }?;
+            Ok(ast::Expr::Unary(Box::new(ast::Unary {
+                op,
+                op_span,
+                operand,
+                side: OpSide::Prefix,
+            })))
+        } else {
+            self.exponent()
+        }
     }
 
     /// `exponent -> conversion ( "**" conversion )*`
@@ -895,20 +920,44 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
 
     /// `conversion -> unary_postfix ( "-:>" | "=:>" ) type_expression`
     fn conversion(&mut self) -> Result<ast::Expr> {
-        todo!()
+        let mut expr = self.unary_postfix()?;
+        if let Some((op_span, op)) =
+            self.pull_into_if(|kind| matches!(kind, Operator::Convert | Operator::Transmute))
+        {
+            expr = ast::Expr::Binary(Box::new(ast::Binary {
+                lhs: expr,
+                op,
+                op_span,
+                rhs: ast::Expr::Type(Box::new(self.type_expression()?)),
+            }));
+        }
+        Ok(expr)
     }
 
     /// `unary_postfix -> primary ( "?" | "++" | "--" )*`
     fn unary_postfix(&mut self) -> Result<ast::Expr> {
-        todo!()
+        let mut expr = self.primary()?;
+        while let Some((op_span, op)) = self.pull_into_if(|kind| {
+            matches!(kind, Operator::Coalesce | Operator::Incr | Operator::Decr)
+        }) {
+            expr = ast::Expr::Unary(Box::new(ast::Unary {
+                op,
+                op_span,
+                operand: expr,
+                side: OpSide::Postfix,
+            }));
+        }
+        Ok(expr)
     }
 
-    /// `primary -> literal | group | variable | type_expression`
-    ///
-    /// `type_expression`/`type_bound` are included as a variant of `primary` in order
-    /// to allow type errors instead of just "wrong token" errors.
+    /// `primary -> literal | group | variable`
     fn primary(&mut self) -> Result<ast::Expr> {
-        todo!()
+        self.literal()
+            .map(|x| Ok(ast::Expr::Literal(x)))
+            .or_else(|| self.group().map_inner(|x| ast::Expr::Grouping(Box::new(x))))
+            .or_else(|| self.variable().map(|x| Ok(ast::Expr::Variable(x))))
+            .ok_or_else(|| self.error(ExpectedToken::Expr))
+            .flatten()
     }
 
     /// `directive -> "inpt"`
@@ -948,43 +997,65 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
     /// `sequence -> "[" expression "]"`
     fn sequence(&mut self) -> Option<Result<ast::Grouping>> {
         self.pull_if_delim(Bracket::Brack, Self::expression)
-            .map_inner(|x| ast::Grouping {
-                open: x.open,
-                expr: x.inner,
-                close: x.close,
-            })
+            .map_inner(|(open, expr, close)| ast::Grouping { open, expr, close })
     }
 
     /// `group -> "(" expression ")"`
     fn group(&mut self) -> Option<Result<ast::Grouping>> {
         self.pull_if_delim(Bracket::Paren, Self::expression)
-            .map_inner(|x| ast::Grouping {
-                open: x.open,
-                expr: x.inner,
-                close: x.close,
-            })
+            .map_inner(|(open, expr, close)| ast::Grouping { open, expr, close })
     }
 
     /// `generic_group -> "<" ( type_expression ( "," type_expression )* ( "," )? )? ">"`
     fn generic_group(&mut self) -> Option<Result<ast::GenericGroup>> {
         self.pull_if_delim(Bracket::Angle, |parser| {
-            parser.pull_if_separated(None, Punctuation::Comma, |parser| {
+            parser.pull_separated(None, Punctuation::Comma, |parser| {
                 Some(parser.type_expression())
             })
         })
-        .map_inner(|x| ast::GenericGroup {
-            open: x.open,
-            list: x.inner,
-            close: x.close,
+        .map_inner(|(open, list, close)| ast::GenericGroup { open, list, close })
+    }
+
+    /// `type_expression -> type_instance ( or_type )?`
+    fn type_expression(&mut self) -> Result<ast::TypeExpr> {
+        Ok(ast::TypeExpr {
+            then_ty: self.type_instance()?,
+            or_ty: self.or_type().transpose()?,
         })
     }
 
-    /// `type_expression -> ( ( "nevr" | "bool" | "uint" | "sint" | "flpt" | "char" | "text" | "fail" | IDENTIFIER ) "::" )*
-    ///     ( "nevr" | "bool" | "uint" | "sint" | "flpt" | "char" | "text" | "fail" | IDENTIFIER )
-    ///     ( generic_group )?
-    ///     ( "|" ( "fail" | "none" | "nevr" ) )?`
-    fn type_expression(&mut self) -> Result<ast::TypeExpr> {
-        todo!()
+    /// `type_instance -> typename generic_group`
+    fn type_instance(&mut self) -> Result<ast::TypeInstance> {
+        Ok(ast::TypeInstance {
+            name: self.typename()?,
+            args: self.generic_group().transpose()?,
+        })
+    }
+
+    /// `typename -> ( ( TYPENAME_KEYWORD | IDENTIFIER ) "::" )* ( TYPENAME_KEYWORD | IDENTIFIER )`
+    fn typename(&mut self) -> Result<ast::Typename> {
+        let (mut name_span, mut name) = self.try_pull_into(ExpectedToken::TypeExpr)?;
+        let mut path = Vec::new();
+        while let Some(sep) = self.pull_if_eq(Punctuation::PathSep) {
+            path.push(ast::NamespacePathPart {
+                name: name_span,
+                sep,
+            });
+            (name_span, name) = self.try_pull_into(ExpectedToken::TypeExpr)?;
+        }
+        Ok(ast::Typename {
+            path,
+            name,
+            name_span,
+        })
+    }
+
+    /// `or_type -> "|" ( "none" | "nevr" | "fail" )`
+    fn or_type(&mut self) -> Option<Result<ast::OrType>> {
+        self.pull_if_eq(Punctuation::Or).map(|pipe| {
+            let (ty_span, ty) = self.try_pull_into(ExpectedToken::OrType)?;
+            Ok(ast::OrType { pipe, ty, ty_span })
+        })
     }
 
     /// `iff_clause -> "<=>" type_bound`
@@ -997,9 +1068,89 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         })
     }
 
-    /// `type_bound -> exact_bound | member_bound | shape_bound | expr_bound | grouped_bound | or_bound`
+    /// `type_bound -> or_bound`
     fn type_bound(&mut self) -> Result<ast::TypeBound> {
-        todo!()
+        self.or_bound()
+    }
+
+    /// `or_bound -> xor_bound ( "|" xor_bound )*`
+    fn or_bound(&mut self) -> Result<ast::TypeBound> {
+        let mut bound = self.xor_bound()?;
+        while let Some(sep_span) = self.pull_if_eq(Punctuation::Or) {
+            let rhs = self.xor_bound()?;
+            bound = ast::TypeBound::Combo(Box::new(ast::ComboBound {
+                lhs: bound,
+                sep: Combinator::Any,
+                sep_span,
+                rhs,
+            }));
+        }
+        Ok(bound)
+    }
+
+    /// `xor_bound -> and_bound ( "/" and_bound )*`
+    fn xor_bound(&mut self) -> Result<ast::TypeBound> {
+        let mut bound = self.and_bound()?;
+        while let Some(sep_span) = self.pull_if_eq(Punctuation::Div) {
+            let rhs = self.and_bound()?;
+            bound = ast::TypeBound::Combo(Box::new(ast::ComboBound {
+                lhs: bound,
+                sep: Combinator::One,
+                sep_span,
+                rhs,
+            }));
+        }
+        Ok(bound)
+    }
+
+    /// `and_bound -> not_bound ( "+" not_bound )*`
+    fn and_bound(&mut self) -> Result<ast::TypeBound> {
+        let mut bound = self.not_bound()?;
+        while let Some(sep_span) = self.pull_if_eq(Punctuation::Add) {
+            let rhs = self.not_bound()?;
+            bound = ast::TypeBound::Combo(Box::new(ast::ComboBound {
+                lhs: bound,
+                sep: Combinator::All,
+                sep_span,
+                rhs,
+            }));
+        }
+        Ok(bound)
+    }
+
+    /// `not_bound -> ( "!" )* primary_bound`
+    fn not_bound(&mut self) -> Result<ast::TypeBound> {
+        if let Some(not) = self.pull_if_eq(Punctuation::Not) {
+            Ok(ast::TypeBound::Not(Box::new(ast::NegativeBound {
+                not,
+                rhs: self.not_bound()?,
+            })))
+        } else {
+            self.primary_bound()
+        }
+    }
+
+    /// `primary_bound -> exact_bound | member_bound | shape_bound | expr_bound | grouped_bound`
+    fn primary_bound(&mut self) -> Result<ast::TypeBound> {
+        self.exact_bound()
+            .map_inner(|x| ast::TypeBound::Exact(Box::new(x)))
+            .or_else(|| {
+                self.has_bound()
+                    .map_inner(|x| ast::TypeBound::Has(Box::new(x)))
+            })
+            .or_else(|| {
+                self.shape_bound()
+                    .map_inner(|x| ast::TypeBound::Shape(Box::new(x)))
+            })
+            .or_else(|| {
+                self.satisfies_bound()
+                    .map_inner(|x| ast::TypeBound::Satisfies(Box::new(x)))
+            })
+            .or_else(|| {
+                self.grouped_bound()
+                    .map_inner(|x| ast::TypeBound::Group(Box::new(x)))
+            })
+            .unwrap_or_else(|| Err(self.error(ExpectedToken::TypeBound)))
     }
 
     /// `exact_bound -> "only" type_expression`
@@ -1013,7 +1164,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
     }
 
     /// `member_bound -> "has" IDENTIFIER ( colon_bound )?`
-    fn member_bound(&mut self) -> Option<Result<ast::MemberBound>> {
+    fn has_bound(&mut self) -> Option<Result<ast::MemberBound>> {
         self.pull_if_eq(Keyword::Has).map(|kw| {
             Ok(ast::MemberBound {
                 kw,
@@ -1035,11 +1186,32 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
 
     /// `shape_bound -> "fun" "(" ( type_expression ( "," type_expression )* ( "," )? )? ")" "->" type_expression`
     fn shape_bound(&mut self) -> Option<Result<ast::ShapeBound>> {
-        todo!()
+        self.pull_if_eq(Keyword::Fun).map(|kw| {
+            let (open, args, close) = self
+                .pull_if_delim(Bracket::Paren, |parser| {
+                    parser.pull_separated(None, Punctuation::Comma, |parser| {
+                        Some(parser.type_expression())
+                    })
+                })
+                .ok_or_else(|| {
+                    self.error(ExpectedToken::Verbatim(TokenKind::Punc(
+                        Punctuation::LParen,
+                    )))
+                })
+                .flatten()?;
+            Ok(ast::ShapeBound {
+                kw,
+                open,
+                args,
+                close,
+                arrow: self.try_pull_eq(Punctuation::Arrow)?,
+                ret: self.type_expression()?,
+            })
+        })
     }
 
     /// `expr_bound -> "for" IDENTIFIER ":" expression`
-    fn expr_bound(&mut self) -> Option<Result<ast::ExprBound>> {
+    fn satisfies_bound(&mut self) -> Option<Result<ast::ExprBound>> {
         self.pull_if_eq(Keyword::For).map(|kw| {
             Ok(ast::ExprBound {
                 kw,
@@ -1052,31 +1224,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
 
     /// `grouped_bound -> "(" type_bound ")"`
     fn grouped_bound(&mut self) -> Option<Result<ast::GroupedBound>> {
-        self.pull_if_delim(Bracket::Paren, |parser| parser.type_bound())
-            .map_inner(|x| ast::GroupedBound {
-                open: x.open,
-                inner: x.inner,
-                close: x.close,
-            })
-    }
-
-    /// `or_bound -> xor_bound ( "|" xor_bound )*`
-    fn or_bound(&mut self) -> Result<ast::TypeBound> {
-        todo!()
-    }
-
-    /// `xor_bound -> and_bound ( "/" and_bound )*`
-    fn xor_bound(&mut self) -> Result<ast::TypeBound> {
-        todo!()
-    }
-
-    /// `and_bound -> not_bound ( "+" not_bound )*`
-    fn and_bound(&mut self) -> Result<ast::TypeBound> {
-        todo!()
-    }
-
-    /// `not_bound -> ( "!" )* type_bound`
-    fn not_bound(&mut self) -> Result<ast::TypeBound> {
-        todo!()
+        self.pull_if_delim(Bracket::Paren, Self::type_bound)
+            .map_inner(|(open, inner, close)| ast::GroupedBound { open, inner, close })
     }
 }
