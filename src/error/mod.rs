@@ -3,18 +3,18 @@ use crate::{
     analyzer::types::{AbstractType, SizeReq},
     error::fail::Failure,
     highlight::{style::StyleWrapper, syntax::Syntax},
-    lex::token::{Operator, TokenKind, TokenTable},
-    old_error::{ImmutableAssignment, NumErrorKind},
-    preproc::eval::{PpType, PpValue},
-    scanner::{
+    lex::{
         symbols::{
             BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM,
         },
-        token::{
-            escape_char,
-            punc::{BadBracketCombo, Bracket, OpSide},
-            value::Keyword,
-        },
+        token::{Operator, TokenKind, TokenTable},
+    },
+    old_error::{ImmutableAssignment, NumErrorKind},
+    preproc::eval::{PpType, PpValue},
+    scanner::token::{
+        escape_char,
+        punc::{BadBracketCombo, Bracket, OpSide},
+        value::Keyword,
     },
     src_code::{map::SourceMap, span::Span},
 };

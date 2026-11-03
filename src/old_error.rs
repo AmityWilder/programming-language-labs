@@ -14,14 +14,16 @@ use crate::{
         syntax::Syntax,
         write_highlight,
     },
-    lex::token::{Operator, TokenEq},
-    preproc::eval::{PpType, PpValue},
-    scanner::{
-        self, rfind_block_comment,
+    lex::{
         symbols::{
             BIN_PREFIX, BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, HEX_PREFIX,
             OCT_PREFIX, TEXT_DELIM,
         },
+        token::{Operator, TokenEq},
+    },
+    preproc::eval::{PpType, PpValue},
+    scanner::{
+        self, rfind_block_comment,
         token::{
             ExpansionData, Token, escape_char,
             punc::{BadBracketCombo, Bracket, OpSide},

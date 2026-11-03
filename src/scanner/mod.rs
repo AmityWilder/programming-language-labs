@@ -3,20 +3,17 @@
 #![deprecated = "use `lex` instead"]
 
 use crate::{
+    lex::symbols::{
+        BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
+        MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM,
+    },
     old_error::{ContextError, ErrorType},
     regex::{FauxRegex, digit_char, word_char},
-    scanner::{
-        symbols::{
-            BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
-            MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM,
-        },
-        token::Lexeme,
-    },
+    scanner::token::Lexeme,
 };
 use std::range::Range;
 use token::{Token, keyword::Keyword, punc::Punctuation, value::LexValue};
 
-pub mod symbols;
 pub mod token;
 
 /// Finds the first `looking_for` not preceded by an odd number of [`ESCAPE`]s
