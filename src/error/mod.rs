@@ -508,12 +508,15 @@ impl Error {
         }
     }
 
-    pub const fn contextualize<'smap>(&self, source: &'smap SourceMap) -> ContextError<'smap, '_> {
+    pub const fn contextualize<'smap, 'err>(
+        &'err self,
+        source: &'smap SourceMap,
+    ) -> ContextError<'smap, 'err> {
         ContextError::new(source, self)
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ContextError<'smap, 'err> {
     source: &'smap SourceMap,
     error: &'err Error,

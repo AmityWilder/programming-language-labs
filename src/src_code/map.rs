@@ -9,16 +9,26 @@ pub struct SourceMap {
     files: Vec<SourceCode>,
 }
 
+impl FromIterator<SourceCode> for SourceMap {
+    fn from_iter<I: IntoIterator<Item = SourceCode>>(iter: I) -> Self {
+        Self {
+            files: Vec::from_iter(iter),
+        }
+    }
+}
+
 impl std::ops::Index<FileId> for SourceMap {
     type Output = SourceCode;
 
     fn index(&self, index: FileId) -> &Self::Output {
+        #[expect(clippy::indexing_slicing, reason = "caller's responsibility")]
         &self.files[index.into_usize()]
     }
 }
 
 impl std::ops::IndexMut<FileId> for SourceMap {
     fn index_mut(&mut self, index: FileId) -> &mut Self::Output {
+        #[expect(clippy::indexing_slicing, reason = "caller's responsibility")]
         &mut self.files[index.into_usize()]
     }
 }
@@ -48,6 +58,10 @@ impl SourceMap {
 
     pub fn get(&self, id: FileId) -> Option<&SourceCode> {
         self.files.get(id.into_usize())
+    }
+
+    pub fn get_mut(&mut self, id: FileId) -> Option<&mut SourceCode> {
+        self.files.get_mut(id.into_usize())
     }
 
     pub fn source_of(&self, span: Span) -> &SourceCode {
