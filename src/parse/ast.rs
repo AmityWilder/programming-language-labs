@@ -3,10 +3,8 @@ use crate::{
     error::ExpectedToken,
     lex::token::{Operator, TokenKind, punc::OpSide},
     scanner::token::value::Keyword,
-    src_code::span::Span,
+    src_code::span::{FileId, RelSpan},
 };
-
-// TBD: can RelSpan be used instead of Span? will an AST ever contain spans from multiple separate files?
 
 pub trait Expectable {
     const EXPECTED: ExpectedToken;
@@ -49,7 +47,7 @@ pub enum ExprPrecedence {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BindingPattern {
     // TBD: what else can a pattern be?
-    pub ident: Span,
+    pub ident: RelSpan,
 }
 
 impl Expectable for BindingPattern {
@@ -60,7 +58,7 @@ impl Expectable for BindingPattern {
 pub struct Binary {
     pub lhs: Expr,
     pub op: Operator,
-    pub op_span: Span,
+    pub op_span: RelSpan,
     pub rhs: Expr,
 }
 
@@ -77,7 +75,7 @@ impl Binary {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unary {
     pub op: Operator,
-    pub op_span: Span,
+    pub op_span: RelSpan,
     pub operand: Expr,
     pub side: OpSide,
 }
@@ -95,10 +93,10 @@ impl Unary {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Grouping {
     /// `(`
-    pub open: Span,
+    pub open: RelSpan,
     pub expr: Expr,
     /// `)`
-    pub close: Span,
+    pub close: RelSpan,
 }
 
 impl Expectable for Grouping {
@@ -108,10 +106,10 @@ impl Expectable for Grouping {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sequence {
     /// `[`
-    pub open: Span,
+    pub open: RelSpan,
     pub expr: Expr,
     /// `]`
-    pub close: Span,
+    pub close: RelSpan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -171,10 +169,10 @@ impl TryFrom<TokenKind> for OrTypeKeyword {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrType {
     // `|`
-    pub pipe: Span,
+    pub pipe: RelSpan,
     // `none`, `fail`, or `nevr`
     pub ty: OrTypeKeyword,
-    pub ty_span: Span,
+    pub ty_span: RelSpan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -276,24 +274,24 @@ impl TryFrom<TokenKind> for Option<TypenameKeyword> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamespacePathPart {
     /// Identifier
-    pub name: Span,
+    pub name: RelSpan,
     /// `::`
-    pub sep: Span,
+    pub sep: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenericGroup {
     /// `<`
-    pub open: Span,
+    pub open: RelSpan,
     pub list: Vec<TypeExpr>,
     /// `>`
-    pub close: Span,
+    pub close: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IffClause {
     /// `<=>`
-    pub iff: Span,
+    pub iff: RelSpan,
     pub bound: TypeBound,
 }
 
@@ -302,7 +300,7 @@ pub struct Typename {
     pub path: Vec<NamespacePathPart>,
     /// [`None`] represents `Ident`
     pub name: Option<TypenameKeyword>,
-    pub name_span: Span,
+    pub name_span: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -326,52 +324,52 @@ impl Expectable for TypeExpr {
 pub struct ComboBound {
     pub lhs: TypeBound,
     pub sep: Combinator,
-    pub sep_span: Span,
+    pub sep_span: RelSpan,
     pub rhs: TypeBound,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NegativeBound {
     /// `!`
-    pub not: Span,
+    pub not: RelSpan,
     pub rhs: TypeBound,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExactTypeBound {
     /// `only`
-    pub kw: Span,
+    pub kw: RelSpan,
     pub ty: TypeExpr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColonBound {
     /// `:`
-    pub colon: Span,
+    pub colon: RelSpan,
     pub bound: TypeBound,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemberBound {
     /// `has`
-    pub kw: Span,
+    pub kw: RelSpan,
     /// Identifier
-    pub member: Span,
+    pub member: RelSpan,
     pub req: Option<ColonBound>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapeBound {
     /// `fun`
-    pub kw: Span,
+    pub kw: RelSpan,
     /// `(`
-    pub open: Span,
+    pub open: RelSpan,
     pub args: Vec<TypeExpr>,
     /// `)`
-    pub close: Span,
+    pub close: RelSpan,
     // TBD: should return be optional when none?
     /// `->`
-    pub arrow: Span,
+    pub arrow: RelSpan,
     pub ret: TypeExpr,
 }
 
@@ -384,21 +382,21 @@ pub struct OverloadBound {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExprBound {
     /// `for`
-    pub kw: Span,
+    pub kw: RelSpan,
     /// Identifier
-    pub name: Span,
+    pub name: RelSpan,
     /// `:`
-    pub colon: Span,
+    pub colon: RelSpan,
     pub expr: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupedBound {
     /// `(`
-    pub open: Span,
+    pub open: RelSpan,
     pub inner: TypeBound,
     /// `)`
-    pub close: Span,
+    pub close: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -420,7 +418,7 @@ impl Expectable for TypeBound {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Literal {
     pub kind: TokenKind,
-    pub span: Span,
+    pub span: RelSpan,
 }
 
 impl Expectable for Literal {
@@ -480,13 +478,13 @@ impl TryFrom<TokenKind> for DirectiveKw {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Directive {
     pub kw: DirectiveKw,
-    pub kw_span: Span,
+    pub kw_span: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
     /// Identifier
-    pub ident: Span,
+    pub ident: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -526,14 +524,14 @@ impl Expectable for OrBody {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrStmt {
     /// `or`
-    pub kw: Span,
+    pub kw: RelSpan,
     pub body: OrBody,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     /// `if`
-    pub kw: Span,
+    pub kw: RelSpan,
     pub pred: Expr,
     pub then: BlockStmt,
     pub or: Option<Box<OrStmt>>,
@@ -542,16 +540,16 @@ pub struct IfStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeferParam {
     /// `(`
-    pub open: Span,
+    pub open: RelSpan,
     pub param: BindingPattern,
     /// `)`
-    pub close: Span,
+    pub close: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclDefer {
     /// `defer`
-    pub kw: Span,
+    pub kw: RelSpan,
     pub param: Option<DeferParam>,
     pub on_pop: BlockStmt,
 }
@@ -575,7 +573,7 @@ pub enum LoopKind {
         /// The variable `iter` items are stored in
         bind: BindingPattern,
         /// `in`
-        in_kw: Span,
+        in_kw: RelSpan,
         /// An expression which produces an iterable value
         /// (i.e. a value which overloads `++`)
         iter: Expr,
@@ -586,7 +584,7 @@ pub enum LoopKind {
 pub struct LoopBlock {
     pub label: Option<ScopeLabel>,
     /// variant-dependent
-    pub kw: Span,
+    pub kw: RelSpan,
     pub kind: LoopKind,
     /// the code that gets repeated
     pub block: BlockStmt,
@@ -599,29 +597,29 @@ impl Expectable for LoopBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DoneStmt {
     /// `done`
-    pub kw: Span,
+    pub kw: RelSpan,
     pub label: Option<Label>,
     pub value: Option<Expr>,
     /// `;`
-    pub semi: Span,
+    pub semi: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SkipStmt {
     /// `skip`
-    pub kw: Span,
+    pub kw: RelSpan,
     pub label: Option<Label>,
     /// `;`
-    pub semi: Span,
+    pub semi: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockStmt {
     /// `{`
-    pub open: Span,
+    pub open: RelSpan,
     pub body: Vec<Declaration>,
     /// `}`
-    pub close: Span,
+    pub close: RelSpan,
 }
 
 impl Expectable for BlockStmt {
@@ -632,16 +630,16 @@ impl Expectable for BlockStmt {
 pub struct ExprStmt {
     pub expr: Expr,
     /// `;`
-    pub semi: Span,
+    pub semi: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrintStmt {
     /// `prnt`
-    pub kw: Span,
+    pub kw: RelSpan,
     pub group: Grouping,
     /// `;`
-    pub semi: Span,
+    pub semi: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -661,11 +659,12 @@ impl Expectable for Statement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Program {
+pub struct ProgramUnit {
+    pub file: FileId,
     pub decls: Vec<Declaration>,
 }
 
-impl std::ops::Deref for Program {
+impl std::ops::Deref for ProgramUnit {
     type Target = Vec<Declaration>;
 
     fn deref(&self) -> &Self::Target {
@@ -673,13 +672,13 @@ impl std::ops::Deref for Program {
     }
 }
 
-impl std::ops::DerefMut for Program {
+impl std::ops::DerefMut for ProgramUnit {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.decls
     }
 }
 
-impl IntoIterator for Program {
+impl IntoIterator for ProgramUnit {
     type Item = Declaration;
     type IntoIter = std::vec::IntoIter<Declaration>;
 
@@ -688,7 +687,7 @@ impl IntoIterator for Program {
     }
 }
 
-impl<'prgm> IntoIterator for &'prgm Program {
+impl<'prgm> IntoIterator for &'prgm ProgramUnit {
     type Item = &'prgm Declaration;
     type IntoIter = std::slice::Iter<'prgm, Declaration>;
 
@@ -697,7 +696,7 @@ impl<'prgm> IntoIterator for &'prgm Program {
     }
 }
 
-impl<'prgm> IntoIterator for &'prgm mut Program {
+impl<'prgm> IntoIterator for &'prgm mut ProgramUnit {
     type Item = &'prgm mut Declaration;
     type IntoIter = std::slice::IterMut<'prgm, Declaration>;
 
@@ -709,29 +708,29 @@ impl<'prgm> IntoIterator for &'prgm mut Program {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assignment {
     /// `=`
-    pub op: Span,
+    pub op: RelSpan,
     pub expr: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Label {
     /// `.`
-    pub dot: Span,
+    pub dot: RelSpan,
     /// identifier
-    pub name: Span,
+    pub name: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopeLabel {
     pub label: Label,
     /// `:`
-    pub colon: Span,
+    pub colon: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeAnnotation {
     /// `:`
-    pub colon: Span,
+    pub colon: RelSpan,
     // TODO: should type annotations be different from type expressions?
     pub ty: TypeExpr,
 }
@@ -791,13 +790,13 @@ impl TryFrom<TokenKind> for VarKeyword {
 pub struct DeclVar {
     /// `uni`, `let`, or `pvt`
     pub kw: VarKeyword,
-    pub kw_span: Span,
+    pub kw_span: RelSpan,
     /// Identifier
     pub binding: BindingPattern,
     pub ty: Option<TypeAnnotation>,
     pub assignment: Option<Assignment>,
     /// `;`
-    pub semi: Span,
+    pub semi: RelSpan,
 }
 
 #[derive(Debug, Clone, PartialEq)]

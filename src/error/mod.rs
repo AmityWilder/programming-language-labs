@@ -5,7 +5,8 @@ use crate::{
     highlight::{style::StyleWrapper, syntax::Syntax},
     lex::{
         symbols::{
-            BLOCK_COMMENT_CLOSE, CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM,
+            BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX,
+            MACRO_PREFIX, TEXT_DELIM,
         },
         token::{Operator, TokenKind, TokenTable},
     },
@@ -502,26 +503,21 @@ impl Error {
             kind: Box::new(kind),
         }
     }
+
+    pub const fn contextualize<'smap>(&self, source: &'smap SourceMap) -> ContextError<'smap, '_> {
+        ContextError::new(source, self)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ContextError<'smap, 'tt, 'err> {
+pub struct ContextError<'smap, 'err> {
     source: &'smap SourceMap,
-    tokens: &'tt TokenTable,
     error: &'err Error,
 }
 
-impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
-    pub const fn new(
-        source: &'smap SourceMap,
-        tokens: &'tt TokenTable,
-        error: &'err Error,
-    ) -> Self {
-        Self {
-            source,
-            tokens,
-            error,
-        }
+impl<'smap, 'err> ContextError<'smap, 'err> {
+    pub const fn new(source: &'smap SourceMap, error: &'err Error) -> Self {
+        Self { source, error }
     }
 
     fn code(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -536,7 +532,7 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
             ErrorKind::EndlessBlockComment => {
                 write!(
                     f,
-                    "block comment opens (`/*`) but never closes (missing `*/`)"
+                    "block comment opens (`{BLOCK_COMMENT_OPEN}`) but never closes (missing `{BLOCK_COMMENT_CLOSE}`)"
                 )
             }
             ErrorKind::EmptyMacroName => write!(f, "invalid macro name"),
@@ -548,25 +544,25 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
             ErrorKind::EndlessCharLiteral => {
                 write!(
                     f,
-                    "char literal opens (`'`) but never closes (missing unescaped `'`)"
+                    "char literal opens (`{CHAR_DELIM}`) but never closes (missing unescaped `{CHAR_DELIM}`)"
                 )
             }
             ErrorKind::EscapedCharLiteralEnd => {
                 write!(
                     f,
-                    "char literal opens (`'`) but never closes (missing unescaped `'`)"
+                    "char literal opens (`{CHAR_DELIM}`) but never closes (missing unescaped `{CHAR_DELIM}`)"
                 )
             }
             ErrorKind::EndlessStringLiteral => {
                 write!(
                     f,
-                    "string literal opens (`\"`) but never closes (missing unescaped `\"`)"
+                    "string literal opens (`{TEXT_DELIM}`) but never closes (missing unescaped `{TEXT_DELIM}`)"
                 )
             }
             ErrorKind::EscapedStringLiteralEnd => {
                 write!(
                     f,
-                    "string literal opens (`\"`) but never closes (missing unescaped `\"`)"
+                    "string literal opens (`{TEXT_DELIM}`) but never closes (missing unescaped `{TEXT_DELIM}`)"
                 )
             }
             ErrorKind::InvalidEscape => {
@@ -591,7 +587,7 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
             ErrorKind::NonBoolPrePredicate { .. } => {
                 write!(f, "preprocessor predicate must evaluate to a boolean")
             }
-            ErrorKind::InvalidPreOperator { .. } => {
+            ErrorKind::InvalidPreOperator => {
                 write!(f, "invalid preprocessor operator")
             }
             ErrorKind::PreIncompatible { op, l_ty, r_ty, .. } => {
@@ -600,13 +596,10 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
             ErrorKind::PreUnsupported { op, r_ty, .. } => {
                 write!(f, "`{op}` is not supported for {r_ty}")
             }
-            ErrorKind::InvalidPreLiteral { .. } => {
+            ErrorKind::InvalidPreLiteral => {
                 write!(f, "invalid preprocessor literal")
             }
-            ErrorKind::InvalidPreType { .. } => {
-                write!(f, "invalid preprocessor type")
-            }
-            ErrorKind::PreOrType { .. } => {
+            ErrorKind::InvalidPreType | ErrorKind::PreOrType => {
                 write!(f, "invalid preprocessor type")
             }
             ErrorKind::IncorrectCloseBracket { failure, .. } => {
@@ -671,7 +664,12 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
                 write!(f, "cannot assign to immutable")
             }
             ErrorKind::FallibleBlockExpr => {
-                write!(f, "only `loop` and `cord` are supported loop expressions")
+                write!(
+                    f,
+                    "only `{}` and `{}` are supported loop expressions",
+                    Keyword::Loop,
+                    Keyword::Cord
+                )
             }
             ErrorKind::TypeTooBig => {
                 write!(
@@ -695,16 +693,15 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
     fn inline(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.error.kind {
             ErrorKind::UnknownToken => write!(f, "what is this?"),
-            ErrorKind::EndlessBlockComment => write!(f, "never ends"),
+            ErrorKind::EndlessBlockComment
+            | ErrorKind::EndlessCharLiteral
+            | ErrorKind::EndlessStringLiteral => write!(f, "never ends"),
             ErrorKind::EmptyMacroName => write!(f, "macro prefix, but no name"),
             ErrorKind::EmptyMacroParam => write!(f, "macro parameter prefix, but no name"),
             ErrorKind::EmptyCharLiteral => write!(f, "empty"),
             ErrorKind::MultiCharLiteral => write!(f, "a char should be 1 char"),
-            ErrorKind::EndlessCharLiteral => write!(f, "never ends"),
-            ErrorKind::EscapedCharLiteralEnd => write!(f, "never ends, unless you remove the `\\`"),
-            ErrorKind::EndlessStringLiteral => write!(f, "never ends"),
-            ErrorKind::EscapedStringLiteralEnd => {
-                write!(f, "never ends, unless you remove the `\\`")
+            ErrorKind::EscapedCharLiteralEnd | ErrorKind::EscapedStringLiteralEnd => {
+                write!(f, "never ends, unless you remove the `{ESCAPE}`")
             }
             ErrorKind::InvalidEscape => write!(f, "invalid escape sequence"),
             ErrorKind::InvalidNumLiteral(_) => write!(f, "not a valid number"),
@@ -736,37 +733,30 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
                     }
                 }
             }
-            ErrorKind::InvalidPreOperator { .. } => {
+            ErrorKind::InvalidPreOperator => {
                 write!(f, "this operator is not defined within preprocessing")
             }
-            ErrorKind::PreIncompatible { .. } => write!(
+            ErrorKind::PreIncompatible { .. } | ErrorKind::Incompatible { .. } => write!(
                 f,
                 "operation is not supported between operands of these types"
             ),
 
-            ErrorKind::PreUnsupported { .. } => {
-                write!(f, "operation is not supported for operands of this type")
+            ErrorKind::PreUnsupported { .. } | ErrorKind::Unsupported { .. } => {
+                write!(f, "operation is not supported for operand of this type")
             }
-            ErrorKind::InvalidPreLiteral { .. } => {
+            ErrorKind::InvalidPreLiteral => {
                 write!(f, "this literal type is not valid within preprocessing")
             }
-            ErrorKind::InvalidPreType { .. } => {
+            ErrorKind::InvalidPreType => {
                 write!(f, "this type is not valid within preprocessing")
             }
-            ErrorKind::PreOrType { .. } => write!(f, "this type is not valid within preprocessing"),
+            ErrorKind::PreOrType => write!(f, "this type is not valid within preprocessing"),
             ErrorKind::IncorrectCloseBracket { .. } => write!(f, "incorrect partner"),
             ErrorKind::ExcessCloseBracket { .. } => write!(f, "missing a partner"),
             ErrorKind::MissingCloseBracket { .. } => write!(f, "missing close bracket"),
             ErrorKind::MissingToken { .. } => write!(f, "missing token"),
             ErrorKind::UnexpectedToken { .. } => write!(f, "wrong token"),
             ErrorKind::DivByZero { .. } => write!(f, "dividing by 0"),
-            ErrorKind::Incompatible { .. } => write!(
-                f,
-                "operation is not supported between operands of these types"
-            ),
-            ErrorKind::Unsupported { .. } => {
-                write!(f, "operation is not supported for operand of this type")
-            }
             ErrorKind::UnsignedNeg => write!(f, "uint can't be negated"),
             ErrorKind::UnknownVar => write!(f, "unknown variable"),
             ErrorKind::TypeMismatch(_) => write!(f, "incorrect type"),
@@ -788,8 +778,8 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
             ErrorKind::EndlessBlockComment => {
                 write!(f, "try adding `{BLOCK_COMMENT_CLOSE}`")
             }
-            ErrorKind::EmptyMacroName => write!(f, "try adding an identifier after the {MACRO_PREFIX}" ),
-            ErrorKind::EmptyMacroParam => write!(f, "try adding an identifier after the {MACRO_PARAM_PREFIX}" ),
+            ErrorKind::EmptyMacroName => write!(f, "try adding an identifier after the `{MACRO_PREFIX}`"),
+            ErrorKind::EmptyMacroParam => write!(f, "try adding an identifier after the `{MACRO_PARAM_PREFIX}`"),
             ErrorKind::EmptyCharLiteral => {
                 write!(
                     f,
@@ -800,7 +790,7 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
                     let inner = src
                         .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
                         .expect("char literals should include delimiters");
-                    let (first, rest) = inner.split_at(match escape_char(inner){
+                    let (first, rest) = inner.split_at(match escape_char(inner) {
                         Some((len, _)) => len,
                         None => inner.chars().next().expect("should have at least one character if MultiCharLiteral instead of EmptyCharLiteral").len_utf8(),
                     });
@@ -816,10 +806,10 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
             ErrorKind::EscapedCharLiteralEnd => {
                     let substr = src.strip_prefix(CHAR_DELIM).expect("string literal should include at least the open delimiter, in EscapedCharLiteralEnd").split_once("\\'").expect("should be EscapedCharLiteralEnd if this is not present").0;
                     write!(f, "there is a closing single-quote candidate, but it is escaped (`{ESCAPE}{CHAR_DELIM}`). \n\
-                char literals cannot end with an unescaped backslash (`{ESCAPE}`), \
-                it is indistinguishable from an escaped single-quote (`{ESCAPE}{CHAR_DELIM}`). \n\
-                try adding a `{CHAR_DELIM}` to the end of the char or remove the `{ESCAPE}` from `{ESCAPE}{CHAR_DELIM}` \
-                to make the char `{CHAR_DELIM}{substr}{CHAR_DELIM}`")
+                        char literals cannot end with an unescaped backslash (`{ESCAPE}`), \
+                        it is indistinguishable from an escaped single-quote (`{ESCAPE}{CHAR_DELIM}`). \n\
+                        try adding a `{CHAR_DELIM}` to the end of the char or remove the `{ESCAPE}` from `{ESCAPE}{CHAR_DELIM}` \
+                        to make the char `{CHAR_DELIM}{substr}{CHAR_DELIM}`")
 
             }
             ErrorKind::EndlessStringLiteral => {
@@ -1223,7 +1213,7 @@ impl<'smap, 'tt, 'err> ContextError<'smap, 'tt, 'err> {
     // }
 }
 
-impl Display for ContextError<'_, '_, '_> {
+impl Display for ContextError<'_, '_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         const INDENT: &str = "          ";
         write!(f, "  \x1b[91m");

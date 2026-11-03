@@ -38,6 +38,10 @@ impl SourceMap {
         (0..).map(FileId).zip(self.files.iter())
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (FileId, &mut SourceCode)> {
+        (0..).map(FileId).zip(self.files.iter_mut())
+    }
+
     pub fn push(&mut self, code: SourceCode) {
         self.files.push(code);
     }

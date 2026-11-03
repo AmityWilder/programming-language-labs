@@ -6,7 +6,7 @@ use crate::{
         keyword::Keyword,
         punc::{BadBracketCombo, Bracket, OpSide, Punctuation},
     },
-    src_code::span::Span,
+    src_code::span::{FileId, RelSpan, Span, uspan},
 };
 use ast::{Expectable, ExpectableExt};
 use std::iter::{Filter, Peekable};
@@ -42,7 +42,7 @@ pub trait ParserExpect {
 
     fn ok_or_unexpected<I>(self, parser: &mut Parser<I>) -> Result<Self::Item>
     where
-        I: Iterator<Item = (Span, TokenKind)>;
+        I: Iterator<Item = (RelSpan, TokenKind)>;
 }
 
 impl<T: ExpectableExt> ParserExpect for T {
@@ -50,7 +50,7 @@ impl<T: ExpectableExt> ParserExpect for T {
 
     fn ok_or_unexpected<I>(self, parser: &mut Parser<I>) -> Result<Self::Item>
     where
-        I: Iterator<Item = (Span, TokenKind)>,
+        I: Iterator<Item = (RelSpan, TokenKind)>,
     {
         self.ok_or_expected().map_err(|e| parser.error(e))
     }
@@ -61,7 +61,7 @@ impl<T: Expectable> ParserExpect for Option<Result<T>> {
 
     fn ok_or_unexpected<I>(self, parser: &mut Parser<I>) -> Result<T>
     where
-        I: Iterator<Item = (Span, TokenKind)>,
+        I: Iterator<Item = (RelSpan, TokenKind)>,
     {
         self.ok_or(T::EXPECTED)
             .map_err(|e| parser.error(e))
@@ -71,12 +71,13 @@ impl<T: Expectable> ParserExpect for Option<Result<T>> {
 
 #[derive(Debug, Clone)]
 pub struct Parser<I: Iterator> {
+    file: FileId,
+    file_len: uspan,
     tokens: Peekable<Filter<I, fn(&I::Item) -> bool>>,
-    eof: Span,
 }
 
-impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
-    pub fn new<J>(tokens: J, eof: Span) -> Self
+impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
+    pub fn new<J>(file: FileId, file_len: uspan, tokens: J) -> Self
     where
         J: IntoIterator<IntoIter = I>,
     {
@@ -87,8 +88,9 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
             )
         };
         Self {
+            file,
+            file_len,
             tokens: tokens.into_iter().filter(filter).peekable(),
-            eof,
         }
     }
 
@@ -155,7 +157,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         self.tokens.next_if_map(|item| f(item).ok_or(item))
     }
 
-    fn pull_if_eq<Q>(&mut self, kind: Q) -> Option<Span>
+    fn pull_if_eq<Q>(&mut self, kind: Q) -> Option<RelSpan>
     where
         Q: Into<TokenKind>,
     {
@@ -164,7 +166,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
             .map(|(span, _)| span)
     }
 
-    fn pull_into_if<T, P>(&mut self, p: P) -> Option<(Span, T)>
+    fn pull_into_if<T, P>(&mut self, p: P) -> Option<(RelSpan, T)>
     where
         TokenKind: TryInto<T>,
         P: FnOnce(&T) -> bool,
@@ -172,7 +174,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         self.pull_if_map(|(span, kind)| kind.try_into().ok().filter(p).map(|t| (span, t)))
     }
 
-    fn pull_into<T>(&mut self) -> Option<(Span, T)>
+    fn pull_into<T>(&mut self) -> Option<(RelSpan, T)>
     where
         TokenKind: TryInto<T>,
     {
@@ -193,7 +195,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         self.pull_if_map(f).ok_or_else(|| self.error(expected))
     }
 
-    fn try_pull_eq<Q>(&mut self, kind: Q) -> Result<Span>
+    fn try_pull_eq<Q>(&mut self, kind: Q) -> Result<RelSpan>
     where
         Q: Into<TokenKind>,
     {
@@ -203,7 +205,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
             .ok_or_else(|| self.error(ExpectedToken::Verbatim(kind)))
     }
 
-    fn try_pull_into_if<T, P>(&mut self, expected: ExpectedToken, p: P) -> Result<(Span, T)>
+    fn try_pull_into_if<T, P>(&mut self, expected: ExpectedToken, p: P) -> Result<(RelSpan, T)>
     where
         TokenKind: TryInto<T>,
         P: FnOnce(&T) -> bool,
@@ -214,7 +216,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         )
     }
 
-    fn try_pull_into<T>(&mut self, expected: ExpectedToken) -> Result<(Span, T)>
+    fn try_pull_into<T>(&mut self, expected: ExpectedToken) -> Result<(RelSpan, T)>
     where
         TokenKind: TryInto<T>,
     {
@@ -224,7 +226,7 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
         )
     }
 
-    fn rip_rangle(&mut self) -> Option<Span> {
+    fn rip_rangle(&mut self) -> Option<RelSpan> {
         #[expect(
             clippy::as_conversions,
             clippy::cast_possible_truncation,
@@ -239,18 +241,15 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
                 TokenKind::Punc(Punctuation::ShrAssign) => TokenKind::Punc(Punctuation::Ge),
                 _ => return None,
             };
-            let start = span.rel.start;
+            let start = span.start;
             #[expect(
                 clippy::arithmetic_side_effects,
                 reason = "the span contains a '>' so because file length is not allowed to exceed u32::MAX, \
                 the end position of that '>' cannot exceed u32::MAX."
             )]
             let mid = start + RANGLE_LEN;
-            span.rel.start = mid;
-            Some(Span {
-                file: span.file,
-                rel: (start..mid).into(),
-            })
+            span.start = mid;
+            Some((start..mid).into())
         } else {
             None
         }
@@ -259,7 +258,11 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
     /// `pull_if_delim -> brack.open inner brack.close`
     // I know it's a big function, but `brack` should be a literal, so inlining should allow the compiler to cut down on some of the branches
     #[inline]
-    fn pull_if_delim<R, F>(&mut self, brack: Bracket, inner: F) -> Option<Result<(Span, R, Span)>>
+    fn pull_if_delim<R, F>(
+        &mut self,
+        brack: Bracket,
+        inner: F,
+    ) -> Option<Result<(RelSpan, R, RelSpan)>>
     where
         F: FnOnce(&mut Self) -> Result<R>,
     {
@@ -285,17 +288,32 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
                             }
                         };
                         ErrorKind::IncorrectCloseBracket {
-                            open_range: open,
+                            open_range: Span {
+                                file: self.file,
+                                rel: open,
+                            },
                             failure: BadBracketCombo::new(brack, close)
                                 .expect("matching brackets should not produce an error"),
                         }
                     };
-                    Error::new(span, kind)
+                    Error::new(
+                        Span {
+                            file: self.file,
+                            rel: span,
+                        },
+                        kind,
+                    )
                 } else {
                     Error::new(
-                        self.eof,
+                        Span {
+                            file: self.file,
+                            rel: (self.file_len..self.file_len).into(),
+                        },
                         ErrorKind::MissingCloseBracket {
-                            open_range: open,
+                            open_range: Span {
+                                file: self.file,
+                                rel: open,
+                            },
                             expect: brack,
                         },
                     )
@@ -343,9 +361,21 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
     /// Does not consume the next token
     fn error(&mut self, expected: ExpectedToken) -> Error {
         if let Some(&(span, _)) = self.peek() {
-            Error::new(span, ErrorKind::UnexpectedToken { expected })
+            Error::new(
+                Span {
+                    file: self.file,
+                    rel: span,
+                },
+                ErrorKind::UnexpectedToken { expected },
+            )
         } else {
-            Error::new(self.eof, ErrorKind::MissingToken { expected })
+            Error::new(
+                Span {
+                    file: self.file,
+                    rel: (self.file_len..self.file_len).into(),
+                },
+                ErrorKind::MissingToken { expected },
+            )
         }
     }
 
@@ -397,18 +427,24 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
     }
 }
 
-pub fn parse<I>(tokens: I, eof: Span) -> std::result::Result<ast::Program, Vec<Error>>
+pub fn parse<I>(
+    file: FileId,
+    file_len: uspan,
+    tokens: I,
+) -> std::result::Result<ast::ProgramUnit, Vec<Error>>
 where
-    I: IntoIterator<Item = (Span, TokenKind)>,
+    I: IntoIterator<Item = (RelSpan, TokenKind)>,
 {
-    Parser::new(tokens, eof).program().map_err(Vec::from_iter)
+    Parser::new(file, file_len, tokens)
+        .program()
+        .map_err(Vec::from_iter)
 }
 
-impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
+impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     /// `program -> ( statement )*`
     pub fn program(
         &mut self,
-    ) -> std::result::Result<ast::Program, impl IntoIterator<Item = Error>> {
+    ) -> std::result::Result<ast::ProgramUnit, impl IntoIterator<Item = Error>> {
         let mut iter = std::iter::from_fn(|| {
             self.tokens
                 .peek()
@@ -425,7 +461,10 @@ impl<I: Iterator<Item = (Span, TokenKind)>> Parser<I> {
                 }
             }
         }
-        Ok(ast::Program { decls })
+        Ok(ast::ProgramUnit {
+            file: self.file,
+            decls,
+        })
     }
 
     /// `declaration -> var_declaration | defer_declaration | statement`
