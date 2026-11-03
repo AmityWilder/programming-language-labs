@@ -94,7 +94,8 @@ use crate::{
         span::Span,
     },
 };
-use analyzer::analyze_interp;
+use analyzer::{InterpProgram, analyze_interp};
+use error::fail::Failure;
 use interp::interpret;
 use src_code::span::uspan;
 use std::{path::PathBuf, range::Range};
@@ -557,9 +558,7 @@ impl Cli {
     }
 }
 
-/// # Panics
-/// This method can panic if [`scanner::Scanner`] isn't written correctly
-fn run_code(source: &mut SourceMap, config: &Cli) {
+fn compile(source: &mut SourceMap, config: &Cli) -> Result<Todo, Vec<Error>> {
     // scanner
     let mut token_errs = Vec::new();
     for (id, file) in source.iter_mut() {
@@ -596,13 +595,12 @@ fn run_code(source: &mut SourceMap, config: &Cli) {
     if !token_errs.is_empty() {
         if config.print_errors {
             println!("\ntokenization errors:");
-            for e in token_errs {
+            for e in &token_errs {
                 println!("{}", e.contextualize(source));
             }
         }
-        return;
+        return Err(token_errs);
     }
-    drop(token_errs);
 
     // // preprocessing
     // let tokens: Vec<_> = preprocess(source, tokens).collect();
@@ -643,7 +641,7 @@ fn run_code(source: &mut SourceMap, config: &Cli) {
                 reason = "should not parse oversize file"
             )]
             match parse::parse(id, code.content().len() as uspan, code.tokens().spans()) {
-                Ok(unit) => Some((id, unit)),
+                Ok(unit) => Some(unit),
                 Err(errs) => {
                     parse_errs.extend(errs);
                     None
@@ -652,44 +650,18 @@ fn run_code(source: &mut SourceMap, config: &Cli) {
         })
         .collect();
 
+    println!("{prgm_units:#?}");
+
     // lex errors
     if !parse_errs.is_empty() {
         if config.print_errors {
             println!("\ntokenization errors:");
-            for e in parse_errs {
+            for e in &parse_errs {
                 println!("{}", e.contextualize(source));
             }
         }
-        return;
+        return Err(parse_errs);
     }
-    drop(parse_errs);
-
-    println!("{prgm_units:?}");
-
-    // // parse debug
-    // let prgm = match parse(source, tokens.into_iter().flatten()).program() {
-    //     Ok(prgm) => {
-    //         if config.dbg_ast {
-    //             println!("\nparser:");
-    //             println!("TODO: print_ast(&prgm, 0, 0)"); // TODO
-    //         }
-    //         prgm
-    //     }
-    //     Err(errs) => {
-    //         // parse errors
-    //         let any_err = if config.print_errors {
-    //             println!();
-    //             list_errors("grammar", errs)
-    //         } else {
-    //             errs.into_iter().next().is_some()
-    //         };
-    //         debug_assert!(
-    //             any_err,
-    //             "parser should only error if there is an error (duh)"
-    //         );
-    //         return;
-    //     }
-    // };
 
     // // TODO
     // // // semantic highlighting
@@ -750,6 +722,12 @@ fn run_code(source: &mut SourceMap, config: &Cli) {
     //         );
     //     }
     // }
+
+    Ok(todo!())
+}
+
+fn run_program(prgm: &Todo) -> Result<(), Failure> {
+    todo!()
 }
 
 fn pop_trailing_newline(s: &mut String) {
@@ -787,10 +765,15 @@ fn main() {
 
                     Ok(code) => {
                         source_map.push(code);
-                        run_code(&mut source_map, &config);
+                        if let Ok(prgm) = compile(&mut source_map, &config) {
+                            println!("\x1b[90mrunning...\x1b[0m\n");
+                            if let Err(e) = run_program(&prgm) {
+                                eprintln!("runtime error: {e}");
+                            }
+                            println!("\n\x1b[90mfinished\x1b[0m");
+                        }
                     }
                 }
-                run_code(&mut source_map, &config);
             }
         }
 
@@ -805,7 +788,13 @@ fn main() {
 
                     Ok(code) => {
                         source_map.push(code);
-                        run_code(&mut source_map, &config);
+                        if let Ok(prgm) = compile(&mut source_map, &config) {
+                            println!("\x1b[90mrunning...\x1b[0m\n");
+                            if let Err(e) = run_program(&prgm) {
+                                eprintln!("runtime error: {e}");
+                            }
+                            println!("\n\x1b[90mfinished\x1b[0m");
+                        }
                     }
                 }
             }
