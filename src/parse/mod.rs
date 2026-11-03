@@ -989,12 +989,13 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
         Ok(expr)
     }
 
-    /// `primary -> literal | group | variable`
+    /// `primary -> literal | group | variable | directive`
     fn primary(&mut self) -> Result<ast::Expr> {
         self.literal()
             .map(|x| Ok(ast::Expr::Literal(x)))
             .or_else(|| self.group().map_inner(|x| ast::Expr::Grouping(Box::new(x))))
             .or_else(|| self.variable().map(|x| Ok(ast::Expr::Variable(x))))
+            .or_else(|| self.directive().map(|x| Ok(ast::Expr::Directive(x))))
             .ok_or_else(|| self.error(ExpectedToken::Expr))
             .flatten()
     }
