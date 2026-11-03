@@ -96,6 +96,7 @@ use crate::{
 };
 use analyzer::analyze_interp;
 use interp::interpret;
+use src_code::span::uspan;
 use std::{path::PathBuf, range::Range};
 
 /// Indicates unfinished code.
@@ -627,6 +628,43 @@ fn run_code(source: &mut SourceMap, config: &Cli) {
     // } {
     //     return;
     // }
+
+    let mut parse_errs = Vec::new();
+    let prgm_units: Vec<_> = source
+        .iter_mut()
+        .filter_map(|(id, code)| {
+            debug_assert!(
+                uspan::try_from(code.content().len()).is_ok(),
+                "should not parse oversize file"
+            );
+            #[expect(
+                clippy::as_conversions,
+                clippy::cast_possible_truncation,
+                reason = "should not parse oversize file"
+            )]
+            match parse::parse(id, code.content().len() as uspan, code.tokens().spans()) {
+                Ok(unit) => Some((id, unit)),
+                Err(errs) => {
+                    parse_errs.extend(errs);
+                    None
+                }
+            }
+        })
+        .collect();
+
+    // lex errors
+    if !parse_errs.is_empty() {
+        if config.print_errors {
+            println!("\ntokenization errors:");
+            for e in parse_errs {
+                println!("{}", e.contextualize(source));
+            }
+        }
+        return;
+    }
+    drop(parse_errs);
+
+    println!("{prgm_units:?}");
 
     // // parse debug
     // let prgm = match parse(source, tokens.into_iter().flatten()).program() {
