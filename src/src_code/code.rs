@@ -203,7 +203,7 @@ impl SourceCode {
     pub fn with_expansion(loc: SourceLoc, src: String, mac: Vec<ExpansionData>) -> Self {
         Self {
             loc,
-            lines: src.lines().map(str::len).collect(),
+            lines: src.split_inclusive('\n').map(str::len).collect(),
             src,
             mac,
             tokens: None,
@@ -223,7 +223,23 @@ impl SourceCode {
     }
 
     /// Returns [`None`] if `pos` is not within the source.
-    pub fn line_char(&self, pos: usize) -> Option<(NonZero<usize>, usize)> {
+    pub fn line_char(&self, pos: usize) -> Option<(NonZero<usize>, NonZero<usize>)> {
+        if pos == self.src.len() {
+            return Some((
+                NonZero::new(self.lines.len())
+                    .expect("lines should not be empty; even an empty string has 1 line of len 0"),
+                NonZero::new(
+                    self.src
+                        .split('\n')
+                        .next_back()
+                        .expect("should output at least one, even if empty")
+                        .chars()
+                        .count()
+                        .strict_add(1),
+                )
+                .expect("adding 1 should ensure non-zero"),
+            ));
+        }
         self.lines
             .iter()
             .copied()
@@ -236,12 +252,13 @@ impl SourceCode {
                 }
             })
             .enumerate()
-            .find(|(_, range)| pos < range.end)
-            .inspect(|(_, range)| debug_assert!(range.contains(&pos), "pos should be in range"))
+            .find(|(_, range)| range.contains(&pos))
             .map(|(line_idx, range)| {
                 let line_num =
                     NonZero::new(line_idx.strict_add(1)).expect("adding 1 should ensure non-zero");
-                let char_num = self.src[range.start..pos].chars().count();
+                let char_num =
+                    NonZero::new(self.src[range.start..pos].chars().count().strict_add(1))
+                        .expect("adding 1 should ensure non-zero");
                 (line_num, char_num)
             })
     }

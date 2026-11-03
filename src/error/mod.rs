@@ -1235,11 +1235,18 @@ impl Display for ContextError<'_, '_> {
             write!(f, " (preprocessed)")?;
         }
         {
-            // TODO: ew. factor this into a function.
-            let (linenum, charnum) = code
+            let (start_linenum, start_charnum) = code
                 .line_char(uspan_to_usize(self.error.span.rel.start))
                 .expect("span should be in file it's from");
-            write!(f, ":{linenum}:{charnum}")?;
+            let (end_linenum, end_charnum) = code
+                .line_char(uspan_to_usize(self.error.span.rel.end))
+                .expect("span should be in file it's from");
+            write!(f, ":{start_linenum}:{start_charnum}")?;
+            if end_linenum != start_linenum {
+                write!(f, "-{end_linenum}:{end_charnum}")?;
+            } else if end_charnum != start_charnum {
+                write!(f, "-{end_charnum}")?;
+            }
         }
         write!(f, ": ")?;
         self.err(f)?;

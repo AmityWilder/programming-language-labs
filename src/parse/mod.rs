@@ -705,7 +705,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     /// `block_statement -> "{" ( declaration )* "}"`
     pub fn block_statement(&mut self) -> Option<Result<ast::BlockStmt>> {
         self.pull_if_delim(Bracket::Brace, |parser| {
-            std::iter::from_fn(|| parser.is_next_close().then(|| parser.declaration())).collect()
+            std::iter::from_fn(|| (!parser.is_next_close()).then(|| parser.declaration())).collect()
         })
         .map_inner(|(open, body, close)| ast::BlockStmt { open, body, close })
     }
