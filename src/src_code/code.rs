@@ -223,28 +223,26 @@ impl SourceCode {
     }
 
     /// Returns [`None`] if `pos` is not within the source.
-    pub fn charnum_of(&self, pos: usize) -> Option<usize> {
-        charnum(&self.src, pos)
-    }
-
-    /// Returns [`None`] if `span` is not within the source.
-    pub fn charnum_of_span(&self, span: RelSpan) -> Option<Range<usize>> {
-        charnum_range(&self.src, span.into())
-    }
-
-    /// Returns [`None`] if `pos` is not within the source.
-    pub fn linenum_of(&self, pos: usize) -> Option<NonZero<usize>> {
+    pub fn line_char(&self, pos: usize) -> Option<(NonZero<usize>, usize)> {
         self.lines
             .iter()
             .copied()
-            .position({
-                let mut prev_end = 0;
+            .map({
+                let mut end: usize = 0;
                 move |len| {
-                    let is_beyond = pos >= prev_end;
-                    prev_end = prev_end.strict_add(len);
-                    is_beyond
+                    let start = end;
+                    end = end.strict_add(len);
+                    Range { start, end }
                 }
             })
-            .map(|n| NonZero::new(n.strict_add(1)).expect("adding 1 should ensure non-zero"))
+            .enumerate()
+            .find(|(_, range)| pos < range.end)
+            .inspect(|(_, range)| debug_assert!(range.contains(&pos), "pos should be in range"))
+            .map(|(line_idx, range)| {
+                let line_num =
+                    NonZero::new(line_idx.strict_add(1)).expect("adding 1 should ensure non-zero");
+                let char_num = self.src[range.start..pos].chars().count();
+                (line_num, char_num)
+            })
     }
 }

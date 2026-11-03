@@ -10,14 +10,18 @@ use crate::{
         },
         token::{Operator, TokenKind, TokenTable},
     },
-    old_error::{ImmutableAssignment, NumErrorKind},
+    old_error::{ImmutableAssignment, LineRef, NumErrorKind},
     preproc::eval::{PpType, PpValue},
     scanner::token::{
         escape_char,
         punc::{BadBracketCombo, Bracket, OpSide},
         value::Keyword,
     },
-    src_code::{map::SourceMap, span::Span},
+    src_code::{
+        code::SourceLoc,
+        map::SourceMap,
+        span::{Span, uspan_to_usize},
+    },
 };
 use std::fmt::{self, Display, Formatter};
 
@@ -1216,9 +1220,28 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
 impl Display for ContextError<'_, '_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         const INDENT: &str = "          ";
-        write!(f, "  \x1b[91m");
+        write!(f, "  \x1b[91m")?;
         self.code(f)?;
-        write!(f, ":\x1b[0m ")?;
+        write!(f, ":\x1b[0m at ")?;
+        let code = self.source.source_of(self.error.span);
+        match code.loc() {
+            SourceLoc::Repl | SourceLoc::PreprocRepl => write!(f, "terminal")?,
+            SourceLoc::File(path) | SourceLoc::PreprocFile(path) => path.display().fmt(f)?,
+        }
+        if matches!(
+            code.loc(),
+            SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)
+        ) {
+            write!(f, " (preprocessed)")?;
+        }
+        {
+            // TODO: ew. factor this into a function.
+            let (linenum, charnum) = code
+                .line_char(uspan_to_usize(self.error.span.rel.start))
+                .expect("span should be in file it's from");
+            write!(f, ":{linenum}:{charnum}")?;
+        }
+        write!(f, ": ")?;
         self.err(f)?;
         writeln!(f)?;
 
