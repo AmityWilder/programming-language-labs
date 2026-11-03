@@ -2,15 +2,15 @@
 
 pub use super::{keyword::Keyword, punc::Punctuation};
 use crate::{
-    lex::token::TokenEq,
-    old_error::{ErrorType, IntKind, NumErrorKind},
-    scanner::{
+    lex::{
         symbols::{
             BIN_PREFIX, BYTE_SUFFIX, CHAR_DELIM, ESCAPE, HEX_PREFIX, OCT_PREFIX, SIGNED_SUFFIX,
             TEXT_DELIM, UNSIGNED_SUFFIX,
         },
-        token::{escape_char, escape_seq},
+        token::TokenEq,
     },
+    old_error::{ErrorType, IntKind, NumErrorKind},
+    scanner::token::{escape_char, escape_seq},
     types::{byte, flpt, sint, uint},
 };
 use std::{borrow::Cow, range::Range};

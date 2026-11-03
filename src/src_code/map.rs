@@ -34,8 +34,16 @@ impl SourceMap {
         Self { files: Vec::new() }
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (FileId, &SourceCode)> {
+        (0..).map(FileId).zip(self.files.iter())
+    }
+
     pub fn push(&mut self, code: SourceCode) {
         self.files.push(code);
+    }
+
+    pub fn get(&self, id: FileId) -> Option<&SourceCode> {
+        self.files.get(id.into_usize())
     }
 
     pub fn source_of(&self, span: Span) -> &SourceCode {

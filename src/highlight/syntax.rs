@@ -2,6 +2,7 @@
 
 use crate::{
     highlight::style::Style,
+    lex::token::TokenKind,
     scanner::token::{Token, punc::Punctuation, value::LexValue},
 };
 use std::marker::Destruct;
@@ -404,6 +405,64 @@ impl GetSyntax for Token<'_> {
             ) => Syntax::Keyword,
 
             LexValue::Punctuation(_) => Syntax::Normal,
+        }
+    }
+}
+
+impl GetSyntax for (&str, TokenKind) {
+    fn syntax(&self) -> Syntax {
+        match self.1 {
+            TokenKind::Invalid => Syntax::Invalid,
+            TokenKind::Comment => Syntax::Comment,
+            TokenKind::WSpace | TokenKind::Newline => Syntax::Dimmed,
+            TokenKind::NumberLit => Syntax::NumberLiteral,
+            TokenKind::CharLit => Syntax::CharLiteral,
+            TokenKind::TextLit => Syntax::TextLiteral,
+            TokenKind::BoolLit => Syntax::LanguageDefined,
+            TokenKind::Macro => Syntax::MacroName,
+            TokenKind::MParam => Syntax::MacroParam,
+
+            TokenKind::Ident => {
+                // constants are all-caps
+                if self.0.chars().any(char::is_uppercase) {
+                    if self.0.chars().any(char::is_lowercase) {
+                        Syntax::Typename
+                    } else {
+                        Syntax::Constant
+                    }
+                } else {
+                    Syntax::Variable
+                }
+            }
+
+            TokenKind::Keyword(kw) => {
+                if kw.is_flow() {
+                    Syntax::CtrlKeyword
+                } else if kw.is_type() && /* TODO: differenciate type vs value in semantics */ !kw.is_value()
+                {
+                    Syntax::Typename
+                } else {
+                    Syntax::Keyword
+                }
+            }
+
+            TokenKind::Punc(
+                Punctuation::MacroConcat
+                | Punctuation::MacroStringify
+                | Punctuation::MacroConst
+                | Punctuation::Coalesce,
+            ) => Syntax::CtrlKeyword,
+
+            TokenKind::Punc(
+                Punctuation::Exists
+                | Punctuation::Convert
+                | Punctuation::Transmute
+                | Punctuation::Incr
+                | Punctuation::Decr
+                | Punctuation::Iff,
+            ) => Syntax::Keyword,
+
+            TokenKind::Punc(_) => Syntax::Normal,
         }
     }
 }

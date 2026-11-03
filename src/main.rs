@@ -71,12 +71,14 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
+    error::Error,
     grammar::parse,
     highlight::{
         TokenHighlight, highlight,
         style::{Style, StyleWrapper},
-        syntax::{Syntax, SyntaxStyle, syntax_style},
+        syntax::{GetSyntax, Syntax, SyntaxStyle, syntax_style},
     },
+    lex::token::TokenTable,
     old_error::ContextError,
     preproc::preprocess,
     scanner::{
@@ -85,6 +87,11 @@ use crate::{
             value::{CharLiteral, LexValue, TextLiteral},
         },
         tokenize,
+    },
+    src_code::{
+        code::{SourceCode, SourceLoc},
+        map::SourceMap,
+        span::Span,
     },
 };
 use analyzer::analyze_interp;
@@ -208,85 +215,6 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
         foreground: BrightRed
     }
 };
-
-// pub fn print_ast(node: &Expr<'_>, indent: usize, br_depth: usize) {
-//     fn header(name: &str) {
-//         println!("\x1b[94m{name}:\x1b[0m");
-//     }
-
-//     fn tkn_field(name: &str, value: &Token<'_>, override_syn: Option<Syntax>, indent: usize) {
-//         const INDENT_BY: &str = "  ";
-//         println!(
-//             "{:>indent$}{INDENT_BY}\x1b[90m{name}:\x1b[0m {}",
-//             "",
-//             SYNTAX_STYLE_ANSI[override_syn.unwrap_or_else(|| value.syntax())].style_dbg(value)
-//         );
-//     }
-
-//     fn ast_field(name: &str, expr: &Expr<'_>, indent: usize, next_br_depth: usize) {
-//         const INDENT_BY: &str = "  ";
-//         print!("{:>indent$}{INDENT_BY}\x1b[90m{name}:\x1b[0m ", "");
-//         print_ast(expr, indent.strict_add(INDENT_BY.len()), next_br_depth);
-//     }
-
-//     match node {
-//         Expr::Ternary(inner) => {
-//             let Ternary {
-//                 lhs,
-//                 lop,
-//                 mhs,
-//                 rop,
-//                 rhs,
-//             } = &**inner;
-//             header("Ternary");
-//             ast_field("lhs", lhs, indent, br_depth);
-//             tkn_field("lop", lop, None, indent);
-//             ast_field("mhs", mhs, indent, br_depth);
-//             tkn_field("rop", rop, None, indent);
-//             ast_field("rhs", rhs, indent, br_depth);
-//         }
-
-//         Expr::Binary(inner) => {
-//             let Binary { lhs, op, rhs } = &**inner;
-//             header("Binary");
-//             ast_field("lhs", lhs, indent, br_depth);
-//             tkn_field(" op", op, None, indent);
-//             ast_field("rhs", rhs, indent, br_depth);
-//         }
-
-//         Expr::Unary(inner) => {
-//             let Unary { op, operand, side } = &**inner;
-//             header("Unary");
-//             tkn_field(" op", op, None, indent);
-//             ast_field(side.as_str(), operand, indent, br_depth);
-//         }
-
-//         Expr::Literal(inner) => {
-//             let Literal { value } = inner;
-//             header("Literal");
-//             tkn_field("value", value, None, indent);
-//         }
-
-//         Expr::Grouping(inner) => {
-//             let Grouping { open, expr, close } = &**inner;
-//             let syn = Syntax::Bracket(br_depth);
-//             header("Grouping");
-//             tkn_field(" open", open, Some(syn), indent);
-//             ast_field(" expr", expr, indent, br_depth.strict_add(1));
-//             tkn_field("close", close, Some(syn), indent);
-//         }
-
-//         Expr::Type(inner) => {
-//             let TypeExpr { name, or_ty } = &**inner;
-//             header("Type");
-//             tkn_field("name", name, None, indent);
-//             if let Some(OrType { pipe, ty }) = or_ty {
-//                 tkn_field("pipe", pipe, None, indent);
-//                 tkn_field("  ty", ty, None, indent);
-//             }
-//         }
-//     }
-// }
 
 trait ContextErrorOrRef<'src> {
     fn as_ref(&self) -> &ContextError<'src>;
@@ -436,95 +364,6 @@ impl Default for RunSyntax<'_> {
         Self::Mono(Syntax::default())
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct RunToken<'src> {
-    lex: &'src str,
-    // TODO: Subtokens
-    syn: RunSyntax<'src>,
-}
-
-impl<'src> TokenHighlight<'src> for RunToken<'src> {
-    fn get_syntax(&self) -> (&'src str, Syntax, LexValue<'src>) {
-        match self.syn {
-            // HACK: assumes highlighting ignores LexValue except for char and text
-            RunSyntax::Mono(syn) => (self.lex, syn, LexValue::Whitespace),
-            RunSyntax::Char(val) => (self.lex, Syntax::CharLiteral, LexValue::CharLiteral(val)),
-            RunSyntax::Text(val) => (self.lex, Syntax::TextLiteral, LexValue::TextLiteral(val)),
-        }
-    }
-}
-
-// fn runtime_token<'buf>(value: RunValue<'buf>, buf: &'buf mut String) -> RunToken<'buf> {
-//     use std::fmt::Write;
-//     match value {
-//         RunValue::None | RunValue::CoalesceNone => RunToken {
-//             lex: "none",
-//             syn: RunSyntax::Mono(Syntax::LanguageDefined),
-//         },
-//         RunValue::Fail(e) => RunToken {
-//             lex: {
-//                 _ = write!(buf, "failed: {e}"); // infallible for String
-//                 buf
-//             },
-//             syn: RunSyntax::Mono(Syntax::Invalid),
-//         },
-//         RunValue::Bool(x) => RunToken {
-//             lex: if x { "true" } else { "fals" },
-//             syn: RunSyntax::Mono(Syntax::LanguageDefined),
-//         },
-//         RunValue::UInt(n) => RunToken {
-//             lex: {
-//                 *buf = n.to_string();
-//                 buf
-//             },
-//             syn: RunSyntax::Mono(Syntax::NumberLiteral),
-//         },
-//         RunValue::SInt(n) => RunToken {
-//             lex: {
-//                 *buf = n.to_string();
-//                 buf
-//             },
-//             syn: RunSyntax::Mono(Syntax::NumberLiteral),
-//         },
-//         RunValue::Flpt(x) => RunToken {
-//             lex: {
-//                 *buf = x.to_string();
-//                 buf
-//             },
-//             syn: RunSyntax::Mono(Syntax::NumberLiteral),
-//         },
-//         RunValue::Char(ch) => {
-//             _ = write!(buf, "{ch:?}"); // infallible for String
-//             RunToken {
-//                 lex: buf,
-//                 syn: RunSyntax::Char(CharLiteral {
-//                     ch,
-//                     is_escaped: buf.contains('\\'),
-//                 }),
-//             }
-//         }
-//         RunValue::Text(s) => {
-//             _ = write!(buf, "{s:?}"); // infallible for String
-//             RunToken {
-//                 lex: buf,
-//                 syn: RunSyntax::Text(TextLiteral {
-//                     content: buf
-//                         .strip_circumfix('\"', '\"')
-//                         .expect("string debug should include delimiters"),
-//                 }),
-//             }
-//         }
-//         RunValue::Ptr(_, _) => todo!(),
-//         RunValue::Type(t) => {
-//             _ = write!(buf, "{t:?}"); // infallible for String
-//             RunToken {
-//                 lex: buf,
-//                 syn: RunSyntax::Mono(Syntax::Typename),
-//             }
-//         }
-//     }
-// }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliError {
@@ -732,147 +571,163 @@ impl Cli {
 
 /// # Panics
 /// This method can panic if [`scanner::Scanner`] isn't written correctly
-fn run_code(source: &str, config: &Cli) {
-    // token debug
-    if config.echo_src {
-        println!("source code:\n```\n{source}\n```");
-    }
-
+fn run_code<'src>(source: &mut SourceMap, config: &Cli) {
     // scanner
-    let tokens: Vec<_> = tokenize(source).collect();
-    if config.scanner_tokens {
-        println!("\ntokenizer:");
-        print_tokens(source, &tokens);
-    }
+    let mut token_errs = Vec::new();
+    let token_map: Vec<_> = source
+        .iter()
+        .map(|(id, file)| {
+            let (tokens, errs) = lex::lex(id, file.content());
+            token_errs.extend(errs);
+            (id, tokens)
+        })
+        .collect();
 
     // syntax highlighted
     if config.scanner_highlight {
         println!("\nsyntax highlighting:");
-        print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
-    }
-
-    // lex errors
-    if if config.print_errors {
-        println!();
-        list_errors(
-            "tokenization",
-            tokens.iter().map(Result::as_ref).filter_map(Result::err),
-        )
-    } else {
-        tokens.iter().any(Result::is_err)
-    } {
-        return;
-    }
-
-    // preprocessing
-    let tokens: Vec<_> = preprocess(source, tokens).collect();
-    if config.preproc_tokens {
-        println!("\npreprocessor:");
-        print_tokens(source, &tokens);
-    }
-
-    // preprocessed + syntax highlighted
-    if config.preproc_highlight {
-        print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
-    }
-
-    // preproc errors
-    if if config.print_errors {
-        println!();
-        list_errors(
-            "preprocessor",
-            tokens.iter().map(Result::as_ref).filter_map(Result::err),
-        )
-    } else {
-        tokens.iter().any(Result::is_err)
-    } {
-        return;
-    }
-
-    // parse debug
-    let prgm = match parse(source, tokens.into_iter().flatten()).program() {
-        Ok(prgm) => {
-            if config.dbg_ast {
-                println!("\nparser:");
-                println!("TODO: print_ast(&prgm, 0, 0)"); // TODO
+        for (id, file) in token_map {
+            let loc = source[id].loc();
+            match loc {
+                SourceLoc::Repl | SourceLoc::PreprocRepl => print!("repl"),
+                SourceLoc::File(path) | SourceLoc::PreprocFile(path) => {
+                    print!("{}", path.display());
+                }
             }
-            prgm
-        }
-        Err(errs) => {
-            // parse errors
-            let any_err = if config.print_errors {
-                println!();
-                list_errors("grammar", errs)
-            } else {
-                errs.into_iter().next().is_some()
-            };
-            debug_assert!(
-                any_err,
-                "parser should only error if there is an error (duh)"
+            if matches!(loc, SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)) {
+                print!(" (preprocessed)");
+            }
+            println!(":");
+            print_highlighted(
+                file.spans()
+                    .map(|(rel, kind)| (source.span_str(Span { file: id, rel }), kind)),
+                &SYNTAX_STYLE_ANSI,
             );
-            return;
         }
-    };
+    }
 
-    // TODO
-    // // semantic highlighting
-    // // TODO: need to find a way to have this take Result instead of flattening
-    // if config.semantic_highlight {
-    //     println!("\nsemantic highlighting:");
-    //     // TODO
-    //     println!(
-    //         "TODO: print_highlighted(semantic(source, prgm.iter().flatten()), &SYNTAX_STYLE_ANSI)"
-    //     );
+    // // lex errors
+    // if if config.print_errors {
+    //     println!();
+    //     list_errors(
+    //         "tokenization",
+    //         tokens.iter().map(Result::as_ref).filter_map(Result::err),
+    //     )
+    // } else {
+    //     tokens.iter().any(Result::is_err)
+    // } {
+    //     return;
     // }
 
-    let (program, env) = match analyze_interp(source, &prgm) {
-        Ok(prgm) => prgm,
-        Err(errs) => {
-            // static analysis errors
-            let any_err = if config.print_errors {
-                println!();
-                list_errors("static analysis", errs)
-            } else {
-                errs.into_iter().next().is_some()
-            };
-            debug_assert!(
-                any_err,
-                "static analysis should only error if there is an error (duh)"
-            );
-            return;
-        }
-    };
+    // // preprocessing
+    // let tokens: Vec<_> = preprocess(source, tokens).collect();
+    // if config.preproc_tokens {
+    //     println!("\npreprocessor:");
+    //     print_tokens(source, &tokens);
+    // }
 
-    // println!("static analysis: {program:#?}");
+    // // preprocessed + syntax highlighted
+    // if config.preproc_highlight {
+    //     print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
+    // }
 
-    // execution
-    if config.do_eval {
-        let outer_style = Style::new().foreground(highlight::style::Color::BrightBlack);
-        println!(
-            "\n{}running...\n----------{}",
-            outer_style.begin(),
-            outer_style.end()
-        );
-        let res = interpret(&program, env);
-        if let Err(e) = res
-            && config.print_errors
-        {
-            let style = SYNTAX_STYLE_ANSI.invalid;
-            println!(
-                "{}----------{}\n{}unhandled runtime error: {e}{}",
-                outer_style.begin(),
-                outer_style.end(),
-                style.begin(),
-                style.end()
-            );
-        } else {
-            println!(
-                "{}----------\nfinished{}\n",
-                outer_style.begin(),
-                outer_style.end()
-            );
-        }
-    }
+    // // preproc errors
+    // if if config.print_errors {
+    //     println!();
+    //     list_errors(
+    //         "preprocessor",
+    //         tokens.iter().map(Result::as_ref).filter_map(Result::err),
+    //     )
+    // } else {
+    //     tokens.iter().any(Result::is_err)
+    // } {
+    //     return;
+    // }
+
+    // // parse debug
+    // let prgm = match parse(source, tokens.into_iter().flatten()).program() {
+    //     Ok(prgm) => {
+    //         if config.dbg_ast {
+    //             println!("\nparser:");
+    //             println!("TODO: print_ast(&prgm, 0, 0)"); // TODO
+    //         }
+    //         prgm
+    //     }
+    //     Err(errs) => {
+    //         // parse errors
+    //         let any_err = if config.print_errors {
+    //             println!();
+    //             list_errors("grammar", errs)
+    //         } else {
+    //             errs.into_iter().next().is_some()
+    //         };
+    //         debug_assert!(
+    //             any_err,
+    //             "parser should only error if there is an error (duh)"
+    //         );
+    //         return;
+    //     }
+    // };
+
+    // // TODO
+    // // // semantic highlighting
+    // // // TODO: need to find a way to have this take Result instead of flattening
+    // // if config.semantic_highlight {
+    // //     println!("\nsemantic highlighting:");
+    // //     // TODO
+    // //     println!(
+    // //         "TODO: print_highlighted(semantic(source, prgm.iter().flatten()), &SYNTAX_STYLE_ANSI)"
+    // //     );
+    // // }
+
+    // let (program, env) = match analyze_interp(source, &prgm) {
+    //     Ok(prgm) => prgm,
+    //     Err(errs) => {
+    //         // static analysis errors
+    //         let any_err = if config.print_errors {
+    //             println!();
+    //             list_errors("static analysis", errs)
+    //         } else {
+    //             errs.into_iter().next().is_some()
+    //         };
+    //         debug_assert!(
+    //             any_err,
+    //             "static analysis should only error if there is an error (duh)"
+    //         );
+    //         return;
+    //     }
+    // };
+
+    // // println!("static analysis: {program:#?}");
+
+    // // execution
+    // if config.do_eval {
+    //     let outer_style = Style::new().foreground(highlight::style::Color::BrightBlack);
+    //     println!(
+    //         "\n{}running...\n----------{}",
+    //         outer_style.begin(),
+    //         outer_style.end()
+    //     );
+    //     let res = interpret(&program, env);
+    //     if let Err(e) = res
+    //         && config.print_errors
+    //     {
+    //         let style = SYNTAX_STYLE_ANSI.invalid;
+    //         println!(
+    //             "{}----------{}\n{}unhandled runtime error: {e}{}",
+    //             outer_style.begin(),
+    //             outer_style.end(),
+    //             style.begin(),
+    //             style.end()
+    //         );
+    //     } else {
+    //         println!(
+    //             "{}----------\nfinished{}\n",
+    //             outer_style.begin(),
+    //             outer_style.end()
+    //         );
+    //     }
+    // }
 }
 
 fn pop_trailing_newline(s: &mut String) {
@@ -892,12 +747,12 @@ fn main() {
             return;
         }
     };
+    let mut source_map = SourceMap::new();
     match &config.source_path {
         // interactive
         None => {
-            let mut input = String::new();
             loop {
-                input.clear();
+                let mut input = String::new();
                 std::io::stdin()
                     .read_line(&mut input)
                     .expect("failed to obtain input");
@@ -905,7 +760,15 @@ fn main() {
                 if matches!(input.trim(), "exit" | "quit") {
                     break; // finish
                 }
-                run_code(&input, &config);
+                match SourceCode::new(SourceLoc::Repl, input) {
+                    Err(e) => eprintln!("failed to read source code: {e}"),
+
+                    Ok(code) => {
+                        source_map.push(code);
+                        run_code(&mut source_map, &config);
+                    }
+                }
+                run_code(&mut source_map, &config);
             }
         }
 
@@ -915,7 +778,14 @@ fn main() {
 
             Ok(mut source) => {
                 pop_trailing_newline(&mut source);
-                run_code(&source, &config);
+                match SourceCode::new(SourceLoc::File(source_path.clone()), source) {
+                    Err(e) => eprintln!("failed to read source code file: {e}"),
+
+                    Ok(code) => {
+                        source_map.push(code);
+                        run_code(&mut source_map, &config);
+                    }
+                }
             }
         },
     }

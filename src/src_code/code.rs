@@ -181,6 +181,10 @@ impl SourceCode {
         &self.loc
     }
 
+    pub const fn content(&self) -> &str {
+        self.src.as_str()
+    }
+
     pub fn with_expansion(loc: SourceLoc, src: String, mac: Vec<ExpansionData>) -> Self {
         Self {
             loc,

@@ -4,8 +4,8 @@
 
 pub use crate::lex::token::{keyword, punc};
 use crate::{
-    lex::token::TokenEq,
-    scanner::{symbols::ESCAPE, token::value::LexValue},
+    lex::{symbols::ESCAPE, token::TokenEq},
+    scanner::token::value::LexValue,
 };
 use std::range::Range;
 pub mod value;

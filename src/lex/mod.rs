@@ -1,13 +1,14 @@
 use crate::{
     error::{Error, ErrorKind},
-    lex::token::{IdentKind, PuncKind, TokenKind, TokenTable},
-    scanner::{
+    lex::{
         symbols::{CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM},
-        token::punc::Punctuation,
+        token::{TokenKind, TokenTable, keyword::Keyword},
     },
+    scanner::token::punc::Punctuation,
     src_code::span::{FileId, RelSpan, Span, uspan},
 };
 
+pub mod symbols;
 pub mod token;
 
 #[derive(Debug, Clone)]
@@ -146,19 +147,22 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    fn keyword(&mut self) -> Option<Keyword> {
+        Keyword::from_prefix(self.source)
+    }
+
     fn ident(&mut self) -> usize {
         self.source
             .find(|ch: char| !ch.is_alphanumeric())
             .unwrap_or(self.source.len())
     }
 
-    fn punc(&mut self) -> Option<(usize, TokenKind)> {
+    fn punc(&mut self) -> Option<Punctuation> {
         Punctuation::from_prefix(self.source)
-            .map(|punc| (punc.as_str().len(), TokenKind::Punc(punc)))
     }
 }
 
-impl<'src> Iterator for Lexer<'src> {
+impl Iterator for Lexer<'_> {
     type Item = (uspan, TokenKind, Option<ErrorKind>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -222,13 +226,17 @@ impl<'src> Iterator for Lexer<'src> {
 
                 // identifier
                 (ch, _) if ch.is_alphabetic() || ch == '_' => {
-                    (self.ident(), TokenKind::Ident, None)
+                    if let Some(kw) = self.keyword() {
+                        (kw.as_str().len(), TokenKind::Keyword(kw), None)
+                    } else {
+                        (self.ident(), TokenKind::Ident, None)
+                    }
                 }
 
                 // punctuation or give up
                 (ch, _) => {
-                    if let Some((len, kind)) = self.punc() {
-                        (len, kind, None)
+                    if let Some(punc) = self.punc() {
+                        (punc.as_str().len(), TokenKind::Punc(punc), None)
                     } else {
                         (
                             ch.len_utf8(),
