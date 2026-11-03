@@ -147,10 +147,6 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn keyword(&mut self) -> Option<Keyword> {
-        Keyword::from_prefix(self.source)
-    }
-
     fn ident(&mut self) -> usize {
         self.source
             .find(|ch: char| !ch.is_alphanumeric())
@@ -226,8 +222,13 @@ impl Iterator for Lexer<'_> {
 
                 // identifier
                 (ch, _) if ch.is_alphabetic() || ch == '_' => {
-                    if let Some(kw) = self.keyword() {
-                        (kw.as_str().len(), TokenKind::Keyword(kw), None)
+                    let len = self.ident();
+                    #[expect(
+                        clippy::string_slice,
+                        reason = "ident() should return a valid position in source"
+                    )]
+                    if let Some(kw) = Keyword::try_from_str(&self.source[..len]) {
+                        (len, TokenKind::Keyword(kw), None)
                     } else {
                         (self.ident(), TokenKind::Ident, None)
                     }
@@ -246,12 +247,23 @@ impl Iterator for Lexer<'_> {
                     }
                 }
             })
-            .inspect(|(len, _, _)| self.source = &self.source[*len..])
+            .inspect(
+                #[expect(
+                    clippy::string_slice,
+                    reason = "should produce a valid position in source"
+                )]
+                |(len, _, _)| self.source = &self.source[*len..],
+            )
             .map(|(len, kind, e)| {
                 debug_assert!(
                     uspan::try_from(len).is_ok(),
                     "should not tokenize oversize file"
                 );
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "should not tokenize oversize file"
+                )]
                 (len as uspan, kind, e)
             })
     }
