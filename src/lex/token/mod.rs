@@ -219,7 +219,7 @@ impl Iterator for TokenSpans<'_> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash, Default)]
 pub struct TokenTable {
     /// (length, kind)
     pub(super) tokens: Vec<(uspan, TokenKind)>,

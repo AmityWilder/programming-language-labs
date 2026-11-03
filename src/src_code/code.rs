@@ -1,4 +1,7 @@
-use crate::src_code::span::{RelSpan, Span, uspan};
+use crate::{
+    lex::token::TokenTable,
+    src_code::span::{RelSpan, Span, uspan},
+};
 use std::{num::NonZero, path::PathBuf, range::Range};
 
 /// # Panics
@@ -152,6 +155,7 @@ pub struct SourceCode {
     mac: Vec<ExpansionData>,
     /// The length of each line in bytes
     lines: Vec<usize>,
+    tokens: Option<TokenTable>,
 }
 
 impl std::ops::Index<RelSpan> for SourceCode {
@@ -177,6 +181,17 @@ impl SourceCode {
         }
     }
 
+    pub const fn set_tokens(&mut self, tokens: TokenTable) {
+        assert!(self.tokens.is_none(), "should not reassign tokens");
+        self.tokens = Some(tokens);
+    }
+
+    pub const fn tokens(&self) -> &TokenTable {
+        self.tokens
+            .as_ref()
+            .expect("should not access tokens before initialization")
+    }
+
     pub const fn loc(&self) -> &SourceLoc {
         &self.loc
     }
@@ -191,6 +206,7 @@ impl SourceCode {
             lines: src.lines().map(str::len).collect(),
             src,
             mac,
+            tokens: None,
         }
     }
 

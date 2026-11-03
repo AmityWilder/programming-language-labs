@@ -352,19 +352,6 @@ where
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum RunSyntax<'src> {
-    Mono(Syntax),
-    Char(CharLiteral),
-    Text(TextLiteral<'src>),
-}
-
-impl Default for RunSyntax<'_> {
-    fn default() -> Self {
-        Self::Mono(Syntax::default())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliError {
     UnknownOption {
@@ -571,22 +558,19 @@ impl Cli {
 
 /// # Panics
 /// This method can panic if [`scanner::Scanner`] isn't written correctly
-fn run_code<'src>(source: &mut SourceMap, config: &Cli) {
+fn run_code(source: &mut SourceMap, config: &Cli) {
     // scanner
     let mut token_errs = Vec::new();
-    let token_map: Vec<_> = source
-        .iter()
-        .map(|(id, file)| {
-            let (tokens, errs) = lex::lex(id, file.content());
-            token_errs.extend(errs);
-            (id, tokens)
-        })
-        .collect();
+    for (id, file) in source.iter_mut() {
+        let (tokens, errs) = lex::lex(id, file.content());
+        token_errs.extend(errs);
+        file.set_tokens(tokens);
+    }
 
     // syntax highlighted
     if config.scanner_highlight {
         println!("\nsyntax highlighting:");
-        for (id, file) in token_map {
+        for (id, file) in source.iter() {
             let loc = source[id].loc();
             match loc {
                 SourceLoc::Repl | SourceLoc::PreprocRepl => print!("repl"),
@@ -599,25 +583,25 @@ fn run_code<'src>(source: &mut SourceMap, config: &Cli) {
             }
             println!(":");
             print_highlighted(
-                file.spans()
+                file.tokens()
+                    .spans()
                     .map(|(rel, kind)| (source.span_str(Span { file: id, rel }), kind)),
                 &SYNTAX_STYLE_ANSI,
             );
         }
     }
 
-    // // lex errors
-    // if if config.print_errors {
-    //     println!();
-    //     list_errors(
-    //         "tokenization",
-    //         tokens.iter().map(Result::as_ref).filter_map(Result::err),
-    //     )
-    // } else {
-    //     tokens.iter().any(Result::is_err)
-    // } {
-    //     return;
-    // }
+    // lex errors
+    if !token_errs.is_empty() {
+        if config.print_errors {
+            println!("\ntokenization errors:");
+            for e in token_errs {
+                println!("{}", e.contextualize(source));
+            }
+        }
+        return;
+    }
+    drop(token_errs);
 
     // // preprocessing
     // let tokens: Vec<_> = preprocess(source, tokens).collect();
