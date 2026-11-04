@@ -1,22 +1,44 @@
 use crate::{
     Todo,
     error::{Error, ErrorKind, ExpectedToken},
-    lex::token::{
-        TokenKind,
-        keyword::Keyword,
-        punc::{BadBracketCombo, Bracket, Punctuation},
+    lex::{
+        lex,
+        token::{
+            TokenKind,
+            keyword::Keyword,
+            punc::{BadBracketCombo, Bracket, Punctuation},
+        },
     },
     parse::util::MapInner,
     src_code::{
-        code::{CreateSourceCodeError, SourceCode, SourceLoc},
-        span::{FileId, RelSpan, Span, uspan},
+        code::{ExpansionData, SourceCode, SourceLoc},
+        span::{FileId, RelSpan, Span, usize_to_uspan, uspan},
     },
 };
 use std::collections::VecDeque;
 
 mod ast;
 
-pub fn preprocess(source: SourceCode, id: FileId) -> Result<SourceCode, CreateSourceCodeError> {
+pub fn preprocess(id: FileId, source: &SourceCode) -> Result<SourceCode, Vec<Error>> {
+    let file_len = usize_to_uspan(source.content().len());
+    let mut pp = PreParser::new(id, file_len, source.tokens().spans());
+    let tokens = loop {
+        let doc = pp.document().map_err(Vec::from_iter)?;
+        if doc
+            .items
+            .iter()
+            .all(|item| matches!(item, ast::DocumentItem::Other(_)))
+        {
+            break doc.items.into_iter().flat_map(|item| {
+                if let ast::DocumentItem::Other(tokens) = item {
+                    tokens.spans
+                } else {
+                    unreachable!("already confirmed all are Other");
+                }
+            });
+        }
+    };
+    let src = tokens.map(|span| &source[span]).collect::<String>();
     let loc = match source.loc() {
         SourceLoc::Repl | SourceLoc::PreprocRepl => SourceLoc::PreprocRepl,
 
@@ -24,17 +46,25 @@ pub fn preprocess(source: SourceCode, id: FileId) -> Result<SourceCode, CreateSo
             SourceLoc::PreprocFile(path.clone())
         }
     };
-    let len = source.content().len();
-    debug_assert!(uspan::try_from(len).is_ok());
-    let mut pp = PreParser::new(id, len as uspan, source.tokens().spans());
-    let _ = pp.document();
-    let src = todo!();
-    let mac = todo!();
-    let tokens = todo!();
-    SourceCode::with_expansion(loc, src, mac).map(|mut code| {
-        code.set_tokens(tokens);
-        code
-    })
+    let (tokens, errs) = lex(id, src.as_str());
+    if errs.is_empty() {
+        match SourceCode::with_expansion(loc, src, pp.macros()) {
+            Ok(mut code) => {
+                code.set_tokens(tokens);
+                Ok(code)
+            }
+            Err(e) => Err([Error::new(
+                Span {
+                    file: id,
+                    rel: (file_len..file_len).into(),
+                },
+                ErrorKind::OversizePreproc(e),
+            )]
+            .to_vec()),
+        }
+    } else {
+        Err(errs)
+    }
 }
 
 /// Preprocessor environment
@@ -59,6 +89,10 @@ impl PreParser {
             file_len,
             tokens: VecDeque::from_iter(tokens),
         }
+    }
+
+    pub fn macros(self) -> Vec<ExpansionData> {
+        Vec::new() // TODO
     }
 
     fn peek_next(&self) -> Option<&(RelSpan, TokenKind)> {
@@ -101,8 +135,9 @@ impl PreParser {
             .position(|(_, k)| !k.is_ignored())
             .filter(|&i| p(&self.tokens[i]))
             .map(|i| {
-                std::iter::from_fn(|| self.tokens.pop_front())
-                    .nth(i)
+                drop(self.tokens.drain(..i));
+                self.tokens
+                    .pop_front()
                     .expect("position should produce a valid index")
             })
     }

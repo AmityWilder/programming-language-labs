@@ -18,7 +18,7 @@ use crate::{
         value::Keyword,
     },
     src_code::{
-        code::SourceLoc,
+        code::{CreateSourceCodeError, SourceLoc},
         map::SourceMap,
         span::{Span, uspan_to_usize},
     },
@@ -234,6 +234,8 @@ pub enum ErrorKind {
         head: Span,
     },
 
+    OversizePreproc(CreateSourceCodeError),
+
     NonBoolPrePredicate {
         actual: PpValue,
     },
@@ -418,6 +420,7 @@ impl ErrorKind {
             Self::MacroUndefined { .. }
             | Self::MacroParamUndefined { .. }
             | Self::RecursiveMacro { .. }
+            | Self::OversizePreproc { .. }
             | Self::NonBoolPrePredicate { .. }
             | Self::InvalidPreOperator { .. }
             | Self::PreIncompatible { .. }
@@ -466,6 +469,7 @@ impl ErrorKind {
             Self::MacroUndefined { .. } => line!(),
             Self::MacroParamUndefined { .. } => line!(),
             Self::RecursiveMacro { .. } => line!(),
+            Self::OversizePreproc { .. } => line!(),
             Self::NonBoolPrePredicate { .. } => line!(),
             Self::InvalidPreOperator { .. } => line!(),
             Self::PreIncompatible { .. } => line!(),
@@ -591,6 +595,9 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
             ErrorKind::RecursiveMacro { .. } => {
                 write!(f, "macro call cannot be recursive")
             }
+            ErrorKind::OversizePreproc(e) => {
+                write!(f, "preprocessor generated an invalid file: {e}")
+            }
             ErrorKind::NonBoolPrePredicate { .. } => {
                 write!(f, "preprocessor predicate must evaluate to a boolean")
             }
@@ -715,6 +722,7 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
             ErrorKind::MacroUndefined => write!(f, "not defined"),
             ErrorKind::MacroParamUndefined { .. } => write!(f, "unknown macro parameter"),
             ErrorKind::RecursiveMacro { .. } => write!(f, "macro calls itself here"),
+            ErrorKind::OversizePreproc { .. } => write!(f, "invalid file"),
             ErrorKind::NonBoolPrePredicate { actual, .. } => {
                 write!(f, "expected a boolean value, found ")?;
                 match actual {
@@ -904,6 +912,12 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                 write!(
                     f,
                     "macros can't be defined recursively. they do not have base cases, so it will always be infinite recursion"
+                )
+            }
+            ErrorKind::OversizePreproc { .. } => {
+                write!(
+                    f,
+                    "check if a macro is expanding to something larger than you may have expected"
                 )
             }
             ErrorKind::NonBoolPrePredicate { actual, .. } => {

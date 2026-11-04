@@ -279,9 +279,7 @@ impl<'src> StaticEnvironment<'src> {
                 \n num_items: {num_items}"
             );
             #[expect(clippy::arithmetic_side_effects, reason = "asserted")]
-            {
-                prev.0 - id.0 - 1
-            }
+            (prev.0 - id.0 - 1)
         }
     }
 

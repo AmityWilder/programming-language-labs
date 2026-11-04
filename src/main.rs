@@ -97,7 +97,7 @@ use crate::{
 use analyzer::{InterpProgram, analyze_interp};
 use error::fail::Failure;
 use interp::interpret;
-use src_code::span::uspan;
+use src_code::span::{usize_to_uspan, uspan};
 use std::{path::PathBuf, range::Range};
 
 /// Indicates unfinished code.
@@ -610,6 +610,36 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
         return Err(token_errs);
     }
 
+    // TODO: how to prevent REPL from generating preprocessed copies every time?
+
+    // preprocessing
+    let mut pp_errs = Vec::new();
+    let preprocessed = source
+        .iter()
+        .filter_map(|(id, file)| match pre::preprocess(id, file) {
+            Ok(x) => Some(x),
+            Err(e) => {
+                pp_errs.extend(e);
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    for code in preprocessed {
+        source.push(code);
+    }
+
+    // preprocesor errors
+    if !pp_errs.is_empty() {
+        if config.print_errors {
+            println!("\npreprocesor errors:");
+            for e in &pp_errs {
+                println!("{}", e.contextualize(source));
+            }
+        }
+        return Err(pp_errs);
+    }
+
     // // preprocessing
     // let tokens: Vec<_> = preprocess(source, tokens).collect();
     // if config.preproc_tokens {
@@ -639,16 +669,11 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     let prgm_units: Vec<_> = source
         .iter_mut()
         .filter_map(|(id, code)| {
-            debug_assert!(
-                uspan::try_from(code.content().len()).is_ok(),
-                "should not parse oversize file"
-            );
-            #[expect(
-                clippy::as_conversions,
-                clippy::cast_possible_truncation,
-                reason = "should not parse oversize file"
-            )]
-            match parse::parse(id, code.content().len() as uspan, code.tokens().spans()) {
+            match parse::parse(
+                id,
+                usize_to_uspan(code.content().len()),
+                code.tokens().spans(),
+            ) {
                 Ok(unit) => Some(unit),
                 Err(errs) => {
                     parse_errs.extend(errs);

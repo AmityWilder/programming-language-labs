@@ -12,10 +12,6 @@ pub type uspan = cfg_select! {
 };
 
 pub const fn uspan_to_usize(n: uspan) -> usize {
-    #![expect(
-        clippy::as_conversions,
-        reason = "`uspan` is guaranteed to be at most pointer-width"
-    )]
     cfg_select! {
         // n is already defined as usize
         target_pointer_width = "16" => n,
@@ -27,9 +23,24 @@ pub const fn uspan_to_usize(n: uspan) -> usize {
                     "`uspan` should be at most pointer-width"
                 );
             }
-            n as usize
+            #[expect(
+                clippy::as_conversions,
+                reason = "`uspan` is guaranteed to be at most pointer-width"
+            )]
+            (n as usize)
         }
     }
+}
+
+/// Relies on the assumption `n` is from a non-oversize file
+pub const fn usize_to_uspan(n: usize) -> uspan {
+    debug_assert!(uspan::try_from(n).is_ok(), "file should not be oversized");
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        reason = "file should not be oversized"
+    )]
+    (n as uspan)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
