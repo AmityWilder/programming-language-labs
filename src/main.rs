@@ -106,6 +106,13 @@ use std::{path::PathBuf, range::Range};
 /// want a placeholder to let your code pass type analysis.
 pub type Todo = !;
 
+/// Indicates unfinished code.
+///
+/// This can be useful if you are prototyping and just
+/// want a placeholder to let your code pass type analysis.
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
+pub struct Dummy;
+
 macro_rules! debug_info {
     ($($args:tt)*) => {
         #[cfg(debug_assertions)] {
@@ -558,7 +565,7 @@ impl Cli {
     }
 }
 
-fn compile(source: &mut SourceMap, config: &Cli) -> Result<Todo, Vec<Error>> {
+fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     // scanner
     let mut token_errs = Vec::new();
     for (id, file) in source.iter_mut() {
@@ -729,10 +736,10 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Todo, Vec<Error>> {
     //     }
     // }
 
-    Ok(todo!())
+    Ok(Dummy)
 }
 
-fn run_program(prgm: &Todo) -> Result<(), Failure> {
+fn run_program(prgm: &Dummy) -> Result<(), Failure> {
     todo!()
 }
 
