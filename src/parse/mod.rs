@@ -1024,7 +1024,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
         self.pull_if(|(_, kind)| {
             matches!(
                 kind,
-                TokenKind::BoolLit
+                TokenKind::BoolLit(_)
                     | TokenKind::Keyword(Keyword::None)
                     | TokenKind::NumberLit
                     | TokenKind::CharLit

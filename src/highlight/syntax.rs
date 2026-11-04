@@ -418,7 +418,7 @@ impl GetSyntax for (&str, TokenKind) {
             TokenKind::NumberLit => Syntax::NumberLiteral,
             TokenKind::CharLit => Syntax::CharLiteral,
             TokenKind::TextLit => Syntax::TextLiteral,
-            TokenKind::BoolLit => Syntax::LanguageDefined,
+            TokenKind::BoolLit(_) => Syntax::LanguageDefined,
             TokenKind::Macro => Syntax::MacroName,
             TokenKind::MParam => Syntax::MacroParam,
 

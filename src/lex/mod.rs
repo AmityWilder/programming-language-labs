@@ -227,8 +227,11 @@ impl Iterator for Lexer<'_> {
                         clippy::string_slice,
                         reason = "ident() should return a valid position in source"
                     )]
-                    if let Some(kw) = Keyword::try_from_str(&self.source[..len]) {
+                    let s = &self.source[..len];
+                    if let Some(kw) = Keyword::try_from_str(s) {
                         (len, TokenKind::Keyword(kw), None)
+                    } else if matches!(s, "true" | "fals") {
+                        (len, TokenKind::BoolLit(s == "true"), None)
                     } else {
                         (self.ident(), TokenKind::Ident, None)
                     }
