@@ -3,7 +3,7 @@ use crate::src_code::{
     span::{FileId, Span, uspan_to_usize},
 };
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct SourceMap {
     /// Cannot be popped or reordered, so [`Span`]s are stable
     files: Vec<SourceCode>,

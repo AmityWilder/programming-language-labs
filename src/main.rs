@@ -650,7 +650,13 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Todo, Vec<Error>> {
         })
         .collect();
 
-    println!("{prgm_units:#?}");
+    for unit in &prgm_units {
+        let source = source
+            .get(unit.file)
+            .expect("program unit should have valid file ID");
+
+        println!("{:#}", parse::fmt::Lisp { source, node: unit });
+    }
 
     // lex errors
     if !parse_errs.is_empty() {

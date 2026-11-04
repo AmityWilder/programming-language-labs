@@ -149,7 +149,7 @@ impl<'src> Lexer<'src> {
 
     fn ident(&mut self) -> usize {
         self.source
-            .find(|ch: char| !ch.is_alphanumeric())
+            .find(|ch: char| !ch.is_alphanumeric() && ch != '_')
             .unwrap_or(self.source.len())
     }
 
@@ -252,7 +252,18 @@ impl Iterator for Lexer<'_> {
                     clippy::string_slice,
                     reason = "should produce a valid position in source"
                 )]
-                |(len, _, _)| self.source = &self.source[*len..],
+                |&(len, kind, ref err)| {
+                    assert_ne!(
+                        len,
+                        0,
+                        "token should not be empty\
+                        \n upcoming: {:?}\
+                        \n     kind: {kind:?}\
+                        \n      err: {err:?}",
+                        self.source.lines().next().unwrap_or("")
+                    );
+                    self.source = &self.source[len..];
+                },
             )
             .map(|(len, kind, e)| {
                 debug_assert!(

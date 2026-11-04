@@ -12,6 +12,7 @@ use ast::{Expectable, ExpectableExt};
 use std::iter::{Filter, Peekable};
 
 pub mod ast;
+pub mod fmt;
 
 pub mod util {
     pub trait MapInner<T, E>: Sized {
