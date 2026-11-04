@@ -119,10 +119,10 @@ expected_token! {
     pub enum ExpectedToken {
         MacroIdent = "a macro identifier (like a regular identifier, but starts with `\\`",
         MacroParamOrRParen = "a macro parameter (like a regular identifier, but starts with `$`) or `)`",
-        MacroDefLBrace = "a `{` for macro definition",
-        MacroArgLBrace = "a `{` for macro argument",
-        MacroPredLBrace = "a `{` for a macro predicate",
-        MacroCondLBrace = "a `{` for a macro condition body",
+        MacroDef = "a macro definition (should be enclosed in `{...}`)",
+        MacroArg = "a macro argument (should be enclosed in `{...}`)",
+        MacroPred = "a a macro predicate (should be enclosed in `{...}`)",
+        MacroCond = "a a macro condition body (should be enclosed in `{...}`)",
 
         #[deprecated = "use ExpectedToken::Verbatim"]
         Colon = "a `:`",

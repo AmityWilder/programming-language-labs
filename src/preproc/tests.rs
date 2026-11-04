@@ -593,7 +593,7 @@ fn test_bad_arg_count() {
                 source,
                 Some(unexpected.lex_range(source)),
                 None,
-                ErrorType::UnexpectedToken { expect: ExpectedToken::MacroArgLBrace, actual: "+" },
+                ErrorType::UnexpectedToken { expect: ExpectedToken::MacroArg, actual: "+" },
             )),
             Ok(("+", Punctuation::Add)),
             Ok(("5", SIntLiteral(5))),

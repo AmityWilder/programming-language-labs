@@ -82,12 +82,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     where
         J: IntoIterator<IntoIter = I>,
     {
-        let filter: fn(&I::Item) -> bool = |&(_, kind)| {
-            !matches!(
-                kind,
-                TokenKind::Newline | TokenKind::WSpace | TokenKind::Comment
-            )
-        };
+        let filter: fn(&I::Item) -> bool = |&(_, kind)| !kind.is_ignored();
         Self {
             file,
             file_len,

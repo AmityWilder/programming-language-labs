@@ -214,6 +214,12 @@ pub enum TokenKind {
     Punc(Punctuation),
 }
 
+impl TokenKind {
+    pub const fn is_ignored(self) -> bool {
+        matches!(self, Self::Newline | Self::WSpace | Self::Comment)
+    }
+}
+
 impl From<Keyword> for TokenKind {
     fn from(value: Keyword) -> Self {
         Self::Keyword(value)

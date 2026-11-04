@@ -174,8 +174,22 @@ impl std::ops::IndexMut<RelSpan> for SourceCode {
 
 impl SourceCode {
     pub fn new(loc: SourceLoc, src: String) -> Result<Self, CreateSourceCodeError> {
+        Self::with_expansion(loc, src, Vec::new())
+    }
+
+    pub fn with_expansion(
+        loc: SourceLoc,
+        src: String,
+        mac: Vec<ExpansionData>,
+    ) -> Result<Self, CreateSourceCodeError> {
         if uspan::try_from(src.len()).is_ok() {
-            Ok(Self::with_expansion(loc, src, Vec::new()))
+            Ok(Self {
+                loc,
+                lines: src.split_inclusive('\n').map(str::len).collect(),
+                src,
+                mac,
+                tokens: None,
+            })
         } else {
             Err(CreateSourceCodeError)
         }
@@ -198,16 +212,6 @@ impl SourceCode {
 
     pub const fn content(&self) -> &str {
         self.src.as_str()
-    }
-
-    pub fn with_expansion(loc: SourceLoc, src: String, mac: Vec<ExpansionData>) -> Self {
-        Self {
-            loc,
-            lines: src.split_inclusive('\n').map(str::len).collect(),
-            src,
-            mac,
-            tokens: None,
-        }
     }
 
     /// Finds the most specific expansion containing `span`

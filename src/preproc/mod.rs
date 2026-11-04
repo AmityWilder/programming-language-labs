@@ -1,5 +1,7 @@
 //! Preprocessing (macros)
 
+#![deprecated = "use `pre` instead"]
+
 use crate::{
     grammar::{ast::AstNodeFinal, parse, token_matches},
     old_error::{ContextError, ErrorType},
