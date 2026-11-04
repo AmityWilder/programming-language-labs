@@ -149,6 +149,7 @@ mod interp;
 mod lex;
 mod old_error;
 mod parse;
+mod pre;
 mod preproc;
 mod regex;
 mod scanner;

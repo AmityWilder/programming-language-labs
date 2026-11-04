@@ -353,10 +353,10 @@ impl<'src> PreprocessorStream<'src> {
         let open = self.try_pull(
             match_token!(Punctuation::LBrace),
             match kind {
-                ReplacerKind::Argument => ExpectedToken::MacroArgLBrace,
-                ReplacerKind::Body => ExpectedToken::MacroDefLBrace,
-                ReplacerKind::Predicate => ExpectedToken::MacroPredLBrace,
-                ReplacerKind::ConditionBody => ExpectedToken::MacroCondLBrace,
+                ReplacerKind::Argument => ExpectedToken::MacroArg,
+                ReplacerKind::Body => ExpectedToken::MacroDef,
+                ReplacerKind::Predicate => ExpectedToken::MacroPred,
+                ReplacerKind::ConditionBody => ExpectedToken::MacroCond,
             },
         )?;
         let content = {
