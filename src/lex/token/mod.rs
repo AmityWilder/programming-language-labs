@@ -129,7 +129,7 @@ pub enum TokenKind {
     Comment,
 
     /// Boolean literal
-    BoolLit,
+    BoolLit(bool),
     /// Any number literal
     NumberLit,
     /// Character literal
@@ -169,7 +169,7 @@ impl TokenKind {
             Self::Newline | Self::WSpace => panic!("not implemented: should not expect whitespace"),
             Self::Comment => panic!("not implemented: should not expect a comment"),
 
-            Self::BoolLit => "a boolean literal",
+            Self::BoolLit(_) => "a boolean literal",
             Self::NumberLit => "a number literal",
             Self::CharLit => "a character literal",
             Self::TextLit => "a text literal",
