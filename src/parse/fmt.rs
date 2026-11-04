@@ -46,36 +46,23 @@ impl<T: ?Sized + LispDisplay> LispDisplayValue for &T {
     }
 }
 
-impl<T: Into<TokenKind>> LispDisplayValue for (&str, T) {
-    fn fmt_value(self, _source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (span, kind) = self;
-        write_highlight(once((span, kind.into())), f, &SYNTAX_STYLE_ANSI)
-    }
-}
-
 impl<T: Into<TokenKind>> LispDisplayValue for (RelSpan, T) {
     fn fmt_value(self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (span, kind) = self;
-        (source.get(span).expect("AST spans should be valid"), kind).fmt_value(source, f)
+        let src = source.get(span).expect("AST spans should be valid");
+        write_highlight(once((src, kind.into())), f, &SYNTAX_STYLE_ANSI)
     }
 }
 
-impl<O, A> LispDisplayValue for (O, A)
+impl<I> LispDisplayValue for (&str, I)
 where
-    O: LispDisplayValue,
-    A: IntoIterator<Item: LispDisplayValue>,
+    I: IntoIterator<Item: LispDisplayValue>,
 {
     fn fmt_value(self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let style = SYNTAX_STYLE_ANSI.keyword;
         let (op, args) = self;
         f.write_str("(")?;
-        if f.alternate() {
-            fmt::Display::fmt(&style.begin(), f)?;
-        }
-        op.fmt_value(source, f)?;
-        if f.alternate() {
-            fmt::Display::fmt(&style.end(), f)?;
-        }
+        fmt::Display::fmt(&style.alt_style(op), f)?;
         for arg in args {
             f.write_str(" ")?;
             arg.fmt_value(source, f)?;
@@ -92,31 +79,31 @@ impl LispDisplay for ast::ProgramUnit {
 
 impl LispDisplay for ast::Binary {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispDisplayValue::fmt_value(((self.op_span, self.op), [&self.lhs, &self.rhs]), source, f)
+        LispDisplayValue::fmt_value((self.op.as_str(), [&self.lhs, &self.rhs]), source, f)
     }
 }
 
 impl LispDisplay for ast::Unary {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.op_span, [&self.operand]).fmt_value(source, f)
+        (self.op.as_str(), [&self.operand]).fmt_value(source, f)
     }
 }
 
 impl LispDisplay for ast::Literal {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.span.fmt_value(source, f)
+        (self.span, self.kind).fmt_value(source, f)
     }
 }
 
 impl LispDisplay for ast::Directive {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.kw_span.fmt_value(source, f)
+        (self.kw_span, self.kw.to_keyword()).fmt_value(source, f)
     }
 }
 
 impl LispDisplay for ast::Variable {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.ident.fmt_value(source, f)
+        (self.ident, TokenKind::Ident).fmt_value(source, f)
     }
 }
 
@@ -165,14 +152,22 @@ impl LispDisplay for ast::ExprStmt {
 
 impl LispDisplay for ast::PrintStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.kw, [&self.group.expr]).fmt_value(source, f)
+        (
+            source
+                .get(self.kw)
+                .expect("should be a valid span within source"),
+            [&self.group.expr],
+        )
+            .fmt_value(source, f)
     }
 }
 
 impl LispDisplay for ast::IfStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         (
-            self.kw,
+            source
+                .get(self.kw)
+                .expect("should be a valid span within source"),
             chain!(once(&self.pred), once(&self.then), self.or.as_deref()),
         )
             .fmt_value(source, f)
@@ -181,7 +176,13 @@ impl LispDisplay for ast::IfStmt {
 
 impl LispDisplay for ast::OrStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.kw, once(&self.body)).fmt_value(source, f)
+        (
+            source
+                .get(self.kw)
+                .expect("should be a valid span within source"),
+            once(&self.body),
+        )
+            .fmt_value(source, f)
     }
 }
 
@@ -202,31 +203,52 @@ impl LispDisplay for ast::ScopeLabel {
 
 impl LispDisplay for ast::Label {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.dot, once(self.name)).fmt_value(source, f)
+        (
+            source
+                .get(self.dot)
+                .expect("should be a valid span within source"),
+            once((self.name, TokenKind::Ident)),
+        )
+            .fmt_value(source, f)
     }
 }
 
 impl LispDisplay for ast::DoneStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.kw, chain!(self.label.as_ref(), self.value.as_ref())).fmt_value(source, f)
+        (
+            source
+                .get(self.kw)
+                .expect("should be a valid span within source"),
+            chain!(self.label.as_ref(), self.value.as_ref()),
+        )
+            .fmt_value(source, f)
     }
 }
 
 impl LispDisplay for ast::SkipStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.kw, chain!(self.label.as_ref())).fmt_value(source, f)
+        (
+            source
+                .get(self.kw)
+                .expect("should be a valid span within source"),
+            chain!(self.label.as_ref()),
+        )
+            .fmt_value(source, f)
     }
 }
 
 impl LispDisplay for ast::LoopBlock {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kw = source
+            .get(self.kw)
+            .expect("should be a valid span within source");
         match &self.kind {
             ast::LoopKind::Loop | ast::LoopKind::Cord => {
-                (self.kw, chain!(self.label.as_ref(), once(&self.block))).fmt_value(source, f)
+                (kw, chain!(self.label.as_ref(), once(&self.block))).fmt_value(source, f)
             }
 
             ast::LoopKind::Rep { pred } => (
-                self.kw,
+                kw,
                 chain!(self.label.as_ref(), once(pred), once(&self.block)),
             )
                 .fmt_value(source, f),
@@ -252,7 +274,7 @@ impl LispDisplay for ast::Statement {
 
 impl LispDisplay for ast::BindingPattern {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.ident.fmt_value(source, f)
+        (self.ident, TokenKind::Ident).fmt_value(source, f)
     }
 }
 
@@ -264,14 +286,22 @@ impl LispDisplay for ast::DeferParam {
 
 impl LispDisplay for ast::DeclDefer {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.kw, chain!(self.param.as_ref(), once(&self.on_pop))).fmt_value(source, f)
+        (
+            source
+                .get(self.kw)
+                .expect("should be a valid span within source"),
+            chain!(self.param.as_ref(), once(&self.on_pop)),
+        )
+            .fmt_value(source, f)
     }
 }
 
 impl LispDisplay for ast::DeclVar {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         (
-            self.kw_span,
+            source
+                .get(self.kw_span)
+                .expect("should be a valid span within source"),
             chain!(
                 once(&self.binding),
                 self.ty.as_ref(),
@@ -284,7 +314,13 @@ impl LispDisplay for ast::DeclVar {
 
 impl LispDisplay for ast::Assignment {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.op, once(&self.expr)).fmt_value(source, f)
+        (
+            source
+                .get(self.op)
+                .expect("should be a valid span within source"),
+            once(&self.expr),
+        )
+            .fmt_value(source, f)
     }
 }
 
@@ -297,7 +333,13 @@ impl LispDisplay for ast::TypeAnnotation {
 impl LispDisplay for ast::TypeExpr {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(or_ty) = self.or_ty.as_ref() {
-            (or_ty.pipe, chain!(once(&self.then_ty), once(or_ty))).fmt_value(source, f)
+            (
+                source
+                    .get(or_ty.pipe)
+                    .expect("should be a valid span within source"),
+                chain!(once(&self.then_ty), once(or_ty)),
+            )
+                .fmt_value(source, f)
         } else {
             self.then_ty.fmt(source, f)
         }
@@ -306,7 +348,7 @@ impl LispDisplay for ast::TypeExpr {
 
 impl LispDisplay for ast::OrType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.ty_span.fmt_value(source, f)
+        (self.ty_span, self.ty.to_keyword()).fmt_value(source, f)
     }
 }
 
@@ -323,7 +365,12 @@ impl LispDisplay for ast::TypeInstance {
 impl LispDisplay for ast::Typename {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.path.is_empty() {
-            self.name_span.fmt_value(source, f)
+            (
+                self.name_span,
+                self.name
+                    .map_or(TokenKind::Ident, |k| k.to_keyword().into()),
+            )
+                .fmt_value(source, f)
         } else {
             todo!()
         }
