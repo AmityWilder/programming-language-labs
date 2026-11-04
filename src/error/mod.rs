@@ -516,7 +516,7 @@ impl Error {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContextError<'smap, 'err> {
     source: &'smap SourceMap,
     error: &'err Error,
