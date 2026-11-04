@@ -5,7 +5,7 @@ use crate::{
         token::{TokenKind, TokenTable, keyword::Keyword},
     },
     scanner::token::punc::Punctuation,
-    src_code::span::{FileId, RelSpan, Span, uspan},
+    src_code::span::{FileId, RelSpan, Span, usize_to_uspan, uspan},
 };
 
 pub mod symbols;
@@ -86,9 +86,7 @@ impl<'src> Lexer<'src> {
                 );
                 #[expect(clippy::arithmetic_side_effects, reason = "if `pos` is the position of a `/`, that `/` must be stored in the string at `pos`, \
                     meaning the string's len() is an integer at least equal to this.")]
-                {
-                    pos + '/'.len_utf8()
-                }
+                (pos + '/'.len_utf8())
             }).ok_or(())
     }
 
@@ -268,18 +266,7 @@ impl Iterator for Lexer<'_> {
                     self.source = &self.source[len..];
                 },
             )
-            .map(|(len, kind, e)| {
-                debug_assert!(
-                    uspan::try_from(len).is_ok(),
-                    "should not tokenize oversize file"
-                );
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_possible_truncation,
-                    reason = "should not tokenize oversize file"
-                )]
-                (len as uspan, kind, e)
-            })
+            .map(|(len, kind, e)| (usize_to_uspan(len), kind, e))
     }
 }
 

@@ -137,13 +137,18 @@ impl ExpansionData {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CreateSourceCodeError;
+pub struct CreateSourceCodeError(usize);
 
 impl std::error::Error for CreateSourceCodeError {}
 
 impl std::fmt::Display for CreateSourceCodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "file too big, cannot exceed {} bytes", uspan::MAX)
+        write!(
+            f,
+            "file too big: cannot exceed {} bytes, found {} bytes",
+            uspan::MAX,
+            self.0
+        )
     }
 }
 
@@ -182,7 +187,8 @@ impl SourceCode {
         src: String,
         mac: Vec<ExpansionData>,
     ) -> Result<Self, CreateSourceCodeError> {
-        if uspan::try_from(src.len()).is_ok() {
+        let len = src.len();
+        if uspan::try_from(len).is_ok() {
             Ok(Self {
                 loc,
                 lines: src.split_inclusive('\n').map(str::len).collect(),
@@ -191,7 +197,7 @@ impl SourceCode {
                 tokens: None,
             })
         } else {
-            Err(CreateSourceCodeError)
+            Err(CreateSourceCodeError(len))
         }
     }
 
