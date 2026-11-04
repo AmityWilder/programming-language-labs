@@ -1,4 +1,5 @@
 use crate::{
+    error::NumberBase,
     lex::token::{keyword::Keyword, punc::Punctuation},
     parse::ast::ExprPrecedence,
     src_code::span::{RelSpan, uspan},
@@ -113,6 +114,69 @@ pub enum PuncKind {
     NumberLit,
     Keyword(KeywordKind),
     Bracket(u8),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum NumberSuffix {
+    #[default]
+    Invalid,
+    /// `s`
+    Signed,
+    /// `u`
+    Unsigned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum IdentCase {
+    #[default]
+    Other,
+    Snake,
+    Pascal,
+    Screaming,
+}
+
+impl From<&str> for IdentCase {
+    fn from(value: &str) -> Self {
+        // PascalCase is allowed to contain underscores, as long as they aren't infix
+        let value = value.trim_matches('_');
+        let mut chars = value.chars();
+        if chars
+            .find(|ch| ch.is_alphabetic())
+            .is_some_and(char::is_uppercase)
+        {
+            if chars.any(char::is_lowercase) {
+                if value.contains('_') {
+                    Self::Other
+                } else {
+                    debug_assert!(
+                        !value.contains('_')
+                            && value
+                                .trim_start_matches(char::is_numeric)
+                                .starts_with(char::is_uppercase)
+                            && value.contains(char::is_lowercase),
+                        "expected PascalCase"
+                    );
+                    Self::Pascal
+                }
+            } else {
+                debug_assert!(
+                    value
+                        .chars()
+                        .all(|ch| ch == '_' || ch.is_uppercase() || ch.is_numeric()),
+                    "expected SCREAMING_SNAKE_CASE"
+                );
+                Self::Screaming
+            }
+        } else {
+            debug_assert!(
+                value
+                    .chars()
+                    .all(|ch| ch == '_' || ch.is_lowercase() || ch.is_numeric()),
+                "expected snake_case"
+            );
+            Self::Snake
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

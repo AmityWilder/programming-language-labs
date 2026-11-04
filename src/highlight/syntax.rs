@@ -2,7 +2,7 @@
 
 use crate::{
     highlight::style::Style,
-    lex::token::TokenKind,
+    lex::token::{IdentCase, TokenKind},
     scanner::token::{Token, punc::Punctuation, value::LexValue},
 };
 use std::marker::Destruct;
@@ -423,15 +423,11 @@ impl GetSyntax for (&str, TokenKind) {
             TokenKind::MParam => Syntax::MacroParam,
 
             TokenKind::Ident => {
-                // constants are all-caps
-                if self.0.chars().any(char::is_uppercase) {
-                    if self.0.chars().any(char::is_lowercase) {
-                        Syntax::Typename
-                    } else {
-                        Syntax::Constant
-                    }
-                } else {
-                    Syntax::Variable
+                let case = IdentCase::from(self.0);
+                match case {
+                    IdentCase::Other | IdentCase::Snake => Syntax::Variable,
+                    IdentCase::Pascal => Syntax::Typename,
+                    IdentCase::Screaming => Syntax::Constant,
                 }
             }
 

@@ -1026,7 +1026,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
                 kind,
                 TokenKind::BoolLit(_)
                     | TokenKind::Keyword(Keyword::None)
-                    | TokenKind::NumberLit
+                    | TokenKind::NumberLit { .. }
                     | TokenKind::CharLit
                     | TokenKind::TextLit
                     | TokenKind::Macro
