@@ -1,3 +1,4 @@
 disallowed-types = [
     { path = "programming_language_labs::Todo", reason = "`Todo` should not be present in production code" },
+    { path = "programming_language_labs::Dummy", reason = "`Dummy` should not be present in production code" },
 ]
