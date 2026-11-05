@@ -593,7 +593,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
             println!(":");
             print_highlighted(
                 file.tokens()
-                    .spans()
+                    .iter()
                     .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
                 &SYNTAX_STYLE_ANSI,
             );
@@ -647,7 +647,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
             println!(":");
             print_highlighted(
                 file.tokens()
-                    .spans()
+                    .iter()
                     .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
                 &SYNTAX_STYLE_ANSI,
             );
@@ -679,7 +679,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
             match parse::parse(
                 id,
                 usize_to_uspan(code.content().len()),
-                code.tokens().spans(),
+                code.tokens().iter(),
             ) {
                 Ok(unit) => Some(unit),
                 Err(errs) => {

@@ -80,7 +80,7 @@ impl<'src> PreProcessor<'src> {
             file_len: code.len(),
             tokens: VecDeque::from_iter(
                 code.tokens()
-                    .spans()
+                    .iter()
                     .map(|(rel, kind)| (rel.within_file(file), kind)),
             ),
             source,
