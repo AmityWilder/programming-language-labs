@@ -128,8 +128,9 @@ expected_token! {
         MacroParamOrRParen = "a macro parameter (like a regular identifier, but starts with `$`) or `)`",
         MacroDef = "a macro definition (should be enclosed in `{...}`)",
         MacroArg = "a macro argument (should be enclosed in `{...}`)",
-        MacroPred = "a a macro predicate (should be enclosed in `{...}`)",
-        MacroCond = "a a macro condition body (should be enclosed in `{...}`)",
+        MacroPred = "a macro predicate (should be enclosed in `{...}`)",
+        MacroCond = "a macro condition body (should be enclosed in `{...}`)",
+        MacroCondContinuation = "a macro condition body (should be enclosed in `{...}`) or `rot`",
 
         #[deprecated = "use ExpectedToken::Verbatim"]
         Colon = "a `:`",

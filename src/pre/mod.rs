@@ -15,10 +15,12 @@ use crate::{
         span::{FileId, RelSpan, Span, usize_to_uspan, uspan},
     },
 };
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    range::Range,
+};
 
 mod ast;
-mod eval;
 
 pub fn preprocess(
     id: FileId,
@@ -274,6 +276,24 @@ impl<'src> PreProcessor<'src> {
                         let key = self.source.span_str(def.name);
                         let params = def.params.map_or_default(|group| group.params);
                         let body = def.body.items.list;
+
+                        // update expansion
+                        for token in std::iter::once(def.kw)
+                            .chain(std::iter::once(def.name))
+                            .chain(params.iter().copied())
+                            .chain(body.iter().map(|(span, _)| *span))
+                            .filter(|span| span.file == self.file)
+                            .map(|span| span.rel)
+                        {
+                            for expansion in
+                                self.expansions.iter_mut().filter(|x| x.exp.overlaps(token))
+                            {
+                                println!(
+                                    "TODO: {token:?} appears to be intermediate within {expansion:?}"
+                                );
+                            }
+                        }
+
                         _ = self.definitions.insert(
                             key,
                             MacroDef {
@@ -282,6 +302,10 @@ impl<'src> PreProcessor<'src> {
                                 body,
                             },
                         );
+                    }
+
+                    ast::DocumentItem::Cond(cond) => {
+                        todo!()
                     }
 
                     ast::DocumentItem::Call(call) => {
@@ -301,12 +325,17 @@ impl<'src> PreProcessor<'src> {
                                 })
                                 .collect::<HashMap<&'src str, _>>();
 
+                            let mut substituted = Vec::new();
                             let mut expansion = Vec::new();
                             for &item @ (span, kind) in &def.body {
                                 if matches!(kind, TokenKind::MParam)
                                     && let Some(sub) = subs.get(self.source.span_str(span))
                                 {
-                                    expansion.extend_from_slice(&sub.arg.list);
+                                    let replacement = sub.arg.list.as_slice();
+                                    let start = expansion.len();
+                                    let end = start.strict_add(replacement.len());
+                                    substituted.push((sub.param, start..end));
+                                    expansion.extend_from_slice(replacement);
                                 } else {
                                     // ignore other macro params, they might belong to an inner definition.
                                     // they will error if they are left behind after all calls have expanded.
@@ -319,7 +348,30 @@ impl<'src> PreProcessor<'src> {
                                 }
                             }
 
-                            // TODO: expansion data
+                            println!("substituted: {substituted:?}");
+
+                            // note: expansions will only ever add tokens forward, they cannot insert tokens ahead of previous ones
+
+                            let start = uspan::try_from(preprocessed.len())
+                                .unwrap_or_else(|_| todo!("error: too big"));
+
+                            let end = expansion
+                                .iter()
+                                .map(|(span, _)| span.rel.len())
+                                .try_fold(start, |acc: uspan, len| acc.checked_add(len))
+                                .unwrap_or_else(|| todo!("error: too big"));
+
+                            self.expansions.push(ExpansionData {
+                                // TODO
+                                exp: RelSpan((start..end).into()),
+                                // TODO: this should include the WHOLE call
+                                call: call.name,
+                                // TODO: this should include the WHOLE definition
+                                def: def.name_span,
+                                // TODO
+                                field: None,
+                            });
+
                             self.tokens.prepend(expansion);
                         } else {
                             errors.push(Error::new(call.name, ErrorKind::MacroUndefined));
@@ -336,19 +388,64 @@ impl<'src> PreProcessor<'src> {
                 Err(e) => errors.push(e),
             }
         }
+        for item in &self.expansions {
+            println!(
+                "expansion: from `{}` to `{}`, defined with `{}`",
+                self.source.span_str(item.call),
+                &preprocessed[<Range<usize>>::from(item.exp)],
+                self.source.span_str(item.def),
+            );
+        }
         (preprocessed, self.expansions, errors)
     }
 
-    /// `document_item -> definition | call | tokens`
+    /// `document_item -> definition | conditional | call | "~" MACRO  | tokens`
     fn document_item(&mut self) -> Result<ast::DocumentItem, Error> {
         self.definition()
             .map_inner(ast::DocumentItem::Def)
+            .or_else(|| self.conditional().map_inner(ast::DocumentItem::Cond))
             .or_else(|| self.call().map_inner(ast::DocumentItem::Call))
+            // TODO: macro const
             .unwrap_or_else(|| {
                 Ok(ast::DocumentItem::Other(self.tokens_while(|(_, kind)| {
-                    !matches!(kind, TokenKind::Keyword(Keyword::Def) | TokenKind::Macro)
+                    !matches!(
+                        kind,
+                        TokenKind::Keyword(Keyword::Def | Keyword::Rot)
+                            | TokenKind::Punc(Punctuation::MacroConst)
+                            | TokenKind::Macro
+                    )
                 })))
             })
+    }
+
+    /// `conditional -> "rot" replacer replacer ( alternative )?`
+    fn conditional(&mut self) -> Option<Result<ast::Conditional, Error>> {
+        self.pull_next_if_eq(Keyword::Rot).map(|kw| {
+            Ok(ast::Conditional {
+                kw,
+                pred: self
+                    .replacer()
+                    .unwrap_or_else(|| Err(self.error(ExpectedToken::MacroPred)))?,
+                then: self
+                    .replacer()
+                    .unwrap_or_else(|| Err(self.error(ExpectedToken::MacroCond)))?,
+                alt: self.alternative().transpose()?,
+            })
+        })
+    }
+
+    /// `alternative -> "tor" ( conditional | replacer )`
+    fn alternative(&mut self) -> Option<Result<ast::Alternative, Error>> {
+        self.pull_if_eq(Keyword::Tor).map(|kw| {
+            Ok(ast::Alternative {
+                kw,
+                body: self
+                    .conditional()
+                    .map_inner(|x| ast::AlternativeBody::More(Box::new(x)))
+                    .or_else(|| self.replacer().map_inner(ast::AlternativeBody::Last))
+                    .unwrap_or_else(|| Err(self.error(ExpectedToken::MacroCondContinuation)))?,
+            })
+        })
     }
 
     /// `call -> MACRO ( replacer )*`
