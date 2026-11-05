@@ -94,8 +94,7 @@ impl<'src> Lexer<'src> {
         if ch2.is_some_and(|ch| ch.is_alphabetic() || ch == '_') {
             Ok(self.source[PREFIX.len_utf8()..]
                 .find(|ch: char| !ch.is_alphanumeric() && ch != '_')
-                .map(|n| n + PREFIX.len_utf8())
-                .unwrap_or(self.source.len()))
+                .map_or(self.source.len(), |n| n + PREFIX.len_utf8()))
         } else {
             Err(PREFIX.len_utf8())
         }

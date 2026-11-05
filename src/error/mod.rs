@@ -1,16 +1,22 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::types::{AbstractType, SizeReq},
-    error::fail::Failure,
-    highlight::{style::StyleWrapper, syntax::Syntax},
+    error::{
+        fail::Failure,
+        inline::{CodeRef, CodeReference, MessageKind, render_code_refs},
+    },
+    highlight::{
+        style::{Color, Style, StyleWrapper},
+        syntax::Syntax,
+    },
     lex::{
         symbols::{
             BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX,
             MACRO_PREFIX, TEXT_DELIM,
         },
-        token::{Operator, TokenKind, TokenTable},
+        token::{Operator, TokenKind},
     },
-    old_error::{ImmutableAssignment, LineRef, NumErrorKind},
+    old_error::{ImmutableAssignment, NumErrorKind},
     preproc::eval::{PpType, PpValue},
     scanner::token::{
         escape_char,
@@ -20,12 +26,13 @@ use crate::{
     src_code::{
         code::{CreateSourceCodeError, SourceLoc},
         map::SourceMap,
-        span::{Span, uspan_to_usize},
+        span::{RelSpan, Span, uspan_to_usize},
     },
 };
 use std::fmt::{self, Display, Formatter};
 
 pub mod fail;
+pub mod inline;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum NumberBase {
@@ -688,7 +695,8 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
             ErrorKind::TypeTooBig => {
                 write!(
                     f,
-                    "type size exceeds what can be stored on a {}-bit system",
+                    "type size exceeds {} bytes; too big to store on a {}-bit system",
+                    std::mem::size_of::<usize>(),
                     usize::BITS
                 )
             }
@@ -704,83 +712,55 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
         }
     }
 
-    fn inline(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn inline(&self) -> impl fmt::Display {
         match &self.error.kind {
-            ErrorKind::UnknownToken => write!(f, "what is this?"),
+            ErrorKind::UnknownToken => "what is this?",
             ErrorKind::EndlessBlockComment
             | ErrorKind::EndlessCharLiteral
-            | ErrorKind::EndlessStringLiteral => write!(f, "never ends"),
-            ErrorKind::EmptyMacroName => write!(f, "macro prefix, but no name"),
-            ErrorKind::EmptyMacroParam => write!(f, "macro parameter prefix, but no name"),
-            ErrorKind::EmptyCharLiteral => write!(f, "empty"),
-            ErrorKind::MultiCharLiteral => write!(f, "a char should be 1 char"),
+            | ErrorKind::EndlessStringLiteral => "never ends",
+            ErrorKind::EmptyMacroName => "macro prefix, but no name",
+            ErrorKind::EmptyMacroParam => "macro parameter prefix, but no name",
+            ErrorKind::EmptyCharLiteral => "empty",
+            ErrorKind::MultiCharLiteral => "a char should be 1 char",
             ErrorKind::EscapedCharLiteralEnd | ErrorKind::EscapedStringLiteralEnd => {
-                write!(f, "never ends, unless you remove the `{ESCAPE}`")
+                "never ends, unless you remove the `\\`"
             }
-            ErrorKind::InvalidEscape => write!(f, "invalid escape sequence"),
-            ErrorKind::InvalidNumLiteral(_) => write!(f, "not a valid number"),
-            ErrorKind::MacroUndefined => write!(f, "not defined"),
-            ErrorKind::MacroParamUndefined { .. } => write!(f, "unknown macro parameter"),
-            ErrorKind::RecursiveMacro { .. } => write!(f, "macro calls itself here"),
-            ErrorKind::OversizePreproc { .. } => write!(f, "invalid file"),
-            ErrorKind::NonBoolPrePredicate { actual, .. } => {
-                write!(f, "expected a boolean value, found ")?;
-                match actual {
-                    PpValue::Bool => f.write_str(
-                        "the typename `bool` (which is not a boolean \x1b[1mvalue\x1b[22m)",
-                    ),
-                    PpValue::Uint => f.write_str("the typename `uint`"),
-                    PpValue::Sint => f.write_str("the typename `sint`"),
-                    PpValue::Flpt => f.write_str("the typename `flpt`"),
-                    PpValue::Char => f.write_str("the typename `char`"),
-                    PpValue::Text => f.write_str("the typename `text`"),
-                    PpValue::UIntLiteral(x) => {
-                        write!(f, "the unsigned integer {x}")
-                    }
-                    PpValue::SIntLiteral(x) => {
-                        write!(f, "the signed integer {x}")
-                    }
-                    PpValue::Macro(x) => {
-                        write!(f, "the unexpanded macro `{}`", self.source.span_str(*x))
-                    }
-                    PpValue::BoolLiteral(_) => {
-                        unimplemented!("should not produce this error on a boolean value");
-                    }
-                }
+            ErrorKind::InvalidEscape => "invalid escape sequence",
+            ErrorKind::InvalidNumLiteral(_) => "not a valid number",
+            ErrorKind::MacroUndefined => "not defined",
+            ErrorKind::MacroParamUndefined { .. } => "unknown macro parameter",
+            ErrorKind::RecursiveMacro { .. } => "macro calls itself here",
+            ErrorKind::OversizePreproc { .. } => "invalid file",
+            ErrorKind::NonBoolPrePredicate { .. } => "expected a boolean value",
+            ErrorKind::InvalidPreOperator => "this operator is not defined within preprocessing",
+            ErrorKind::PreIncompatible { .. } => {
+                "operation is not supported between operands of these types in preprocessing"
             }
-            ErrorKind::InvalidPreOperator => {
-                write!(f, "this operator is not defined within preprocessing")
-            }
-            ErrorKind::PreIncompatible { .. } | ErrorKind::Incompatible { .. } => write!(
-                f,
+            ErrorKind::Incompatible { .. } => {
                 "operation is not supported between operands of these types"
-            ),
-
-            ErrorKind::PreUnsupported { .. } | ErrorKind::Unsupported { .. } => {
-                write!(f, "operation is not supported for operand of this type")
             }
-            ErrorKind::InvalidPreLiteral => {
-                write!(f, "this literal type is not valid within preprocessing")
+            ErrorKind::PreUnsupported { .. } => {
+                "operation is not supported for operand of this type in preprocessing"
             }
-            ErrorKind::InvalidPreType => {
-                write!(f, "this type is not valid within preprocessing")
+            ErrorKind::Unsupported { .. } => "operation is not supported for operand of this type",
+            ErrorKind::InvalidPreLiteral | ErrorKind::InvalidPreType | ErrorKind::PreOrType => {
+                "not valid within preprocessing"
             }
-            ErrorKind::PreOrType => write!(f, "this type is not valid within preprocessing"),
-            ErrorKind::IncorrectCloseBracket { .. } => write!(f, "incorrect partner"),
-            ErrorKind::ExcessCloseBracket { .. } => write!(f, "missing a partner"),
-            ErrorKind::MissingCloseBracket { .. } => write!(f, "missing close bracket"),
-            ErrorKind::MissingToken { .. } => write!(f, "missing token"),
-            ErrorKind::UnexpectedToken { .. } => write!(f, "wrong token"),
-            ErrorKind::DivByZero { .. } => write!(f, "dividing by 0"),
-            ErrorKind::UnsignedNeg => write!(f, "uint can't be negated"),
-            ErrorKind::UnknownVar => write!(f, "unknown variable"),
-            ErrorKind::TypeMismatch(_) => write!(f, "incorrect type"),
-            ErrorKind::TypeAmbiguity => write!(f, "type must be known at this point"),
-            ErrorKind::AssignImmutable(_) => write!(f, "does not resolve to a mutable value"),
-            ErrorKind::FallibleBlockExpr => write!(f, "may finish without a result"),
-            ErrorKind::TypeTooBig => write!(f, "type size exceeds {} bytes", usize::MAX),
-            ErrorKind::IllegalUnsized(x) => write!(f, "{x} must have static size"),
-            ErrorKind::Fail(_) => write!(f, "failed operation"),
+            ErrorKind::IncorrectCloseBracket { .. } => "incorrect partner",
+            ErrorKind::ExcessCloseBracket { .. } => "missing a partner",
+            ErrorKind::MissingCloseBracket { .. } => "missing close bracket",
+            ErrorKind::MissingToken { .. } => "missing token",
+            ErrorKind::UnexpectedToken { .. } => "unexpected",
+            ErrorKind::DivByZero { .. } => "dividing by 0",
+            ErrorKind::UnsignedNeg => "uint can't be negated",
+            ErrorKind::UnknownVar => "unknown variable",
+            ErrorKind::TypeMismatch(_) => "incorrect type",
+            ErrorKind::TypeAmbiguity => "type must be known at this point",
+            ErrorKind::AssignImmutable(_) => "does not resolve to a mutable value",
+            ErrorKind::FallibleBlockExpr => "may finish without a result",
+            ErrorKind::TypeTooBig => "type too big",
+            ErrorKind::IllegalUnsized(_) => "must have static size",
+            ErrorKind::Fail(_) => "failed operation",
         }
     }
 
@@ -1128,7 +1108,7 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
         }
     }
 
-    // fn info(&self) -> Vec<LineRef<'_, '_>> {
+    // fn info(&self) -> Vec<CodeRef<_, _>> {
     //     match &self.error.kind {
     //         ErrorKind::MacroParamUndefined { head, .. } => {
     //             for (range, msg) in (head.iter().map(|&range| (range, "macro defined here"))) {
@@ -1234,12 +1214,32 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
     // }
 }
 
+struct DisplayWith<F>(F);
+
+impl<F: Fn(&mut Formatter<'_>) -> fmt::Result> fmt::Display for DisplayWith<F> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0(f)
+    }
+}
+
 impl Display for ContextError<'_, '_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        const INDENT: &str = "          ";
-        write!(f, "  \x1b[91m")?;
-        self.code(f)?;
-        write!(f, ":\x1b[0m at ")?;
+        write!(
+            f,
+            "{}error{}: ",
+            Style::new().foreground(Color::BrightRed).bold(true).begin(),
+            Style::new().foreground(Color::BrightWhite).begin()
+        )?;
+        self.err(f)?;
+        writeln!(f, "\x1b[0m")?;
+        write!(
+            f,
+            "  {}-->\x1b[0m ",
+            Style::new()
+                .foreground(Color::BrightCyan)
+                .bold(true)
+                .begin()
+        )?;
         let code = self.source.source_of(self.error.span);
         match code.loc() {
             SourceLoc::Repl | SourceLoc::PreprocRepl => write!(f, "terminal")?,
@@ -1253,10 +1253,10 @@ impl Display for ContextError<'_, '_> {
         }
         {
             let (start_linenum, start_charnum) = code
-                .line_char(uspan_to_usize(self.error.span.rel.start))
+                .line_char(self.error.span.rel.start)
                 .expect("span should be in file it's from");
             let (end_linenum, end_charnum) = code
-                .line_char(uspan_to_usize(self.error.span.rel.end))
+                .line_char(self.error.span.rel.end)
                 .expect("span should be in file it's from");
             write!(f, ":{start_linenum}:{start_charnum}")?;
             if end_linenum != start_linenum {
@@ -1265,54 +1265,37 @@ impl Display for ContextError<'_, '_> {
                 write!(f, "-{end_charnum}")?;
             }
         }
-        write!(f, ": ")?;
-        self.err(f)?;
         writeln!(f)?;
 
-        // TODO
         // render
-        // {
-        //     const MAX_ERROR_REFS: usize = 1;
-        //     const MAX_MACRO_REFS: usize = 1;
-        //     const MAX_INFO_REFS: usize = 2;
-        //     let mut refs =
-        //         <ArrayVec<LineRef, { MAX_ERROR_REFS + MAX_MACRO_REFS + MAX_INFO_REFS }>>::new();
+        {
+            let mut refs: Vec<Box<dyn CodeReference>> = vec![Box::new(CodeRef::new(
+                MessageKind::Error,
+                self.error.span,
+                self.inline(),
+            ))];
 
-        //     refs.push_mut(LineRef::new(
-        //         self.0.source,
-        //         RefStyleKind::Error,
-        //         self.0.range,
-        //         LineRefMsg::InlineErr(InlineErrMsg(&self.0.err)),
-        //     )).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
+            // TODO: recursive macro lookup
+            // if let Some(macro_range) = self.0.mac {
+            //     refs.push(CodeRef::new(MessageKind::Info, self.error.span, todo!()));
+            // }
 
-        //     if let Some(macro_range) = self.0.mac {
-        //         refs.push_mut(LineRef::new(
-        //             self.0.source,
-        //             RefStyleKind::Info,
-        //             macro_range,
-        //             LineRefMsg::Text("within this macro expansion"),
-        //         )).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
-        //     }
+            // self.0.info_line(|item| {
+            //     refs.push(item);
+            // });
 
-        //     self.0.info_line(|item| {
-        //         refs.push_mut(item).expect("items should not exceed ArrayVec capacity; check if an error produces more items than the expected maximum");
-        //     });
+            render_code_refs(self.source, refs, f)?;
+        }
 
-        //     refs.sort_by_key(|item| (item.span.start, item.span.end));
-
-        //     LineRefs::new(self.0.source, &refs).fmt(f)?;
-        // }
-
-        write!(f, "    \x1b[92mhelp:\x1b[0m ")?;
-        let mut has_prev = false;
+        write!(
+            f,
+            "{}help\x1b[0m: ",
+            Style::new()
+                .foreground(Color::BrightCyan)
+                .bold(true)
+                .begin()
+        )?;
         self.help(f)?;
-        // for line in self.help().to_string().lines() {
-        //     if has_prev {
-        //         write!(f, "{INDENT}");
-        //     }
-        //     writeln!(f, "{line}");
-        //     has_prev = true;
-        // }
         Ok(())
     }
 }
