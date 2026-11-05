@@ -219,9 +219,14 @@ impl<T> RelSpan<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FileId(pub uspan);
+pub struct FileId(uspan);
 
 impl FileId {
+    /// Caller must ensure this is a legitimate file index.
+    pub(super) const fn new(i: uspan) -> Self {
+        Self(i)
+    }
+
     pub(super) const fn into_usize(self) -> usize {
         uspan_to_usize(self.0)
     }
@@ -291,5 +296,11 @@ impl Span {
         } else {
             None
         }
+    }
+}
+
+impl RelSpan {
+    pub const fn within_file(self, file: FileId) -> Span {
+        Span { file, rel: self }
     }
 }

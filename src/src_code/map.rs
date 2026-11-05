@@ -1,6 +1,6 @@
 use crate::src_code::{
     code::{ExpansionData, SourceCode},
-    span::{FileId, Span, uspan_to_usize},
+    span::{FileId, Span},
 };
 
 #[derive(Debug, PartialEq)]
@@ -21,14 +21,20 @@ impl std::ops::Index<FileId> for SourceMap {
     type Output = SourceCode;
 
     fn index(&self, index: FileId) -> &Self::Output {
-        #[expect(clippy::indexing_slicing, reason = "caller's responsibility")]
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "FileId promises to be a legitimate file index"
+        )]
         &self.files[index.into_usize()]
     }
 }
 
 impl std::ops::IndexMut<FileId> for SourceMap {
     fn index_mut(&mut self, index: FileId) -> &mut Self::Output {
-        #[expect(clippy::indexing_slicing, reason = "caller's responsibility")]
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "FileId promises to be a legitimate file index"
+        )]
         &mut self.files[index.into_usize()]
     }
 }
@@ -45,11 +51,11 @@ impl SourceMap {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (FileId, &SourceCode)> {
-        (0..).map(FileId).zip(self.files.iter())
+        (0..).map(FileId::new).zip(self.files.iter())
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (FileId, &mut SourceCode)> {
-        (0..).map(FileId).zip(self.files.iter_mut())
+        (0..).map(FileId::new).zip(self.files.iter_mut())
     }
 
     pub fn push(&mut self, code: SourceCode) {
@@ -66,7 +72,7 @@ impl SourceMap {
 
     pub fn source_of(&self, span: Span) -> &SourceCode {
         self.files
-            .get(uspan_to_usize(span.file.0))
+            .get(span.file.into_usize())
             .expect("span should not refer to a file that does not exist")
     }
 

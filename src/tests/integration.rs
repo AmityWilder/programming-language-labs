@@ -55,3 +55,9 @@ fn test_complex() {
     let res = integration_test!("example/complex.bats");
     assert!(res.is_ok());
 }
+
+#[test]
+fn test_preproc() {
+    let res = integration_test!("example/preproc.bats");
+    assert!(res.is_ok());
+}

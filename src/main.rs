@@ -492,7 +492,7 @@ impl Default for Cli {
             scanner_tokens: false,
             scanner_highlight: true,
             preproc_tokens: false,
-            preproc_highlight: false,
+            preproc_highlight: true, // TODO: make this non-default!
             dbg_ast: false,
             semantic_highlight: true,
             do_eval: true,
@@ -594,7 +594,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
             print_highlighted(
                 file.tokens()
                     .spans()
-                    .map(|(rel, kind)| (source.span_str(Span { file: id, rel }), kind)),
+                    .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
                 &SYNTAX_STYLE_ANSI,
             );
             println!();
@@ -617,7 +617,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     let mut pp_errs = Vec::new();
     let preprocessed = source
         .iter()
-        .filter_map(|(id, file)| match pre::preprocess(id, file) {
+        .filter_map(|(id, file)| match pre::preprocess(id, file, source) {
             Ok(x) => Some(x),
             Err(e) => {
                 pp_errs.extend(e);
@@ -648,7 +648,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
             print_highlighted(
                 file.tokens()
                     .spans()
-                    .map(|(rel, kind)| (source.span_str(Span { file: id, rel }), kind)),
+                    .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
                 &SYNTAX_STYLE_ANSI,
             );
             println!();

@@ -276,10 +276,7 @@ pub fn lex(file: FileId, code: &str) -> (TokenTable, Vec<Error>) {
     for (len, kind, e) in Lexer::new(code) {
         let end = start.strict_add(len);
         if let Some(kind) = e {
-            let span = Span {
-                file,
-                rel: RelSpan::from(start..end),
-            };
+            let span = RelSpan::from(start..end).within_file(file);
             errors.push(Error::new(span, kind));
         }
         tokens.push((len, kind));

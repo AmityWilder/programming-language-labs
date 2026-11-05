@@ -73,7 +73,7 @@ where
 
 impl LispDisplay for ast::ProgramUnit {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        ("unit", &self.decls).fmt_value(source, f)
+        ("program_unit", &self.decls).fmt_value(source, f)
     }
 }
 

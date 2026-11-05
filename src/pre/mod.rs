@@ -1,5 +1,4 @@
 use crate::{
-    Todo,
     error::{Error, ErrorKind, ExpectedToken},
     lex::{
         lex,
@@ -12,105 +11,101 @@ use crate::{
     parse::util::MapInner,
     src_code::{
         code::{ExpansionData, SourceCode, SourceLoc},
+        map::SourceMap,
         span::{FileId, RelSpan, Span, usize_to_uspan, uspan},
     },
 };
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 mod ast;
+mod eval;
 
-pub fn preprocess(id: FileId, source: &SourceCode) -> Result<SourceCode, Vec<Error>> {
-    let file_len = usize_to_uspan(source.content().len());
-    let mut pp = PreParser::new(id, file_len, source.tokens().spans());
-    let tokens = loop {
-        let doc = pp.document().map_err(Vec::from_iter)?;
-        if doc
-            .items
-            .iter()
-            .all(|item| matches!(item, ast::DocumentItem::Other(_)))
-        {
-            break doc.items.into_iter().flat_map(|item| {
-                if let ast::DocumentItem::Other(tokens) = item {
-                    tokens.spans
-                } else {
-                    unreachable!("already confirmed all are Other");
-                }
-            });
-        }
-    };
-    let src = tokens.map(|span| &source[span]).collect::<String>();
-    let loc = match source.loc() {
+pub fn preprocess(
+    id: FileId,
+    code: &SourceCode,
+    source: &SourceMap,
+) -> Result<SourceCode, Vec<Error>> {
+    let loc = match code.loc() {
         SourceLoc::Repl | SourceLoc::PreprocRepl => SourceLoc::PreprocRepl,
 
         SourceLoc::File(path) | SourceLoc::PreprocFile(path) => {
             SourceLoc::PreprocFile(path.clone())
         }
     };
-    let (tokens, errs) = lex(id, src.as_str());
+    let file_len = usize_to_uspan(code.content().len());
+    let (src, mac, errs) = PreProcessor::new(source, id).preproc();
     if errs.is_empty() {
-        match SourceCode::with_expansion(loc, src, pp.macros()) {
-            Ok(mut code) => {
-                code.set_tokens(tokens);
-                Ok(code)
+        let (tokens, errs) = lex(id, src.as_str());
+        if errs.is_empty() {
+            match SourceCode::with_expansion(loc, src, mac) {
+                Ok(mut code) => {
+                    code.set_tokens(tokens);
+                    Ok(code)
+                }
+                Err(e) => Err(vec![Error::new(
+                    RelSpan::from(file_len..file_len).within_file(id),
+                    ErrorKind::OversizePreproc(e),
+                )]),
             }
-            Err(e) => Err([Error::new(
-                Span {
-                    file: id,
-                    rel: (file_len..file_len).into(),
-                },
-                ErrorKind::OversizePreproc(e),
-            )]
-            .to_vec()),
+        } else {
+            Err(errs)
         }
     } else {
-        Err(errs)
+        Err(if let Err(e) = SourceCode::with_expansion(loc, src, mac) {
+            vec![Error::new(
+                RelSpan::from(file_len..file_len).within_file(id),
+                ErrorKind::OversizePreproc(e),
+            )]
+        } else {
+            errs
+        })
     }
-}
-
-/// Preprocessor environment
-struct PreprocEnv {
-    defs: Todo,
 }
 
 #[derive(Debug, Clone)]
-struct PreParser {
+struct PreProcessor<'src> {
     file: FileId,
     file_len: uspan,
-    tokens: VecDeque<(RelSpan, TokenKind)>,
+    tokens: VecDeque<(Span, TokenKind)>,
+    source: &'src SourceMap,
+    definitions: HashMap<&'src str, MacroDef>,
+    expansions: Vec<ExpansionData>,
 }
 
-impl PreParser {
-    pub fn new<I>(file: FileId, file_len: uspan, tokens: I) -> Self
-    where
-        I: IntoIterator<Item = (RelSpan, TokenKind)>,
-    {
+impl<'src> PreProcessor<'src> {
+    pub fn new(source: &'src SourceMap, file: FileId) -> Self {
+        let code = &source[file];
         Self {
             file,
-            file_len,
-            tokens: VecDeque::from_iter(tokens),
+            file_len: code.len(),
+            tokens: VecDeque::from_iter(
+                code.tokens()
+                    .spans()
+                    .map(|(rel, kind)| (rel.within_file(file), kind)),
+            ),
+            source,
+            definitions: HashMap::new(),
+            expansions: Vec::new(),
         }
     }
 
-    pub fn macros(self) -> Vec<ExpansionData> {
-        Vec::new() // TODO
-    }
-
-    fn peek_next(&self) -> Option<&(RelSpan, TokenKind)> {
+    fn peek_next(&self) -> Option<&(Span, TokenKind)> {
         self.tokens.front()
     }
 
-    fn pull_next(&mut self) -> Option<(RelSpan, TokenKind)> {
+    fn pull_next(&mut self) -> Option<(Span, TokenKind)> {
         self.tokens.pop_front()
     }
 
-    fn pull_next_if<P>(&mut self, p: P) -> Option<(RelSpan, TokenKind)>
+    fn pull_next_if<P>(&mut self, p: P) -> Option<(Span, TokenKind)>
     where
-        P: FnOnce(&(RelSpan, TokenKind)) -> bool,
+        P: FnOnce(&(Span, TokenKind)) -> bool,
     {
+        // can't use `p` directly because Rust isn't smart enough to coerce `FnOnce(&mut T) -> U` into `FnOnce(&T) -> U` :/
         self.tokens.pop_front_if(|x| p(x))
     }
 
-    fn pull_next_if_eq<T>(&mut self, kind: T) -> Option<RelSpan>
+    fn pull_next_if_eq<T>(&mut self, kind: T) -> Option<Span>
     where
         T: Into<TokenKind>,
     {
@@ -118,17 +113,17 @@ impl PreParser {
             .map(|(span, _)| span)
     }
 
-    fn peek(&self) -> Option<&(RelSpan, TokenKind)> {
+    fn peek(&self) -> Option<&(Span, TokenKind)> {
         self.tokens.iter().find(|(_, k)| !k.is_ignored())
     }
 
-    fn pull(&mut self) -> Option<(RelSpan, TokenKind)> {
+    fn pull(&mut self) -> Option<(Span, TokenKind)> {
         std::iter::from_fn(|| self.tokens.pop_front()).find(|(_, k)| !k.is_ignored())
     }
 
-    fn pull_if<P>(&mut self, p: P) -> Option<(RelSpan, TokenKind)>
+    fn pull_if<P>(&mut self, p: P) -> Option<(Span, TokenKind)>
     where
-        P: FnOnce(&(RelSpan, TokenKind)) -> bool,
+        P: FnOnce(&(Span, TokenKind)) -> bool,
     {
         self.tokens
             .iter()
@@ -142,7 +137,7 @@ impl PreParser {
             })
     }
 
-    fn pull_if_eq<T>(&mut self, kind: T) -> Option<RelSpan>
+    fn pull_if_eq<T>(&mut self, kind: T) -> Option<Span>
     where
         T: Into<TokenKind>,
     {
@@ -154,14 +149,14 @@ impl PreParser {
         &mut self,
         p: P,
         expected: ExpectedToken,
-    ) -> Result<(RelSpan, TokenKind), Error>
+    ) -> Result<(Span, TokenKind), Error>
     where
-        P: FnOnce(&(RelSpan, TokenKind)) -> bool,
+        P: FnOnce(&(Span, TokenKind)) -> bool,
     {
         self.pull_next_if(p).ok_or_else(|| self.error(expected))
     }
 
-    fn try_pull_next_eq<T>(&mut self, kind: T) -> Result<RelSpan, Error>
+    fn try_pull_next_eq<T>(&mut self, kind: T) -> Result<Span, Error>
     where
         T: Into<TokenKind>,
     {
@@ -170,14 +165,14 @@ impl PreParser {
             .ok_or_else(|| self.error(ExpectedToken::Verbatim(kind)))
     }
 
-    fn try_pull<P>(&mut self, p: P, expected: ExpectedToken) -> Result<(RelSpan, TokenKind), Error>
+    fn try_pull<P>(&mut self, p: P, expected: ExpectedToken) -> Result<(Span, TokenKind), Error>
     where
-        P: FnOnce(&(RelSpan, TokenKind)) -> bool,
+        P: FnOnce(&(Span, TokenKind)) -> bool,
     {
         self.pull_if(p).ok_or_else(|| self.error(expected))
     }
 
-    fn try_pull_eq<T>(&mut self, kind: T) -> Result<RelSpan, Error>
+    fn try_pull_eq<T>(&mut self, kind: T) -> Result<Span, Error>
     where
         T: Into<TokenKind>,
     {
@@ -189,19 +184,10 @@ impl PreParser {
     /// Does not consume the token
     fn error(&self, expected: ExpectedToken) -> Error {
         if let Some(&(span, _)) = self.peek() {
-            Error::new(
-                Span {
-                    file: self.file,
-                    rel: span,
-                },
-                ErrorKind::UnexpectedToken { expected },
-            )
+            Error::new(span, ErrorKind::UnexpectedToken { expected })
         } else {
             Error::new(
-                Span {
-                    file: self.file,
-                    rel: (self.file_len..self.file_len).into(),
-                },
+                RelSpan::from(self.file_len..self.file_len).within_file(self.file),
                 ErrorKind::MissingToken { expected },
             )
         }
@@ -214,7 +200,7 @@ impl PreParser {
         &mut self,
         brack: Bracket,
         inner: F,
-    ) -> Option<Result<(RelSpan, R, RelSpan), Error>>
+    ) -> Option<Result<(Span, R, Span), Error>>
     where
         F: FnOnce(&mut Self) -> Result<R, Error>,
     {
@@ -236,21 +222,12 @@ impl PreParser {
                             }
                         };
                         ErrorKind::IncorrectCloseBracket {
-                            open_range: Span {
-                                file: self.file,
-                                rel: open,
-                            },
+                            open_range: open,
                             failure: BadBracketCombo::new(brack, close)
                                 .expect("matching brackets should not produce an error"),
                         }
                     };
-                    Error::new(
-                        Span {
-                            file: self.file,
-                            rel: span,
-                        },
-                        kind,
-                    )
+                    Error::new(span, kind)
                 } else {
                     Error::new(
                         Span {
@@ -258,10 +235,7 @@ impl PreParser {
                             rel: (self.file_len..self.file_len).into(),
                         },
                         ErrorKind::MissingCloseBracket {
-                            open_range: Span {
-                                file: self.file,
-                                rel: open,
-                            },
+                            open_range: open,
                             expect: brack,
                         },
                     )
@@ -272,30 +246,127 @@ impl PreParser {
     }
 }
 
-impl PreParser {
-    /// `document -> ( document_item )*`
-    fn document(&mut self) -> Result<ast::Document, impl '_ + IntoIterator<Item = Error>> {
-        let mut items = Vec::new();
-        let mut iter =
-            std::iter::from_fn(|| self.peek_next().is_some().then(|| self.document_item()));
-        while let Some(res) = iter.next() {
+// TODO: cross-file macros?
+// TBD: what is the ExpansionData of an intermediate expansion?
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Hash)]
+struct Substitution<'arg> {
+    param: Span,
+    arg: &'arg ast::Tokens,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
+struct MacroDef {
+    pub name_span: Span,
+    pub params: Vec<Span>,
+    pub body: Vec<(Span, TokenKind)>,
+}
+
+impl<'src> PreProcessor<'src> {
+    fn preproc(mut self) -> (String, Vec<ExpansionData>, Vec<Error>) {
+        let mut preprocessed = String::new();
+        let mut errors = Vec::new();
+        while self.peek_next().is_some() {
+            let res = self.document_item();
             match res {
-                Ok(x) => items.push(x),
-                Err(e) => return Err(std::iter::once(e).chain(iter.filter_map(Result::err))),
+                Ok(item) => match item {
+                    ast::DocumentItem::Def(def) => {
+                        let key = self.source.span_str(def.name);
+                        let params = def.params.map_or_default(|group| group.params);
+                        let body = def.body.items.list;
+                        _ = self.definitions.insert(
+                            key,
+                            MacroDef {
+                                name_span: def.name,
+                                params,
+                                body,
+                            },
+                        );
+                    }
+
+                    ast::DocumentItem::Call(call) => {
+                        if let Some(def) = self.definitions.get(self.source.span_str(call.name)) {
+                            let subs = def
+                                .params
+                                .iter()
+                                .zip(call.args.iter())
+                                .map(|(&param, arg)| {
+                                    (
+                                        self.source.span_str(param),
+                                        Substitution {
+                                            param,
+                                            arg: &arg.items,
+                                        },
+                                    )
+                                })
+                                .collect::<HashMap<&'src str, _>>();
+
+                            let mut expansion = Vec::new();
+                            for &item @ (span, kind) in &def.body {
+                                if matches!(kind, TokenKind::MParam)
+                                    && let Some(sub) = subs.get(self.source.span_str(span))
+                                {
+                                    expansion.extend_from_slice(&sub.arg.list);
+                                } else {
+                                    // ignore other macro params, they might belong to an inner definition.
+                                    // they will error if they are left behind after all calls have expanded.
+
+                                    expansion.push(item);
+
+                                    // note: the case `def \foo($x) { def \bar($x) { ... } }`
+                                    // should substitute `\bar`'s parameter with `\foo`'s argument.
+                                    // e.g. `\foo{7}` INTENTIONALLY expands to `def \bar(7) { ... }`.
+                                }
+                            }
+
+                            // TODO: expansion data
+                            self.tokens.prepend(expansion);
+                        } else {
+                            errors.push(Error::new(call.name, ErrorKind::MacroUndefined));
+                        }
+                    }
+
+                    ast::DocumentItem::Other(tokens) => {
+                        for (span, _) in tokens.list {
+                            preprocessed.push_str(self.source.span_str(span));
+                        }
+                    }
+                },
+                // TODO: what if the range is within a partially-processed file?
+                Err(e) => errors.push(e),
             }
         }
-        Ok(ast::Document { items })
+        (preprocessed, self.expansions, errors)
     }
 
-    /// `document_item -> definition | tokens`
+    /// `document_item -> definition | call | tokens`
     fn document_item(&mut self) -> Result<ast::DocumentItem, Error> {
         self.definition()
             .map_inner(ast::DocumentItem::Def)
+            .or_else(|| self.call().map_inner(ast::DocumentItem::Call))
             .unwrap_or_else(|| {
                 Ok(ast::DocumentItem::Other(self.tokens_while(|(_, kind)| {
-                    *kind != TokenKind::Keyword(Keyword::Def)
+                    !matches!(kind, TokenKind::Keyword(Keyword::Def) | TokenKind::Macro)
                 })))
             })
+    }
+
+    /// `call -> MACRO ( replacer )*`
+    fn call(&mut self) -> Option<Result<ast::Call, Error>> {
+        self.pull_next_if_eq(TokenKind::Macro).map(|name| {
+            let expected_args = self
+                .definitions
+                .get(self.source.span_str(name))
+                .map_or_default(|def| def.params.len());
+            let args = (0..expected_args)
+                .map(|_| {
+                    self.replacer()
+                        .ok_or_else(|| self.error(ExpectedToken::MacroArg))
+                        .flatten()
+                })
+                .collect::<Result<_, _>>()?;
+            Ok(ast::Call { name, args })
+        })
     }
 
     /// `definition -> "def" MACRO ( params )? replacer`
@@ -352,20 +423,10 @@ impl PreParser {
 
     fn tokens_while<P>(&mut self, mut p: P) -> ast::Tokens
     where
-        P: FnMut(&(RelSpan, TokenKind)) -> bool,
+        P: FnMut(&(Span, TokenKind)) -> bool,
     {
-        let mut spans = Vec::new();
-        let mut tokens = std::iter::from_fn(|| self.pull_next_if(&mut p)).map(|(span, _)| span);
-        if let Some(first) = tokens.next() {
-            let mut curr = spans.push_mut(first);
-            while let Some(next) = tokens.next() {
-                if curr.end == next.start {
-                    curr.end = next.end;
-                } else {
-                    curr = spans.push_mut(next);
-                }
-            }
+        ast::Tokens {
+            list: std::iter::from_fn(|| self.pull_next_if(&mut p)).collect(),
         }
-        ast::Tokens { spans }
     }
 }
