@@ -629,6 +629,31 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     for code in preprocessed {
         source.push(code);
     }
+    // syntax highlighted
+    if config.preproc_highlight {
+        println!("\nsyntax highlighting:");
+        for (id, file) in source.iter() {
+            let loc = source[id].loc();
+            if !matches!(loc, SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)) {
+                continue;
+            }
+            match loc {
+                SourceLoc::Repl | SourceLoc::PreprocRepl => print!("repl"),
+                SourceLoc::File(path) | SourceLoc::PreprocFile(path) => {
+                    print!("{}", path.display());
+                }
+            }
+            print!(" (preprocessed)");
+            println!(":");
+            print_highlighted(
+                file.tokens()
+                    .spans()
+                    .map(|(rel, kind)| (source.span_str(Span { file: id, rel }), kind)),
+                &SYNTAX_STYLE_ANSI,
+            );
+            println!();
+        }
+    }
 
     // preprocesor errors
     if !pp_errs.is_empty() {
@@ -640,34 +665,16 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
         return Err(pp_errs);
     }
 
-    // // preprocessing
-    // let tokens: Vec<_> = preprocess(source, tokens).collect();
-    // if config.preproc_tokens {
-    //     println!("\npreprocessor:");
-    //     print_tokens(source, &tokens);
-    // }
-
-    // // preprocessed + syntax highlighted
-    // if config.preproc_highlight {
-    //     print_highlighted(&tokens, &SYNTAX_STYLE_ANSI);
-    // }
-
-    // // preproc errors
-    // if if config.print_errors {
-    //     println!();
-    //     list_errors(
-    //         "preprocessor",
-    //         tokens.iter().map(Result::as_ref).filter_map(Result::err),
-    //     )
-    // } else {
-    //     tokens.iter().any(Result::is_err)
-    // } {
-    //     return;
-    // }
-
     let mut parse_errs = Vec::new();
     let prgm_units: Vec<_> = source
         .iter_mut()
+        .filter(|(_, code)| {
+            // only parse post-processed files
+            matches!(
+                code.loc(),
+                SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)
+            )
+        })
         .filter_map(|(id, code)| {
             match parse::parse(
                 id,
@@ -766,7 +773,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
 }
 
 fn run_program(prgm: &Dummy) -> Result<(), Failure> {
-    todo!()
+    todo!("runtime")
 }
 
 fn pop_trailing_newline(s: &mut String) {

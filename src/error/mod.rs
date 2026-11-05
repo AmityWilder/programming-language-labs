@@ -984,32 +984,31 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                 write!(f, "ensure the right side cannot be 0")
             }
             ErrorKind::Incompatible { candidates, op, .. } => {
-                    write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
-                    if candidates.is_empty() {
-                        writeln!(f,
-                            "\nno overload exists for `{op}` in this position"
-                        )
-                    } else {
-                        writeln!(f, "\nthe following overloads exist:")?;
-                        let mut buf = String::new();
-                        for ((lhs, rhs), ret) in candidates {
-                            use std::fmt::Write;
-                            buf.clear();
-                            _ = buf
-                                .write_fmt(core::format_args!("fun {op}({lhs}, {rhs}) -> {ret}"));
-                            write!(f, "  ")?;
-                            // TODO: just use the token table
-                            // for (lexeme, syntax) in highlight(tokenize(&buf)) {
-                            //     _ = write!(f,
-                            //         "{}",
-                            //         SYNTAX_STYLE_ANSI[syntax].style(lexeme)
-                            //     );
-                            // }
-                            write!(f, "\n")?;
-                        }
-                        Ok(())
+                write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
+                if candidates.is_empty() {
+                    writeln!(f,
+                        "\nno overload exists for `{op}` in this position"
+                    )
+                } else {
+                    writeln!(f, "\nthe following overloads exist:")?;
+                    let mut buf = String::new();
+                    for ((lhs, rhs), ret) in candidates {
+                        use std::fmt::Write;
+                        buf.clear();
+                        _ = buf
+                            .write_fmt(core::format_args!("fun {op}({lhs}, {rhs}) -> {ret}"));
+                        write!(f, "  ")?;
+                        // TODO: just use the token table
+                        // for (lexeme, syntax) in highlight(tokenize(&buf)) {
+                        //     _ = write!(f,
+                        //         "{}",
+                        //         SYNTAX_STYLE_ANSI[syntax].style(lexeme)
+                        //     );
+                        // }
+                        writeln!(f)?;
                     }
-
+                    Ok(())
+                }
             }
             ErrorKind::Unsupported {
                 candidates,
@@ -1017,38 +1016,34 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                 side,
                 ..
             } => {
-                let f = f;
-                let _src = src;
-                {
-                    write!(f,
-                        "try a different operator or convert the type"
-                    )?;
-                    if candidates.is_empty() {
-                        writeln!(f,
-                            "\nno overload exists for `{op}` in this position"
-                        )
-                    } else {
-                        writeln!(f, "\nthe following overloads exist:")?;
-                        for ((arg,), ret) in candidates {
-                            SYNTAX_STYLE_ANSI[Syntax::Keyword].style(Keyword::Fun).fmt(f);
+                write!(f,
+                    "try a different operator or convert the type"
+                )?;
+                if candidates.is_empty() {
+                    writeln!(f,
+                        "\nno overload exists for `{op}` in this position"
+                    )
+                } else {
+                    writeln!(f, "\nthe following overloads exist:")?;
+                    for ((arg,), ret) in candidates {
+                        SYNTAX_STYLE_ANSI[Syntax::Keyword].style(Keyword::Fun).fmt(f)?;
 
-                            f.write_str(" ")?;
-                            if *side == OpSide::Prefix {
-                                write!(f, "{op:#}")?; // TODO: highlight
-                            }
-
-                            f.write_str("(")?;
-                            write!(f, "{arg:#}");
-                            f.write_str(")")?;
-
-                            if *side == OpSide::Postfix {
-                                write!(f, "{op:#}")?; // TODO: highlight
-                            }
-
-                            writeln!(f, " -> {ret:#}")?;
+                        f.write_str(" ")?;
+                        if *side == OpSide::Prefix {
+                            write!(f, "{op:#}")?; // TODO: highlight
                         }
-                        Ok(())
+
+                        f.write_str("(")?;
+                        write!(f, "{arg:#}")?;
+                        f.write_str(")")?;
+
+                        if *side == OpSide::Postfix {
+                            write!(f, "{op:#}")?; // TODO: highlight
+                        }
+
+                        writeln!(f, " -> {ret:#}")?;
                     }
+                    Ok(())
                 }
             }
             ErrorKind::UnsignedNeg => {
