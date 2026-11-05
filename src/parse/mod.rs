@@ -284,32 +284,17 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
                             }
                         };
                         ErrorKind::IncorrectCloseBracket {
-                            open_range: Span {
-                                file: self.file,
-                                rel: open,
-                            },
+                            open_range: open.within_file(self.file),
                             failure: BadBracketCombo::new(brack, close)
                                 .expect("matching brackets should not produce an error"),
                         }
                     };
-                    Error::new(
-                        Span {
-                            file: self.file,
-                            rel: span,
-                        },
-                        kind,
-                    )
+                    Error::new(span.within_file(self.file), kind)
                 } else {
                     Error::new(
-                        Span {
-                            file: self.file,
-                            rel: (self.file_len..self.file_len).into(),
-                        },
+                        RelSpan::from(self.file_len..self.file_len).within_file(self.file),
                         ErrorKind::MissingCloseBracket {
-                            open_range: Span {
-                                file: self.file,
-                                rel: open,
-                            },
+                            open_range: open.within_file(self.file),
                             expect: brack,
                         },
                     )
@@ -358,18 +343,12 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     fn error(&mut self, expected: ExpectedToken) -> Error {
         if let Some(&(span, _)) = self.peek() {
             Error::new(
-                Span {
-                    file: self.file,
-                    rel: span,
-                },
+                span.within_file(self.file),
                 ErrorKind::UnexpectedToken { expected },
             )
         } else {
             Error::new(
-                Span {
-                    file: self.file,
-                    rel: (self.file_len..self.file_len).into(),
-                },
+                RelSpan::from(self.file_len..self.file_len).within_file(self.file),
                 ErrorKind::MissingToken { expected },
             )
         }

@@ -1,10 +1,10 @@
-use crate::src_code::span::RelSpan;
+use crate::{Todo, lex::token::TokenKind, src_code::span::Span};
 
 /// `Macro`
-pub type MacroName = RelSpan;
+pub type MacroName = Span;
 
 /// `MParam`
-pub type Param = RelSpan;
+pub type Param = Span;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Document {
@@ -14,12 +14,15 @@ pub struct Document {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub enum DocumentItem {
     Def(Definition),
+    Call(Call),
+    Cond(Todo),
+    Expr(Todo),
     Other(Tokens),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Definition {
-    pub kw: RelSpan,
+    pub kw: Span,
     pub name: MacroName,
     pub params: Option<ParamGroup>,
     pub body: Replacer,
@@ -28,28 +31,28 @@ pub struct Definition {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct ParamGroup {
     /// `(`
-    pub open: RelSpan,
+    pub open: Span,
     pub params: Vec<Param>,
     /// `)`
-    pub close: RelSpan,
+    pub close: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Replacer {
     /// `{`
-    pub open: RelSpan,
+    pub open: Span,
     pub items: Tokens,
     /// `}`
-    pub close: RelSpan,
+    pub close: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Tokens {
-    pub spans: Vec<RelSpan>,
+    pub list: Vec<(Span, TokenKind)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Call {
     pub name: MacroName,
-    pub body: Vec<Replacer>,
+    pub args: Vec<Replacer>,
 }
