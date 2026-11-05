@@ -1,5 +1,10 @@
 use crate::{
-    highlight::style::{Color, Style, StyleWrapper},
+    SYNTAX_STYLE_ANSI,
+    highlight::{
+        style::{Color, Style, StyleWrapper},
+        write_highlight,
+    },
+    lex::token::TokenKind,
     src_code::{
         code::SourceCode,
         map::SourceMap,
@@ -208,7 +213,7 @@ struct CodeRefsGroup<'src, 'outer, T> {
     q: &'outer mut CodeRefsQueue<T>,
     prev_span: Option<Span>,
     curr_file: &'src SourceCode,
-    lines: std::iter::Enumerate<std::str::Split<'src, char>>,
+    line_idx: std::range::RangeFromIter<usize>,
 }
 
 impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
@@ -218,7 +223,7 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
             Some(Self {
                 q: &mut outer.q,
                 prev_span: None,
-                lines: curr_file.content().split('\n').enumerate(),
+                line_idx: std::range::RangeFrom { start: 0 }.iter(),
                 curr_file,
             })
         } else {
@@ -274,7 +279,7 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
                 if skipped_lines.next().is_some() {
                     // multiple: skip lines with "..."
                     for _ in self.curr_file[sep].matches('\n') {
-                        _ = self.lines.next();
+                        _ = self.line_idx.next();
                     }
                     if self.prev_span.is_some() {
                         writeln!(f, "\n{}...", LINE_PRELUDE_STYLE.begin())?;
@@ -292,15 +297,38 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
                         (last_linebreak + '\n'.len_utf8()),
                     );
                 }
-                let (i, line) = self.lines.next().unwrap_or_else(|| todo!());
+                let i = self.line_idx.next().unwrap_or_else(|| todo!());
                 write!(
                     f,
-                    "\n{0}{2:>max_linenum_width$} |{1}  {line}\
-                     \n{0}{3:>max_linenum_width$} |{1}  ",
+                    "\n{}{:>max_linenum_width$} |{}  ",
                     LINE_PRELUDE_STYLE.begin(),
-                    LINE_PRELUDE_STYLE.end(),
                     i.strict_add(1),
-                    ""
+                    LINE_PRELUDE_STYLE.end(),
+                )?;
+                let line_tokens = self
+                    .curr_file
+                    .tokens()
+                    .iter()
+                    .skip_while({
+                        let mut newlines: usize = 0;
+                        move |(_, kind)| {
+                            if matches!(kind, TokenKind::Newline) {
+                                newlines = newlines.strict_add(1);
+                                true
+                            } else {
+                                newlines < i
+                            }
+                        }
+                    })
+                    .take_while(|(_, kind)| !matches!(kind, TokenKind::Newline))
+                    .map(|(span, kind)| (&self.curr_file[span], kind));
+                write_highlight(line_tokens, f, &SYNTAX_STYLE_ANSI)?;
+                write!(
+                    f,
+                    "\n{}{:>max_linenum_width$} |{}  ",
+                    LINE_PRELUDE_STYLE.begin(),
+                    "",
+                    LINE_PRELUDE_STYLE.end(),
                 )?;
             } else {
                 // none: still on the same line

@@ -1,5 +1,4 @@
 use crate::{
-    error::NumberBase,
     lex::token::{keyword::Keyword, punc::Punctuation},
     parse::ast::ExprPrecedence,
     src_code::span::{RelSpan, uspan},
@@ -300,8 +299,17 @@ impl TokenTable {
         Self { tokens: Vec::new() }
     }
 
-    pub fn spans(&self) -> TokenSpans<'_> {
+    pub fn iter(&self) -> TokenSpans<'_> {
         TokenSpans::new(&self.tokens)
+    }
+}
+
+impl<'tbl> IntoIterator for &'tbl TokenTable {
+    type Item = <Self::IntoIter as Iterator>::Item;
+    type IntoIter = TokenSpans<'tbl>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
