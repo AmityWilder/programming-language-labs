@@ -141,7 +141,7 @@ impl<T> RelSpan<T> {
     {
         debug_assert!(self.0.start <= self.0.end, "ranges should be ordered");
         debug_assert!(other.0.start <= other.0.end, "ranges should be ordered");
-        self.0.start <= other.0.start && self.0.end <= other.0.end
+        self.0.start <= other.0.start && other.0.end <= self.0.end
     }
 
     /// Returns `true` if `self` and `other` do not intersect.
