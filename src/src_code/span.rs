@@ -11,12 +11,14 @@ pub type uspan = cfg_select! {
     _ => u32,
 };
 
+#[cfg_attr(not(debug_assertions), inline)]
 pub const fn uspan_to_usize(n: uspan) -> usize {
     cfg_select! {
         // n is already defined as usize
         target_pointer_width = "16" => n,
 
         _ => {
+            #[cfg(debug_assertions)]
             const {
                 assert!(
                     uspan::BITS <= usize::BITS,
@@ -33,6 +35,7 @@ pub const fn uspan_to_usize(n: uspan) -> usize {
 }
 
 /// Relies on the assumption `n` is from a non-oversize file
+#[cfg_attr(not(debug_assertions), inline)]
 pub const fn usize_to_uspan(n: usize) -> uspan {
     debug_assert!(uspan::try_from(n).is_ok(), "file should not be oversized");
     #[expect(
@@ -124,6 +127,13 @@ impl<T> RelSpan<T> {
         unsafe { std::mem::transmute(value) }
     }
 
+    pub const fn len(self) -> <T as std::ops::Sub>::Output
+    where
+        T: [const] std::ops::Sub + Copy,
+    {
+        self.0.end - self.0.start
+    }
+
     /// Returns `true` if every element of `other` is an element of `self`.
     pub const fn contains(self, other: Self) -> bool
     where
@@ -208,7 +218,7 @@ impl<T> RelSpan<T> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FileId(pub uspan);
 
 impl FileId {

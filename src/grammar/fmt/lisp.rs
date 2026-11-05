@@ -57,7 +57,7 @@ where
     if f.alternate() {
         std::fmt::Display::fmt(&crate::SYNTAX_STYLE_ANSI[Syntax::Keyword].style(op), f)?;
     } else {
-        &op.fmt(f)?;
+        op.fmt(f)?;
     }
     for operand in operands {
         f.write_str(" ")?;

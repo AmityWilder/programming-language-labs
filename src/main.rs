@@ -23,6 +23,7 @@
     char_to_u32,
     extend_one,
     deref_pure_trait,
+    const_ops,
 )]
 #![forbid(
     clippy::missing_safety_doc,
@@ -596,15 +597,15 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
                     .map(|(rel, kind)| (source.span_str(Span { file: id, rel }), kind)),
                 &SYNTAX_STYLE_ANSI,
             );
+            println!();
         }
     }
 
     // lex errors
     if !token_errs.is_empty() {
         if config.print_errors {
-            println!("\ntokenization errors:");
             for e in &token_errs {
-                println!("{}", e.contextualize(source));
+                println!("{}\n", e.contextualize(source));
             }
         }
         return Err(token_errs);
@@ -632,9 +633,8 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     // preprocesor errors
     if !pp_errs.is_empty() {
         if config.print_errors {
-            println!("\npreprocesor errors:");
             for e in &pp_errs {
-                println!("{}", e.contextualize(source));
+                println!("{}\n", e.contextualize(source));
             }
         }
         return Err(pp_errs);
@@ -683,23 +683,23 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
         })
         .collect();
 
+    // parse errors
+    if !parse_errs.is_empty() {
+        if config.print_errors {
+            for e in &parse_errs {
+                println!("{}\n", e.contextualize(source));
+            }
+        }
+        return Err(parse_errs);
+    }
+
+    // lisp debug
     for unit in &prgm_units {
         let source = source
             .get(unit.file)
             .expect("program unit should have valid file ID");
 
-        println!("{:#}", parse::fmt::Lisp { source, node: unit });
-    }
-
-    // lex errors
-    if !parse_errs.is_empty() {
-        if config.print_errors {
-            println!("\ntokenization errors:");
-            for e in &parse_errs {
-                println!("{}", e.contextualize(source));
-            }
-        }
-        return Err(parse_errs);
+        println!("lisp: {:#}", parse::fmt::Lisp { source, node: unit });
     }
 
     // // TODO

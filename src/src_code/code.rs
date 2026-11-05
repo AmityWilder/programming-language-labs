@@ -1,6 +1,6 @@
 use crate::{
     lex::token::TokenTable,
-    src_code::span::{RelSpan, Span, uspan},
+    src_code::span::{RelSpan, Span, usize_to_uspan, uspan, uspan_to_usize},
 };
 use std::{num::NonZero, path::PathBuf, range::Range};
 
@@ -159,7 +159,7 @@ pub struct SourceCode {
     /// Macro expansion ranges
     mac: Vec<ExpansionData>,
     /// The length of each line in bytes
-    lines: Vec<usize>,
+    lines: Vec<uspan>,
     tokens: Option<TokenTable>,
 }
 
@@ -191,7 +191,11 @@ impl SourceCode {
         if uspan::try_from(len).is_ok() {
             Ok(Self {
                 loc,
-                lines: src.split_inclusive('\n').map(str::len).collect(),
+                lines: src
+                    .split_inclusive('\n')
+                    .map(str::len)
+                    .map(usize_to_uspan)
+                    .collect(),
                 src,
                 mac,
                 tokens: None,
@@ -220,6 +224,14 @@ impl SourceCode {
         self.src.as_str()
     }
 
+    pub const fn len(&self) -> uspan {
+        usize_to_uspan(self.src.len())
+    }
+
+    pub const fn line_lens(&self) -> &[uspan] {
+        &self.lines
+    }
+
     /// Finds the most specific expansion containing `span`
     pub fn expansion(&self, span: RelSpan) -> Option<&ExpansionData> {
         self.mac
@@ -232,20 +244,44 @@ impl SourceCode {
         self.src.get(<Range<usize>>::from(span))
     }
 
+    pub fn line_index(&self, pos: uspan) -> Option<uspan> {
+        self.lines
+            .iter()
+            .copied()
+            .map({
+                let mut end: uspan = 0;
+                move |len| {
+                    let start = end;
+                    end = end.strict_add(len);
+                    Range { start, end }
+                }
+            })
+            .position(|range| {
+                let res = pos < range.end;
+                if res {
+                    debug_assert!(range.contains(&pos), "pos < range.end on increasing range should only return true once the range contains pos");
+                }
+                res
+            })
+            .map(usize_to_uspan)
+    }
+
     /// Returns [`None`] if `pos` is not within the source.
-    pub fn line_char(&self, pos: usize) -> Option<(NonZero<usize>, NonZero<usize>)> {
-        if pos == self.src.len() {
+    pub fn line_char(&self, pos: uspan) -> Option<(NonZero<uspan>, NonZero<uspan>)> {
+        if pos == self.len() {
             return Some((
-                NonZero::new(self.lines.len())
+                NonZero::new(usize_to_uspan(self.lines.len()))
                     .expect("lines should not be empty; even an empty string has 1 line of len 0"),
                 NonZero::new(
-                    self.src
-                        .split('\n')
-                        .next_back()
-                        .expect("should output at least one, even if empty")
-                        .chars()
-                        .count()
-                        .strict_add(1),
+                    usize_to_uspan(
+                        self.src
+                            .split('\n')
+                            .next_back()
+                            .expect("should output at least one, even if empty")
+                            .chars()
+                            .count(),
+                    )
+                    .strict_add(1),
                 )
                 .expect("adding 1 should ensure non-zero"),
             ));
@@ -253,21 +289,22 @@ impl SourceCode {
         self.lines
             .iter()
             .copied()
+            .enumerate()
             .map({
-                let mut end: usize = 0;
-                move |len| {
+                let mut end: uspan = 0;
+                move |(i, len)| {
                     let start = end;
                     end = end.strict_add(len);
-                    Range { start, end }
+                    (usize_to_uspan(i), Range { start, end })
                 }
             })
-            .enumerate()
-            .find(|(_, range)| range.contains(&pos))
+            .find(|(_, range)| pos < range.end)
             .map(|(line_idx, range)| {
+                debug_assert!(range.contains(&pos), "pos < range.end on increasing range should only return true once the range contains pos");
                 let line_num =
                     NonZero::new(line_idx.strict_add(1)).expect("adding 1 should ensure non-zero");
                 let char_num =
-                    NonZero::new(self.src[range.start..pos].chars().count().strict_add(1))
+                    NonZero::new(usize_to_uspan(self.src[uspan_to_usize(range.start)..uspan_to_usize(pos)].chars().count()).strict_add(1))
                         .expect("adding 1 should ensure non-zero");
                 (line_num, char_num)
             })
