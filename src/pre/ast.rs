@@ -1,4 +1,8 @@
-use crate::{Todo, lex::token::TokenKind, src_code::span::Span};
+use crate::{
+    Todo,
+    lex::token::TokenKind,
+    src_code::span::{RelSpan, Span, uspan},
+};
 
 /// `Macro`
 pub type MacroName = Span;
@@ -21,6 +25,7 @@ pub enum DocumentItem {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Definition {
+    pub span: RelSpan,
     pub kw: Span,
     pub name: MacroName,
     pub params: Option<ParamGroup>,
@@ -52,6 +57,7 @@ pub struct Tokens {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Call {
+    pub span: RelSpan,
     pub name: MacroName,
     pub args: Vec<Replacer>,
 }

@@ -107,37 +107,15 @@ pub struct ExpansionData {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExpansionField {
-    /// The span of the macro argument that was substituted - same file as `cal`.
-    pub arg: RelSpan,
+    /// The span of the macro argument that was substituted.
+    pub arg: Span,
 
-    /// The span of the macro parameter that was substituted - same file as `def`.
-    pub param: RelSpan,
-}
-
-impl ExpansionData {
-    /// The span of `arg`, absolute to its file
-    pub const fn arg(&self) -> Option<Span> {
-        if let Some(ExpansionField { arg: rel, .. }) = self.field {
-            let file = self.def.file;
-            Some(Span { file, rel })
-        } else {
-            None
-        }
-    }
-
-    /// The span of `par`, absolute to its file
-    pub const fn par(&self) -> Option<Span> {
-        if let Some(ExpansionField { param: rel, .. }) = self.field {
-            let file = self.call.file;
-            Some(Span { file, rel })
-        } else {
-            None
-        }
-    }
+    /// The span of the macro parameter that was substituted.
+    pub param: Span,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CreateSourceCodeError(usize);
+pub struct CreateSourceCodeError(pub usize);
 
 impl std::error::Error for CreateSourceCodeError {}
 
@@ -145,7 +123,7 @@ impl std::fmt::Display for CreateSourceCodeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "file too big: cannot exceed {} bytes, found {} bytes",
+            "file too big: cannot exceed {} bytes, found at least {} bytes",
             uspan::MAX,
             self.0
         )
@@ -238,6 +216,10 @@ impl SourceCode {
             .iter()
             .filter(|x| x.exp.contains(span))
             .reduce(|best, x| if best.exp.contains(x.exp) { x } else { best })
+    }
+
+    pub const fn expansions(&self) -> &[ExpansionData] {
+        self.mac.as_slice()
     }
 
     pub fn get(&self, span: RelSpan) -> Option<&str> {
