@@ -20,6 +20,7 @@ impl FromIterator<SourceCode> for SourceMap {
 impl std::ops::Index<FileId> for SourceMap {
     type Output = SourceCode;
 
+    #[track_caller]
     fn index(&self, index: FileId) -> &Self::Output {
         #[expect(
             clippy::indexing_slicing,
@@ -30,6 +31,7 @@ impl std::ops::Index<FileId> for SourceMap {
 }
 
 impl std::ops::IndexMut<FileId> for SourceMap {
+    #[track_caller]
     fn index_mut(&mut self, index: FileId) -> &mut Self::Output {
         #[expect(
             clippy::indexing_slicing,
@@ -70,12 +72,14 @@ impl SourceMap {
         self.files.get_mut(id.into_usize())
     }
 
+    #[track_caller]
     pub fn source_of(&self, span: Span) -> &SourceCode {
         self.files
             .get(span.file.into_usize())
             .expect("span should not refer to a file that does not exist")
     }
 
+    #[track_caller]
     pub fn span_data(&self, span: Span) -> (&SourceCode, &str) {
         let file = self.source_of(span);
 
@@ -86,6 +90,7 @@ impl SourceMap {
         (file, s)
     }
 
+    #[track_caller]
     pub fn span_str(&self, span: Span) -> &str {
         self.span_data(span).1
     }

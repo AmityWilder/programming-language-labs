@@ -98,7 +98,10 @@ use crate::{
 use analyzer::{InterpProgram, analyze_interp};
 use error::fail::Failure;
 use interp::interpret;
-use src_code::span::{usize_to_uspan, uspan};
+use src_code::{
+    code::ExpansionData,
+    span::{RelSpan, usize_to_uspan, uspan},
+};
 use std::{path::PathBuf, range::Range};
 
 /// Indicates unfinished code.
@@ -325,21 +328,16 @@ pub fn last_ansi_seq(src: &str, pos: usize) -> &str {
         .unwrap_or("\x1b[0m")
 }
 
-fn print_highlighted<'src, I, T, A>(tokens: I, syntax_style: &SyntaxStyle<T, A>)
-where
+fn print_highlighted<'src, I, T, A>(
+    tokens: I,
+    expansions: &[ExpansionData],
+    syntax_style: &SyntaxStyle<T, A>,
+) where
     I: IntoIterator<Item: TokenHighlight<'src>>,
     T: StyleWrapper,
     A: AsRef<[T]>,
 {
     use std::fmt::Write;
-    if false {
-        // ---- DEBUG -----
-        for (lexeme, syntax) in highlight(tokens) {
-            print!("{}", syntax_style[syntax].style(lexeme));
-        }
-        // ----------------
-        return;
-    }
     let mut buf = String::new();
     for (lexeme, syntax) in highlight(tokens) {
         _ = write!(buf, "{}", syntax_style[syntax].style(lexeme));
@@ -352,14 +350,25 @@ where
         .to_string()
         .len();
     for (i, line) in buf.lines().enumerate() {
-        let Range { start, .. } = buf
+        let line_range = buf
             .substr_range(line)
             .expect("lines should be substrings of buf");
-        let last_ansi_seq = last_ansi_seq(&buf, start);
+        let last_ansi_seq = last_ansi_seq(&buf, line_range.start);
         println!(
             " \x1b[90m{:>line_num_width$}{last_ansi_seq}   {line}",
             i.strict_add(1)
         );
+        // for x in expansions {
+        //     if let Ok(line_range) = RelSpan::try_from(line_range) {
+        //         line_range.overlaps(x.exp.into());
+        //         for ch in x.exp.0 {
+        //             print!("~");
+        //         }
+        //     } else {
+        //         // TODO: warning
+        //     }
+        // }
+        println!();
     }
 }
 
@@ -492,7 +501,7 @@ impl Default for Cli {
             scanner_tokens: false,
             scanner_highlight: true,
             preproc_tokens: false,
-            preproc_highlight: true, // TODO: make this non-default!
+            preproc_highlight: false,
             dbg_ast: false,
             semantic_highlight: true,
             do_eval: true,
@@ -595,6 +604,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
                 file.tokens()
                     .iter()
                     .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
+                file.expansions(),
                 &SYNTAX_STYLE_ANSI,
             );
             println!();
@@ -629,7 +639,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     for code in preprocessed {
         source.push(code);
     }
-    // syntax highlighted
+    // preprocessor syntax highlighted
     if config.preproc_highlight {
         println!("\nsyntax highlighting:");
         for (id, file) in source.iter() {
@@ -649,6 +659,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
                 file.tokens()
                     .iter()
                     .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
+                file.expansions(),
                 &SYNTAX_STYLE_ANSI,
             );
             println!();

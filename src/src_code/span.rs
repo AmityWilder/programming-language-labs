@@ -35,6 +35,9 @@ pub const fn uspan_to_usize(n: uspan) -> usize {
 }
 
 /// Relies on the assumption `n` is from a non-oversize file
+///
+/// # Panics
+/// This method may panic in debug if `n` does not actually fit in [`uspan`]
 #[cfg_attr(not(debug_assertions), inline)]
 pub const fn usize_to_uspan(n: usize) -> uspan {
     debug_assert!(uspan::try_from(n).is_ok(), "file should not be oversized");
@@ -77,9 +80,13 @@ impl From<RelSpan<uspan>> for Range<usize> {
     }
 }
 
-impl<T: std::fmt::Debug> std::fmt::Debug for RelSpan<T> {
+impl<T: PartialEq + Copy + std::fmt::Debug> std::fmt::Debug for RelSpan<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        if !self.is_empty() {
+            self.0.start.fmt(f)?;
+            f.write_str("-")?;
+        }
+        self.0.end.fmt(f)
     }
 }
 
@@ -127,47 +134,70 @@ impl<T> RelSpan<T> {
         unsafe { std::mem::transmute(value) }
     }
 
+    #[track_caller]
     pub const fn len(self) -> <T as std::ops::Sub>::Output
     where
-        T: [const] std::ops::Sub + Copy,
+        T: [const] PartialOrd + [const] std::ops::Sub + Copy,
     {
-        self.0.end - self.0.start
+        debug_assert!(self.0.start <= self.0.end, "ranges should be ordered");
+        #[expect(clippy::arithmetic_side_effects, reason = "ranges should be ordered")]
+        (self.0.end - self.0.start)
+    }
+
+    #[track_caller]
+    pub const fn is_empty(self) -> bool
+    where
+        T: [const] PartialEq + Copy,
+    {
+        self.0.start == self.0.end
     }
 
     /// Returns `true` if every element of `other` is an element of `self`.
+    #[track_caller]
     pub const fn contains(self, other: Self) -> bool
     where
-        T: [const] Ord + Copy,
+        T: [const] PartialOrd + Copy,
     {
-        debug_assert!(self.0.start <= self.0.end, "ranges should be ordered");
-        debug_assert!(other.0.start <= other.0.end, "ranges should be ordered");
+        debug_assert!(self.0.start <= self.0.end, "self: ranges should be ordered");
+        debug_assert!(
+            other.0.start <= other.0.end,
+            "other: ranges should be ordered"
+        );
         self.0.start <= other.0.start && other.0.end <= self.0.end
     }
 
     /// Returns `true` if `self` and `other` do not intersect.
+    #[track_caller]
     pub const fn is_disjoint(self, other: Self) -> bool
     where
-        T: [const] Ord + Copy,
+        T: [const] PartialOrd + Copy,
     {
-        debug_assert!(self.0.start <= self.0.end, "ranges should be ordered");
-        debug_assert!(other.0.start <= other.0.end, "ranges should be ordered");
+        debug_assert!(self.0.start <= self.0.end, "self: ranges should be ordered");
+        debug_assert!(
+            other.0.start <= other.0.end,
+            "other: ranges should be ordered"
+        );
         self.0.start >= other.0.end || self.0.end <= other.0.start
     }
 
     /// Returns `true` if `self` and `other` have a non-zero intersection.
+    #[track_caller]
     pub const fn overlaps(self, other: Self) -> bool
     where
-        T: [const] Ord + Copy,
+        T: [const] PartialOrd + Copy,
     {
-        debug_assert!(self.0.start <= self.0.end, "ranges should be ordered");
-        debug_assert!(other.0.start <= other.0.end, "ranges should be ordered");
+        debug_assert!(self.0.start <= self.0.end, "self: ranges should be ordered");
+        debug_assert!(
+            other.0.start <= other.0.end,
+            "other: ranges should be ordered"
+        );
         self.0.start < other.0.end && self.0.end > other.0.start
     }
 
     /// `self` ends exactly where `next` begins.
     pub const fn is_joint(self, next: Self) -> bool
     where
-        T: [const] Ord + Copy,
+        T: [const] PartialEq + Copy,
     {
         self.0.end == next.0.start
     }
@@ -194,7 +224,7 @@ impl<T> RelSpan<T> {
     /// Returns [`None`] if they do not share a boundary.
     pub const fn union(self, other: Self) -> Option<Self>
     where
-        T: [const] Ord + [const] Destruct + Copy,
+        T: [const] PartialEq + [const] Destruct + Copy,
     {
         match ((self.0.start, self.0.end), (other.0.start, other.0.end)) {
             ((start, border1), (border2, end)) | ((border2, end), (start, border1))
@@ -208,18 +238,29 @@ impl<T> RelSpan<T> {
     }
 
     /// Finds the union of `self` and `other`, including all elements between even if not contained in either.
+    #[track_caller]
     pub const fn super_union(self, other: Self) -> Self
     where
         T: [const] Ord + [const] Destruct + Copy,
     {
-        let start = self.0.start.min(other.0.start);
+        debug_assert!(
+            self.0.start <= other.0.start,
+            "should not union out-of-order spans"
+        );
+        let start = self.0.start;
         let end = self.0.end.max(other.0.end);
         Self(Range { start, end })
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FileId(uspan);
+
+impl std::fmt::Debug for FileId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "file[{}]", self.0)
+    }
+}
 
 impl FileId {
     /// Caller must ensure this is a legitimate file index.
@@ -232,10 +273,17 @@ impl FileId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span {
     pub file: FileId,
     pub rel: RelSpan<uspan>,
+}
+
+impl std::fmt::Debug for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { file, rel } = self;
+        write!(f, "{file:?}:{rel:?}")
+    }
 }
 
 impl PartialOrd for Span {
