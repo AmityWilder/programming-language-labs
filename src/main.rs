@@ -397,7 +397,7 @@ fn print_highlighted<'src, I, T, A>(
                     print!("{}", syntax_style[syntax].style(lexeme));
                 }
                 println!(
-                    "\x1b[0m{}` -->\x1b[0m {}",
+                    "\x1b[0m{}` <--\x1b[0m {}",
                     MSG_STYLE.begin(),
                     x.call.display_loc(source)
                 );

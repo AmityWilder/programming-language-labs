@@ -1,23 +1,23 @@
-def \foo {5}// definition of `\foo`
+def \foo {5}// definition of `\foo` (silent)
 
 \foo; // expected: `5`
 
-def \bar($x) {$x+1}// definition of `\bar`
+def \bar($x) {$x+1}// definition of `\bar` (silent)
 
 \bar{7}; // expected: `7+1`
 
 \bar{\foo}; // expected: `5+1`
 
-def \baz($x $y) {def \bat($x) {$y*$x}}// definition of `\baz`
+def \baz($x $y) {def \bat($x) {$y*$x}}// definition of `\baz` (silent)
 
 \baz{$u}{7}// expected: `def \bat($u) {7*$u}` (silent)
 
 \bat{x}; // expected: `7*x`
 2 + \bat{x} - 5; // expected: `2 + 7*x - 5`
 
-def \foo($x) {def $x {8}} // redefines `\foo`
+def \foo($x) {def $x {8}}// redefinition of `\foo` (silent)
 
-def \bar {\hidden} // redefines `\bar`
+def \bar {\hidden}// redefinition of `\bar` (silent)
 
 // expansion arguments are lazy and don't expand until the call expands,
 // at which point `def \bar` has no reason to expand `\bar` and will simply redefine it.
