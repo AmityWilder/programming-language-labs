@@ -71,9 +71,67 @@ where
     }
 }
 
+impl LispDisplay for [ast::Declaration] {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut iter = self.iter();
+        while let Some(item) = iter.next() {
+            f.write_str(" ")?;
+            match item {
+                ast::Declaration::Var(var) => {
+                    var.fmt_value(source, f)?;
+                    if let Some(assignment) = &var.assignment {
+                        f.write_str(" ")?;
+                        (
+                            source
+                                .get(assignment.op)
+                                .expect("should be a valid span within source"),
+                            chain!(once(&var.binding), once(&assignment.expr)),
+                        )
+                            .fmt_value(source, f)?;
+                    }
+                }
+
+                ast::Declaration::Defer(defer) => {
+                    let style = SYNTAX_STYLE_ANSI.keyword;
+                    f.write_str("(")?;
+                    fmt::Display::fmt(
+                        &style.alt_style(
+                            source
+                                .get(defer.kw)
+                                .expect("should be a valid span within source"),
+                        ),
+                        f,
+                    )?;
+                    f.write_str(" ")?;
+                    defer.on_pop.fmt(source, f)?;
+                    iter.as_slice().fmt(source, f)?;
+                    f.write_str(")")?;
+                }
+
+                ast::Declaration::Stmt(inner) => inner.fmt(source, f)?,
+            }
+        }
+        Ok(())
+    }
+}
+
 impl LispDisplay for ast::ProgramUnit {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        ("program_unit", &self.decls).fmt_value(source, f)
+        let style = SYNTAX_STYLE_ANSI.keyword;
+        f.write_str("(")?;
+        fmt::Display::fmt(&style.alt_style("program_unit"), f)?;
+        self.decls.as_slice().fmt(source, f)?;
+        f.write_str(")")
+    }
+}
+
+impl LispDisplay for ast::BlockStmt {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let style = SYNTAX_STYLE_ANSI.keyword;
+        f.write_str("(")?;
+        fmt::Display::fmt(&style.alt_style("block"), f)?;
+        self.body.as_slice().fmt(source, f)?;
+        f.write_str(")")
     }
 }
 
@@ -110,12 +168,6 @@ impl LispDisplay for ast::Variable {
 impl LispDisplay for ast::Grouping {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         ("group", once(&self.expr)).fmt_value(source, f)
-    }
-}
-
-impl LispDisplay for ast::BlockStmt {
-    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        ("block", self.body.as_slice()).fmt_value(source, f)
     }
 }
 
@@ -284,18 +336,6 @@ impl LispDisplay for ast::DeferParam {
     }
 }
 
-impl LispDisplay for ast::DeclDefer {
-    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (
-            source
-                .get(self.kw)
-                .expect("should be a valid span within source"),
-            chain!(self.param.as_ref(), once(&self.on_pop)),
-        )
-            .fmt_value(source, f)
-    }
-}
-
 impl LispDisplay for ast::DeclVar {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         (
@@ -304,21 +344,9 @@ impl LispDisplay for ast::DeclVar {
                 .expect("should be a valid span within source"),
             chain!(
                 once(&self.binding),
-                self.ty.as_ref(),
-                self.assignment.as_ref()
+                self.ty.as_ref().map(|t| &t.ty),
+                // assignment should be handled by the parent Block
             ),
-        )
-            .fmt_value(source, f)
-    }
-}
-
-impl LispDisplay for ast::Assignment {
-    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (
-            source
-                .get(self.op)
-                .expect("should be a valid span within source"),
-            once(&self.expr),
         )
             .fmt_value(source, f)
     }
@@ -380,15 +408,5 @@ impl LispDisplay for ast::Typename {
 impl LispDisplay for ast::NamespacePathPart {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         todo!()
-    }
-}
-
-impl LispDisplay for ast::Declaration {
-    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Var(inner) => inner.fmt(source, f),
-            Self::Defer(inner) => inner.fmt(source, f),
-            Self::Stmt(inner) => inner.fmt(source, f),
-        }
     }
 }
