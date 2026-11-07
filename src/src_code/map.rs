@@ -1,6 +1,9 @@
-use crate::src_code::{
-    code::{ExpansionData, SourceCode},
-    span::{FileId, Span},
+use crate::{
+    lex::token::TokenKind,
+    src_code::{
+        code::{ExpansionData, SourceCode, SourceLoc},
+        span::{FileId, RelSpan, Span},
+    },
 };
 
 #[derive(Debug, PartialEq)]
@@ -95,11 +98,58 @@ impl SourceMap {
         self.span_data(span).1
     }
 
+    #[track_caller]
+    pub fn span_tokens(&self, span: Span) -> impl Iterator<Item = (RelSpan, TokenKind)> {
+        self.source_of(span).span_tokens(span.rel)
+    }
+
     pub fn lookup_macro_recursive(&self, mut span: Span) -> impl Iterator<Item = &ExpansionData> {
         std::iter::from_fn(move || {
             self.source_of(span)
                 .expansion(span.rel)
                 .inspect(|x| span = x.call)
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpanLoc<'src> {
+    source: &'src SourceMap,
+    span: Span,
+}
+
+impl Span {
+    pub const fn display_loc(self, source: &SourceMap) -> SpanLoc<'_> {
+        SpanLoc { source, span: self }
+    }
+}
+
+impl std::fmt::Display for SpanLoc<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let code = self.source.source_of(self.span);
+        match code.loc() {
+            SourceLoc::Repl | SourceLoc::PreprocRepl => write!(f, "terminal")?,
+            SourceLoc::File(path) | SourceLoc::PreprocFile(path) => path.display().fmt(f)?,
+        }
+        if matches!(
+            code.loc(),
+            SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)
+        ) {
+            write!(f, " (preprocessed)")?;
+        }
+        Ok({
+            let (start_linenum, start_charnum) = code
+                .line_char(self.span.rel.start)
+                .expect("span should be in file it's from");
+            let (end_linenum, end_charnum) = code
+                .line_char(self.span.rel.end)
+                .expect("span should be in file it's from");
+            write!(f, ":{start_linenum}:{start_charnum}")?;
+            if end_linenum != start_linenum {
+                write!(f, "-{end_linenum}:{end_charnum}")?;
+            } else if end_charnum != start_charnum {
+                write!(f, "-{end_charnum}")?;
+            }
         })
     }
 }

@@ -82,11 +82,7 @@ impl From<RelSpan<uspan>> for Range<usize> {
 
 impl<T: PartialEq + Copy + std::fmt::Debug> std::fmt::Debug for RelSpan<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if !self.is_empty() {
-            self.0.start.fmt(f)?;
-            f.write_str("-")?;
-        }
-        self.0.end.fmt(f)
+        self.0.fmt(f)
     }
 }
 

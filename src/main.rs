@@ -76,8 +76,9 @@ use crate::{
     grammar::parse,
     highlight::{
         TokenHighlight, highlight,
-        style::{Style, StyleWrapper},
+        style::{Color, Style, StyleWrapper},
         syntax::{GetSyntax, Syntax, SyntaxStyle, syntax_style},
+        write_highlight,
     },
     lex::token::TokenTable,
     old_error::ContextError,
@@ -329,6 +330,8 @@ pub fn last_ansi_seq(src: &str, pos: usize) -> &str {
 }
 
 fn print_highlighted<'src, I, T, A>(
+    source: &SourceMap,
+    code: &SourceCode,
     tokens: I,
     expansions: &[ExpansionData],
     syntax_style: &SyntaxStyle<T, A>,
@@ -339,7 +342,8 @@ fn print_highlighted<'src, I, T, A>(
 {
     use std::fmt::Write;
     let mut buf = String::new();
-    for (lexeme, syntax) in highlight(tokens) {
+    let tokens: Vec<_> = tokens.into_iter().map(|x| x.get_syntax()).collect();
+    for (lexeme, syntax) in highlight(tokens.iter().copied()) {
         _ = write!(buf, "{}", syntax_style[syntax].style(lexeme));
     }
     _ = write!(buf, "\x1b[0m");
@@ -349,26 +353,59 @@ fn print_highlighted<'src, I, T, A>(
         .strict_add(' '.len_utf8())
         .to_string()
         .len();
-    for (i, line) in buf.lines().enumerate() {
+    for (i, (highlighted_line, mut line_span)) in buf.lines().zip(code.line_spans()).enumerate() {
+        line_span.end = line_span
+            .end
+            .saturating_sub(usize_to_uspan('\n'.len_utf8()))
+            .max(line_span.start);
         let line_range = buf
-            .substr_range(line)
+            .substr_range(highlighted_line)
             .expect("lines should be substrings of buf");
         let last_ansi_seq = last_ansi_seq(&buf, line_range.start);
         println!(
-            " \x1b[90m{:>line_num_width$}{last_ansi_seq}   {line}",
+            " \x1b[90m{:>line_num_width$}{last_ansi_seq}   {highlighted_line}",
             i.strict_add(1)
         );
-        // for x in expansions {
-        //     if let Ok(line_range) = RelSpan::try_from(line_range) {
-        //         line_range.overlaps(x.exp.into());
-        //         for ch in x.exp.0 {
-        //             print!("~");
-        //         }
-        //     } else {
-        //         // TODO: warning
-        //     }
-        // }
-        println!();
+        let mut has_annotation = false;
+        for x in expansions {
+            const MSG_STYLE: Style = Style::new().foreground(Color::BrightCyan).bold(true);
+            if let Some(span) = line_span.intersection(x.exp) {
+                has_annotation = true;
+                print!(" {}{:>line_num_width$}   ", MSG_STYLE.begin(), "");
+                #[expect(
+                    clippy::arithmetic_side_effects,
+                    reason = "intersection must contain only elements in both spans, \
+                    so the span's minimum element must be >= the minimum element of either span."
+                )]
+                for _ in 0..span.0.start - line_span.start {
+                    print!(" ");
+                }
+                if span.is_empty() {
+                    print!("↖ (empty)");
+                } else {
+                    for _ in span.0 {
+                        print!("~");
+                    }
+                }
+                print!(" expanded from `\x1b[0m");
+                let call_code = source.source_of(x.call);
+                for (lexeme, syntax) in highlight(
+                    call_code
+                        .span_tokens(x.call.rel)
+                        .map(|(span, kind)| (&call_code[span], kind)),
+                ) {
+                    print!("{}", syntax_style[syntax].style(lexeme));
+                }
+                println!(
+                    "\x1b[0m{}` -->\x1b[0m {}",
+                    MSG_STYLE.begin(),
+                    x.call.display_loc(source)
+                );
+            }
+        }
+        if has_annotation {
+            println!(); // breathing room
+        }
     }
 }
 
@@ -501,7 +538,7 @@ impl Default for Cli {
             scanner_tokens: false,
             scanner_highlight: true,
             preproc_tokens: false,
-            preproc_highlight: false,
+            preproc_highlight: true, // TODO: should not be default!
             dbg_ast: false,
             semantic_highlight: true,
             do_eval: true,
@@ -601,6 +638,8 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
             }
             println!(":");
             print_highlighted(
+                source,
+                file,
                 file.tokens()
                     .iter()
                     .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
@@ -656,6 +695,8 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
             print!(" (preprocessed)");
             println!(":");
             print_highlighted(
+                source,
+                file,
                 file.tokens()
                     .iter()
                     .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),

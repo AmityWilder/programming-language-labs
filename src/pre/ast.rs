@@ -1,14 +1,11 @@
-use crate::{
-    Todo,
-    lex::token::TokenKind,
-    src_code::span::{RelSpan, Span, uspan},
-};
+use super::StreamSpan;
+use crate::{lex::token::TokenKind, src_code::span::uspan};
 
 /// `Macro`
-pub type MacroName = Span;
+pub type MacroName = StreamSpan;
 
 /// `MParam`
-pub type Param = Span;
+pub type Param = StreamSpan;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Document {
@@ -25,61 +22,167 @@ pub enum DocumentItem {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Definition {
-    pub span: RelSpan,
-    pub kw: Span,
+    pub kw: StreamSpan,
     pub name: MacroName,
     pub params: Option<ParamGroup>,
     pub body: Replacer,
+
+    /// The total lenth of the item in bytes, including whitespace and comments
+    pub len: uspan,
+}
+
+impl Definition {
+    pub const fn first_span(&self) -> &StreamSpan {
+        &self.kw
+    }
+
+    pub const fn last_span(&self) -> &StreamSpan {
+        self.body.last_span()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct ParamGroup {
     /// `(`
-    pub open: Span,
+    pub open: StreamSpan,
     pub params: Vec<Param>,
     /// `)`
-    pub close: Span,
+    pub close: StreamSpan,
+}
+
+impl ParamGroup {
+    pub const fn first_span(&self) -> &StreamSpan {
+        &self.open
+    }
+
+    pub const fn last_span(&self) -> &StreamSpan {
+        &self.close
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Replacer {
     /// `{`
-    pub open: Span,
+    pub open: StreamSpan,
     pub items: Tokens,
     /// `}`
-    pub close: Span,
+    pub close: StreamSpan,
+}
+
+impl Replacer {
+    pub const fn first_span(&self) -> &StreamSpan {
+        &self.open
+    }
+
+    pub const fn last_span(&self) -> &StreamSpan {
+        &self.close
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Tokens {
-    pub list: Vec<(Span, TokenKind)>,
+    pub list: Vec<(StreamSpan, TokenKind)>,
+}
+
+impl Tokens {
+    pub const fn first_span(&self) -> Option<&StreamSpan> {
+        if let Some((span, _)) = self.list.as_slice().first() {
+            Some(span)
+        } else {
+            None
+        }
+    }
+
+    pub const fn last_span(&self) -> Option<&StreamSpan> {
+        if let Some((span, _)) = self.list.as_slice().last() {
+            Some(span)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Call {
-    pub span: RelSpan,
     pub name: MacroName,
     pub args: Vec<Replacer>,
+
+    /// The total lenth of the item in bytes, including whitespace and comments
+    pub len: uspan,
+}
+
+impl Call {
+    pub const fn first_span(&self) -> &StreamSpan {
+        &self.name
+    }
+
+    pub const fn last_span(&self) -> &StreamSpan {
+        if let Some(arg) = self.args.as_slice().last() {
+            arg.last_span()
+        } else {
+            &self.name
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Conditional {
     /// `rot`
-    pub kw: Span,
+    pub kw: StreamSpan,
     pub pred: Replacer,
     pub then: Replacer,
     pub alt: Option<Alternative>,
 }
 
+impl Conditional {
+    pub const fn first_span(&self) -> &StreamSpan {
+        &self.kw
+    }
+
+    pub const fn last_span(&self) -> &StreamSpan {
+        if let Some(alt) = &self.alt {
+            alt.last_span()
+        } else {
+            self.then.last_span()
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Alternative {
     /// `tor`
-    pub kw: Span,
+    pub kw: StreamSpan,
     pub body: AlternativeBody,
+}
+
+impl Alternative {
+    pub const fn first_span(&self) -> &StreamSpan {
+        &self.kw
+    }
+
+    pub const fn last_span(&self) -> &StreamSpan {
+        self.body.last_span()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub enum AlternativeBody {
     More(Box<Conditional>),
     Last(Replacer),
+}
+
+impl AlternativeBody {
+    pub const fn first_span(&self) -> &StreamSpan {
+        match self {
+            Self::More(x) => (&**x).first_span(),
+            Self::Last(x) => x.first_span(),
+        }
+    }
+
+    pub const fn last_span(&self) -> &StreamSpan {
+        match self {
+            Self::More(x) => (&**x).last_span(),
+            Self::Last(x) => x.last_span(),
+        }
+    }
 }

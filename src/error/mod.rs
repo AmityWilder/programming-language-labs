@@ -1236,31 +1236,7 @@ impl Display for ContextError<'_, '_> {
                 .bold(true)
                 .begin()
         )?;
-        let code = self.source.source_of(self.error.span);
-        match code.loc() {
-            SourceLoc::Repl | SourceLoc::PreprocRepl => write!(f, "terminal")?,
-            SourceLoc::File(path) | SourceLoc::PreprocFile(path) => path.display().fmt(f)?,
-        }
-        if matches!(
-            code.loc(),
-            SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)
-        ) {
-            write!(f, " (preprocessed)")?;
-        }
-        {
-            let (start_linenum, start_charnum) = code
-                .line_char(self.error.span.rel.start)
-                .expect("span should be in file it's from");
-            let (end_linenum, end_charnum) = code
-                .line_char(self.error.span.rel.end)
-                .expect("span should be in file it's from");
-            write!(f, ":{start_linenum}:{start_charnum}")?;
-            if end_linenum != start_linenum {
-                write!(f, "-{end_linenum}:{end_charnum}")?;
-            } else if end_charnum != start_charnum {
-                write!(f, "-{end_charnum}")?;
-            }
-        }
+        self.error.span.display_loc(&self.source).fmt(f);
         writeln!(f)?;
 
         // render
