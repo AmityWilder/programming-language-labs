@@ -6,7 +6,7 @@ use crate::{
     },
     lex::token::TokenKind,
     src_code::{
-        code::SourceCode,
+        code::{LineContentSpans, SourceCode},
         map::SourceMap,
         span::{RelSpan, Span, usize_to_uspan},
     },
@@ -213,7 +213,7 @@ struct CodeRefsGroup<'src, 'outer, T> {
     q: &'outer mut CodeRefsQueue<T>,
     prev_span: Option<Span>,
     curr_file: &'src SourceCode,
-    line_idx: std::range::RangeFromIter<usize>,
+    lines: std::iter::Enumerate<LineContentSpans<'src>>,
 }
 
 impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
@@ -223,7 +223,7 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
             Some(Self {
                 q: &mut outer.q,
                 prev_span: None,
-                line_idx: std::range::RangeFrom { start: 0 }.iter(),
+                lines: curr_file.line_content_spans().enumerate(),
                 curr_file,
             })
         } else {
@@ -279,7 +279,7 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
                 if skipped_lines.next().is_some() {
                     // multiple: skip lines with "..."
                     for _ in self.curr_file[sep].matches('\n') {
-                        _ = self.line_idx.next();
+                        _ = self.lines.next();
                     }
                     if self.prev_span.is_some() {
                         writeln!(f, "\n{}...", LINE_PRELUDE_STYLE.begin())?;
@@ -297,7 +297,10 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
                         (last_linebreak + '\n'.len_utf8()),
                     );
                 }
-                let i = self.line_idx.next().unwrap_or_else(|| todo!());
+                let (i, line_span) = self
+                    .lines
+                    .next()
+                    .unwrap_or_else(|| todo!("error at end of document"));
                 write!(
                     f,
                     "\n{}{:>max_linenum_width$} |{}  ",
@@ -308,19 +311,8 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
                 let line_tokens = self
                     .curr_file
                     .tokens()
-                    .iter()
-                    .skip_while({
-                        let mut newlines: usize = 0;
-                        move |(_, kind)| {
-                            if matches!(kind, TokenKind::Newline) {
-                                newlines = newlines.strict_add(1);
-                                true
-                            } else {
-                                newlines < i
-                            }
-                        }
-                    })
-                    .take_while(|(_, kind)| !matches!(kind, TokenKind::Newline))
+                    .lines(self.curr_file)
+                    .overlapping(line_span)
                     .map(|(span, kind)| (&self.curr_file[span], kind));
                 write_highlight(line_tokens, f, &SYNTAX_STYLE_ANSI)?;
                 write!(

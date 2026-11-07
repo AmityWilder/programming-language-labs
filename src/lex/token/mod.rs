@@ -1,8 +1,12 @@
 use crate::{
     lex::token::{keyword::Keyword, punc::Punctuation},
     parse::ast::ExprPrecedence,
-    src_code::span::{RelSpan, uspan},
+    src_code::{
+        code::{LineContentSpans, SourceCode},
+        span::{RelSpan, usize_to_uspan, uspan},
+    },
 };
+use std::range::Range;
 
 /// Helper macro for preventing issues with missed variants when adding new ones
 ///
@@ -184,8 +188,6 @@ pub enum TokenKind {
     #[default]
     Invalid,
 
-    /// A single newline
-    Newline,
     /// An entire chunk of whitespace, not just one character
     WSpace,
     /// A comment (either block or line)
@@ -215,7 +217,7 @@ pub enum TokenKind {
 
 impl TokenKind {
     pub const fn is_ignored(self) -> bool {
-        matches!(self, Self::Newline | Self::WSpace | Self::Comment)
+        matches!(self, Self::WSpace | Self::Comment)
     }
 }
 
@@ -235,7 +237,7 @@ impl TokenKind {
     pub const fn expectation_name(self) -> &'static str {
         match self {
             Self::Invalid => panic!("not implemented: should not expect an invalid token"),
-            Self::Newline | Self::WSpace => panic!("not implemented: should not expect whitespace"),
+            Self::WSpace => panic!("not implemented: should not expect whitespace"),
             Self::Comment => panic!("not implemented: should not expect a comment"),
 
             Self::BoolLit(_) => "a boolean literal",
@@ -260,13 +262,13 @@ impl TokenKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct TokenSpans<'a> {
+pub struct TokenSpans<'tbl> {
     acc: uspan,
-    iter: std::slice::Iter<'a, (uspan, TokenKind)>,
+    iter: std::slice::Iter<'tbl, (uspan, TokenKind)>,
 }
 
-impl<'a> TokenSpans<'a> {
-    fn new(iter: &'a [(uspan, TokenKind)]) -> Self {
+impl<'tbl> TokenSpans<'tbl> {
+    fn new(iter: &'tbl [(uspan, TokenKind)]) -> Self {
         Self {
             acc: 0,
             iter: iter.iter(),
@@ -288,10 +290,154 @@ impl Iterator for TokenSpans<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash, Default)]
+enum TokenLinesWithinState {
+    Ahead {
+        start: uspan,
+        end: uspan,
+    },
+    Within {
+        end: uspan,
+    },
+    #[default]
+    After,
+}
+
+#[derive(Debug, Clone)]
+pub struct TokenLinesWithin<'src, 'tbl> {
+    iter: TokenLines<'src, 'tbl>,
+    state: TokenLinesWithinState,
+}
+
+impl<'src, 'tbl> TokenLinesWithin<'src, 'tbl> {
+    const fn new(iter: TokenLines<'src, 'tbl>, RelSpan(Range { start, end }): RelSpan) -> Self {
+        Self {
+            iter,
+            state: TokenLinesWithinState::Ahead { start, end },
+        }
+    }
+}
+
+impl Iterator for TokenLinesWithin<'_, '_> {
+    type Item = (RelSpan, TokenKind);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.state {
+                TokenLinesWithinState::Ahead { start, end } => {
+                    if let item @ Some((span, _)) = self.iter.next()
+                        && span.end > start
+                    {
+                        self.state = TokenLinesWithinState::Within { end };
+                        break item;
+                    }
+                }
+
+                TokenLinesWithinState::Within { end } => {
+                    if let item @ Some((span, _)) = self.iter.next()
+                        && span.start < end
+                    {
+                        break item;
+                    }
+                    self.state = TokenLinesWithinState::After;
+                }
+
+                TokenLinesWithinState::After => break None,
+            }
+        }
+    }
+}
+
+/// **Note:** Not ever Item output from this iterator is a true token.
+/// This iterator may break tokens apart around newlines.
+#[derive(Debug, Clone)]
+pub struct TokenLines<'src, 'tbl> {
+    lines: std::iter::Peekable<LineContentSpans<'src>>,
+    tokens: std::iter::Peekable<TokenSpans<'tbl>>,
+}
+
+impl<'src, 'tbl> TokenLines<'src, 'tbl> {
+    fn new(line_content_spans: LineContentSpans<'src>, tokens: TokenSpans<'tbl>) -> Self {
+        Self {
+            lines: line_content_spans.peekable(),
+            tokens: tokens.peekable(),
+        }
+    }
+
+    pub const fn overlapping(self, span: RelSpan) -> TokenLinesWithin<'src, 'tbl> {
+        TokenLinesWithin::new(self, span)
+    }
+}
+
+impl Iterator for TokenLines<'_, '_> {
+    type Item = (RelSpan, TokenKind);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(&mut (ref mut span, kind)) = self.tokens.peek_mut() {
+            debug_assert!(
+                !self.lines.peek().is_some_and(|span| span.is_empty()),
+                "`lines` should iterate when emptied"
+            );
+            let line_span = self
+                .lines
+                .peek_mut()
+                .expect("ran out of lines before visiting every token");
+
+            match span.end.cmp(&line_span.end) {
+                // line is incomplete
+                std::cmp::Ordering::Less => {
+                    debug_assert!(
+                        line_span.start <= span.end,
+                        "line should not iterate while it still contains tokens"
+                    );
+                    line_span.start = span.end;
+                    self.tokens.next()
+                }
+
+                // token completes line
+                std::cmp::Ordering::Equal => {
+                    _ = self.lines.next();
+                    self.tokens.next()
+                }
+
+                // token contains linebreak(s)
+                std::cmp::Ordering::Greater => {
+                    let Some(line_span) = self.lines.next() else {
+                        unreachable!("already peeked");
+                    };
+                    let item = (
+                        RelSpan(Range {
+                            start: span.start,
+                            end: line_span.end,
+                        }),
+                        kind,
+                    );
+                    if let Some(next_line_span) = self.lines.peek() {
+                        span.start = next_line_span.start;
+                    } else {
+                        // TODO: this assertion doesn't cover the case where the span includes an extra character
+                        // the size of a newline while `lines` *doesn't* have a trailing newline
+                        debug_assert_eq!(
+                            (span.len().checked_sub(line_span.len()), kind),
+                            (Some(usize_to_uspan('\n'.len_utf8())), TokenKind::WSpace),
+                            "the absence of an upcoming line in the presence of a token containing a newline should \
+                            imply the token ends with the newline (which is only possible for whitespace tokens)"
+                        );
+                        _ = self.tokens.next();
+                    }
+                    Some(item)
+                }
+            }
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash, Default)]
 pub struct TokenTable {
     /// (length, kind)
-    pub(super) tokens: Vec<(uspan, TokenKind)>,
+    pub tokens: Vec<(uspan, TokenKind)>,
 }
 
 impl TokenTable {
@@ -301,6 +447,11 @@ impl TokenTable {
 
     pub fn iter(&self) -> TokenSpans<'_> {
         TokenSpans::new(&self.tokens)
+    }
+
+    /// Splits tokens into chunks around newline characters
+    pub fn lines<'src, 'tbl>(&'tbl self, code: &'src SourceCode) -> TokenLines<'src, 'tbl> {
+        TokenLines::new(code.line_content_spans(), self.iter())
     }
 }
 
@@ -454,7 +605,7 @@ impl TryFrom<TokenKind> for Operator {
     type Error = ();
 
     fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
-        value.to_token_eq().and_then(|x| x.to_operator()).ok_or(())
+        value.to_token_eq().and_then(TokenEq::to_operator).ok_or(())
     }
 }
 

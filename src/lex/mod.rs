@@ -5,7 +5,7 @@ use crate::{
         token::{TokenKind, TokenTable, keyword::Keyword},
     },
     scanner::token::punc::Punctuation,
-    src_code::span::{FileId, RelSpan, Span, usize_to_uspan, uspan},
+    src_code::span::{FileId, RelSpan, usize_to_uspan, uspan},
 };
 
 pub mod symbols;
@@ -29,7 +29,7 @@ impl<'src> Lexer<'src> {
 
     fn whitespace(&mut self) -> usize {
         self.source
-            .find(|ch: char| !ch.is_whitespace() || ch == '\n')
+            .find(|ch: char| !ch.is_whitespace())
             .unwrap_or(self.source.len())
     }
 
@@ -163,9 +163,6 @@ impl Iterator for Lexer<'_> {
         chars
             .next()
             .map(|ch1| match (ch1, chars.next()) {
-                // newline
-                ('\n', _) => ('\n'.len_utf8(), TokenKind::Newline, None),
-
                 // whitespace
                 (ch, _) if ch.is_whitespace() => (self.whitespace(), TokenKind::WSpace, None),
 
