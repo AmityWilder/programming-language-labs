@@ -396,10 +396,24 @@ fn print_highlighted<'src, I, T, A>(
                 ) {
                     print!("{}", syntax_style[syntax].style(lexeme));
                 }
-                println!(
+                print!(
                     "\x1b[0m{}` <--\x1b[0m {}",
                     MSG_STYLE.begin(),
                     x.call.display_loc(source)
+                );
+                print!(" {}as defined in `\x1b[0m", MSG_STYLE.begin());
+                let def_code = source.source_of(x.def);
+                for (lexeme, syntax) in highlight(
+                    def_code
+                        .span_tokens(x.def.rel)
+                        .map(|(span, kind)| (&def_code[span], kind)),
+                ) {
+                    print!("{}", syntax_style[syntax].style(lexeme));
+                }
+                println!(
+                    "\x1b[0m{}` <--\x1b[0m {}",
+                    MSG_STYLE.begin(),
+                    x.def.display_loc(source)
                 );
             }
         }
