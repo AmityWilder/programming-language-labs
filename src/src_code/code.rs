@@ -1,5 +1,5 @@
 use crate::{
-    lex::token::TokenTable,
+    lex::token::{TokenKind, TokenTable},
     src_code::span::{RelSpan, Span, usize_to_uspan, uspan, uspan_to_usize},
 };
 use std::{num::NonZero, path::PathBuf, range::Range};
@@ -210,6 +210,17 @@ impl SourceCode {
         &self.lines
     }
 
+    pub fn line_spans(&self) -> impl Iterator<Item = RelSpan> {
+        self.lines.iter().copied().map({
+            let mut end: uspan = 0;
+            move |len| {
+                let start = end;
+                end = end.strict_add(len);
+                RelSpan(Range { start, end })
+            }
+        })
+    }
+
     /// Finds the most specific expansion containing `span`
     pub fn expansion(&self, span: RelSpan) -> Option<&ExpansionData> {
         self.mac
@@ -290,5 +301,13 @@ impl SourceCode {
                         .expect("adding 1 should ensure non-zero");
                 (line_num, char_num)
             })
+    }
+
+    /// NOTE: Includes the WHOLE token, even if the `rel` argument is to a subtoken!
+    pub fn span_tokens(&self, rel: RelSpan) -> impl Iterator<Item = (RelSpan, TokenKind)> {
+        self.tokens()
+            .into_iter()
+            .skip_while(move |(span, _)| span.end <= rel.start)
+            .take_while(move |(span, _)| span.start < rel.end)
     }
 }
