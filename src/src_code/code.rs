@@ -1,6 +1,6 @@
 use crate::{
     lex::token::{TokenKind, TokenTable},
-    src_code::span::{RelSpan, Span, usize_to_uspan, uspan, uspan_to_usize},
+    src_code::span::{RelSpan, Span, usize_to_uspan, uspan},
 };
 use std::{num::NonZero, path::PathBuf, range::Range};
 
@@ -130,27 +130,282 @@ impl std::fmt::Display for CreateSourceCodeError {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct LineSpans<'src> {
+    iter: std::iter::Copied<std::slice::Iter<'src, uspan>>,
+    head: uspan,
+}
+
+impl<'src> LineSpans<'src> {
+    fn new(lens: &'src [uspan]) -> Self {
+        Self {
+            iter: lens.iter().copied(),
+            head: 0,
+        }
+    }
+}
+
+impl Iterator for LineSpans<'_> {
+    type Item = RelSpan;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|len| {
+            let start = self.head;
+            self.head = self.head.strict_add(len);
+            RelSpan(Range {
+                start,
+                end: self.head,
+            })
+        })
+    }
+
+    fn count(self) -> usize {
+        self.iter.count()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl ExactSizeIterator for LineSpans<'_> {
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+}
+
+impl std::iter::FusedIterator for LineSpans<'_> {}
+
+#[derive(Debug, Clone)]
+pub struct LineSpansDe<'src> {
+    iter: std::iter::Copied<std::slice::Iter<'src, uspan>>,
+    head: uspan,
+    tail: uspan,
+}
+
+impl<'src> LineSpansDe<'src> {
+    fn new(lens: &'src [uspan], full_len: uspan) -> Self {
+        Self {
+            iter: lens.iter().copied(),
+            head: 0,
+            tail: full_len,
+        }
+    }
+}
+
+impl Iterator for LineSpansDe<'_> {
+    type Item = RelSpan;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|len| {
+            let start = self.head;
+            self.head = self.head.strict_add(len);
+            debug_assert!(
+                self.head <= self.tail,
+                "head should not exceed tail\
+                \n head: {}\
+                \n tail: {}",
+                self.head,
+                self.tail,
+            );
+            RelSpan(Range {
+                start,
+                end: self.head,
+            })
+        })
+    }
+
+    fn last(mut self) -> Option<Self::Item> {
+        // this iterator does not mutate external state
+        self.next_back()
+    }
+
+    fn count(self) -> usize {
+        self.iter.count()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl DoubleEndedIterator for LineSpansDe<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.iter.next_back().map(|len| {
+            let end = self.tail;
+            debug_assert!(
+                end >= len,
+                "no token should be longer than the sum of all token lengths up to and including it\
+                \n token length: {len}\
+                \n total length: {end}"
+            );
+            #[expect(clippy::arithmetic_side_effects, reason = "see assertion")]
+            {
+                self.tail -= len;
+            }
+            debug_assert!(
+                self.head <= self.tail,
+                "tail should not subceed head\
+                \n head: {}\
+                \n tail: {}",
+                self.head,
+                self.tail,
+            );
+            RelSpan(Range {
+                start: self.tail,
+                end,
+            })
+        })
+    }
+}
+
+impl ExactSizeIterator for LineSpansDe<'_> {
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+}
+
+impl std::iter::FusedIterator for LineSpansDe<'_> {}
+
+#[derive(Debug, Clone)]
+pub struct LineContentSpans<'src> {
+    iter: std::iter::Copied<std::slice::Iter<'src, uspan>>,
+    last: std::option::IntoIter<RelSpan>,
+    head: uspan,
+}
+
+impl<'src> LineContentSpans<'src> {
+    fn new(lens: &'src [uspan], has_trailing_newline: bool, full_len: uspan) -> Self {
+        let mut iter = lens.iter().copied();
+
+        let last = if has_trailing_newline {
+            None
+        } else {
+            iter.next_back().map(|len| {
+                debug_assert!(
+                    len <= full_len,
+                    "every `len` should be a subset of `full_len`\
+                    \n      len: {len}\
+                    \n full_len: {full_len}"
+                );
+                RelSpan(Range {
+                    #[expect(clippy::arithmetic_side_effects, reason = "see assertion")]
+                    start: full_len - len,
+                    end: full_len,
+                })
+            })
+        }
+        .into_iter();
+
+        Self {
+            last,
+            iter,
+            head: 0,
+        }
+    }
+
+    fn transform(&mut self, len: uspan) -> RelSpan {
+        // `char::len_utf8()` is guaranteed to be at most 4, which easily fits in uspan
+        const NEWLINE_LEN: uspan = usize_to_uspan('\n'.len_utf8());
+        // only proves it CAN contain a newline character, not that it DOES
+        debug_assert!(
+            len >= NEWLINE_LEN,
+            "every line in this branch should contain a newline character\
+            \n         len: {len}\
+            \n NEWLINE_LEN: {NEWLINE_LEN}"
+        );
+        let start = self.head;
+        self.head = self.head.strict_add(len);
+        RelSpan(Range {
+            start,
+            #[expect(clippy::arithmetic_side_effects, reason = "see assertion")]
+            end: self.head - NEWLINE_LEN,
+        })
+    }
+}
+
+impl Iterator for LineContentSpans<'_> {
+    type Item = RelSpan;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(len) = self.iter.next() {
+            Some(self.transform(len))
+        } else {
+            self.last.next()
+        }
+    }
+
+    fn count(self) -> usize {
+        #[expect(
+            clippy::arithmetic_side_effects,
+            reason = "this behavior is expected according to the [`Iterator::count`] documentation"
+        )]
+        (self.iter.count() + self.last.count())
+    }
+
+    fn last(mut self) -> Option<Self::Item> {
+        // this iterator does not mutate external state
+        if let res @ Some(_) = self.last.next() {
+            res
+        } else {
+            self.iter.next_back().map(|l| self.transform(l))
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for LineContentSpans<'_> {
+    fn len(&self) -> usize {
+        debug_assert!(
+            self.iter.len().checked_add(self.last.len()).is_some(),
+            "`last` can only come from calling `iter.next_back()` in the constructor, \
+            so if `iter.len()` is `usize::MAX` ({}), then `last.len()` must be 0, \
+            and if `last.len()` is non-zero, then `iter.len()` must be *at most* `usize::MAX - 1` ({}). \
+            therefore, the sum of their lengths should never exceed `usize::MAX`\
+            \n iter.len(): {}\
+            \n last.len(): {}",
+            usize::MAX,
+            usize::MAX - 1,
+            self.iter.len(),
+            self.last.len(),
+        );
+        #[expect(clippy::arithmetic_side_effects, reason = "see assertion")]
+        (self.iter.len() + self.last.len())
+    }
+}
+
+impl std::iter::FusedIterator for LineContentSpans<'_> {}
+
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SourceCode {
     loc: SourceLoc,
     src: String,
     /// Macro expansion ranges
     mac: Vec<ExpansionData>,
-    /// The length of each line in bytes
+    /// The length of each line in bytes (including the trailing `\n`)
     lines: Vec<uspan>,
+    has_trailing_newline: bool,
     tokens: Option<TokenTable>,
 }
 
 impl std::ops::Index<RelSpan> for SourceCode {
     type Output = str;
 
+    #[track_caller]
     fn index(&self, index: RelSpan) -> &Self::Output {
+        #[expect(clippy::string_slice, reason = "caller's responsibility")]
         &self.src[<Range<usize>>::from(index)]
     }
 }
 
 impl std::ops::IndexMut<RelSpan> for SourceCode {
+    #[track_caller]
     fn index_mut(&mut self, index: RelSpan) -> &mut Self::Output {
+        #[expect(clippy::string_slice, reason = "caller's responsibility")]
         &mut self.src[<Range<usize>>::from(index)]
     }
 }
@@ -174,6 +429,7 @@ impl SourceCode {
                     .map(str::len)
                     .map(usize_to_uspan)
                     .collect(),
+                has_trailing_newline: src.ends_with('\n'),
                 src,
                 mac,
                 tokens: None,
@@ -210,15 +466,17 @@ impl SourceCode {
         &self.lines
     }
 
-    pub fn line_spans(&self) -> impl Iterator<Item = RelSpan> {
-        self.lines.iter().copied().map({
-            let mut end: uspan = 0;
-            move |len| {
-                let start = end;
-                end = end.strict_add(len);
-                RelSpan(Range { start, end })
-            }
-        })
+    pub const fn has_trailing_newline(&self) -> bool {
+        self.has_trailing_newline
+    }
+
+    pub fn line_spans(&self) -> LineSpans<'_> {
+        LineSpans::new(&self.lines)
+    }
+
+    /// Like [`Self::line_spans`], but excluding the `\n` characters from the span
+    pub fn line_content_spans(&self) -> LineContentSpans<'_> {
+        LineContentSpans::new(&self.lines, self.has_trailing_newline, self.len())
     }
 
     /// Finds the most specific expansion containing `span`
@@ -297,7 +555,7 @@ impl SourceCode {
                 let line_num =
                     NonZero::new(line_idx.strict_add(1)).expect("adding 1 should ensure non-zero");
                 let char_num =
-                    NonZero::new(usize_to_uspan(self.src[uspan_to_usize(range.start)..uspan_to_usize(pos)].chars().count()).strict_add(1))
+                    NonZero::new(usize_to_uspan(self[RelSpan(Range { start: range.start, end: pos })].chars().count()).strict_add(1))
                         .expect("adding 1 should ensure non-zero");
                 (line_num, char_num)
             })

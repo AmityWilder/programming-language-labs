@@ -353,11 +353,8 @@ fn print_highlighted<'src, I, T, A>(
         .strict_add(' '.len_utf8())
         .to_string()
         .len();
-    for (i, (highlighted_line, mut line_span)) in buf.lines().zip(code.line_spans()).enumerate() {
-        line_span.end = line_span
-            .end
-            .saturating_sub(usize_to_uspan('\n'.len_utf8()))
-            .max(line_span.start);
+    for (i, (highlighted_line, line_span)) in buf.lines().zip(code.line_content_spans()).enumerate()
+    {
         let line_range = buf
             .substr_range(highlighted_line)
             .expect("lines should be substrings of buf");
@@ -372,12 +369,7 @@ fn print_highlighted<'src, I, T, A>(
             if let Some(span) = line_span.intersection(x.exp) {
                 has_annotation = true;
                 print!(" {}{:>line_num_width$}   ", MSG_STYLE.begin(), "");
-                #[expect(
-                    clippy::arithmetic_side_effects,
-                    reason = "intersection must contain only elements in both spans, \
-                    so the span's minimum element must be >= the minimum element of either span."
-                )]
-                for _ in 0..span.0.start - line_span.start {
+                for _ in line_span.start..span.0.start {
                     print!(" ");
                 }
                 if span.is_empty() {

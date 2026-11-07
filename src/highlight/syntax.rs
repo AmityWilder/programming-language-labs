@@ -414,7 +414,7 @@ impl GetSyntax for (&str, TokenKind) {
         match self.1 {
             TokenKind::Invalid => Syntax::Invalid,
             TokenKind::Comment => Syntax::Comment,
-            TokenKind::WSpace | TokenKind::Newline => Syntax::Dimmed,
+            TokenKind::WSpace => Syntax::Dimmed,
             TokenKind::NumberLit => Syntax::NumberLiteral,
             TokenKind::CharLit => Syntax::CharLiteral,
             TokenKind::TextLit => Syntax::TextLiteral,

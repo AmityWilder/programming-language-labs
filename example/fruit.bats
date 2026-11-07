@@ -1,4 +1,6 @@
 {
+    let x == ;
+
     prnt("name a fruit\n");
     cord {
         let fruit = inpt;
