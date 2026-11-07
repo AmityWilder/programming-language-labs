@@ -21,7 +21,7 @@ def \bar {\hidden} // redefines `\bar`
 
 // expansion arguments are lazy and don't expand until the call expands,
 // at which point `def \bar` has no reason to expand `\bar` and will simply redefine it.
-\foo{\bar}// expected: `def \bar {8}` -> `def \hidden {8}` (silent)
+\foo{\bar}// expected: `def \bar {8}` (silent)
 
 //\hidden; // expected: macro undefined error
 
