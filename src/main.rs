@@ -24,6 +24,7 @@
     extend_one,
     deref_pure_trait,
     const_ops,
+    iterator_try_reduce,
 )]
 #![forbid(
     clippy::missing_safety_doc,

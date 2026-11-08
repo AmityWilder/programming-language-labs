@@ -139,10 +139,10 @@ impl std::fmt::Display for SpanLoc<'_> {
         }
         Ok({
             let (start_linenum, start_charnum) = code
-                .line_char(self.span.rel.start)
+                .line_char(self.span.start)
                 .expect("span should be in file it's from");
             let (end_linenum, end_charnum) = code
-                .line_char(self.span.rel.end)
+                .line_char(self.span.end)
                 .expect("span should be in file it's from");
             write!(f, ":{start_linenum}:{start_charnum}")?;
             if end_linenum != start_linenum {

@@ -247,6 +247,21 @@ impl<T> RelSpan<T> {
         let end = self.0.end.max(other.0.end);
         Self(Range { start, end })
     }
+
+    /// Finds the union of `self` and `other`, including all elements between even if not contained in either.
+    #[track_caller]
+    pub const fn try_super_union(self, other: Self) -> Option<Self>
+    where
+        T: [const] Ord + [const] Destruct + Copy,
+    {
+        if self.0.start <= other.0.start {
+            let start = self.0.start;
+            let end = self.0.end.max(other.0.end);
+            Some(Self(Range { start, end }))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -273,6 +288,20 @@ impl FileId {
 pub struct Span {
     pub file: FileId,
     pub rel: RelSpan<uspan>,
+}
+
+impl std::ops::Deref for Span {
+    type Target = RelSpan<uspan>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.rel
+    }
+}
+
+impl std::ops::DerefMut for Span {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.rel
+    }
 }
 
 impl std::fmt::Debug for Span {
@@ -337,6 +366,17 @@ impl Span {
                 file,
                 rel: self.rel.super_union(other.rel),
             })
+        } else {
+            None
+        }
+    }
+
+    pub const fn try_super_union(self, other: Self) -> Option<Self> {
+        let file = self.file;
+        if file.0 == other.file.0
+            && let Some(rel) = self.rel.try_super_union(other.rel)
+        {
+            Some(Self { file, rel })
         } else {
             None
         }

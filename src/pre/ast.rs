@@ -1,5 +1,8 @@
 use super::StreamSpan;
-use crate::{lex::token::TokenKind, src_code::span::uspan};
+use crate::{
+    lex::token::TokenKind,
+    src_code::span::{FileId, Span, uspan},
+};
 
 /// `Macro`
 pub type MacroName = StreamSpan;
@@ -17,7 +20,24 @@ pub enum DocumentItem {
     Def(Definition),
     Call(Call),
     Cond(Conditional),
+    Const(MacroConst),
     Other(Tokens),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+pub struct MacroConst {
+    pub tilde: StreamSpan,
+    pub name: MacroName,
+}
+
+impl MacroConst {
+    pub const fn first_span(&self) -> &StreamSpan {
+        &self.tilde
+    }
+
+    pub const fn last_span(&self) -> &StreamSpan {
+        &self.name
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
@@ -86,7 +106,7 @@ pub struct Tokens {
 
 impl Tokens {
     pub const fn first_span(&self) -> Option<&StreamSpan> {
-        if let Some((span, _)) = self.list.as_slice().first() {
+        if let Some((span, _)) = self.list.first() {
             Some(span)
         } else {
             None
@@ -94,11 +114,19 @@ impl Tokens {
     }
 
     pub const fn last_span(&self) -> Option<&StreamSpan> {
-        if let Some((span, _)) = self.list.as_slice().last() {
+        if let Some((span, _)) = self.list.last() {
             Some(span)
         } else {
             None
         }
+    }
+
+    pub fn max_def(&self, file: FileId) -> Option<Span> {
+        self.list
+            .iter()
+            .map(|(x, _)| x.into_span(file))
+            .try_reduce(Span::try_super_union)
+            .flatten()
     }
 }
 
@@ -117,7 +145,7 @@ impl Call {
     }
 
     pub const fn last_span(&self) -> &StreamSpan {
-        if let Some(arg) = self.args.as_slice().last() {
+        if let Some(arg) = self.args.last() {
             arg.last_span()
         } else {
             &self.name
@@ -129,6 +157,7 @@ impl Call {
 pub struct Conditional {
     /// `rot`
     pub kw: StreamSpan,
+    /// Macros and conditions should already be expanded
     pub pred: Replacer,
     pub then: Replacer,
     pub alt: Option<Alternative>,
@@ -174,14 +203,14 @@ pub enum AlternativeBody {
 impl AlternativeBody {
     pub const fn first_span(&self) -> &StreamSpan {
         match self {
-            Self::More(x) => (&**x).first_span(),
+            Self::More(x) => (*x).first_span(),
             Self::Last(x) => x.first_span(),
         }
     }
 
     pub const fn last_span(&self) -> &StreamSpan {
         match self {
-            Self::More(x) => (&**x).last_span(),
+            Self::More(x) => (*x).last_span(),
             Self::Last(x) => x.last_span(),
         }
     }
