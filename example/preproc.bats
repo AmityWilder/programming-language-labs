@@ -34,3 +34,11 @@ def \wrap {\call}//definition of `\wrap`
 //\call\args; // expected: macro missing arguments error
 
 \wrap{8}; // expected: `\wrap` expands to `\call` without consuming the argument, then `\call{8}` expands to `3*8`
+
+rot { !!~\bark } {
+    // squawk
+} tor rot { !!~\bat } {
+    // squeak
+} tor {
+    // chirp
+} // expect `// squeak`

@@ -182,8 +182,8 @@ impl<'src, T: CodeReference> CodeRefs<'src, T> {
                     //
                     // if everything else is equal, order the most important message first.
                     // note: `a.kind` and `b.kind` are swapped, since they should be in *descending* order of importance
-                    let x = (a.span().rel.end, a.span().rel.start, b.kind());
-                    let y = (b.span().rel.end, b.span().rel.start, a.kind());
+                    let x = (a.span().end, a.span().start, b.kind());
+                    let y = (b.span().end, b.span().start, a.kind());
                     x.cmp(&y)
                 })
         });
@@ -245,7 +245,7 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
             if let Some(prev) = self.prev_span {
                 if prev.file != item.span().file {
                     break;
-                } else if item.span().rel.overlaps(prev.rel) {
+                } else if item.span().overlaps(prev) {
                     self.q.deferred.push_back(item);
                     continue;
                 }
@@ -257,21 +257,20 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
                     item.span().file,
                     "different files should be handled in different loops"
                 );
-                prev.rel.end
+                prev.end
             });
 
             debug_assert!(
-                prev_end <= item.span().rel.start,
+                prev_end <= item.span().start,
                 "non-overlapping previous element should end before the next one starts\n prev: {:?}\n curr: {:?}",
-                self.prev_span.expect(
-                    "item.span.rel.start can't be less than 0, so prev must have been Some"
-                ),
+                self.prev_span
+                    .expect("item.span.start can't be less than 0, so prev must have been Some"),
                 item.span(),
             );
 
             let mut sep = RelSpan(Range {
                 start: prev_end,
-                end: item.span().rel.start,
+                end: item.span().start,
             });
 
             let mut skipped_lines = self.curr_file[sep].matches('\n');

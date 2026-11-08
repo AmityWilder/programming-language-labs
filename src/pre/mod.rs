@@ -157,6 +157,22 @@ impl StreamSpan {
     pub const fn is_injected(&self) -> bool {
         matches!(self, Self::Injected(_))
     }
+
+    pub const fn original(self) -> Option<RelSpan> {
+        if let Self::Original(x) = self {
+            Some(x)
+        } else {
+            None
+        }
+    }
+
+    pub const fn injected(self) -> Option<Span> {
+        if let Self::Injected(x) = self {
+            Some(x)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -195,6 +211,9 @@ struct PreProcessor<'src> {
 
     /// The current preprocessor result - can only increase
     processed: String,
+
+    #[cfg(debug_assertions)]
+    printed_expansions: usize,
 }
 
 impl<'src> PreProcessor<'src> {
@@ -216,6 +235,8 @@ impl<'src> PreProcessor<'src> {
             expansions: Vec::new(),
             errors: Vec::new(),
             processed: String::new(),
+            #[cfg(debug_assertions)]
+            printed_expansions: 0,
         }
     }
 
@@ -407,7 +428,7 @@ struct Substitution<'args> {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
 struct MacroDef {
-    pub name_span: StreamSpan,
+    pub ast: ast::Definition,
     pub params: Vec<StreamSpan>,
     pub body: Vec<(StreamSpan, TokenKind)>,
 }
@@ -433,49 +454,9 @@ impl PreProcessor<'_> {
 
     fn preproc(mut self) -> (String, Vec<ExpansionCluster>, Vec<Error>) {
         while self.peek_next().is_some() {
-            #[cfg(debug_assertions)]
-            if let Some(curr) = self.expansions.last() {
-                if self.processed_len() >= curr.exp.end {
-                    println!(
-                        "most recent expansion is {:?} ({:?}), which expands to {:?} ({:?})",
-                        &self.code[curr.call],
-                        curr.call,
-                        &self.processed[<Range<usize>>::from(curr.exp)],
-                        curr.exp,
-                    );
-                } else {
-                    println!(
-                        "still processing expansion of {:?} ({:?}), currently expanding within {:?}",
-                        &self.code[curr.call], curr.call, curr.exp,
-                    );
-                }
-            } else {
-                println!("top-level");
-            }
-
-            let res = self.document_item();
-            if let Err(e) = res.and_then(|item| match item {
-                ast::DocumentItem::Def(def) => {
-                    self.define_macro(def);
-                    Ok(())
-                }
-
-                ast::DocumentItem::Cond(cond) => self.expand_conditional(cond),
-
-                ast::DocumentItem::Call(call) => self.expand_call(call),
-
-                ast::DocumentItem::Other(tokens) => {
-                    for (span, _) in tokens.list {
-                        self.processed
-                            .push_str(span.span_str(self.source, self.code));
-                    }
-                    Ok(())
-                }
-            }) {
-                // TODO: what if the range is within a partially-processed file?
-                self.errors.push(e);
-            }
+            self.expand_item();
         }
+
         #[cfg(debug_assertions)]
         for item in &self.expansions {
             println!(
@@ -485,13 +466,108 @@ impl PreProcessor<'_> {
                 self.source.span_str(item.def),
             );
         }
+
         (self.processed, self.expansions, self.errors)
+    }
+
+    /// Returns the substring within the incomplete document
+    #[cfg(debug_assertions)]
+    fn span_str(&self, span: RelSpan) -> std::borrow::Cow<'_, str> {
+        self.processed.get(<Range<usize>>::from(span)).map_or_else(
+            || {
+                std::borrow::Cow::Owned(
+                    // at most partially within self.processed, but rest within self.queue
+                    std::iter::chain(
+                        self.processed.get(uspan_to_usize(span.start)..),
+                        self.queue
+                            .iter()
+                            .map(|(span, _)| span.span_str(self.source, self.code)),
+                    )
+                    .take_while({
+                        let full_end = span.end;
+                        let mut end: uspan = span.start;
+                        move |s| {
+                            let len = usize_to_uspan(s.len());
+                            end = end.strict_add(len);
+                            end <= full_end
+                        }
+                    })
+                    .collect::<String>(),
+                )
+            },
+            // entirely within self.processed
+            std::borrow::Cow::Borrowed,
+        )
+    }
+
+    fn expand_item(&mut self) {
+        #[cfg(debug_assertions)]
+        if let Some(curr) = self.expansions.last() {
+            if self.processed_len() >= curr.exp.end {
+                for _ in self.printed_expansions..self.expansions.len() {
+                    println!(
+                        "finished expansion of {:?} ({:?}), which expands to {:?} ({:?})",
+                        &self.code[curr.call],
+                        curr.call,
+                        &self.processed[<Range<usize>>::from(curr.exp)],
+                        curr.exp,
+                    );
+                }
+                debug_assert!(
+                    self.printed_expansions <= self.expansions.len(),
+                    "should not remove expansions"
+                );
+                self.printed_expansions = self.expansions.len();
+            } else {
+                println!(
+                    "  still processing expansion of {:?} ({:?}), currently expands to {:?} ({:?})",
+                    &self.code[curr.call],
+                    curr.call,
+                    self.span_str(curr.exp),
+                    curr.exp,
+                );
+            }
+        }
+
+        let res = self.document_item();
+        if let Err(e) = res.and_then(|item| match item {
+            ast::DocumentItem::Def(def) => {
+                self.define_macro(def);
+                Ok(())
+            }
+
+            ast::DocumentItem::Cond(cond) => self.expand_conditional(cond),
+
+            ast::DocumentItem::Call(ref call) => self.expand_call(call),
+
+            ast::DocumentItem::Const(mref) => {
+                for span in [mref.tilde, mref.name] {
+                    self.processed
+                        .push_str(span.span_str(self.source, self.code));
+                }
+                Ok(())
+            }
+
+            ast::DocumentItem::Other(tokens) => {
+                for (span, _) in tokens.list {
+                    self.processed
+                        .push_str(span.span_str(self.source, self.code));
+                }
+                Ok(())
+            }
+        }) {
+            // TODO: what if the range gets trampled over when it isn't appended to `processed`? could sync fix this?
+            self.errors.push(e);
+        }
     }
 
     fn define_macro(&mut self, def: ast::Definition) {
         let key = def.name.span_str(self.source, self.code);
-        let params = def.params.map_or_default(|group| group.params);
-        let body = def.body.items.list;
+        let params = def
+            .params
+            .as_ref()
+            .map_or_default(|group| group.params.clone());
+        let body = def.body.items.list.clone();
 
         // strip from current expansion
         let processed_len = self.processed_len();
@@ -504,7 +580,7 @@ impl PreProcessor<'_> {
         _ = self.definitions.insert(
             key,
             MacroDef {
-                name_span: def.name,
+                ast: def,
                 params,
                 body,
             },
@@ -513,34 +589,17 @@ impl PreProcessor<'_> {
 
     fn expand_conditional(&mut self, mut cond: ast::Conditional) -> Result<(), Error> {
         let case = loop {
-            let pred = eval::eval(&cond.pred.items, self.source)?;
-            if let eval::PreVal::Bool(pred) = pred {
-                if pred {
-                    break cond.then.items.list;
-                } else if let Some(alt) = cond.alt {
-                    use ast::AlternativeBody::{Last, More};
-                    match alt.body {
-                        More(x) => cond = *x,
-                        Last(replacer) => break replacer.items.list,
-                    }
-                } else {
-                    // prepend empty
-                    return Ok(());
+            if eval::eval_predicate(cond.pred, self.source, self.file)? {
+                break cond.then.items.list;
+            } else if let Some(alt) = cond.alt {
+                use ast::AlternativeBody::{Last, More};
+                match alt.body {
+                    More(x) => cond = *x,
+                    Last(replacer) => break replacer.items.list,
                 }
             } else {
-                return Err(Error::new(
-                    cond.pred
-                        .open
-                        .into_span(self.file)
-                        .super_union(cond.pred.close.into_span(self.file))
-                        .unwrap_or_else(|| {
-                            todo!("union between open and close from different files")
-                        }),
-                    ErrorKind::NonBoolPrePredicate {
-                        // TODO: update ErrorKind to use PreVal
-                        actual: todo!(),
-                    },
-                ));
+                // prepend empty
+                return Ok(());
             }
         };
         self.queue.prepend(
@@ -550,7 +609,7 @@ impl PreProcessor<'_> {
         Ok(())
     }
 
-    fn expand_call(&mut self, call: ast::Call) -> Result<(), Error> {
+    fn expand_call(&mut self, call: &ast::Call) -> Result<(), Error> {
         if let Some(def) = self
             .definitions
             .get(call.name.span_str(self.source, self.code))
@@ -613,9 +672,7 @@ impl PreProcessor<'_> {
                     "call with original name should not have injected tokens in its arguments until they are lazily expanded"
                 );
                 self.expansions.push(ExpansionCluster {
-                    // TODO: this should be the span of the ENTIRE definition
-                    // TBD: what if the definition was within an intermediate expansion?
-                    def: def.name_span.into_span(self.file),
+                    def: def.ast.name.into_span(self.file),
                     call: name_start.rel().super_union(*name_end.rel()),
                     exp,
                     args: Vec::new(), // TODO
@@ -623,16 +680,6 @@ impl PreProcessor<'_> {
             } else if let Some(curr) = self.expansions.last_mut() {
                 #[cfg(debug_assertions)]
                 println!("updating expansion {:?}", curr.exp);
-
-                // debug_assert!(
-                //     curr.exp.len() >= call.len,
-                //     "outer expansion should be at least as large as inner call\
-                //         \n outer: {:?} (len: {})\
-                //         \n inner: {call:?} (len: {})",
-                //     curr.exp,
-                //     curr.exp.len(),
-                //     call.len,
-                // );
 
                 curr.exp.end = curr
                     .exp
@@ -660,12 +707,13 @@ impl PreProcessor<'_> {
         }
     }
 
-    /// `document_item -> definition | conditional | call | "~" MACRO  | tokens`
+    /// `document_item -> definition | conditional | call | macro_constant | tokens`
     fn document_item(&mut self) -> Result<ast::DocumentItem, Error> {
         self.definition()
             .map_inner(ast::DocumentItem::Def)
             .or_else(|| self.conditional().map_inner(ast::DocumentItem::Cond))
             .or_else(|| self.call().map_inner(ast::DocumentItem::Call))
+            .or_else(|| self.macro_constant().map_inner(ast::DocumentItem::Const))
             // TODO: macro const
             .unwrap_or_else(|| {
                 Ok(ast::DocumentItem::Other(self.tokens_while(|(_, kind)| {
@@ -677,6 +725,16 @@ impl PreProcessor<'_> {
                     )
                 })))
             })
+    }
+
+    /// `macro_constant -> "~" MACRO`
+    fn macro_constant(&mut self) -> Option<Result<ast::MacroConst, Error>> {
+        self.pull_next_if_eq(Punctuation::MacroConst).map(|tilde| {
+            Ok(ast::MacroConst {
+                tilde,
+                name: self.try_pull_eq(TokenKind::Macro)?,
+            })
+        })
     }
 
     /// `conditional -> "rot" replacer replacer ( alternative )?`
