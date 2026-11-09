@@ -527,15 +527,22 @@ pub trait TryFilterParser: FilterParser + TryParser {
     }
 }
 
+/// `Self` can be parsed from a [`Parser`] over elements of `T`.
+/// Requires that `Self` is guaranteed to be possible, even if there are no elements.
+///
+/// Example: A possibly-empty [`Vec`] of raw elements.
+///
+/// Method name is identical to that of [`Parse`], because items should
+/// have either a fallible or infallible implementation, not both.
 pub trait ParseTrivial<T>: Sized {
     fn parse_from<P: ?Sized + Parser<Item = T>>(parser: &mut P) -> Self;
 }
 
-pub trait ParseTrivialExt<T>
+pub trait ParseTrivialExt<T>: Parser
 where
-    Self: Parser,
     T: ParseTrivial<Self::Item>,
 {
+    /// Parse an instance of `T` infallibly
     fn parse(&mut self) -> T {
         T::parse_from(self)
     }
@@ -543,15 +550,24 @@ where
 
 impl<P: Parser, T: ParseTrivial<P::Item>> ParseTrivialExt<T> for P {}
 
+/// `Self` can be parsed from a [`Parser`] over elements of `T`.
+/// Requires that `Self` cannot error, but may be absent.
+///
+/// Example: An open-brace (`{`).
+///
+/// **Should not consume any elements if returning [`None`].**
+///
+/// Method name is identical to that of [`TryParse`], because items should
+/// have either a fallible or infallible implementation, not both.
 pub trait TryParseTrivial<T>: Sized {
     fn try_parse_from<P: ?Sized + Parser<Item = T>>(parser: &mut P) -> Option<Self>;
 }
 
-pub trait TryParseTrivialExt<T>
+pub trait TryParseTrivialExt<T>: Parser
 where
-    Self: Parser,
     T: TryParseTrivial<Self::Item>,
 {
+    /// Parse an instance of `T` that may be absent
     fn parse(&mut self) -> Option<T> {
         T::try_parse_from(self)
     }
@@ -559,17 +575,24 @@ where
 
 impl<P: Parser, T: TryParseTrivial<P::Item>> TryParseTrivialExt<T> for P {}
 
+/// `Self` can be parsed from a [`Parser`] over elements of `T`.
+/// Requires that an absence of `Self` is an error.
+///
+/// Example: A close-brace (`}`), when its partner has already been found.
+///
+/// Method name is identical to that of [`ParseTrivial`], because items should
+/// have either a fallible or infallible implementation, not both.
 pub trait Parse<T>: Sized {
     type Error;
 
     fn parse_from<P: ?Sized + Parser<Item = T>>(parser: &mut P) -> Result<Self, Self::Error>;
 }
 
-pub trait ParseExt<T>
+pub trait ParseExt<T>: Parser
 where
-    Self: Parser,
     T: Parse<Self::Item>,
 {
+    /// Parse an instance of `T`, erroring if it is absent
     fn parse(&mut self) -> Result<T, T::Error> {
         T::parse_from(self)
     }
@@ -577,6 +600,17 @@ where
 
 impl<P: Parser, T: Parse<P::Item>> ParseExt<T> for P {}
 
+/// `Self` can be parsed from a [`Parser`] over elements of `T`.
+/// Requires that an element can be peither absent or present,
+/// but has extra requirements when it is present.
+///
+/// Example: A brace pair (`{}`), which is present if the open-brace (`{`) is found,
+/// but erroneous if the close-brace (`}`) is missing.
+///
+/// **Should not consume any elements if returning [`None`].**
+///
+/// Method name is identical to that of [`TryParseTrivial`], because items should
+/// have either a fallible or infallible implementation, not both.
 pub trait TryParse<T>: Sized {
     type Error;
 
@@ -585,11 +619,20 @@ pub trait TryParse<T>: Sized {
     ) -> Option<Result<Self, Self::Error>>;
 }
 
-pub trait TryParseExt<T>
+pub trait TryParseExt<T>: Parser
 where
-    Self: Parser,
     T: TryParse<Self::Item>,
 {
+    /// Parse an instance of `T`
+    ///
+    /// - Returns [`None`] if absent.\
+    ///   No elements are consumed.
+    ///
+    /// - Returns [`Some(Ok)`](Ok) if present but erroneous.\
+    ///   Elements up to but not including the error may be consumed.
+    ///
+    /// - Returns [`Some(Ok)`](Ok) if present.\
+    ///   All elements within the item are consumed.
     fn try_parse(&mut self) -> Option<Result<T, T::Error>> {
         T::try_parse_from(self)
     }
