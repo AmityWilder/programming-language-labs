@@ -30,7 +30,7 @@ pub trait CategoryEq<T: ?Sized> {
     fn category_eq(&self, value: &T) -> bool;
 }
 
-pub trait LocCategoryEq<T: ?Sized>: Sized {
+pub trait LocIfCategoryEq<T: ?Sized>: Sized {
     type Location;
 
     fn loc_if_category_eq(self, value: &T) -> Result<Self::Location, Self>;
@@ -95,7 +95,7 @@ where
 }
 
 /// Based on the intuition that `enumerate` produces `(index, value)`
-impl<T, U, Q> LocCategoryEq<Q> for (T, U)
+impl<T, U, Q> LocIfCategoryEq<Q> for (T, U)
 where
     Q: ?Sized,
     U: PartialEq<Q>,
@@ -162,10 +162,10 @@ pub trait Parser {
 
     /// Extract the upcoming element and return it; if its category is equal to `value`.
     #[inline]
-    fn pull_if_eq<Q>(&mut self, value: &Q) -> Option<<Self::Item as LocCategoryEq<Q>>::Location>
+    fn pull_if_eq<Q>(&mut self, value: &Q) -> Option<<Self::Item as LocIfCategoryEq<Q>>::Location>
     where
         Q: ?Sized,
-        Self::Item: LocCategoryEq<Q>,
+        Self::Item: LocIfCategoryEq<Q>,
     {
         self.pull_if_map(|x| x.loc_if_category_eq(value))
     }
@@ -218,87 +218,106 @@ pub trait TryParser: Parser {
     /// A type indicating what was expected, for use in erroring
     type Expect;
 
+    /// Produces a "missing" error if `peek` is [`None`],
+    /// or an "unexpected" error if `peek` is [`Some`].
     fn error(&mut self, expected: Self::Expect) -> Self::Error;
 
     /// Extract the upcoming element and return it.
     #[inline]
-    fn try_pull(&mut self) -> Result<Self::Item, Self::Error> {
-        todo!()
+    fn try_pull(&mut self, expected: Self::Expect) -> Result<Self::Item, Self::Error> {
+        self.pull().ok_or_else(|| self.error(expected))
     }
 
     /// Extract the upcoming element and return it; if it satisfies the predicate.
     #[inline]
-    fn try_pull_if<P>(&mut self, predicate: P) -> Result<Self::Item, Self::Error>
+    fn try_pull_if<P>(
+        &mut self,
+        expected: Self::Expect,
+        predicate: P,
+    ) -> Result<Self::Item, Self::Error>
     where
         P: FnOnce(&Self::Item) -> bool,
     {
-        todo!()
+        self.pull_if(predicate).ok_or_else(|| self.error(expected))
     }
 
     /// Extract the upcoming element, transform it, and return the transformation.
     ///
     /// If the element should not be returned, have `f` return the original element in an [`Err`].
-    fn try_pull_if_map<T, F>(&mut self, f: F) -> Result<T, Self::Error>
+    #[inline]
+    fn try_pull_if_map<T, F>(&mut self, expected: Self::Expect, f: F) -> Result<T, Self::Error>
     where
-        F: FnOnce(Self::Item) -> Result<T, Self::Item>;
+        F: FnOnce(Self::Item) -> Result<T, Self::Item>,
+    {
+        self.pull_if_map(f).ok_or_else(|| self.error(expected))
+    }
 
     /// Extract the upcoming element and return it; if its category is equal to `value`.
     #[inline]
     fn try_pull_if_eq<Q>(
         &mut self,
+        expected: Self::Expect,
         value: &Q,
-    ) -> Result<<Self::Item as LocCategoryEq<Q>>::Location, Self::Error>
+    ) -> Result<<Self::Item as LocIfCategoryEq<Q>>::Location, Self::Error>
     where
         Q: ?Sized,
-        Self::Item: LocCategoryEq<Q>,
+        Self::Item: LocIfCategoryEq<Q>,
     {
-        todo!()
+        self.pull_if_eq(value).ok_or_else(|| self.error(expected))
     }
 
     /// Extract the upcoming element and convert it
     #[inline]
-    fn try_pull_into<T>(&mut self) -> Result<<Self::Item as MapCategory<T>>::Mapped, Self::Error>
+    fn try_pull_into<T>(
+        &mut self,
+        expected: Self::Expect,
+    ) -> Result<<Self::Item as MapCategory<T>>::Mapped, Self::Error>
     where
         Self::Item: MapCategory<T>,
     {
-        todo!()
+        self.pull_into().ok_or_else(|| self.error(expected))
     }
 
     /// Extract the upcoming element and convert it if it satisfies the predicate
     #[inline]
     fn try_pull_into_if<T, P>(
         &mut self,
+        expected: Self::Expect,
         predicate: P,
     ) -> Result<<Self::Item as MapCategory<T>>::Mapped, Self::Error>
     where
         P: FnOnce(&T) -> bool,
         Self::Item: MapCategory<T>,
     {
-        todo!()
+        self.pull_into_if(predicate)
+            .ok_or_else(|| self.error(expected))
     }
 
     /// Extract the upcoming element and convert it, returning it if it successfully converts
     #[inline]
     fn try_pull_if_into<T>(
         &mut self,
+        expected: Self::Expect,
     ) -> Result<<Self::Item as TryMapCategory<T>>::Mapped, Self::Error>
     where
         Self::Item: TryMapCategory<T>,
     {
-        todo!()
+        self.pull_if_into().ok_or_else(|| self.error(expected))
     }
 
     /// Extract the upcoming element and convert it, returning it if it successfully converts and satisfies the predicate
     #[inline]
     fn try_pull_if_into_and<T, P>(
         &mut self,
+        expected: Self::Expect,
         predicate: P,
     ) -> Result<<Self::Item as TryMapCategory<T>>::Mapped, Self::Error>
     where
         Self::Item: TryMapCategory<T>,
         P: FnOnce(&T) -> bool,
     {
-        todo!()
+        self.pull_if_into_and(predicate)
+            .ok_or_else(|| self.error(expected))
     }
 }
 
@@ -353,10 +372,10 @@ pub trait FilterParser: Parser {
     fn pull_next_if_eq<Q>(
         &mut self,
         value: &Q,
-    ) -> Option<<Self::Item as LocCategoryEq<Q>>::Location>
+    ) -> Option<<Self::Item as LocIfCategoryEq<Q>>::Location>
     where
         Q: ?Sized,
-        Self::Item: LocCategoryEq<Q>,
+        Self::Item: LocIfCategoryEq<Q>,
     {
         self.pull_next_if_map(|x| x.loc_if_category_eq(value))
     }
@@ -409,85 +428,102 @@ pub trait FilterParser: Parser {
 pub trait TryFilterParser: FilterParser + TryParser {
     /// Extract the next element and return it.
     #[inline]
-    fn try_pull_next(&mut self) -> Result<Self::Item, Self::Error> {
-        todo!()
+    fn try_pull_next(&mut self, expected: Self::Expect) -> Result<Self::Item, Self::Error> {
+        self.pull_next().ok_or_else(|| self.error(expected))
     }
 
     /// Extract the next element and return it; if it satisfies the predicate.
     #[inline]
-    fn try_pull_next_if<P>(&mut self, predicate: P) -> Result<Self::Item, Self::Error>
+    fn try_pull_next_if<P>(
+        &mut self,
+        expected: Self::Expect,
+        predicate: P,
+    ) -> Result<Self::Item, Self::Error>
     where
         P: FnOnce(&Self::Item) -> bool,
     {
-        todo!()
+        self.pull_next_if(predicate)
+            .ok_or_else(|| self.error(expected))
     }
 
     /// Extract the next element, transform it, and return the transformation.
     ///
     /// If the element should not be returned, have `f` return the original element in an [`Err`].
-    fn try_pull_next_if_map<T, F>(&mut self, f: F) -> Result<T, Self::Error>
+    #[inline]
+    fn try_pull_next_if_map<T, F>(&mut self, expected: Self::Expect, f: F) -> Result<T, Self::Error>
     where
-        F: FnOnce(Self::Item) -> Result<T, Self::Item>;
+        F: FnOnce(Self::Item) -> Result<T, Self::Item>,
+    {
+        self.pull_next_if_map(f).ok_or_else(|| self.error(expected))
+    }
 
     /// Extract the next element and return it; if its category is equal to `value`.
     #[inline]
     fn try_pull_next_if_eq<Q>(
         &mut self,
+        expected: Self::Expect,
         value: &Q,
-    ) -> Result<<Self::Item as LocCategoryEq<Q>>::Location, Self::Error>
+    ) -> Result<<Self::Item as LocIfCategoryEq<Q>>::Location, Self::Error>
     where
         Q: ?Sized,
-        Self::Item: LocCategoryEq<Q>,
+        Self::Item: LocIfCategoryEq<Q>,
     {
-        todo!()
+        self.pull_next_if_eq(value)
+            .ok_or_else(|| self.error(expected))
     }
 
     /// Extract the next element and convert it
     #[inline]
     fn try_pull_next_into<T>(
         &mut self,
+        expected: Self::Expect,
     ) -> Result<<Self::Item as MapCategory<T>>::Mapped, Self::Error>
     where
         Self::Item: MapCategory<T>,
     {
-        todo!()
+        self.pull_next_into().ok_or_else(|| self.error(expected))
     }
 
     /// Extract the next element and convert it if it satisfies the predicate
     #[inline]
     fn try_pull_next_into_if<T, P>(
         &mut self,
+        expected: Self::Expect,
         predicate: P,
     ) -> Result<<Self::Item as MapCategory<T>>::Mapped, Self::Error>
     where
         P: FnOnce(&T) -> bool,
         Self::Item: MapCategory<T>,
     {
-        todo!()
+        self.pull_next_into_if(predicate)
+            .ok_or_else(|| self.error(expected))
     }
 
     /// Extract the next element and convert it, returning it if it successfully converts
     #[inline]
     fn try_pull_next_if_into<T>(
         &mut self,
+        expected: Self::Expect,
     ) -> Result<<Self::Item as TryMapCategory<T>>::Mapped, Self::Error>
     where
         Self::Item: TryMapCategory<T>,
     {
-        todo!()
+        self.pull_next_if_into().ok_or_else(|| self.error(expected))
     }
 
     /// Extract the next element and convert it, returning it if it successfully converts and satisfies the predicate
     #[inline]
     fn try_pull_next_if_into_and<T, P>(
         &mut self,
+        expected: Self::Expect,
         predicate: P,
     ) -> Result<<Self::Item as TryMapCategory<T>>::Mapped, Self::Error>
     where
         Self::Item: TryMapCategory<T>,
         P: FnOnce(&T) -> bool,
     {
-        todo!()
+        self.pull_next_if_into_and(predicate)
+            .ok_or_else(|| self.error(expected))
     }
 }
 
@@ -508,7 +544,7 @@ where
 impl<P: Parser, T: ParseTrivial<P::Item>> ParseTrivialExt<T> for P {}
 
 pub trait TryParseTrivial<T>: Sized {
-    fn parse_from<P: ?Sized + Parser<Item = T>>(parser: &mut P) -> Option<Self>;
+    fn try_parse_from<P: ?Sized + Parser<Item = T>>(parser: &mut P) -> Option<Self>;
 }
 
 pub trait TryParseTrivialExt<T>
@@ -517,7 +553,7 @@ where
     T: TryParseTrivial<Self::Item>,
 {
     fn parse(&mut self) -> Option<T> {
-        T::parse_from(self)
+        T::try_parse_from(self)
     }
 }
 
@@ -544,7 +580,7 @@ impl<P: Parser, T: Parse<P::Item>> ParseExt<T> for P {}
 pub trait TryParse<T>: Sized {
     type Error;
 
-    fn parse_from<P: ?Sized + Parser<Item = T>>(
+    fn try_parse_from<P: ?Sized + Parser<Item = T>>(
         parser: &mut P,
     ) -> Option<Result<Self, Self::Error>>;
 }
@@ -554,8 +590,8 @@ where
     Self: Parser,
     T: TryParse<Self::Item>,
 {
-    fn parse(&mut self) -> Option<Result<T, T::Error>> {
-        T::parse_from(self)
+    fn try_parse(&mut self) -> Option<Result<T, T::Error>> {
+        T::try_parse_from(self)
     }
 }
 
