@@ -3,11 +3,80 @@ use crate::{
     error::ExpectedToken,
     lex::token::{Operator, TokenKind, punc::OpSide},
     scanner::token::value::Keyword,
-    src_code::span::{FileId, RelSpan},
+    src_code::span::{FileId, RelSpan, uspan},
 };
 
 pub trait Expectable {
     const EXPECTED: ExpectedToken;
+}
+
+pub trait AstNode {
+    /// If [`Self::span_end`] is [`Some`], this should be too.
+    fn span_start(&self) -> uspan;
+
+    /// If [`Self::span_start`] is [`Some`], this should be too.
+    fn span_end(&self) -> uspan;
+
+    fn span(&self) -> RelSpan {
+        let start = self.span_start();
+        let end = self.span_end();
+        debug_assert!(
+            start <= end,
+            "span should be ordered\
+                \n start: {start}\
+                \n   end: {end}"
+        );
+        RelSpan(std::range::Range { start, end })
+    }
+}
+
+impl AstNode for RelSpan {
+    fn span_start(&self) -> uspan {
+        self.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.end
+    }
+
+    fn span(&self) -> RelSpan {
+        *self
+    }
+}
+
+macro_rules! AstNode {
+    derive() {
+        $(#[$m:meta])*
+        $vis:vis enum $Enum:ident {
+            $(
+                $(#[$vm:meta])*
+                $Variant:ident(
+                    $(#[$fm:meta])*
+                    $Type:ty
+                )
+            ),* $(,)?
+        }
+    } => {
+        impl AstNode for $Enum {
+            fn span_start(&self) -> uspan {
+                match self {
+                    $(Self::$Variant(x) => x.span_start()),*
+                }
+            }
+
+            fn span_end(&self) -> uspan {
+                match self {
+                    $(Self::$Variant(x) => x.span_end()),*
+                }
+            }
+
+            fn span(&self) -> RelSpan {
+                match self {
+                    $(Self::$Variant(x) => x.span()),*
+                }
+            }
+        }
+    };
 }
 
 pub trait ExpectableExt: Sized {
@@ -50,6 +119,20 @@ pub struct BindingPattern {
     pub ident: RelSpan,
 }
 
+impl AstNode for BindingPattern {
+    fn span_start(&self) -> uspan {
+        self.ident.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ident.end
+    }
+
+    fn span(&self) -> RelSpan {
+        self.ident
+    }
+}
+
 impl Expectable for BindingPattern {
     const EXPECTED: ExpectedToken = ExpectedToken::Pattern;
 }
@@ -60,6 +143,16 @@ pub struct Binary {
     pub op: Operator,
     pub op_span: RelSpan,
     pub rhs: Expr,
+}
+
+impl AstNode for Binary {
+    fn span_start(&self) -> uspan {
+        self.lhs.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.rhs.span_end()
+    }
 }
 
 impl Binary {
@@ -78,6 +171,22 @@ pub struct Unary {
     pub op_span: RelSpan,
     pub operand: Expr,
     pub side: OpSide,
+}
+
+impl AstNode for Unary {
+    fn span_start(&self) -> uspan {
+        match self.side {
+            OpSide::Postfix => self.operand.span_start(),
+            OpSide::Prefix => self.op_span.start,
+        }
+    }
+
+    fn span_end(&self) -> uspan {
+        match self.side {
+            OpSide::Postfix => self.op_span.end,
+            OpSide::Prefix => self.operand.span_end(),
+        }
+    }
 }
 
 impl Unary {
@@ -99,6 +208,16 @@ pub struct Grouping {
     pub close: RelSpan,
 }
 
+impl AstNode for Grouping {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.open.end
+    }
+}
+
 impl Expectable for Grouping {
     const EXPECTED: ExpectedToken = ExpectedToken::ParenExpr;
 }
@@ -110,6 +229,16 @@ pub struct Sequence {
     pub expr: Expr,
     /// `]`
     pub close: RelSpan,
+}
+
+impl AstNode for Sequence {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.open.end
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -173,6 +302,16 @@ pub struct OrType {
     // `none`, `fail`, or `nevr`
     pub ty: OrTypeKeyword,
     pub ty_span: RelSpan,
+}
+
+impl AstNode for OrType {
+    fn span_start(&self) -> uspan {
+        self.pipe.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ty_span.end
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -279,6 +418,16 @@ pub struct NamespacePathPart {
     pub sep: RelSpan,
 }
 
+impl AstNode for NamespacePathPart {
+    fn span_start(&self) -> uspan {
+        self.name.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.sep.end
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GenericGroup {
     /// `<`
@@ -288,11 +437,31 @@ pub struct GenericGroup {
     pub close: RelSpan,
 }
 
+impl AstNode for GenericGroup {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct IffClause {
     /// `<=>`
     pub iff: RelSpan,
     pub bound: TypeBound,
+}
+
+impl AstNode for IffClause {
+    fn span_start(&self) -> uspan {
+        self.iff.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.bound.span_end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -303,10 +472,36 @@ pub struct Typename {
     pub name_span: RelSpan,
 }
 
+impl AstNode for Typename {
+    fn span_start(&self) -> uspan {
+        self.path
+            .first()
+            .map_or(self.name_span.start, NamespacePathPart::span_start)
+    }
+
+    fn span_end(&self) -> uspan {
+        self.name_span.end
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeInstance {
     pub name: Typename,
     pub args: Option<GenericGroup>,
+}
+
+impl AstNode for TypeInstance {
+    fn span_start(&self) -> uspan {
+        self.name.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        if let Some(args) = &self.args {
+            args.span_end()
+        } else {
+            self.name.span_end()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -314,6 +509,20 @@ pub struct TypeExpr {
     /// Identifier
     pub then_ty: TypeInstance,
     pub or_ty: Option<OrType>,
+}
+
+impl AstNode for TypeExpr {
+    fn span_start(&self) -> uspan {
+        self.then_ty.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        if let Some(t) = &self.or_ty {
+            t.span_end()
+        } else {
+            self.then_ty.span_end()
+        }
+    }
 }
 
 impl Expectable for TypeExpr {
@@ -328,11 +537,31 @@ pub struct ComboBound {
     pub rhs: TypeBound,
 }
 
+impl AstNode for ComboBound {
+    fn span_start(&self) -> uspan {
+        self.lhs.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.rhs.span_end()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct NegativeBound {
     /// `!`
     pub not: RelSpan,
     pub rhs: TypeBound,
+}
+
+impl AstNode for NegativeBound {
+    fn span_start(&self) -> uspan {
+        self.not.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.rhs.span_end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -342,11 +571,31 @@ pub struct ExactTypeBound {
     pub ty: TypeExpr,
 }
 
+impl AstNode for ExactTypeBound {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ty.span_end()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColonBound {
     /// `:`
     pub colon: RelSpan,
     pub bound: TypeBound,
+}
+
+impl AstNode for ColonBound {
+    fn span_start(&self) -> uspan {
+        self.colon.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.bound.span_end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -356,6 +605,20 @@ pub struct MemberBound {
     /// Identifier
     pub member: RelSpan,
     pub req: Option<ColonBound>,
+}
+
+impl AstNode for MemberBound {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        if let Some(req) = &self.req {
+            req.span_end()
+        } else {
+            self.member.end
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -373,10 +636,30 @@ pub struct ShapeBound {
     pub ret: TypeExpr,
 }
 
+impl AstNode for ShapeBound {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ret.span_end()
+    }
+}
+
 /// UNDER CONSTRUCTION
 #[derive(Debug, Clone, PartialEq)]
 pub struct OverloadBound {
     // TODO
+}
+
+impl AstNode for OverloadBound {
+    fn span_start(&self) -> uspan {
+        todo!()
+    }
+
+    fn span_end(&self) -> uspan {
+        todo!()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -390,6 +673,16 @@ pub struct ExprBound {
     pub expr: Expr,
 }
 
+impl AstNode for ExprBound {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.expr.span_end()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupedBound {
     /// `(`
@@ -399,7 +692,17 @@ pub struct GroupedBound {
     pub close: RelSpan,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl AstNode for GroupedBound {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNode)]
 pub enum TypeBound {
     Combo(Box<ComboBound>),
     Not(Box<NegativeBound>),
@@ -419,6 +722,20 @@ impl Expectable for TypeBound {
 pub struct Literal {
     pub kind: TokenKind,
     pub span: RelSpan,
+}
+
+impl AstNode for Literal {
+    fn span_start(&self) -> uspan {
+        self.span.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.span.end
+    }
+
+    fn span(&self) -> RelSpan {
+        self.span
+    }
 }
 
 impl Expectable for Literal {
@@ -481,13 +798,41 @@ pub struct Directive {
     pub kw_span: RelSpan,
 }
 
+impl AstNode for Directive {
+    fn span_start(&self) -> uspan {
+        self.kw_span.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.kw_span.end
+    }
+
+    fn span(&self) -> RelSpan {
+        self.kw_span
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
     /// Identifier
     pub ident: RelSpan,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl AstNode for Variable {
+    fn span_start(&self) -> uspan {
+        self.ident.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ident.end
+    }
+
+    fn span(&self) -> RelSpan {
+        self.ident
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNode)]
 pub enum BlockExpr {
     If(Box<IfStmt>),
     /// Only `loop` or `cord`
@@ -495,7 +840,7 @@ pub enum BlockExpr {
     Block(BlockStmt),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, AstNode)]
 pub enum Expr {
     Block(BlockExpr),
     Binary(Box<Binary>),
@@ -511,7 +856,7 @@ impl Expectable for Expr {
     const EXPECTED: ExpectedToken = ExpectedToken::Expr;
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, AstNode)]
 pub enum OrBody {
     More(IfStmt),
     Last(BlockStmt),
@@ -528,6 +873,16 @@ pub struct OrStmt {
     pub body: OrBody,
 }
 
+impl AstNode for OrStmt {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.body.span_end()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt {
     /// `if`
@@ -535,6 +890,20 @@ pub struct IfStmt {
     pub pred: Expr,
     pub then: BlockStmt,
     pub or: Option<Box<OrStmt>>,
+}
+
+impl AstNode for IfStmt {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        if let Some(or) = &self.or {
+            or.span_end()
+        } else {
+            self.then.span_end()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -546,12 +915,32 @@ pub struct DeferParam {
     pub close: RelSpan,
 }
 
+impl AstNode for DeferParam {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclDefer {
     /// `defer`
     pub kw: RelSpan,
     pub param: Option<DeferParam>,
     pub on_pop: BlockStmt,
+}
+
+impl AstNode for DeclDefer {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.on_pop.span_end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -590,6 +979,20 @@ pub struct LoopBlock {
     pub block: BlockStmt,
 }
 
+impl AstNode for LoopBlock {
+    fn span_start(&self) -> uspan {
+        if let Some(label) = &self.label {
+            label.span_start()
+        } else {
+            self.kw.start
+        }
+    }
+
+    fn span_end(&self) -> uspan {
+        self.block.span_end()
+    }
+}
+
 impl Expectable for LoopBlock {
     const EXPECTED: ExpectedToken = ExpectedToken::LoopBlock;
 }
@@ -604,6 +1007,16 @@ pub struct DoneStmt {
     pub semi: RelSpan,
 }
 
+impl AstNode for DoneStmt {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SkipStmt {
     /// `skip`
@@ -613,13 +1026,33 @@ pub struct SkipStmt {
     pub semi: RelSpan,
 }
 
+impl AstNode for SkipStmt {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockStmt {
     /// `{`
     pub open: RelSpan,
-    pub body: Vec<Declaration>,
+    pub body: Vec<Decl>,
     /// `}`
     pub close: RelSpan,
+}
+
+impl AstNode for BlockStmt {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
 }
 
 impl Expectable for BlockStmt {
@@ -633,6 +1066,16 @@ pub struct ExprStmt {
     pub semi: RelSpan,
 }
 
+impl AstNode for ExprStmt {
+    fn span_start(&self) -> uspan {
+        self.expr.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrintStmt {
     /// `prnt`
@@ -642,8 +1085,18 @@ pub struct PrintStmt {
     pub semi: RelSpan,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Statement {
+impl AstNode for PrintStmt {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNode)]
+pub enum Stmt {
     Expr(ExprStmt),
     // TODO: im not too fond of the print keyword
     Print(PrintStmt),
@@ -654,18 +1107,18 @@ pub enum Statement {
     Block(BlockStmt),
 }
 
-impl Expectable for Statement {
+impl Expectable for Stmt {
     const EXPECTED: ExpectedToken = ExpectedToken::Statement;
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProgramUnit {
     pub file: FileId,
-    pub decls: Vec<Declaration>,
+    pub decls: Vec<Decl>,
 }
 
 impl std::ops::Deref for ProgramUnit {
-    type Target = Vec<Declaration>;
+    type Target = Vec<Decl>;
 
     fn deref(&self) -> &Self::Target {
         &self.decls
@@ -679,8 +1132,8 @@ impl std::ops::DerefMut for ProgramUnit {
 }
 
 impl IntoIterator for ProgramUnit {
-    type Item = Declaration;
-    type IntoIter = std::vec::IntoIter<Declaration>;
+    type Item = Decl;
+    type IntoIter = std::vec::IntoIter<Decl>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.decls.into_iter()
@@ -688,8 +1141,8 @@ impl IntoIterator for ProgramUnit {
 }
 
 impl<'prgm> IntoIterator for &'prgm ProgramUnit {
-    type Item = &'prgm Declaration;
-    type IntoIter = std::slice::Iter<'prgm, Declaration>;
+    type Item = &'prgm Decl;
+    type IntoIter = std::slice::Iter<'prgm, Decl>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.decls.iter()
@@ -697,8 +1150,8 @@ impl<'prgm> IntoIterator for &'prgm ProgramUnit {
 }
 
 impl<'prgm> IntoIterator for &'prgm mut ProgramUnit {
-    type Item = &'prgm mut Declaration;
-    type IntoIter = std::slice::IterMut<'prgm, Declaration>;
+    type Item = &'prgm mut Decl;
+    type IntoIter = std::slice::IterMut<'prgm, Decl>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.decls.iter_mut()
@@ -712,12 +1165,32 @@ pub struct Assignment {
     pub expr: Expr,
 }
 
+impl AstNode for Assignment {
+    fn span_start(&self) -> uspan {
+        self.op.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.expr.span_end()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Label {
     /// `.`
     pub dot: RelSpan,
     /// identifier
     pub name: RelSpan,
+}
+
+impl AstNode for Label {
+    fn span_start(&self) -> uspan {
+        self.dot.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.name.end
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -727,12 +1200,32 @@ pub struct ScopeLabel {
     pub colon: RelSpan,
 }
 
+impl AstNode for ScopeLabel {
+    fn span_start(&self) -> uspan {
+        self.label.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.colon.end
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeAnnotation {
     /// `:`
     pub colon: RelSpan,
     // TODO: should type annotations be different from type expressions?
     pub ty: TypeExpr,
+}
+
+impl AstNode for TypeAnnotation {
+    fn span_start(&self) -> uspan {
+        self.colon.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ty.span_end()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -799,13 +1292,23 @@ pub struct DeclVar {
     pub semi: RelSpan,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Declaration {
-    Var(DeclVar),
-    Defer(DeclDefer),
-    Stmt(Statement),
+impl AstNode for DeclVar {
+    fn span_start(&self) -> uspan {
+        self.kw_span.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
 }
 
-impl Expectable for Declaration {
+#[derive(Debug, Clone, PartialEq, AstNode)]
+pub enum Decl {
+    Var(DeclVar),
+    Defer(DeclDefer),
+    Stmt(Stmt),
+}
+
+impl Expectable for Decl {
     const EXPECTED: ExpectedToken = ExpectedToken::Declaration;
 }

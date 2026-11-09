@@ -443,11 +443,11 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     }
 
     /// `declaration -> var_declaration | defer_declaration | statement`
-    pub fn declaration(&mut self) -> Result<ast::Declaration> {
+    pub fn declaration(&mut self) -> Result<ast::Decl> {
         self.var_declaration()
-            .map_inner(ast::Declaration::Var)
-            .or_else(|| self.defer_declaration().map_inner(ast::Declaration::Defer))
-            .unwrap_or_else(|| self.statement().map(ast::Declaration::Stmt))
+            .map_inner(ast::Decl::Var)
+            .or_else(|| self.defer_declaration().map_inner(ast::Decl::Defer))
+            .unwrap_or_else(|| self.statement().map(ast::Decl::Stmt))
     }
 
     /// `assignment -> "=" expression`
@@ -491,15 +491,15 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     ///     | if_statement
     ///     | loop_block
     ///     | expression_statement`
-    pub fn statement(&mut self) -> Result<ast::Statement> {
+    pub fn statement(&mut self) -> Result<ast::Stmt> {
         self.block_statement()
-            .map_inner(ast::Statement::Block)
-            .or_else(|| self.print_statement().map_inner(ast::Statement::Print))
-            .or_else(|| self.done_statement().map_inner(ast::Statement::Done))
-            .or_else(|| self.skip_statement().map_inner(ast::Statement::Skip))
-            .or_else(|| self.if_statement().map_inner(ast::Statement::If))
-            .or_else(|| self.loop_block().map_inner(ast::Statement::Loop))
-            .unwrap_or_else(|| self.expression_statement().map(ast::Statement::Expr))
+            .map_inner(ast::Stmt::Block)
+            .or_else(|| self.print_statement().map_inner(ast::Stmt::Print))
+            .or_else(|| self.done_statement().map_inner(ast::Stmt::Done))
+            .or_else(|| self.skip_statement().map_inner(ast::Stmt::Skip))
+            .or_else(|| self.if_statement().map_inner(ast::Stmt::If))
+            .or_else(|| self.loop_block().map_inner(ast::Stmt::Loop))
+            .unwrap_or_else(|| self.expression_statement().map(ast::Stmt::Expr))
     }
 
     /// `expression_statement -> assign ";"`

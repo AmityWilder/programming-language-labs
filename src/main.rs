@@ -25,6 +25,7 @@
     deref_pure_trait,
     const_ops,
     iterator_try_reduce,
+    option_into_flat_iter,
 )]
 #![forbid(
     clippy::missing_safety_doc,
@@ -769,18 +770,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
         println!("lisp: {:#}", parse::fmt::Lisp { source, node: unit });
     }
 
-    // // TODO
-    // // // semantic highlighting
-    // // // TODO: need to find a way to have this take Result instead of flattening
-    // // if config.semantic_highlight {
-    // //     println!("\nsemantic highlighting:");
-    // //     // TODO
-    // //     println!(
-    // //         "TODO: print_highlighted(semantic(source, prgm.iter().flatten()), &SYNTAX_STYLE_ANSI)"
-    // //     );
-    // // }
-
-    // let (program, env) = match analyze_interp(source, &prgm) {
+    // let (program, env) = match analyze(source, &prgm) {
     //     Ok(prgm) => prgm,
     //     Err(errs) => {
     //         // static analysis errors
