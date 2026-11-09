@@ -212,6 +212,21 @@ pub trait Parser {
     }
 }
 
+impl<I: Iterator> Parser for std::iter::Peekable<I> {
+    type Item = I::Item;
+
+    fn peek(&mut self) -> Option<&Self::Item> {
+        self.peek()
+    }
+
+    fn pull_if_map<T, F>(&mut self, f: F) -> Option<T>
+    where
+        F: FnOnce(Self::Item) -> Result<T, Self::Item>,
+    {
+        self.next_if_map(f)
+    }
+}
+
 pub trait TryParser: Parser {
     type Error;
 
