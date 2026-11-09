@@ -133,12 +133,12 @@ where
     }
 }
 
-impl LispArgs for [ast::Declaration] {
+impl LispArgs for [ast::Decl] {
     fn fmt(&self, source: &SourceCode, f: &mut LispCall<'_, '_>) -> fmt::Result {
         let mut iter = self.iter();
         while let Some(item) = iter.next() {
             match item {
-                ast::Declaration::Var(var) => {
+                ast::Decl::Var(var) => {
                     f.write_arg(var, source)?;
                     if let Some(assignment) = &var.assignment {
                         f.call(&assignment.op, source)?
@@ -148,14 +148,14 @@ impl LispArgs for [ast::Declaration] {
                     }
                 }
 
-                ast::Declaration::Defer(defer) => {
+                ast::Decl::Defer(defer) => {
                     f.call(&defer.kw, source)?
                         .write_arg(&defer.on_pop, source)?
                         .write_args(iter.as_slice(), source)?
                         .finish()?;
                 }
 
-                ast::Declaration::Stmt(inner) => {
+                ast::Decl::Stmt(inner) => {
                     f.write_arg(inner, source)?.finish()?;
                 }
             }
@@ -342,7 +342,7 @@ impl LispDisplay for ast::LoopBlock {
     }
 }
 
-impl LispDisplay for ast::Statement {
+impl LispDisplay for ast::Stmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Expr(inner) => inner.fmt(source, f),

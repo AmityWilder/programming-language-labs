@@ -1,16 +1,17 @@
 use crate::{
-    Todo,
+    Dummy, Todo,
     analyzer::{
         GetType,
         static_env::old::StaticEnvironment,
         types::{AbstractType, StaticTypeSize, TypeSize, TypeSizeError},
     },
+    parse::ast,
 };
 
 pub mod morph;
 #[deprecated = "changing to multi-pass analyzer"]
 pub mod old;
-pub mod vis;
+pub mod scope;
 
 /// A unique ID for distinguishing items that may have the same identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

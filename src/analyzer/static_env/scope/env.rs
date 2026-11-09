@@ -3,8 +3,9 @@ use crate::{
         static_env::VarId,
         types::{AbstractType, FunShape},
     },
-    grammar::ast::AstNodeFinal,
-    lex::token::Operator,
+    lex::token::{Operator, punc::OpSide},
+    parse::ast,
+    src_code::span::Span,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -22,17 +23,20 @@ pub enum BuiltinOpParamTypes {
         lhs: AbstractType<'static>,
         rhs: AbstractType<'static>,
     },
-    UnaryPre {
-        rhs: AbstractType<'static>,
-    },
-    UnaryPost {
-        lhs: AbstractType<'static>,
+    Unary {
+        side: OpSide,
+        operand: AbstractType<'static>,
     },
 }
 
 impl BuiltinOpParamTypes {
     pub const fn lhs(&self) -> Option<&AbstractType<'static>> {
-        if let Self::Binary { lhs, .. } | Self::UnaryPost { lhs } = self {
+        if let Self::Binary { lhs, .. }
+        | Self::Unary {
+            operand: lhs,
+            side: OpSide::Postfix,
+        } = self
+        {
             Some(lhs)
         } else {
             None
@@ -40,7 +44,12 @@ impl BuiltinOpParamTypes {
     }
 
     pub const fn rhs(&self) -> Option<&AbstractType<'static>> {
-        if let Self::Binary { rhs, .. } | Self::UnaryPre { rhs } = self {
+        if let Self::Binary { rhs, .. }
+        | Self::Unary {
+            operand: rhs,
+            side: OpSide::Prefix,
+        } = self
+        {
             Some(rhs)
         } else {
             None
@@ -54,24 +63,31 @@ pub struct BuiltinOpSignature {
     pub ret: AbstractType<'static>,
 }
 
-#[derive(Debug)]
-pub struct Item<'ast, 'src> {
-    pub node: Box<dyn 'ast + AstNodeFinal<'src>>,
+#[derive(Debug, Clone, PartialEq)]
+pub enum AstNode {
+    Var(ast::DeclVar),
+}
+
+impl From<ast::DeclVar> for AstNode {
+    fn from(value: ast::DeclVar) -> Self {
+        Self::Var(value)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Item<'src> {
+    /// The span where the item was originally declared
+    pub decl: Span,
 
     /// If the item is a function or overloads the call-operator, this will be [`Some`].
     pub shape: Option<FunShape<'src>>,
 }
 
-impl std::hash::Hash for Item<'_, '_> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.shape.hash(state);
-    }
-}
-
 #[derive(Debug, Default)]
-pub struct VisEnvironment<'ast, 'src> {
+pub struct ScopeEnvironment<'src> {
     builtin: HashMap<Operator, HashSet<BuiltinOpSignature>>,
-    items: Vec<Item<'ast, 'src>>,
+    items: Vec<Item<'src>>,
+    ids: HashMap<Span, VarId>,
     /// NOTE: this does NOT represent "the scope where all global variables belong",
     /// this is just the scope of all things outside of any function!!
     /// It is used to guarantee the stack is never empty.
@@ -79,11 +95,12 @@ pub struct VisEnvironment<'ast, 'src> {
     layers: Vec<Layer<'src>>,
 }
 
-impl<'ast, 'src> VisEnvironment<'ast, 'src> {
-    pub const fn new(builtin: HashMap<Operator, HashSet<BuiltinOpSignature>>) -> Self {
+impl<'src> ScopeEnvironment<'src> {
+    pub fn new(builtin: HashMap<Operator, HashSet<BuiltinOpSignature>>) -> Self {
         Self {
             builtin,
             items: Vec::new(),
+            ids: HashMap::new(),
             global: Scope::new(),
             layers: Vec::new(),
         }
@@ -137,7 +154,7 @@ impl<'ast, 'src> VisEnvironment<'ast, 'src> {
     /// An iterator over all visible items in order of most recent to least recent declaration.
     ///
     /// Does not include builtin items.
-    fn search(&self) -> impl Iterator<Item = (&'src str, VarId, &Item<'ast, 'src>)> {
+    fn search(&self) -> impl Iterator<Item = (&'src str, VarId, &Item<'src>)> {
         // Relies on the assumption that IDs increase monotonically along the stack
         let Self {
             items,
@@ -155,7 +172,7 @@ impl<'ast, 'src> VisEnvironment<'ast, 'src> {
     /// An iterator over all visible items in order of most recent to least recent declaration.
     ///
     /// Does not include builtin items.
-    fn search_mut(&mut self) -> impl Iterator<Item = (&'src str, VarId, &mut Item<'ast, 'src>)> {
+    fn search_mut(&mut self) -> impl Iterator<Item = (&'src str, VarId, &mut Item<'src>)> {
         // Relies on the assumption that IDs increase monotonically along the stack
         let Self {
             items,
@@ -173,7 +190,7 @@ impl<'ast, 'src> VisEnvironment<'ast, 'src> {
     /// Finds visible items matching the key in order of most recent to least recent declaration.
     ///
     /// Does not include builtin items.
-    pub fn lookup<Q>(&self, key: &Q) -> impl Iterator<Item = (&'src str, VarId, &Item<'ast, 'src>)>
+    pub fn lookup<Q>(&self, key: &Q) -> impl Iterator<Item = (&'src str, VarId, &Item<'src>)>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -186,7 +203,7 @@ impl<'ast, 'src> VisEnvironment<'ast, 'src> {
     pub fn lookup_mut<Q>(
         &mut self,
         key: &Q,
-    ) -> impl Iterator<Item = (&'src str, VarId, &mut Item<'ast, 'src>)>
+    ) -> impl Iterator<Item = (&'src str, VarId, &mut Item<'src>)>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -205,8 +222,6 @@ impl<'ast, 'src> VisEnvironment<'ast, 'src> {
     }
 
     /// Entering a block
-    ///
-    /// Returns [`None`] if not in a function; since
     #[must_use = "indicates success"]
     pub fn push_scope(&mut self) -> Option<()> {
         self.curr_layer_mut()
@@ -222,13 +237,9 @@ impl<'ast, 'src> VisEnvironment<'ast, 'src> {
     }
 
     /// Declare an item in the current scope
-    fn decl_item_internal(
-        &mut self,
-        key: &'src str,
-        node: Box<dyn 'ast + AstNodeFinal<'src>>,
-    ) -> VarId {
+    fn decl_item_internal(&mut self, key: &'src str, decl: Span) -> VarId {
         let id = VarId(self.items.len());
-        self.items.push(Item { node, shape: None });
+        self.items.push(Item { decl, shape: None });
         let curr_scope = if let Some(scope) = self.layers.last_mut().map(Layer::curr_scope_mut) {
             scope
         } else {
@@ -238,11 +249,13 @@ impl<'ast, 'src> VisEnvironment<'ast, 'src> {
         id
     }
 
-    pub fn decl_item<T>(&mut self, key: &'src str, node: T) -> VarId
-    where
-        T: 'ast + AstNodeFinal<'src>,
-    {
-        self.decl_item_internal(key, Box::new(node))
+    pub fn decl_item(&mut self, key: &'src str, decl: Span) -> VarId {
+        self.decl_item_internal(key, decl)
+    }
+
+    pub fn mark_ref(&mut self, span: Span, id: VarId) {
+        let x = self.ids.insert(span, id);
+        debug_assert_eq!(x, None);
     }
 }
 
