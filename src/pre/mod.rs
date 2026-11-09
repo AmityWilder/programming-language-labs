@@ -216,34 +216,6 @@ struct PreProcessor<'src> {
     printed_expansions: usize,
 }
 
-impl crate::parser::Parser for PreProcessor<'_> {
-    type Item = (StreamSpan, TokenKind);
-
-    fn peek(&mut self) -> Option<&Self::Item> {
-        todo!()
-    }
-
-    fn pull_if_map<T, F>(&mut self, f: F) -> Option<T>
-    where
-        F: FnOnce(Self::Item) -> Result<T, Self::Item>,
-    {
-        todo!()
-    }
-}
-
-impl crate::parser::FilterParser for PreProcessor<'_> {
-    fn peek_next(&mut self) -> Option<&Self::Item> {
-        todo!()
-    }
-
-    fn pull_next_if_map<T, F>(&mut self, f: F) -> Option<T>
-    where
-        F: FnOnce(Self::Item) -> Result<T, Self::Item>,
-    {
-        todo!()
-    }
-}
-
 impl<'src> PreProcessor<'src> {
     pub fn new(source: &'src SourceMap, file: FileId) -> Self {
         let code = &source[file];
