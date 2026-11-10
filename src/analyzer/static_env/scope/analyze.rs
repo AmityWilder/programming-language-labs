@@ -112,10 +112,9 @@ impl<'src> ScopeEnvironment<'src> {
                 kind: ast::LoopKind::Rep { pred },
                 block: ast::BlockStmt { body, .. },
                 ..
-            }) => {
-                // self.analyze_expr(file, code, expr);
-                self.analyze_block(file, code, body)
-            }
+            }) => std::iter::once(self.analyze_expr(file, code, pred))
+                .chain(std::iter::once(self.analyze_block(file, code, body)))
+                .collect_errs(),
 
             ast::Stmt::Loop(ast::LoopBlock {
                 kind: ast::LoopKind::For { bind, iter, .. },
