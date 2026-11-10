@@ -161,6 +161,7 @@ mod pre;
 mod preproc;
 mod regex;
 mod scanner;
+mod session;
 mod spec_ops;
 mod src_code;
 mod types;
