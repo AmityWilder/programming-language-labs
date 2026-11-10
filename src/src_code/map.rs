@@ -1,3 +1,4 @@
+use super::span::uspan;
 use crate::{
     lex::token::TokenKind,
     src_code::{
@@ -63,8 +64,10 @@ impl SourceMap {
         (0..).map(FileId::new).zip(self.files.iter_mut())
     }
 
-    pub fn push(&mut self, code: SourceCode) {
+    pub fn push(&mut self, code: SourceCode) -> FileId {
+        let id = FileId::new(uspan::try_from(self.files.len()).expect("too many files"));
         self.files.push(code);
+        id
     }
 
     pub fn get(&self, id: FileId) -> Option<&SourceCode> {
@@ -128,12 +131,12 @@ impl std::fmt::Display for SpanLoc<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let code = self.source.source_of(self.span);
         match code.loc() {
-            SourceLoc::Repl | SourceLoc::PreprocRepl => write!(f, "terminal")?,
-            SourceLoc::File(path) | SourceLoc::PreprocFile(path) => path.display().fmt(f)?,
+            SourceLoc::Repl | SourceLoc::PreprocRepl(_) => write!(f, "terminal")?,
+            SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => path.display().fmt(f)?,
         }
         if matches!(
             code.loc(),
-            SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)
+            SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
         ) {
             write!(f, " (preprocessed)")?;
         }

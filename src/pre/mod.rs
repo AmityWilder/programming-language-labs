@@ -27,18 +27,18 @@ pub fn preprocess(
     id: FileId,
     code: &SourceCode,
     source: &SourceMap,
-) -> Result<SourceCode, Vec<Error>> {
+) -> Result<Option<SourceCode>, Vec<Error>> {
     let loc = match code.loc() {
-        SourceLoc::Repl | SourceLoc::PreprocRepl => SourceLoc::PreprocRepl,
+        SourceLoc::Repl | SourceLoc::PreprocRepl(_) => SourceLoc::PreprocRepl(id),
 
-        SourceLoc::File(path) | SourceLoc::PreprocFile(path) => {
-            SourceLoc::PreprocFile(path.clone())
+        SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => {
+            SourceLoc::PreprocFile(id, path.clone())
         }
     };
     let file_len = usize_to_uspan(code.content().len());
     let (src, mac, errs) = PreProcessor::new(source, id).preproc();
     // TBD: what if ExpansionCluter is the better structure?
-    let mac = mac
+    let mac: Vec<_> = mac
         .into_iter()
         .flat_map(|x| {
             let call = x.call.within_file(id);
@@ -61,20 +61,25 @@ pub fn preprocess(
         })
         .collect();
     if errs.is_empty() {
-        let (tokens, errs) = lex(id, src.as_str());
-        if errs.is_empty() {
-            match SourceCode::with_expansion(loc, src, mac) {
-                Ok(mut code) => {
-                    code.set_tokens(tokens);
-                    Ok(code)
-                }
-                Err(e) => Err(vec![Error::new(
-                    RelSpan::from(file_len..file_len).within_file(id),
-                    ErrorKind::OversizePreproc(e),
-                )]),
-            }
+        if mac.is_empty() {
+            // no change
+            Ok(None)
         } else {
-            Err(errs)
+            let (tokens, errs) = lex(id, src.as_str());
+            if errs.is_empty() {
+                match SourceCode::with_expansion(loc, src, mac) {
+                    Ok(mut code) => {
+                        code.set_tokens(tokens);
+                        Ok(Some(code))
+                    }
+                    Err(e) => Err(vec![Error::new(
+                        RelSpan::from(file_len..file_len).within_file(id),
+                        ErrorKind::OversizePreproc(e),
+                    )]),
+                }
+            } else {
+                Err(errs)
+            }
         }
     } else {
         Err(if let Err(e) = SourceCode::with_expansion(loc, src, mac) {

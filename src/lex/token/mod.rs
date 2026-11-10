@@ -374,23 +374,28 @@ impl Iterator for TokenLines<'_, '_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(&mut (ref mut span, kind)) = self.tokens.peek_mut() {
-            debug_assert!(
-                !self.lines.peek().is_some_and(|span| span.is_empty()),
-                "`lines` should iterate when emptied"
-            );
+            while self.lines.next_if(|span| span.is_empty()).is_some() {
+                // consume empty lines
+            }
             let line_span = self
                 .lines
                 .peek_mut()
                 .expect("ran out of lines before visiting every token");
 
+            debug_assert!(
+                line_span.start <= span.end,
+                "line should not iterate while it still contains tokens"
+            );
             match span.end.cmp(&line_span.end) {
                 // line is incomplete
                 std::cmp::Ordering::Less => {
-                    debug_assert!(
-                        line_span.start <= span.end,
-                        "line should not iterate while it still contains tokens"
-                    );
+                    debug_assert!(span.end < line_span.end, "sanity check");
+                    debug_assert!(line_span.start < line_span.end, "sanity check");
                     line_span.start = span.end;
+                    debug_assert!(
+                        !line_span.is_empty(),
+                        "span should not be emptied by a span shorter than it"
+                    );
                     self.tokens.next()
                 }
 
@@ -402,6 +407,7 @@ impl Iterator for TokenLines<'_, '_> {
 
                 // token contains linebreak(s)
                 std::cmp::Ordering::Greater => {
+                    debug_assert!(span.end > line_span.end, "sanity check");
                     let Some(line_span) = self.lines.next() else {
                         unreachable!("already peeked");
                     };
