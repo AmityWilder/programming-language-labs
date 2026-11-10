@@ -1,3 +1,4 @@
+use super::span::FileId;
 use crate::{
     lex::token::{TokenKind, TokenTable},
     src_code::span::{RelSpan, Span, usize_to_uspan, uspan},
@@ -61,15 +62,22 @@ pub struct SourceRange {
 pub enum SourceLoc {
     Repl,
     File(PathBuf),
-    PreprocRepl,
-    PreprocFile(PathBuf),
+    PreprocRepl(FileId),
+    PreprocFile(FileId, PathBuf),
 }
 
 impl SourceLoc {
     pub const fn path(&self) -> Option<&PathBuf> {
         match self {
-            Self::File(path_buf) | Self::PreprocFile(path_buf) => Some(path_buf),
-            Self::Repl | Self::PreprocRepl => None,
+            Self::File(path_buf) | Self::PreprocFile(_, path_buf) => Some(path_buf),
+            Self::Repl | Self::PreprocRepl(_) => None,
+        }
+    }
+
+    pub const fn original(&self) -> Option<&FileId> {
+        match self {
+            Self::Repl | Self::File(_) => None,
+            Self::PreprocRepl(id) | Self::PreprocFile(id, _) => Some(id),
         }
     }
 }
@@ -390,6 +398,7 @@ pub struct SourceCode {
     lines: Vec<uspan>,
     has_trailing_newline: bool,
     tokens: Option<TokenTable>,
+    preproc: Option<FileId>,
 }
 
 impl std::ops::Index<RelSpan> for SourceCode {
@@ -433,6 +442,7 @@ impl SourceCode {
                 src,
                 mac,
                 tokens: None,
+                preproc: None,
             })
         } else {
             Err(CreateSourceCodeError(len))
@@ -440,7 +450,7 @@ impl SourceCode {
     }
 
     pub const fn set_tokens(&mut self, tokens: TokenTable) {
-        assert!(self.tokens.is_none(), "should not reassign tokens");
+        debug_assert!(self.tokens.is_none(), "should not reassign tokens");
         self.tokens = Some(tokens);
     }
 
@@ -448,6 +458,15 @@ impl SourceCode {
         self.tokens
             .as_ref()
             .expect("should not access tokens before initialization")
+    }
+
+    pub const fn set_preproc(&mut self, preproc: FileId) {
+        debug_assert!(self.preproc.is_none(), "should not reassign preproc");
+        self.preproc = Some(preproc);
+    }
+
+    pub const fn preproc(&self) -> Option<&FileId> {
+        self.preproc.as_ref()
     }
 
     pub const fn loc(&self) -> &SourceLoc {

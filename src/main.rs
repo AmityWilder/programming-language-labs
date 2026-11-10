@@ -98,14 +98,14 @@ use crate::{
         span::Span,
     },
 };
-use analyzer::{InterpProgram, analyze_interp};
+use analyzer::{InterpProgram, analyze_interp, static_env::scope::env::ScopeEnvironment};
 use error::fail::Failure;
 use interp::interpret;
 use src_code::{
     code::ExpansionData,
     span::{RelSpan, usize_to_uspan, uspan},
 };
-use std::{path::PathBuf, range::Range};
+use std::{collections::HashMap, path::PathBuf, range::Range};
 
 /// Indicates unfinished code.
 ///
@@ -633,16 +633,20 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
 
     // syntax highlighted
     if config.scanner_highlight {
-        println!("\nsyntax highlighting:");
+        println!();
         for (id, file) in source.iter() {
+            print!("\x1b[0m");
             let loc = source[id].loc();
             match loc {
-                SourceLoc::Repl | SourceLoc::PreprocRepl => print!("repl"),
-                SourceLoc::File(path) | SourceLoc::PreprocFile(path) => {
+                SourceLoc::Repl | SourceLoc::PreprocRepl(_) => print!("repl"),
+                SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => {
                     print!("{}", path.display());
                 }
             }
-            if matches!(loc, SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)) {
+            if matches!(
+                loc,
+                SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
+            ) {
                 print!(" (preprocessed)");
             }
             println!(":");
@@ -684,20 +688,32 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
         })
         .collect::<Vec<_>>();
 
-    for code in preprocessed {
-        source.push(code);
+    for code in preprocessed.into_iter().flatten() {
+        let &(SourceLoc::PreprocRepl(og_id) | SourceLoc::PreprocFile(og_id, _)) = code.loc() else {
+            unimplemented!("preprocessor should only output preprocessed files")
+        };
+        let pp_id = source.push(code);
+        source
+            .get_mut(og_id)
+            .expect("preprocessor should reference legitimate, existing files")
+            .set_preproc(pp_id);
     }
     // preprocessor syntax highlighted
     if config.preproc_highlight {
-        println!("\nsyntax highlighting:");
+        println!();
         for (id, file) in source.iter() {
+            print!("\x1b[0m");
             let loc = source[id].loc();
-            if !matches!(loc, SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)) {
+            // only include preprocessed versions of files
+            if !matches!(
+                loc,
+                SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
+            ) {
                 continue;
             }
             match loc {
-                SourceLoc::Repl | SourceLoc::PreprocRepl => print!("repl"),
-                SourceLoc::File(path) | SourceLoc::PreprocFile(path) => {
+                SourceLoc::Repl | SourceLoc::PreprocRepl(_) => print!("repl"),
+                SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => {
                     print!("{}", path.display());
                 }
             }
@@ -730,11 +746,12 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     let prgm_units: Vec<_> = source
         .iter_mut()
         .filter(|(_, code)| {
-            // only parse post-processed files
-            matches!(
-                code.loc(),
-                SourceLoc::PreprocRepl | SourceLoc::PreprocFile(_)
-            )
+            // only parse post-processed files, or files that have no preprocessor directives
+            code.preproc().is_none()
+                || matches!(
+                    code.loc(),
+                    SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
+                )
         })
         .filter_map(|(id, code)| {
             match parse::parse(
@@ -768,6 +785,28 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
             .expect("program unit should have valid file ID");
 
         println!("lisp: {:#}", parse::fmt::Lisp { source, node: unit });
+    }
+
+    // scope analysis
+    let mut scope_env = ScopeEnvironment::new(HashMap::new(/* TODO */));
+    let scope_errs: Vec<_> = prgm_units
+        .iter()
+        .flat_map(|unit| {
+            scope_env
+                .analyze(&source[unit.file], unit)
+                .err()
+                .into_flat_iter()
+        })
+        .collect();
+
+    // scope errors
+    if !scope_errs.is_empty() {
+        if config.print_errors {
+            for e in &scope_errs {
+                println!("{}\n", e.contextualize(source));
+            }
+        }
+        return Err(scope_errs);
     }
 
     // let (program, env) = match analyze(source, &prgm) {
@@ -844,6 +883,13 @@ fn main() {
         }
     };
     let mut source_map = SourceMap::new();
+    source_map.push(
+        SourceCode::new(
+            SourceLoc::File(PathBuf::from("builtin").join("std").with_extension("bats")),
+            include_str!("batstd/std.bats").to_string(),
+        )
+        .expect("standard library should not be valid"),
+    );
     match &config.source_path {
         // interactive
         None => {
