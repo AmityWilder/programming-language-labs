@@ -28,6 +28,10 @@ impl<'src> ScopeEnvironment<'src> {
     ) -> Vec<Error> {
         let mut errors = Vec::new();
         match decl {
+            ast::Decl::Type(ty) => {
+                todo!()
+            }
+
             ast::Decl::Var(decl) => {
                 let ident = decl.binding.ident;
                 let var = self.decl_item(&code[ident], decl.span().within_file(file));

@@ -58,6 +58,17 @@ mod helpers {
             LispCall::new(op, source, self.0)
         }
 
+        pub fn call_with<'me>(
+            &'me mut self,
+            op: &(impl ?Sized + LispOp),
+            source: &SourceCode,
+            f: impl FnOnce(&mut LispCall<'me, 'buf>) -> Result<(), fmt::Error>,
+        ) -> Result<(), fmt::Error> {
+            let mut call = self.call(op, source)?;
+            f(&mut call)?;
+            call.finish()
+        }
+
         pub fn write_arg<'me>(
             &'me mut self,
             arg: impl LispDisplayValue,
@@ -138,6 +149,10 @@ impl LispArgs for [ast::Decl] {
         let mut iter = self.iter();
         while let Some(item) = iter.next() {
             match item {
+                ast::Decl::Type(ty) => {
+                    f.write_arg(ty, source)?;
+                }
+
                 ast::Decl::Var(var) => {
                     f.write_arg(var, source)?;
                     if let Some(assignment) = &var.assignment {
@@ -176,6 +191,76 @@ impl LispDisplay for ast::BlockStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LispCall::new("block", source, f)?
             .write_args(self.body.as_slice(), source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::DeclType {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rec(rec) => rec.fmt(source, f),
+            Self::Cat(cat) => cat.fmt(source, f),
+        }
+    }
+}
+
+impl LispDisplay for ast::GenericGroup {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("generics", source, f)?
+            .write_arg_iter(self.list.as_slice(), source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::DeclRec {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new(&self.kw, source, f)?
+            .write_arg((self.name, TokenKind::Ident), source)?
+            .write_arg_iter(self.generics.as_ref(), source)?
+            .write_arg(&self.body, source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::FieldSet {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("fieldset", source, f)?
+            .write_arg_iter(self.fields.as_slice(), source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::Field {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("field", source, f)?
+            .write_arg((self.name, TokenKind::Ident), source)?
+            .write_arg(&self.ty.ty, source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::DeclCat {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new(&self.kw, source, f)?
+            .write_arg((self.name, TokenKind::Ident), source)?
+            .write_arg(&self.discriminants, source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::CatDiscSet {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("discset", source, f)?
+            .write_arg_iter(self.items.as_slice(), source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::CatDisc {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("=", source, f)?
+            .write_arg((self.name, TokenKind::Ident), source)?
+            .write_arg_iter(self.val.as_ref().map(|x| &x.expr), source)?
             .finish()
     }
 }
@@ -334,7 +419,8 @@ impl LispDisplay for ast::LoopBlock {
             ast::LoopKind::For { bind, in_kw, iter } => {
                 f.call(in_kw, source)?
                     .write_arg(bind, source)?
-                    .write_arg(iter, source)?;
+                    .write_arg(iter, source)?
+                    .finish()?;
                 f.write_arg(&self.block, source)?
             }
         }
@@ -384,22 +470,92 @@ impl LispDisplay for ast::TypeAnnotation {
     }
 }
 
-impl LispDisplay for ast::TypeExpr {
+impl LispDisplay for ast::PrimitiveType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(or_ty) = self.or_ty.as_ref() {
-            LispCall::new(&or_ty.pipe, source, f)?
-                .write_arg(&self.then_ty, source)?
-                .write_arg(or_ty, source)?
-                .finish()
-        } else {
-            self.then_ty.fmt(source, f)
+        (self.span, TokenKind::from(self.ty.to_keyword())).fmt_value(source, f)
+    }
+}
+
+impl LispDisplay for ast::FallType {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new(&self.pipe, source, f)?
+            .write_arg(&*self.then_ty, source)?
+            .write_arg(
+                (self.ty_span, TokenKind::from(self.ty.to_keyword())),
+                source,
+            )?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::RefType {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new(&self.sym, source, f)?
+            .write_arg(&*self.ty, source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::ViewType {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("view", source, f)?
+            .write_arg(&*self.item, source)?
+            .write_arg_iter(self.count.as_ref().map(|x| &x.count), source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::GroupedType {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("type_group", source, f)?
+            .write_arg(&self.inner, source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::AssocTypeSource {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Simple(inner) => inner.fmt(source, f),
+            Self::Grouped(inner) => inner.fmt(source, f),
         }
     }
 }
 
-impl LispDisplay for ast::OrType {
+impl LispDisplay for ast::AssocType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.ty_span, TokenKind::from(self.ty.to_keyword())).fmt_value(source, f)
+        LispCall::new(&self.sep, source, f)?
+            .write_arg(&self.base, source)?
+            .write_arg(&self.assoc, source)?
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::FunType {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = LispCall::new(&self.kw, source, f)?;
+        if let Some(ret) = self.ret.as_deref() {
+            // TBD: what about the arrow?
+            f.write_arg(&ret.ty, source)?;
+        }
+        f.call("params", source)?
+            .write_arg_iter(self.args.as_slice(), source)?
+            .finish()?;
+        f.finish()
+    }
+}
+
+impl LispDisplay for ast::TypeExpr {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Primitive(inner) => inner.fmt(source, f),
+            Self::Instance(inner) => inner.fmt(source, f),
+            Self::Fallible(inner) => inner.fmt(source, f),
+            Self::Ref(inner) => inner.fmt(source, f),
+            Self::View(inner) => inner.fmt(source, f),
+            Self::Assoc(inner) => inner.fmt(source, f),
+            Self::FunPtr(inner) => inner.fmt(source, f),
+        }
     }
 }
 
@@ -418,11 +574,7 @@ impl LispDisplay for ast::TypeInstance {
 
 impl LispDisplay for ast::Typename {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = (
-            self.name_span,
-            self.name
-                .map_or(TokenKind::Ident, |k| k.to_keyword().into()),
-        );
+        let name = (self.name, TokenKind::Ident);
         if self.path.is_empty() {
             LispCall::new("::", source, f)?
                 .write_arg_iter(&self.path, source)?

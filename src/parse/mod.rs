@@ -6,10 +6,9 @@ use crate::{
         keyword::Keyword,
         punc::{BadBracketCombo, Bracket, OpSide, Punctuation},
     },
-    src_code::span::{FileId, RelSpan, Span, uspan},
+    src_code::span::{FileId, RelSpan, uspan},
 };
 use ast::{Expectable, ExpectableExt};
-use std::iter::{Filter, Peekable};
 
 pub mod ast;
 pub mod fmt;
@@ -33,8 +32,29 @@ pub mod util {
             }
         }
     }
+
+    pub trait OkOrFlatten<T, E> {
+        fn ok_or_flat(self, error: E) -> Result<T, E>;
+
+        fn ok_or_else_flat<F>(self, error: F) -> Result<T, E>
+        where
+            F: FnOnce() -> E;
+    }
+
+    impl<T, E> OkOrFlatten<T, E> for Option<Result<T, E>> {
+        fn ok_or_flat(self, error: E) -> Result<T, E> {
+            self.unwrap_or(Err(error))
+        }
+
+        fn ok_or_else_flat<F>(self, error: F) -> Result<T, E>
+        where
+            F: FnOnce() -> E,
+        {
+            self.unwrap_or_else(move || Err(error()))
+        }
+    }
 }
-use util::MapInner;
+use util::{MapInner, OkOrFlatten};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -74,7 +94,8 @@ impl<T: Expectable> ParserExpect for Option<Result<T>> {
 pub struct Parser<I: Iterator> {
     file: FileId,
     file_len: uspan,
-    tokens: Peekable<Filter<I, fn(&I::Item) -> bool>>,
+    #[expect(clippy::type_complexity, reason = "type alias messes up derives")]
+    tokens: std::iter::Peekable<std::iter::Filter<I, fn(&I::Item) -> bool>>,
 }
 
 impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
@@ -327,7 +348,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
             items.push(first?);
             while self.pull_if_eq(sep).is_some() {
                 let item = if let Some(expected) = trailing {
-                    f(self).ok_or_else(|| self.error(expected)).flatten()
+                    f(self).ok_or_else_flat(|| self.error(expected))
                 } else if let Some(item) = f(self) {
                     item
                 } else {
@@ -442,10 +463,13 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
         })
     }
 
-    /// `declaration -> var_declaration | defer_declaration | statement`
+    /// `declaration -> rec_declaration | cat_declaration | var_declaration | defer_declaration | statement`
     pub fn declaration(&mut self) -> Result<ast::Decl> {
-        self.var_declaration()
-            .map_inner(ast::Decl::Var)
+        self.rec_declaration()
+            .map_inner(ast::DeclType::Rec)
+            .or_else(|| self.cat_declaration().map_inner(ast::DeclType::Cat))
+            .map_inner(ast::Decl::Type)
+            .or_else(|| self.var_declaration().map_inner(ast::Decl::Var))
             .or_else(|| self.defer_declaration().map_inner(ast::Decl::Defer))
             .unwrap_or_else(|| self.statement().map(ast::Decl::Stmt))
     }
@@ -470,6 +494,75 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
                 ty: self.type_annotation().transpose()?,
                 assignment: self.assignment().transpose()?,
                 semi: self.try_pull_eq(TokenKind::Punc(Punctuation::Semi))?,
+            })
+        })
+    }
+
+    /// `rec_declaration -> "rec" IDENT ( generic_group )? "{" ( field ( "," field )* ( "," )? )? "}"`
+    pub fn rec_declaration(&mut self) -> Option<Result<ast::DeclRec>> {
+        self.pull_if_eq(Keyword::Rec).map(|kw| {
+            Ok(ast::DeclRec {
+                kw,
+                name: self.try_pull_eq(TokenKind::Ident)?,
+                generics: self.generic_group().transpose()?,
+                body: self
+                    .field_set()
+                    .ok_or_else_flat(|| self.error(ExpectedToken::RecBody))?,
+            })
+        })
+    }
+
+    pub fn field_set(&mut self) -> Option<Result<ast::FieldSet>> {
+        self.pull_if_delim(Bracket::Brace, |parser| {
+            parser.pull_separated(None, Punctuation::Comma, Self::field)
+        })
+        .map_inner(|(open, fields, close)| ast::FieldSet {
+            open,
+            fields,
+            close,
+        })
+    }
+
+    pub fn field(&mut self) -> Option<Result<ast::Field>> {
+        self.pull_if_eq(TokenKind::Ident).map(|name| {
+            Ok(ast::Field {
+                name,
+                ty: self.type_annotation().ok_or_else_flat(|| {
+                    self.error(ExpectedToken::Verbatim(TokenKind::Punc(Punctuation::Colon)))
+                })?,
+            })
+        })
+    }
+
+    /// `cat_declaration -> "cat" name ( generic_group )? cat_disc_set`
+    pub fn cat_declaration(&mut self) -> Option<Result<ast::DeclCat>> {
+        self.pull_if_eq(Keyword::Cat).map(|kw| {
+            Ok(ast::DeclCat {
+                kw,
+                name: self.try_pull_eq(TokenKind::Ident)?,
+                discriminants: self.cat_disc_set().ok_or_else_flat(|| {
+                    self.error(ExpectedToken::Verbatim(TokenKind::Punc(
+                        Punctuation::LBrace,
+                    )))
+                })?,
+            })
+        })
+    }
+
+    /// `cat_disc_set -> "{" ( cat_disc ( "," cat_disc )* ( "," )? )? "}"`
+    pub fn cat_disc_set(&mut self) -> Option<Result<ast::CatDiscSet>> {
+        self.pull_if_delim(Bracket::Brace, |parser| {
+            parser.pull_separated(None, Punctuation::Comma, Self::cat_disc)
+        })
+        .map_inner(|(open, items, close)| ast::CatDiscSet { open, items, close })
+    }
+
+    /// `cat_disc -> IDENT ( assignment )?`
+    pub fn cat_disc(&mut self) -> Option<Result<ast::CatDisc>> {
+        self.pull_if_eq(TokenKind::Ident).map(|name| {
+            Ok(ast::CatDisc {
+                name,
+                val: self.assignment().transpose()?,
             })
         })
     }
@@ -638,8 +731,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
             if label.is_none() {
                 res?
             } else {
-                res.ok_or_else(|| self.error(ExpectedToken::LoopBlock))
-                    .flatten()
+                res.ok_or_else_flat(|| self.error(ExpectedToken::LoopBlock))
             }
             .and_then(|(kw, kind)| {
                 Ok(ast::LoopBlock {
@@ -971,8 +1063,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
             .or_else(|| self.group().map_inner(|x| ast::Expr::Grouping(Box::new(x))))
             .or_else(|| self.variable().map(|x| Ok(ast::Expr::Variable(x))))
             .or_else(|| self.directive().map(|x| Ok(ast::Expr::Directive(x))))
-            .ok_or_else(|| self.error(ExpectedToken::Expr))
-            .flatten()
+            .ok_or_else_flat(|| self.error(ExpectedToken::Expr))
     }
 
     /// `directive -> "inpt"`
@@ -1000,7 +1091,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
                 kind,
                 TokenKind::BoolLit(_)
                     | TokenKind::Keyword(Keyword::None)
-                    | TokenKind::NumberLit { .. }
+                    | TokenKind::NumberLit
                     | TokenKind::CharLit
                     | TokenKind::TextLit
                     | TokenKind::Macro
@@ -1031,45 +1122,173 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
         .map_inner(|(open, list, close)| ast::GenericGroup { open, list, close })
     }
 
-    /// `type_expression -> type_instance ( or_type )?`
+    /// `type_expression -> fallible_type`
     fn type_expression(&mut self) -> Result<ast::TypeExpr> {
-        Ok(ast::TypeExpr {
-            then_ty: self.type_instance()?,
-            or_ty: self.or_type().transpose()?,
+        self.fallible_type()
+    }
+
+    /// `fallible_type -> ref_type ( "|" ( "none" | "nevr" | "fail" ) )?`
+    fn fallible_type(&mut self) -> Result<ast::TypeExpr> {
+        self.ref_type().and_then(|then_ty| {
+            if let Some(pipe) = self.pull_if_eq(Punctuation::Or) {
+                let (ty_span, ty) = self.try_pull_into(ExpectedToken::OrType)?;
+                Ok(ast::TypeExpr::Fallible(ast::FallType {
+                    then_ty: Box::new(then_ty),
+                    pipe,
+                    ty,
+                    ty_span,
+                }))
+            } else {
+                Ok(then_ty)
+            }
         })
     }
 
-    /// `type_instance -> typename generic_group`
+    /// `ref_type -> ( "@" )* ref_type | assoc_type`
+    fn ref_type(&mut self) -> Result<ast::TypeExpr> {
+        if let Some(sym) = self.pull_if_eq(Punctuation::Ref) {
+            Ok(ast::TypeExpr::Ref(ast::RefType {
+                sym,
+                ty: Box::new(self.ref_type()?),
+            }))
+        } else {
+            self.assoc_type()
+        }
+    }
+
+    /// `assoc_type -> type_source ( "::" type_instance )? | primary_type`
+    fn assoc_type(&mut self) -> Result<ast::TypeExpr> {
+        if let Some(base) = self.type_source().transpose()? {
+            if let Some(sep) = self.pull_if_eq(Punctuation::PathSep) {
+                Ok(ast::TypeExpr::Assoc(Box::new(ast::AssocType {
+                    base,
+                    sep,
+                    assoc: self.type_instance()?,
+                })))
+            } else {
+                match base {
+                    ast::AssocTypeSource::Simple(name) => {
+                        Ok(ast::TypeExpr::Instance(ast::TypeInstance {
+                            name,
+                            args: self.generic_group().transpose()?,
+                        }))
+                    }
+                    // TBD: is the `<>` is important?
+                    ast::AssocTypeSource::Grouped(ast::GroupedType { inner, .. }) => Ok(inner),
+                }
+            }
+        } else {
+            self.primary_type()
+        }
+    }
+
+    /// `type_source -> grouped_type | typename`
+    fn type_source(&mut self) -> Option<Result<ast::AssocTypeSource>> {
+        self.grouped_type()
+            .map_inner(ast::AssocTypeSource::Grouped)
+            .or_else(|| self.typename().map_inner(ast::AssocTypeSource::Simple))
+    }
+
+    /// `primary_type -> view_type | fun_type | primitive_type | type_instance`
+    fn primary_type(&mut self) -> Result<ast::TypeExpr> {
+        self.view_type()
+            .map_inner(ast::TypeExpr::View)
+            .or_else(|| self.fun_type().map_inner(ast::TypeExpr::FunPtr))
+            .or_else(|| {
+                self.primitive_type()
+                    .map(|x| Ok(ast::TypeExpr::Primitive(x)))
+            })
+            .unwrap_or_else(|| self.type_instance().map(ast::TypeExpr::Instance))
+    }
+
+    /// `fun_type -> "fun" "(" ( type_expression ( "," type_expression )* ( "," )? )? ")" "->" type_expression`
+    fn fun_type(&mut self) -> Option<Result<ast::FunType>> {
+        self.pull_if_eq(Keyword::Fun).map(|kw| {
+            let (open, args, close) = self
+                .pull_if_delim(Bracket::Paren, |parser| {
+                    parser.pull_separated(None, Punctuation::Comma, |parser| {
+                        (!parser.is_next_close()).then(|| parser.type_expression())
+                    })
+                })
+                .ok_or_else_flat(|| {
+                    self.error(ExpectedToken::Verbatim(TokenKind::Punc(
+                        Punctuation::LParen,
+                    )))
+                })?;
+            Ok(ast::FunType {
+                kw,
+                open,
+                args,
+                close,
+                ret: self.fun_ret().transpose()?.map(Box::new),
+            })
+        })
+    }
+
+    /// `fun_ret -> "->" type_expression`
+    fn fun_ret(&mut self) -> Option<Result<ast::FunRet>> {
+        self.pull_if_eq(Punctuation::Arrow).map(|arrow| {
+            Ok(ast::FunRet {
+                arrow,
+                ty: self.type_expression()?,
+            })
+        })
+    }
+
+    /// `grouped_type -> "<" type_expression ">"`
+    fn grouped_type(&mut self) -> Option<Result<ast::GroupedType>> {
+        self.pull_if_delim(Bracket::Angle, Self::type_expression)
+            .map_inner(|(open, inner, close)| ast::GroupedType { open, inner, close })
+    }
+
+    /// `view_type -> "[" type_expression ( ";" expression )? "]"`
+    fn view_type(&mut self) -> Option<Result<ast::ViewType>> {
+        self.pull_if_delim(Bracket::Brack, |parser| {
+            let item = parser.type_expression()?;
+            let count = parser
+                .pull_if_eq(Punctuation::Semi)
+                .map(|semi| {
+                    Ok(ast::ArrCount {
+                        semi,
+                        count: parser.expression()?,
+                    })
+                })
+                .transpose()?;
+            Ok((item, count))
+        })
+        .map_inner(|(open, (item, count), close)| ast::ViewType {
+            open,
+            item: Box::new(item),
+            count,
+            close,
+        })
+    }
+
+    /// `primitive_type -> "none" | "nevr" | "fail" | "bool" | "byte" | "uint" | "sint" | "flpt" | "char" | "text"`
+    fn primitive_type(&mut self) -> Option<ast::PrimitiveType> {
+        self.pull_into()
+            .map(|(span, ty)| ast::PrimitiveType { ty, span })
+    }
+
+    /// `type_instance -> typename ( generic_group )?`
     fn type_instance(&mut self) -> Result<ast::TypeInstance> {
         Ok(ast::TypeInstance {
-            name: self.typename()?,
+            name: self
+                .typename()
+                .ok_or_else_flat(|| self.error(ExpectedToken::Typename))?,
             args: self.generic_group().transpose()?,
         })
     }
 
     /// `typename -> ( ( TYPENAME_KEYWORD | IDENTIFIER ) "::" )* ( TYPENAME_KEYWORD | IDENTIFIER )`
-    fn typename(&mut self) -> Result<ast::Typename> {
-        let (mut name_span, mut name) = self.try_pull_into(ExpectedToken::TypeExpr)?;
-        let mut path = Vec::new();
-        while let Some(sep) = self.pull_if_eq(Punctuation::PathSep) {
-            path.push(ast::NamespacePathPart {
-                name: name_span,
-                sep,
-            });
-            (name_span, name) = self.try_pull_into(ExpectedToken::TypeExpr)?;
-        }
-        Ok(ast::Typename {
-            path,
-            name,
-            name_span,
-        })
-    }
-
-    /// `or_type -> "|" ( "none" | "nevr" | "fail" )`
-    fn or_type(&mut self) -> Option<Result<ast::OrType>> {
-        self.pull_if_eq(Punctuation::Or).map(|pipe| {
-            let (ty_span, ty) = self.try_pull_into(ExpectedToken::OrType)?;
-            Ok(ast::OrType { pipe, ty, ty_span })
+    fn typename(&mut self) -> Option<Result<ast::Typename>> {
+        self.pull_if_eq(TokenKind::Ident).map(|mut name| {
+            let mut path = Vec::new();
+            while let Some(sep) = self.pull_if_eq(Punctuation::PathSep) {
+                path.push(ast::NamespacePathPart { name, sep });
+                name = self.try_pull_eq(TokenKind::Ident)?; // TODO: ExpectedToken::TypeExpr
+            }
+            Ok(ast::Typename { path, name })
         })
     }
 
@@ -1165,7 +1384,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
                 self.grouped_bound()
                     .map_inner(|x| ast::TypeBound::Group(Box::new(x)))
             })
-            .unwrap_or_else(|| Err(self.error(ExpectedToken::TypeBound)))
+            .ok_or_else_flat(|| self.error(ExpectedToken::TypeBound))
     }
 
     /// `exact_bound -> "only" type_expression`
@@ -1208,12 +1427,11 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
                         Some(parser.type_expression())
                     })
                 })
-                .ok_or_else(|| {
+                .ok_or_else_flat(|| {
                     self.error(ExpectedToken::Verbatim(TokenKind::Punc(
                         Punctuation::LParen,
                     )))
-                })
-                .flatten()?;
+                })?;
             Ok(ast::ShapeBound {
                 kw,
                 open,
