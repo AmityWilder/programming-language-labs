@@ -295,25 +295,6 @@ impl TryFrom<TokenKind> for OrTypeKeyword {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct OrType {
-    // `|`
-    pub pipe: RelSpan,
-    // `none`, `fail`, or `nevr`
-    pub ty: OrTypeKeyword,
-    pub ty_span: RelSpan,
-}
-
-impl AstNode for OrType {
-    fn span_start(&self) -> uspan {
-        self.pipe.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.ty_span.end
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum TypenameKeyword {
     #[default]
@@ -465,22 +446,41 @@ impl AstNode for IffClause {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PrimitiveType {
+    pub ty: TypenameKeyword,
+    pub span: RelSpan,
+}
+
+impl AstNode for PrimitiveType {
+    fn span_start(&self) -> uspan {
+        self.span.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.span.end
+    }
+
+    fn span(&self) -> RelSpan {
+        self.span
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Typename {
     pub path: Vec<NamespacePathPart>,
-    /// [`None`] represents `Ident`
-    pub name: Option<TypenameKeyword>,
-    pub name_span: RelSpan,
+    /// Identifier
+    pub name: RelSpan,
 }
 
 impl AstNode for Typename {
     fn span_start(&self) -> uspan {
         self.path
             .first()
-            .map_or(self.name_span.start, NamespacePathPart::span_start)
+            .map_or(self.name.start, NamespacePathPart::span_start)
     }
 
     fn span_end(&self) -> uspan {
-        self.name_span.end
+        self.name.end
     }
 }
 
@@ -504,25 +504,178 @@ impl AstNode for TypeInstance {
     }
 }
 
+/// Fallible Type
 #[derive(Debug, Clone, PartialEq)]
-pub struct TypeExpr {
+pub struct FallType {
     /// Identifier
-    pub then_ty: TypeInstance,
-    pub or_ty: Option<OrType>,
+    pub then_ty: Box<TypeExpr>,
+    // `|`
+    pub pipe: RelSpan,
+    // `none`, `fail`, or `nevr`
+    pub ty: OrTypeKeyword,
+    pub ty_span: RelSpan,
 }
 
-impl AstNode for TypeExpr {
+impl AstNode for FallType {
     fn span_start(&self) -> uspan {
         self.then_ty.span_start()
     }
 
     fn span_end(&self) -> uspan {
-        if let Some(t) = &self.or_ty {
-            t.span_end()
+        self.ty_span.end
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefType {
+    /// `@`
+    pub sym: RelSpan,
+    // TODO: mutability?
+    pub ty: Box<TypeExpr>,
+}
+
+impl AstNode for RefType {
+    fn span_start(&self) -> uspan {
+        self.sym.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ty.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArrCount {
+    /// `;`
+    pub semi: RelSpan,
+    pub count: Expr,
+}
+
+impl AstNode for ArrCount {
+    fn span_start(&self) -> uspan {
+        self.semi.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.count.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewType {
+    /// `[`
+    pub open: RelSpan,
+    pub item: Box<TypeExpr>,
+    pub count: Option<ArrCount>,
+    /// `]`
+    pub close: RelSpan,
+}
+
+impl AstNode for ViewType {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupedType {
+    /// `<`
+    pub open: RelSpan,
+    pub inner: TypeExpr,
+    /// `>`
+    pub close: RelSpan,
+}
+
+impl AstNode for GroupedType {
+    fn span_start(&self) -> uspan {
+        self.open.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNode)]
+pub enum AssocTypeSource {
+    Simple(Typename),
+    Grouped(GroupedType),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssocType {
+    pub base: AssocTypeSource,
+    /// `::`
+    pub sep: RelSpan,
+    pub assoc: TypeInstance,
+}
+
+impl AstNode for AssocType {
+    fn span_start(&self) -> uspan {
+        self.base.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.assoc.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunRet {
+    /// `->`
+    pub arrow: RelSpan,
+    pub ty: TypeExpr,
+}
+
+impl AstNode for FunRet {
+    fn span_start(&self) -> uspan {
+        self.arrow.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ty.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunType {
+    /// `fun`
+    pub kw: RelSpan,
+    /// `(`
+    pub open: RelSpan,
+    pub args: Vec<TypeExpr>,
+    /// `)`
+    pub close: RelSpan,
+    pub ret: Option<Box<FunRet>>,
+}
+
+impl AstNode for FunType {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        if let Some(ret) = &self.ret {
+            ret.span_end()
         } else {
-            self.then_ty.span_end()
+            self.close.end
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNode)]
+pub enum TypeExpr {
+    Primitive(PrimitiveType),
+    Instance(TypeInstance),
+    Fallible(FallType),
+    Ref(RefType),
+    View(ViewType),
+    Assoc(Box<AssocType>),
+    FunPtr(FunType),
 }
 
 impl Expectable for TypeExpr {
@@ -1302,9 +1455,141 @@ impl AstNode for DeclVar {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Field {
+    // TODO: visibility?
+    /// Identifier
+    pub name: RelSpan,
+    pub ty: TypeAnnotation,
+}
+
+impl AstNode for Field {
+    fn span_start(&self) -> uspan {
+        self.name.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ty.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldSet {
+    /// `{`
+    pub open: RelSpan,
+    /// Comma-separated, but commas are not stored
+    pub fields: Vec<Field>,
+    /// `}`
+    pub close: RelSpan,
+}
+
+impl AstNode for FieldSet {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
+}
+
+// TODO: exact-lexeme RelSpans could be replaced with uspans
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclRec {
+    // TODO: visibility?
+    /// `rec`
+    pub kw: RelSpan,
+    /// Identifier
+    pub name: RelSpan,
+    pub generics: Option<GenericGroup>,
+    pub body: FieldSet,
+}
+
+impl AstNode for DeclRec {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.body.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatDisc {
+    /// Identifier
+    pub name: RelSpan,
+    pub val: Option<Assignment>,
+}
+
+impl AstNode for CatDisc {
+    fn span_start(&self) -> uspan {
+        self.name.start
+    }
+
+    fn span_end(&self) -> uspan {
+        if let Some(val) = &self.val {
+            val.span_end()
+        } else {
+            self.name.span_end()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatDiscSet {
+    /// `{`
+    pub open: RelSpan,
+    /// Comma-separated, but commas aren't kept
+    pub items: Vec<CatDisc>,
+    /// `}`
+    pub close: RelSpan,
+}
+
+impl AstNode for CatDiscSet {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclCat {
+    /// `cat`
+    pub kw: RelSpan,
+    /// Identifier
+    pub name: RelSpan,
+    pub discriminants: CatDiscSet,
+}
+
+impl AstNode for DeclCat {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.discriminants.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNode)]
+pub enum DeclType {
+    Rec(DeclRec),
+    Cat(DeclCat),
+    // TODO: subtypes
+    // TODO: supertypes
+    // TODO: category types
+    // TBD: aliases?
+}
+
 #[derive(Debug, Clone, PartialEq, AstNode)]
 pub enum Decl {
     Var(DeclVar),
+    Type(DeclType),
     Defer(DeclDefer),
     Stmt(Stmt),
 }
