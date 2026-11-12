@@ -1,5 +1,5 @@
 use crate::analyzer::{
-    static_env::VarId,
+    static_env::ItemId,
     types::{
         AbstractType,
         bounds::{Satisfaction, TypeBound, TypeSatisfaction, error::UnsatisfiedBoundError},
@@ -69,7 +69,7 @@ impl<'src> Entry<'src> {
 
 #[derive(Debug)]
 pub struct MorphEnvironment<'src> {
-    items: HashMap<VarId, Entry<'src>>,
+    items: HashMap<ItemId, Entry<'src>>,
 }
 
 impl<'src> MorphEnvironment<'src> {
@@ -79,11 +79,11 @@ impl<'src> MorphEnvironment<'src> {
         }
     }
 
-    pub fn get(&self, id: VarId) -> Option<&Entry<'src>> {
+    pub fn get(&self, id: ItemId) -> Option<&Entry<'src>> {
         self.items.get(&id)
     }
 
-    pub fn get_mut(&mut self, id: VarId) -> Option<&mut Entry<'src>> {
+    pub fn get_mut(&mut self, id: ItemId) -> Option<&mut Entry<'src>> {
         self.items.get_mut(&id)
     }
 }

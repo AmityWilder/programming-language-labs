@@ -382,10 +382,17 @@ impl<'src> TokenHighlight<'src> for (&'src str, Syntax, SubTokenable) {
     }
 }
 
+impl<'src> TokenHighlight<'src> for (&'src str, Syntax) {
+    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
+        let (src, syn) = *self;
+        (src, syn, SubTokenable::Normal)
+    }
+}
+
 impl<'src> TokenHighlight<'src> for (&'src str, TokenKind) {
     fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
         let syn = self.syntax();
-        let (src, kind) = self;
+        let (src, kind) = *self;
         (
             src,
             syn,
