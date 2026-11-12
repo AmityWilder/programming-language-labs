@@ -225,207 +225,6 @@ impl SyntaxStyle<Style, &[Style]> {
     }
 }
 
-impl<T, A> SyntaxStyle<T, A>
-where
-    A: AsRef<[T]>,
-{
-    pub const fn normal(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.normal = value;
-        self
-    }
-
-    pub const fn comment(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.comment = value;
-        self
-    }
-
-    pub const fn dimmed(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.dimmed = value;
-        self
-    }
-
-    pub const fn number_literal(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.number_literal = value;
-        self
-    }
-
-    pub const fn char_literal(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.char_literal = value;
-        self
-    }
-
-    pub const fn string_literal(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.string_literal = value;
-        self
-    }
-
-    pub const fn escape_seq(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.escape_seq = value;
-        self
-    }
-
-    pub const fn language_defined(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.language_defined = value;
-        self
-    }
-
-    pub const fn label(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.label = value;
-        self
-    }
-
-    pub const fn variable(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.variable = value;
-        self
-    }
-
-    pub const fn field(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.field = value;
-        self
-    }
-
-    pub const fn param(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.param = value;
-        self
-    }
-
-    pub const fn constant(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.constant = value;
-        self
-    }
-
-    pub const fn discriminant(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.discriminant = value;
-        self
-    }
-
-    pub const fn variant(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.variant = value;
-        self
-    }
-
-    pub const fn callable(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.callable = value;
-        self
-    }
-
-    pub const fn keyword(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.keyword = value;
-        self
-    }
-
-    pub const fn flow_keyword(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.flow_keyword = value;
-        self
-    }
-
-    pub const fn typename(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.typename = value;
-        self
-    }
-
-    pub const fn modname(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.modname = value;
-        self
-    }
-
-    pub const fn macro_name(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.macro_name = value;
-        self
-    }
-
-    pub const fn macro_param(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.macro_param = value;
-        self
-    }
-
-    pub const fn bracket(mut self, value: A) -> Self
-    where
-        A: [const] Destruct + [const] AsRef<[T]>,
-    {
-        assert!(
-            !value.as_ref().is_empty(),
-            "bracket list cannot be empty; it would cause an \"n % 0\" error"
-        );
-        self.bracket = value;
-        self
-    }
-
-    pub const fn invalid(mut self, value: T) -> Self
-    where
-        T: [const] Destruct,
-    {
-        self.invalid = value;
-        self
-    }
-}
-
 pub trait GetSyntax {
     fn syntax(&self) -> Syntax;
 }
@@ -570,19 +369,20 @@ macro_rules! syntax_style {
     ),*) => {{
         #[allow(unused_imports)]
         use $crate::highlight::style::Color::*;
-        $crate::highlight::syntax::SyntaxStyle::<$crate::highlight::style::Style, [_; _]>::new()
-            $(
-                .$item(
-                    // simple
-                    $(
-                        $crate::highlight::style::Style::new()$(.$key($value))*
-                    )?
-                    // bracket
-                    $(const {
-                        [$( $crate::highlight::style::Style::new()$(.$brack_key($brack_value))* ),+]
-                    })?
-                )
-            )*
+        let mut style = $crate::highlight::syntax::SyntaxStyle::<$crate::highlight::style::Style, [_; _]>::new();
+        $(
+            style.$item = (
+                // simple
+                $(
+                    $crate::highlight::style::Style::new()$(.$key($value))*
+                )?
+                // bracket
+                $(const {
+                    [$( $crate::highlight::style::Style::new()$(.$brack_key($brack_value))* ),+]
+                })?
+            );
+        )*
+        style
     }};
 }
 pub(crate) use syntax_style;
