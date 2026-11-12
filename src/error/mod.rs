@@ -23,11 +23,7 @@ use crate::{
         punc::{BadBracketCombo, Bracket, OpSide},
         value::Keyword,
     },
-    src_code::{
-        code::{CreateSourceCodeError, SourceLoc},
-        map::SourceMap,
-        span::{RelSpan, Span, uspan_to_usize},
-    },
+    src_code::{code::CreateSourceCodeError, map::SourceMap, span::Span},
 };
 use std::fmt::{self, Display, Formatter};
 
@@ -189,7 +185,7 @@ fn trim_article(s: &str) -> &str {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum ErrorKind {
+pub enum DiagnosticKind {
     // ----------------------------
     // lex
     // ----------------------------
@@ -385,7 +381,7 @@ pub enum ErrorKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ErrorCategory {
+pub enum DiagnosticCategory {
     Lexical,
     Preprocessor,
     Grammatical,
@@ -393,7 +389,7 @@ pub enum ErrorCategory {
     Runtime,
 }
 
-impl ErrorCategory {
+impl DiagnosticCategory {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Lexical => "LEX",
@@ -405,14 +401,89 @@ impl ErrorCategory {
     }
 }
 
-impl Display for ErrorCategory {
+impl Display for DiagnosticCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.as_str().fmt(f)
     }
 }
 
-impl ErrorKind {
-    pub const fn category(&self) -> ErrorCategory {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum Severity {
+    #[default]
+    Info,
+    Suggestion,
+    Warning,
+    Error,
+}
+
+impl Severity {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Suggestion => "suggestion",
+            Self::Warning => "warning",
+            Self::Error => "error",
+        }
+    }
+
+    pub const fn is_err(self) -> bool {
+        matches!(self, Self::Error)
+    }
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.as_str().fmt(f)
+    }
+}
+
+impl DiagnosticKind {
+    pub const fn severity(&self) -> Severity {
+        match self {
+            DiagnosticKind::UnknownToken
+            | DiagnosticKind::EndlessBlockComment
+            | DiagnosticKind::EmptyMacroName
+            | DiagnosticKind::EmptyMacroParam
+            | DiagnosticKind::EmptyCharLiteral
+            | DiagnosticKind::MultiCharLiteral
+            | DiagnosticKind::EndlessCharLiteral
+            | DiagnosticKind::EscapedCharLiteralEnd
+            | DiagnosticKind::EndlessStringLiteral
+            | DiagnosticKind::EscapedStringLiteralEnd
+            | DiagnosticKind::InvalidEscape
+            | DiagnosticKind::InvalidNumLiteral { .. }
+            | DiagnosticKind::MacroUndefined
+            | DiagnosticKind::MacroParamUndefined { .. }
+            | DiagnosticKind::RecursiveMacro { .. }
+            | DiagnosticKind::OversizePreproc { .. }
+            | DiagnosticKind::NonBoolPrePredicate { .. }
+            | DiagnosticKind::InvalidPreOperator
+            | DiagnosticKind::PreIncompatible { .. }
+            | DiagnosticKind::PreUnsupported { .. }
+            | DiagnosticKind::InvalidPreLiteral
+            | DiagnosticKind::InvalidPreType
+            | DiagnosticKind::PreOrType
+            | DiagnosticKind::IncorrectCloseBracket { .. }
+            | DiagnosticKind::ExcessCloseBracket { .. }
+            | DiagnosticKind::MissingCloseBracket { .. }
+            | DiagnosticKind::MissingToken { .. }
+            | DiagnosticKind::UnexpectedToken { .. }
+            | DiagnosticKind::DivByZero { .. }
+            | DiagnosticKind::Incompatible { .. }
+            | DiagnosticKind::Unsupported { .. }
+            | DiagnosticKind::UnsignedNeg
+            | DiagnosticKind::UnknownVar
+            | DiagnosticKind::TypeMismatch { .. }
+            | DiagnosticKind::TypeAmbiguity
+            | DiagnosticKind::AssignImmutable { .. }
+            | DiagnosticKind::FallibleBlockExpr
+            | DiagnosticKind::TypeTooBig
+            | DiagnosticKind::IllegalUnsized { .. }
+            | DiagnosticKind::Fail { .. } => Severity::Error,
+        }
+    }
+
+    pub const fn category(&self) -> DiagnosticCategory {
         match self {
             Self::UnknownToken { .. }
             | Self::EndlessBlockComment { .. }
@@ -425,7 +496,7 @@ impl ErrorKind {
             | Self::EndlessStringLiteral { .. }
             | Self::EscapedStringLiteralEnd { .. }
             | Self::InvalidEscape { .. }
-            | Self::InvalidNumLiteral { .. } => ErrorCategory::Lexical,
+            | Self::InvalidNumLiteral { .. } => DiagnosticCategory::Lexical,
 
             Self::MacroUndefined { .. }
             | Self::MacroParamUndefined { .. }
@@ -437,13 +508,13 @@ impl ErrorKind {
             | Self::PreUnsupported { .. }
             | Self::InvalidPreLiteral { .. }
             | Self::InvalidPreType { .. }
-            | Self::PreOrType { .. } => ErrorCategory::Preprocessor,
+            | Self::PreOrType { .. } => DiagnosticCategory::Preprocessor,
 
             Self::IncorrectCloseBracket { .. }
             | Self::ExcessCloseBracket { .. }
             | Self::MissingCloseBracket { .. }
             | Self::MissingToken { .. }
-            | Self::UnexpectedToken { .. } => ErrorCategory::Grammatical,
+            | Self::UnexpectedToken { .. } => DiagnosticCategory::Grammatical,
 
             Self::DivByZero { .. }
             | Self::Incompatible { .. }
@@ -455,13 +526,14 @@ impl ErrorKind {
             | Self::AssignImmutable { .. }
             | Self::FallibleBlockExpr { .. }
             | Self::TypeTooBig { .. }
-            | Self::IllegalUnsized { .. } => ErrorCategory::StaticAnalysis,
+            | Self::IllegalUnsized { .. } => DiagnosticCategory::StaticAnalysis,
 
-            Self::Fail { .. } => ErrorCategory::Runtime,
+            Self::Fail { .. } => DiagnosticCategory::Runtime,
         }
     }
 
     pub const fn num(&self) -> u32 {
+        #![expect(clippy::arithmetic_side_effects, reason = "nuh uh")]
         const START: u32 = line!() + 1; // +1 because of `match` line
         (match self {
             Self::UnknownToken { .. } => line!(),
@@ -509,13 +581,13 @@ impl ErrorKind {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct Error {
+pub struct Diagnostic {
     pub span: Span,
-    pub kind: Box<ErrorKind>,
+    pub kind: Box<DiagnosticKind>,
 }
 
-impl Error {
-    pub fn new(span: Span, kind: ErrorKind) -> Self {
+impl Diagnostic {
+    pub fn new(span: Span, kind: DiagnosticKind) -> Self {
         Self {
             span,
             kind: Box::new(kind),
@@ -525,19 +597,19 @@ impl Error {
     pub const fn contextualize<'smap, 'err>(
         &'err self,
         source: &'smap SourceMap,
-    ) -> ContextError<'smap, 'err> {
-        ContextError::new(source, self)
+    ) -> ContextDiagnostic<'smap, 'err> {
+        ContextDiagnostic::new(source, self)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ContextError<'smap, 'err> {
+pub struct ContextDiagnostic<'smap, 'err> {
     source: &'smap SourceMap,
-    error: &'err Error,
+    error: &'err Diagnostic,
 }
 
-impl<'smap, 'err> ContextError<'smap, 'err> {
-    pub const fn new(source: &'smap SourceMap, error: &'err Error) -> Self {
+impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
+    pub const fn new(source: &'smap SourceMap, error: &'err Diagnostic) -> Self {
         Self { source, error }
     }
 
@@ -549,84 +621,72 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
 
     fn err(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.error.kind {
-            ErrorKind::UnknownToken => write!(f, "unknown token"),
-            ErrorKind::EndlessBlockComment => {
+            DiagnosticKind::UnknownToken => write!(f, "unknown token"),
+            DiagnosticKind::EndlessBlockComment => {
                 write!(
                     f,
                     "block comment opens (`{BLOCK_COMMENT_OPEN}`) but never closes (missing `{BLOCK_COMMENT_CLOSE}`)"
                 )
             }
-            ErrorKind::EmptyMacroName => write!(f, "invalid macro name"),
-            ErrorKind::EmptyMacroParam => write!(f, "invalid macro parameter name"),
-            ErrorKind::EmptyCharLiteral => write!(f, "empty character literal"),
-            ErrorKind::MultiCharLiteral => {
+            DiagnosticKind::EmptyMacroName => write!(f, "invalid macro name"),
+            DiagnosticKind::EmptyMacroParam => write!(f, "invalid macro parameter name"),
+            DiagnosticKind::EmptyCharLiteral => write!(f, "empty character literal"),
+            DiagnosticKind::MultiCharLiteral => {
                 write!(f, "character literal may only contain one codepoint")
             }
-            ErrorKind::EndlessCharLiteral => {
+            DiagnosticKind::EndlessCharLiteral | DiagnosticKind::EscapedCharLiteralEnd => {
                 write!(
                     f,
                     "char literal opens (`{CHAR_DELIM}`) but never closes (missing unescaped `{CHAR_DELIM}`)"
                 )
             }
-            ErrorKind::EscapedCharLiteralEnd => {
-                write!(
-                    f,
-                    "char literal opens (`{CHAR_DELIM}`) but never closes (missing unescaped `{CHAR_DELIM}`)"
-                )
-            }
-            ErrorKind::EndlessStringLiteral => {
+            DiagnosticKind::EndlessStringLiteral | DiagnosticKind::EscapedStringLiteralEnd => {
                 write!(
                     f,
                     "string literal opens (`{TEXT_DELIM}`) but never closes (missing unescaped `{TEXT_DELIM}`)"
                 )
             }
-            ErrorKind::EscapedStringLiteralEnd => {
-                write!(
-                    f,
-                    "string literal opens (`{TEXT_DELIM}`) but never closes (missing unescaped `{TEXT_DELIM}`)"
-                )
-            }
-            ErrorKind::InvalidEscape => {
+            DiagnosticKind::InvalidEscape => {
                 write!(
                     f,
                     "unknown character escape: {:?}",
                     self.source.span_str(self.error.span)
                 )
             }
-            ErrorKind::InvalidNumLiteral(e) => {
+            DiagnosticKind::InvalidNumLiteral(e) => {
                 write!(f, "invalid number literal: {e}")
             }
-            ErrorKind::MacroUndefined => {
+            DiagnosticKind::MacroUndefined => {
                 write!(f, "macro has not been defined at this point")
             }
-            ErrorKind::MacroParamUndefined { .. } => {
+            DiagnosticKind::MacroParamUndefined { .. } => {
                 write!(f, "macro parameter not in scope")
             }
-            ErrorKind::RecursiveMacro { .. } => {
+            DiagnosticKind::RecursiveMacro { .. } => {
                 write!(f, "macro call cannot be recursive")
             }
-            ErrorKind::OversizePreproc(e) => {
+            DiagnosticKind::OversizePreproc(e) => {
                 write!(f, "preprocessor generated an invalid file: {e}")
             }
-            ErrorKind::NonBoolPrePredicate { .. } => {
+            DiagnosticKind::NonBoolPrePredicate { .. } => {
                 write!(f, "preprocessor predicate must evaluate to a boolean")
             }
-            ErrorKind::InvalidPreOperator => {
+            DiagnosticKind::InvalidPreOperator => {
                 write!(f, "invalid preprocessor operator")
             }
-            ErrorKind::PreIncompatible { op, l_ty, r_ty, .. } => {
+            DiagnosticKind::PreIncompatible { op, l_ty, r_ty, .. } => {
                 write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`")
             }
-            ErrorKind::PreUnsupported { op, r_ty, .. } => {
+            DiagnosticKind::PreUnsupported { op, r_ty, .. } => {
                 write!(f, "`{op}` is not supported for {r_ty}")
             }
-            ErrorKind::InvalidPreLiteral => {
+            DiagnosticKind::InvalidPreLiteral => {
                 write!(f, "invalid preprocessor literal")
             }
-            ErrorKind::InvalidPreType | ErrorKind::PreOrType => {
+            DiagnosticKind::InvalidPreType | DiagnosticKind::PreOrType => {
                 write!(f, "invalid preprocessor type")
             }
-            ErrorKind::IncorrectCloseBracket { failure, .. } => {
+            DiagnosticKind::IncorrectCloseBracket { failure, .. } => {
                 let (expect, actual) = failure.decompose();
                 write!(
                     f,
@@ -635,26 +695,26 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     actual.close(),
                 )
             }
-            ErrorKind::ExcessCloseBracket { actual, .. } => {
+            DiagnosticKind::ExcessCloseBracket { actual, .. } => {
                 write!(
                     f,
                     "too many close brackets: expected none, found `{}`",
                     actual.close()
                 )
             }
-            ErrorKind::MissingCloseBracket { expect, .. } => {
+            DiagnosticKind::MissingCloseBracket { expect, .. } => {
                 write!(
                     f,
                     "missing close bracket: expected `{}`, found none",
                     expect.close()
                 )
             }
-            ErrorKind::MissingToken {
+            DiagnosticKind::MissingToken {
                 expected: expect, ..
             } => {
                 write!(f, "missing {expect}")
             }
-            ErrorKind::UnexpectedToken {
+            DiagnosticKind::UnexpectedToken {
                 expected: expect, ..
             } => {
                 write!(
@@ -663,31 +723,31 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     self.source.span_str(self.error.span)
                 )
             }
-            ErrorKind::DivByZero { .. } => {
+            DiagnosticKind::DivByZero { .. } => {
                 write!(f, "divide by zero")
             }
-            ErrorKind::Incompatible { op, l_ty, r_ty, .. } => {
+            DiagnosticKind::Incompatible { op, l_ty, r_ty, .. } => {
                 write!(f, "{l_ty} is not compatible with {r_ty} for `{op}`")
             }
-            ErrorKind::Unsupported { op, ty, .. } => {
+            DiagnosticKind::Unsupported { op, ty, .. } => {
                 write!(f, "`{op}` is not supported for {ty}")
             }
-            ErrorKind::UnsignedNeg => {
+            DiagnosticKind::UnsignedNeg => {
                 write!(f, "unsigned integer cannot be negated")
             }
-            ErrorKind::UnknownVar => {
+            DiagnosticKind::UnknownVar => {
                 write!(f, "cannot find variable within this scope")
             }
-            ErrorKind::TypeMismatch(ts) => {
+            DiagnosticKind::TypeMismatch(ts) => {
                 write!(f, "type mismatch: expected {}, found {}", ts.0, ts.1)
             }
-            ErrorKind::TypeAmbiguity => {
+            DiagnosticKind::TypeAmbiguity => {
                 write!(f, "type is ambiguous")
             }
-            ErrorKind::AssignImmutable(_) => {
+            DiagnosticKind::AssignImmutable(_) => {
                 write!(f, "cannot assign to immutable")
             }
-            ErrorKind::FallibleBlockExpr => {
+            DiagnosticKind::FallibleBlockExpr => {
                 write!(
                     f,
                     "only `{}` and `{}` are supported loop expressions",
@@ -695,7 +755,7 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     Keyword::Cord
                 )
             }
-            ErrorKind::TypeTooBig => {
+            DiagnosticKind::TypeTooBig => {
                 write!(
                     f,
                     "type size exceeds {} bytes; too big to store on a {}-bit system",
@@ -703,13 +763,13 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     usize::BITS
                 )
             }
-            ErrorKind::IllegalUnsized(_) => {
+            DiagnosticKind::IllegalUnsized(_) => {
                 write!(
                     f,
                     "runtime-sized type stored in a statically-sized location"
                 )
             }
-            ErrorKind::Fail(_) => {
+            DiagnosticKind::Fail(_) => {
                 write!(f, "unhandled failure")
             }
         }
@@ -717,74 +777,78 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
 
     fn inline(&self) -> impl fmt::Display {
         match &self.error.kind {
-            ErrorKind::UnknownToken => "what is this?",
-            ErrorKind::EndlessBlockComment
-            | ErrorKind::EndlessCharLiteral
-            | ErrorKind::EndlessStringLiteral => "never ends",
-            ErrorKind::EmptyMacroName => "macro prefix, but no name",
-            ErrorKind::EmptyMacroParam => "macro parameter prefix, but no name",
-            ErrorKind::EmptyCharLiteral => "empty",
-            ErrorKind::MultiCharLiteral => "a char should be 1 char",
-            ErrorKind::EscapedCharLiteralEnd | ErrorKind::EscapedStringLiteralEnd => {
+            DiagnosticKind::UnknownToken => "what is this?",
+            DiagnosticKind::EndlessBlockComment
+            | DiagnosticKind::EndlessCharLiteral
+            | DiagnosticKind::EndlessStringLiteral => "never ends",
+            DiagnosticKind::EmptyMacroName => "macro prefix, but no name",
+            DiagnosticKind::EmptyMacroParam => "macro parameter prefix, but no name",
+            DiagnosticKind::EmptyCharLiteral => "empty",
+            DiagnosticKind::MultiCharLiteral => "a char should be 1 char",
+            DiagnosticKind::EscapedCharLiteralEnd | DiagnosticKind::EscapedStringLiteralEnd => {
                 "never ends, unless you remove the `\\`"
             }
-            ErrorKind::InvalidEscape => "invalid escape sequence",
-            ErrorKind::InvalidNumLiteral(_) => "not a valid number",
-            ErrorKind::MacroUndefined => "not defined",
-            ErrorKind::MacroParamUndefined { .. } => "unknown macro parameter",
-            ErrorKind::RecursiveMacro { .. } => "macro calls itself here",
-            ErrorKind::OversizePreproc { .. } => "invalid file",
-            ErrorKind::NonBoolPrePredicate { .. } => "expected a boolean value",
-            ErrorKind::InvalidPreOperator => "this operator is not defined within preprocessing",
-            ErrorKind::PreIncompatible { .. } => {
+            DiagnosticKind::InvalidEscape => "invalid escape sequence",
+            DiagnosticKind::InvalidNumLiteral(_) => "not a valid number",
+            DiagnosticKind::MacroUndefined => "not defined",
+            DiagnosticKind::MacroParamUndefined { .. } => "unknown macro parameter",
+            DiagnosticKind::RecursiveMacro { .. } => "macro calls itself here",
+            DiagnosticKind::OversizePreproc { .. } => "invalid file",
+            DiagnosticKind::NonBoolPrePredicate { .. } => "expected a boolean value",
+            DiagnosticKind::InvalidPreOperator => {
+                "this operator is not defined within preprocessing"
+            }
+            DiagnosticKind::PreIncompatible { .. } => {
                 "operation is not supported between operands of these types in preprocessing"
             }
-            ErrorKind::Incompatible { .. } => {
+            DiagnosticKind::Incompatible { .. } => {
                 "operation is not supported between operands of these types"
             }
-            ErrorKind::PreUnsupported { .. } => {
+            DiagnosticKind::PreUnsupported { .. } => {
                 "operation is not supported for operand of this type in preprocessing"
             }
-            ErrorKind::Unsupported { .. } => "operation is not supported for operand of this type",
-            ErrorKind::InvalidPreLiteral | ErrorKind::InvalidPreType | ErrorKind::PreOrType => {
-                "not valid within preprocessing"
+            DiagnosticKind::Unsupported { .. } => {
+                "operation is not supported for operand of this type"
             }
-            ErrorKind::IncorrectCloseBracket { .. } => "incorrect partner",
-            ErrorKind::ExcessCloseBracket { .. } => "missing a partner",
-            ErrorKind::MissingCloseBracket { .. } => "missing close bracket",
-            ErrorKind::MissingToken { .. } => "missing token",
-            ErrorKind::UnexpectedToken { .. } => "unexpected",
-            ErrorKind::DivByZero { .. } => "dividing by 0",
-            ErrorKind::UnsignedNeg => "uint can't be negated",
-            ErrorKind::UnknownVar => "unknown variable",
-            ErrorKind::TypeMismatch(_) => "incorrect type",
-            ErrorKind::TypeAmbiguity => "type must be known at this point",
-            ErrorKind::AssignImmutable(_) => "does not resolve to a mutable value",
-            ErrorKind::FallibleBlockExpr => "may finish without a result",
-            ErrorKind::TypeTooBig => "type too big",
-            ErrorKind::IllegalUnsized(_) => "must have static size",
-            ErrorKind::Fail(_) => "failed operation",
+            DiagnosticKind::InvalidPreLiteral
+            | DiagnosticKind::InvalidPreType
+            | DiagnosticKind::PreOrType => "not valid within preprocessing",
+            DiagnosticKind::IncorrectCloseBracket { .. } => "incorrect partner",
+            DiagnosticKind::ExcessCloseBracket { .. } => "missing a partner",
+            DiagnosticKind::MissingCloseBracket { .. } => "missing close bracket",
+            DiagnosticKind::MissingToken { .. } => "missing token",
+            DiagnosticKind::UnexpectedToken { .. } => "unexpected",
+            DiagnosticKind::DivByZero { .. } => "dividing by 0",
+            DiagnosticKind::UnsignedNeg => "uint can't be negated",
+            DiagnosticKind::UnknownVar => "unknown variable",
+            DiagnosticKind::TypeMismatch(_) => "incorrect type",
+            DiagnosticKind::TypeAmbiguity => "type must be known at this point",
+            DiagnosticKind::AssignImmutable(_) => "does not resolve to a mutable value",
+            DiagnosticKind::FallibleBlockExpr => "may finish without a result",
+            DiagnosticKind::TypeTooBig => "type too big",
+            DiagnosticKind::IllegalUnsized(_) => "must have static size",
+            DiagnosticKind::Fail(_) => "failed operation",
         }
     }
 
     fn help(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let src = self.source.span_str(self.error.span);
         match &self.error.kind {
-            ErrorKind::UnknownToken => {
+            DiagnosticKind::UnknownToken => {
                 write!(f, "try removing the character")
             }
-            ErrorKind::EndlessBlockComment => {
+            DiagnosticKind::EndlessBlockComment => {
                 write!(f, "try adding `{BLOCK_COMMENT_CLOSE}`")
             }
-            ErrorKind::EmptyMacroName => write!(f, "try adding an identifier after the `{MACRO_PREFIX}`"),
-            ErrorKind::EmptyMacroParam => write!(f, "try adding an identifier after the `{MACRO_PARAM_PREFIX}`"),
-            ErrorKind::EmptyCharLiteral => {
+            DiagnosticKind::EmptyMacroName => write!(f, "try adding an identifier after the `{MACRO_PREFIX}`"),
+            DiagnosticKind::EmptyMacroParam => write!(f, "try adding an identifier after the `{MACRO_PARAM_PREFIX}`"),
+            DiagnosticKind::EmptyCharLiteral => {
                 write!(
                     f,
                     "chars can't be empty, try replacing `{CHAR_DELIM}{CHAR_DELIM}` with `{TEXT_DELIM}{TEXT_DELIM}` or insert a character"
                 )
             }
-            ErrorKind::MultiCharLiteral => {
+            DiagnosticKind::MultiCharLiteral => {
                     let inner = src
                         .strip_circumfix(CHAR_DELIM, CHAR_DELIM)
                         .expect("char literals should include delimiters");
@@ -798,10 +862,10 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     )
 
             }
-            ErrorKind::EndlessCharLiteral => {
+            DiagnosticKind::EndlessCharLiteral => {
                 write!(f, "try adding a `{CHAR_DELIM}` to the end of the char")
             }
-            ErrorKind::EscapedCharLiteralEnd => {
+            DiagnosticKind::EscapedCharLiteralEnd => {
                     let substr = src.strip_prefix(CHAR_DELIM).expect("string literal should include at least the open delimiter, in EscapedCharLiteralEnd").split_once("\\'").expect("should be EscapedCharLiteralEnd if this is not present").0;
                     write!(f, "there is a closing single-quote candidate, but it is escaped (`{ESCAPE}{CHAR_DELIM}`). \n\
                         char literals cannot end with an unescaped backslash (`{ESCAPE}`), \
@@ -810,10 +874,10 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                         to make the char `{CHAR_DELIM}{substr}{CHAR_DELIM}`")
 
             }
-            ErrorKind::EndlessStringLiteral => {
+            DiagnosticKind::EndlessStringLiteral => {
                 write!(f, "try adding a `{TEXT_DELIM}` to the end of the string")
             }
-            ErrorKind::EscapedStringLiteralEnd => {
+            DiagnosticKind::EscapedStringLiteralEnd => {
                     let substr = src
                         .strip_prefix(TEXT_DELIM)
                         .expect("string literal should include delimiter")
@@ -827,7 +891,7 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                 to make the string `{TEXT_DELIM}{substr}{TEXT_DELIM}`")
 
             }
-            ErrorKind::InvalidEscape => {
+            DiagnosticKind::InvalidEscape => {
                     let mut iter = src
                         .strip_prefix(ESCAPE)
                         .expect("InvalidEscape should include `\\`")
@@ -852,7 +916,7 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     }
 
             }
-            ErrorKind::InvalidNumLiteral(e) => {
+            DiagnosticKind::InvalidNumLiteral(e) => {
                 match e {
                     NumErrorKind::InvalidInt => {
                         let (suffix, base) = invalid_num_suffix(src);
@@ -876,13 +940,13 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     ),
                 }
             }
-            ErrorKind::MacroUndefined => {
+            DiagnosticKind::MacroUndefined => {
                 write!(
                     f,
                     "try moving the definition ahead of this usage or fix the errors in the definition"
                 )
             }
-            ErrorKind::MacroParamUndefined { head, .. } => {
+            DiagnosticKind::MacroParamUndefined { head, .. } => {
                     if head.is_some() {
                         write!(f,
                             "try adding this parameter to the macro, "
@@ -891,19 +955,19 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     write!(f, "remove the `$` if it isn't for a macro, or check if a macro is expanding incorrectly")
 
             }
-            ErrorKind::RecursiveMacro { .. } => {
+            DiagnosticKind::RecursiveMacro { .. } => {
                 write!(
                     f,
                     "macros can't be defined recursively. they do not have base cases, so it will always be infinite recursion"
                 )
             }
-            ErrorKind::OversizePreproc { .. } => {
+            DiagnosticKind::OversizePreproc { .. } => {
                 write!(
                     f,
                     "check if a macro is expanding to something larger than you may have expected"
                 )
             }
-            ErrorKind::NonBoolPrePredicate { actual, .. } => {
+            DiagnosticKind::NonBoolPrePredicate { actual, .. } => {
                 match actual {
                     PpValue::Bool|PpValue::Uint|PpValue::Sint|PpValue::Flpt|PpValue::Char|PpValue::Text => f.write_str("typenames are not values, and especially not booleans. \
                         if you are trying to compare the size of a type with some number, \
@@ -919,13 +983,13 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     },
                 }
             }
-            ErrorKind::InvalidPreOperator { .. } => {
+            DiagnosticKind::InvalidPreOperator => {
                 write!(
                     f,
                     "some operations that are valid at runtime are not valid in preprocessing. check if the operation is supported, or if you may have made a typo."
                 )
             }
-            ErrorKind::PreIncompatible { op, l_ty, r_ty, .. } => {
+            DiagnosticKind::PreIncompatible { op, l_ty, r_ty, .. } => {
 
                     write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
                     match op {
@@ -934,30 +998,30 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     }
 
             }
-            ErrorKind::PreUnsupported { .. } => {
+            DiagnosticKind::PreUnsupported { .. } => {
                 write!(f, "try a different operator or convert the type")
             }
-            ErrorKind::InvalidPreLiteral { .. } => {
+            DiagnosticKind::InvalidPreLiteral => {
                 write!(
                     f,
                     "only bool, uint, sint, and macro names are legal literal types within preprocessing."
                 )
             }
-            ErrorKind::InvalidPreType { .. } => {
+            DiagnosticKind::InvalidPreType => {
                 write!(
                     f,
                     "only `bool`, `uint`, `sint`, `flpt`, `char`, and `text` are valid typenames within preprocessing."
                 )
             }
-            ErrorKind::PreOrType { .. } => {
+            DiagnosticKind::PreOrType => {
                 write!(f, "\"or-types\" are not legal within preprocessing.")
             }
-            ErrorKind::IncorrectCloseBracket { failure, .. } => {
+            DiagnosticKind::IncorrectCloseBracket { failure, .. } => {
                     let (expect, actual) = failure.decompose();
                     write!(f, "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or the `{}`", expect.close(), actual.close(), actual.open(), expect.open(), expect.open(), actual.close())
 
             }
-            ErrorKind::ExcessCloseBracket { actual, .. } => {
+            DiagnosticKind::ExcessCloseBracket { actual, .. } => {
                 write!(
                     f,
                     "try removing the `{}` or add a `{}` before it",
@@ -965,7 +1029,7 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     actual.open()
                 )
             }
-            ErrorKind::MissingCloseBracket { expect, .. } => {
+            DiagnosticKind::MissingCloseBracket { expect, .. } => {
                 write!(
                     f,
                     "try inserting a `{}` or remove the `{}`",
@@ -973,20 +1037,20 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     expect.open(),
                 )
             }
-            ErrorKind::MissingToken { expected: expect, .. } => {
+            DiagnosticKind::MissingToken { expected: expect, .. } => {
                 write!(f, "try inserting {expect}")
             }
-            ErrorKind::UnexpectedToken { expected: expect, .. } => {
+            DiagnosticKind::UnexpectedToken { expected: expect, .. } => {
                 let actual = self.source.span_str(self.error.span);
                 write!(
                     f,
                     "try inserting {expect} before the `{actual}` or remove the `{actual}`"
                 )
             }
-            ErrorKind::DivByZero { .. } => {
+            DiagnosticKind::DivByZero { .. } => {
                 write!(f, "ensure the right side cannot be 0")
             }
-            ErrorKind::Incompatible { candidates, op, .. } => {
+            DiagnosticKind::Incompatible { candidates, op, .. } => {
                 write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
                 if candidates.is_empty() {
                     writeln!(f,
@@ -1013,7 +1077,7 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     Ok(())
                 }
             }
-            ErrorKind::Unsupported {
+            DiagnosticKind::Unsupported {
                 candidates,
                 op,
                 side,
@@ -1049,58 +1113,54 @@ impl<'smap, 'err> ContextError<'smap, 'err> {
                     Ok(())
                 }
             }
-            ErrorKind::UnsignedNeg => {
+            DiagnosticKind::UnsignedNeg => {
                 write!(f, "remove the `-` or convert the integer to signed")
             }
-            ErrorKind::UnknownVar => {
+            DiagnosticKind::UnknownVar => {
                 write!(
                     f,
                     "check if the variable is in a tighter scope than where you are trying to use it"
                 )
             }
-            ErrorKind::TypeMismatch(_) => {
+            DiagnosticKind::TypeMismatch(_) => {
                 write!(
                     f,
                     "check if you are using a different type from what you intended, or create a new variable to shadow this one"
                 )
             }
-            ErrorKind::TypeAmbiguity => {
+            DiagnosticKind::TypeAmbiguity => {
                 write!(
                     f,
                     "try annotating the type or use an expression with an explicit type"
                 )
             }
-            ErrorKind::AssignImmutable(x) => {
-                let f = f;
-                let _src = src;
-                {
-                    match x {
-                        ImmutableAssignment::Expression => write!(f, "try replacing this with an expression that resolves to a mutable reference"),
-                        ImmutableAssignment::Assignment => write!(f, "assignments cannot be chained, try breaking them up into separate statements"),
-                        ImmutableAssignment::Literal => write!(f, "literals cannot be assigned, perhaps you meant to put this on the right side?"),
-                        ImmutableAssignment::Keyword(kw) => write!(f, "`{kw}` is a reserved keyword, and doesn't resolve to a mutable value"),
-                    }
+            DiagnosticKind::AssignImmutable(x) => {
+                match x {
+                    ImmutableAssignment::Expression => write!(f, "try replacing this with an expression that resolves to a mutable reference"),
+                    ImmutableAssignment::Assignment => write!(f, "assignments cannot be chained, try breaking them up into separate statements"),
+                    ImmutableAssignment::Literal => write!(f, "literals cannot be assigned, perhaps you meant to put this on the right side?"),
+                    ImmutableAssignment::Keyword(kw) => write!(f, "`{kw}` is a reserved keyword, and doesn't resolve to a mutable value"),
                 }
             }
-            ErrorKind::FallibleBlockExpr => {
+            DiagnosticKind::FallibleBlockExpr => {
                 write!(
                     f,
                     "try changing the expression to a `loop` or `cord` or remove the assignment"
                 )
             }
-            ErrorKind::TypeTooBig => {
+            DiagnosticKind::TypeTooBig => {
                 write!(
                     f,
                     "consider making the type smaller (I have no idea how it got so big)"
                 )
             }
-            ErrorKind::IllegalUnsized(_) => {
+            DiagnosticKind::IllegalUnsized(_) => {
                 write!(
                     f,
                     "try adding indirection, or replace the type with a statically-sized one"
                 )
             }
-            ErrorKind::Fail(_) => {
+            DiagnosticKind::Fail(_) => {
                 write!(f, "try handling the error")
             }
         }
@@ -1220,7 +1280,7 @@ impl<F: Fn(&mut Formatter<'_>) -> fmt::Result> fmt::Display for DisplayWith<F> {
     }
 }
 
-impl Display for ContextError<'_, '_> {
+impl Display for ContextDiagnostic<'_, '_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -1238,7 +1298,7 @@ impl Display for ContextError<'_, '_> {
                 .bold(true)
                 .begin()
         )?;
-        self.error.span.display_loc(&self.source).fmt(f);
+        self.error.span.display_loc(self.source).fmt(f)?;
         writeln!(f)?;
 
         // render

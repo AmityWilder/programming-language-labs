@@ -140,19 +140,18 @@ impl std::fmt::Display for SpanLoc<'_> {
         ) {
             write!(f, " (preprocessed)")?;
         }
-        Ok({
-            let (start_linenum, start_charnum) = code
-                .line_char(self.span.start)
-                .expect("span should be in file it's from");
-            let (end_linenum, end_charnum) = code
-                .line_char(self.span.end)
-                .expect("span should be in file it's from");
-            write!(f, ":{start_linenum}:{start_charnum}")?;
-            if end_linenum != start_linenum {
-                write!(f, "-{end_linenum}:{end_charnum}")?;
-            } else if end_charnum != start_charnum {
-                write!(f, "-{end_charnum}")?;
-            }
-        })
+        let (start_linenum, start_charnum) = code
+            .line_char(self.span.start)
+            .expect("span should be in file it's from");
+        let (end_linenum, end_charnum) = code
+            .line_char(self.span.end)
+            .expect("span should be in file it's from");
+        write!(f, ":{start_linenum}:{start_charnum}")?;
+        if end_linenum != start_linenum {
+            write!(f, "-{end_linenum}:{end_charnum}")?;
+        } else if end_charnum != start_charnum {
+            write!(f, "-{end_charnum}")?;
+        }
+        Ok(())
     }
 }

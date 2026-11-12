@@ -1,5 +1,5 @@
 use crate::{
-    error::{Error, ErrorKind},
+    error::{Diagnostic, DiagnosticKind},
     lex::{
         symbols::{CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM},
         token::{TokenKind, TokenTable, keyword::Keyword},
@@ -156,7 +156,7 @@ impl<'src> Lexer<'src> {
 }
 
 impl Iterator for Lexer<'_> {
-    type Item = (uspan, TokenKind, Option<ErrorKind>);
+    type Item = (uspan, TokenKind, Option<DiagnosticKind>);
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut chars = self.source.chars();
@@ -175,20 +175,28 @@ impl Iterator for Lexer<'_> {
                     Err(()) => (
                         self.source.len(),
                         TokenKind::Comment,
-                        Some(ErrorKind::EndlessBlockComment),
+                        Some(DiagnosticKind::EndlessBlockComment),
                     ),
                 },
 
                 // macro name
                 (MACRO_PREFIX, ch2) => match self.macro_ident::<MACRO_PREFIX>(ch2) {
                     Ok(len) => (len, TokenKind::Macro, None),
-                    Err(len) => (len, TokenKind::Invalid, Some(ErrorKind::EmptyMacroName)),
+                    Err(len) => (
+                        len,
+                        TokenKind::Invalid,
+                        Some(DiagnosticKind::EmptyMacroName),
+                    ),
                 },
 
                 // macro parameter
                 (MACRO_PARAM_PREFIX, ch2) => match self.macro_ident::<MACRO_PARAM_PREFIX>(ch2) {
                     Ok(len) => (len, TokenKind::MParam, None),
-                    Err(len) => (len, TokenKind::Invalid, Some(ErrorKind::EmptyMacroParam)),
+                    Err(len) => (
+                        len,
+                        TokenKind::Invalid,
+                        Some(DiagnosticKind::EmptyMacroParam),
+                    ),
                 },
 
                 // character literal
@@ -197,7 +205,7 @@ impl Iterator for Lexer<'_> {
                     (
                         len.unwrap_or(self.source.len()),
                         TokenKind::CharLit,
-                        len.is_none().then_some(ErrorKind::EndlessCharLiteral),
+                        len.is_none().then_some(DiagnosticKind::EndlessCharLiteral),
                     )
                 }
 
@@ -207,7 +215,8 @@ impl Iterator for Lexer<'_> {
                     (
                         len.unwrap_or(self.source.len()),
                         TokenKind::TextLit,
-                        len.is_none().then_some(ErrorKind::EndlessStringLiteral),
+                        len.is_none()
+                            .then_some(DiagnosticKind::EndlessStringLiteral),
                     )
                 }
 
@@ -239,7 +248,7 @@ impl Iterator for Lexer<'_> {
                         (
                             ch.len_utf8(),
                             TokenKind::Invalid,
-                            Some(ErrorKind::UnknownToken),
+                            Some(DiagnosticKind::UnknownToken),
                         )
                     }
                 }
@@ -266,18 +275,17 @@ impl Iterator for Lexer<'_> {
     }
 }
 
-pub fn lex(file: FileId, code: &str) -> (TokenTable, Vec<Error>) {
-    let mut errors = Vec::new();
+pub fn lex(file: FileId, code: &str, diagnostics: &mut Vec<Diagnostic>) -> TokenTable {
     let mut tokens = Vec::new();
     let mut start: uspan = 0;
     for (len, kind, e) in Lexer::new(code) {
         let end = start.strict_add(len);
         if let Some(kind) = e {
             let span = RelSpan::from(start..end).within_file(file);
-            errors.push(Error::new(span, kind));
+            diagnostics.push(Diagnostic::new(span, kind));
         }
         tokens.push((len, kind));
         start = end;
     }
-    (TokenTable { tokens }, errors)
+    TokenTable { tokens }
 }

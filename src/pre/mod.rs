@@ -1,5 +1,5 @@
 use crate::{
-    error::{Error, ErrorKind, ExpectedToken},
+    error::{Diagnostic, DiagnosticKind, ExpectedToken},
     lex::{
         lex,
         token::{
@@ -27,7 +27,8 @@ pub fn preprocess(
     id: FileId,
     code: &SourceCode,
     source: &SourceMap,
-) -> Result<Option<SourceCode>, Vec<Error>> {
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<SourceCode> {
     let loc = match code.loc() {
         SourceLoc::Repl | SourceLoc::PreprocRepl(_) => SourceLoc::PreprocRepl(id),
 
@@ -36,7 +37,7 @@ pub fn preprocess(
         }
     };
     let file_len = usize_to_uspan(code.content().len());
-    let (src, mac, errs) = PreProcessor::new(source, id).preproc();
+    let (src, mac) = PreProcessor::new(source, id, diagnostics).preproc();
     // TBD: what if ExpansionCluter is the better structure?
     let mac: Vec<_> = mac
         .into_iter()
@@ -60,36 +61,24 @@ pub fn preprocess(
             }))
         })
         .collect();
-    if errs.is_empty() {
-        if mac.is_empty() {
-            // no change
-            Ok(None)
-        } else {
-            let (tokens, errs) = lex(id, src.as_str());
-            if errs.is_empty() {
-                match SourceCode::with_expansion(loc, src, mac) {
-                    Ok(mut code) => {
-                        code.set_tokens(tokens);
-                        Ok(Some(code))
-                    }
-                    Err(e) => Err(vec![Error::new(
-                        RelSpan::from(file_len..file_len).within_file(id),
-                        ErrorKind::OversizePreproc(e),
-                    )]),
-                }
-            } else {
-                Err(errs)
+    if mac.is_empty() {
+        // no change
+        None
+    } else {
+        let tokens = lex(id, src.as_str(), diagnostics);
+        match SourceCode::with_expansion(loc, src, mac) {
+            Ok(mut code) => {
+                code.set_tokens(tokens);
+                Some(code)
+            }
+            Err(e) => {
+                diagnostics.push(Diagnostic::new(
+                    RelSpan::from(file_len..file_len).within_file(id),
+                    DiagnosticKind::OversizePreproc(e),
+                ));
+                None
             }
         }
-    } else {
-        Err(if let Err(e) = SourceCode::with_expansion(loc, src, mac) {
-            vec![Error::new(
-                RelSpan::from(file_len..file_len).within_file(id),
-                ErrorKind::OversizePreproc(e),
-            )]
-        } else {
-            errs
-        })
     }
 }
 
@@ -180,8 +169,8 @@ impl StreamSpan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct PreProcessor<'src> {
+#[derive(Debug, PartialEq)]
+struct PreProcessor<'src, 'err> {
     source: &'src SourceMap,
 
     /// The file being parsed
@@ -212,7 +201,7 @@ struct PreProcessor<'src> {
 
     /// The list of errors encountered so far - preprocessing has failed if this is non-empty
     // TODO: prevent cascading
-    errors: Vec<Error>,
+    diagnostics: &'err mut Vec<Diagnostic>,
 
     /// The current preprocessor result - can only increase
     processed: String,
@@ -221,8 +210,12 @@ struct PreProcessor<'src> {
     printed_expansions: usize,
 }
 
-impl<'src> PreProcessor<'src> {
-    pub fn new(source: &'src SourceMap, file: FileId) -> Self {
+impl<'src, 'err> PreProcessor<'src, 'err> {
+    pub fn new(
+        source: &'src SourceMap,
+        file: FileId,
+        diagnostics: &'err mut Vec<Diagnostic>,
+    ) -> Self {
         let code = &source[file];
         Self {
             source,
@@ -238,7 +231,7 @@ impl<'src> PreProcessor<'src> {
             file,
             file_len: code.len(),
             expansions: Vec::new(),
-            errors: Vec::new(),
+            diagnostics,
             processed: String::new(),
             #[cfg(debug_assertions)]
             printed_expansions: 0,
@@ -315,14 +308,14 @@ impl<'src> PreProcessor<'src> {
         &mut self,
         p: P,
         expected: ExpectedToken,
-    ) -> Result<(StreamSpan, TokenKind), Error>
+    ) -> Result<(StreamSpan, TokenKind), Diagnostic>
     where
         P: FnOnce(&(StreamSpan, TokenKind)) -> bool,
     {
         self.pull_next_if(p).ok_or_else(|| self.error(expected))
     }
 
-    fn try_pull_next_eq<T>(&mut self, kind: T) -> Result<StreamSpan, Error>
+    fn try_pull_next_eq<T>(&mut self, kind: T) -> Result<StreamSpan, Diagnostic>
     where
         T: Into<TokenKind>,
     {
@@ -335,14 +328,14 @@ impl<'src> PreProcessor<'src> {
         &mut self,
         p: P,
         expected: ExpectedToken,
-    ) -> Result<(StreamSpan, TokenKind), Error>
+    ) -> Result<(StreamSpan, TokenKind), Diagnostic>
     where
         P: FnOnce(&(StreamSpan, TokenKind)) -> bool,
     {
         self.pull_if(p).ok_or_else(|| self.error(expected))
     }
 
-    fn try_pull_eq<T>(&mut self, kind: T) -> Result<StreamSpan, Error>
+    fn try_pull_eq<T>(&mut self, kind: T) -> Result<StreamSpan, Diagnostic>
     where
         T: Into<TokenKind>,
     {
@@ -352,16 +345,16 @@ impl<'src> PreProcessor<'src> {
     }
 
     /// Does not consume the token
-    fn error(&self, expected: ExpectedToken) -> Error {
+    fn error(&self, expected: ExpectedToken) -> Diagnostic {
         if let Some(&(span, _)) = self.peek() {
-            Error::new(
+            Diagnostic::new(
                 span.into_span(self.file),
-                ErrorKind::UnexpectedToken { expected },
+                DiagnosticKind::UnexpectedToken { expected },
             )
         } else {
-            Error::new(
+            Diagnostic::new(
                 RelSpan::from(self.file_len..self.file_len).within_file(self.file),
-                ErrorKind::MissingToken { expected },
+                DiagnosticKind::MissingToken { expected },
             )
         }
     }
@@ -376,9 +369,9 @@ impl<'src> PreProcessor<'src> {
         &mut self,
         brack: Bracket,
         inner: F,
-    ) -> Option<Result<(StreamSpan, R, StreamSpan), Error>>
+    ) -> Option<Result<(StreamSpan, R, StreamSpan), Diagnostic>>
     where
-        F: FnOnce(&mut Self) -> Result<R, Error>,
+        F: FnOnce(&mut Self) -> Result<R, Diagnostic>,
     {
         self.pull_if_eq(brack.open_punc()).map(|open| {
             let inner = inner(self)?;
@@ -392,25 +385,25 @@ impl<'src> PreProcessor<'src> {
                             TokenKind::Punc(Punctuation::RBrace) => Bracket::Brace,
                             // '>' should not be reported as an unexpected close bracket, only an unexpected token.
                             _ => {
-                                break 'err_kind ErrorKind::UnexpectedToken {
+                                break 'err_kind DiagnosticKind::UnexpectedToken {
                                     expected: ExpectedToken::Verbatim(brack.close_punc().into()),
                                 };
                             }
                         };
-                        ErrorKind::IncorrectCloseBracket {
+                        DiagnosticKind::IncorrectCloseBracket {
                             open_range: open.into_span(self.file),
                             failure: BadBracketCombo::new(brack, close)
                                 .expect("matching brackets should not produce an error"),
                         }
                     };
-                    Error::new(span.into_span(self.file), kind)
+                    Diagnostic::new(span.into_span(self.file), kind)
                 } else {
-                    Error::new(
+                    Diagnostic::new(
                         Span {
                             file: self.file,
                             rel: (self.file_len..self.file_len).into(),
                         },
-                        ErrorKind::MissingCloseBracket {
+                        DiagnosticKind::MissingCloseBracket {
                             open_range: open.into_span(self.file),
                             expect: brack,
                         },
@@ -452,12 +445,12 @@ where
         .map(|end| (start..end).into())
 }
 
-impl PreProcessor<'_> {
+impl PreProcessor<'_, '_> {
     const fn processed_len(&self) -> uspan {
         usize_to_uspan(self.processed.len())
     }
 
-    fn preproc(mut self) -> (String, Vec<ExpansionCluster>, Vec<Error>) {
+    fn preproc(mut self) -> (String, Vec<ExpansionCluster>) {
         while self.peek_next().is_some() {
             self.expand_item();
         }
@@ -472,7 +465,7 @@ impl PreProcessor<'_> {
             );
         }
 
-        (self.processed, self.expansions, self.errors)
+        (self.processed, self.expansions)
     }
 
     /// Returns the substring within the incomplete document
@@ -562,7 +555,7 @@ impl PreProcessor<'_> {
             }
         }) {
             // TODO: what if the range gets trampled over when it isn't appended to `processed`? could sync fix this?
-            self.errors.push(e);
+            self.diagnostics.push(e);
         }
     }
 
@@ -592,7 +585,7 @@ impl PreProcessor<'_> {
         );
     }
 
-    fn expand_conditional(&mut self, mut cond: ast::Conditional) -> Result<(), Error> {
+    fn expand_conditional(&mut self, mut cond: ast::Conditional) -> Result<(), Diagnostic> {
         let case = loop {
             if eval::eval_predicate(cond.pred, self.source, self.file)? {
                 break cond.then.items.list;
@@ -614,7 +607,7 @@ impl PreProcessor<'_> {
         Ok(())
     }
 
-    fn expand_call(&mut self, call: &ast::Call) -> Result<(), Error> {
+    fn expand_call(&mut self, call: &ast::Call) -> Result<(), Diagnostic> {
         if let Some(def) = self
             .definitions
             .get(call.name.span_str(self.source, self.code))
@@ -666,7 +659,9 @@ impl PreProcessor<'_> {
                     ..uspan::try_from(expanded_len)
                         .ok()
                         .and_then(|len| self.processed_len().checked_add(len))
-                        .ok_or_else(|| Error::new(todo!(), ErrorKind::OversizePreproc(todo!())))?,
+                        .ok_or_else(|| {
+                            Diagnostic::new(todo!(), DiagnosticKind::OversizePreproc(todo!()))
+                        })?,
             );
 
             if call.name.is_original() {
@@ -705,15 +700,15 @@ impl PreProcessor<'_> {
             );
             Ok(())
         } else {
-            Err(Error::new(
+            Err(Diagnostic::new(
                 call.name.into_span(self.file),
-                ErrorKind::MacroUndefined,
+                DiagnosticKind::MacroUndefined,
             ))
         }
     }
 
     /// `document_item -> definition | conditional | call | macro_constant | tokens`
-    fn document_item(&mut self) -> Result<ast::DocumentItem, Error> {
+    fn document_item(&mut self) -> Result<ast::DocumentItem, Diagnostic> {
         self.definition()
             .map_inner(ast::DocumentItem::Def)
             .or_else(|| self.conditional().map_inner(ast::DocumentItem::Cond))
@@ -733,7 +728,7 @@ impl PreProcessor<'_> {
     }
 
     /// `macro_constant -> "~" MACRO`
-    fn macro_constant(&mut self) -> Option<Result<ast::MacroConst, Error>> {
+    fn macro_constant(&mut self) -> Option<Result<ast::MacroConst, Diagnostic>> {
         self.pull_next_if_eq(Punctuation::MacroConst).map(|tilde| {
             Ok(ast::MacroConst {
                 tilde,
@@ -743,7 +738,7 @@ impl PreProcessor<'_> {
     }
 
     /// `conditional -> "rot" replacer replacer ( alternative )?`
-    fn conditional(&mut self) -> Option<Result<ast::Conditional, Error>> {
+    fn conditional(&mut self) -> Option<Result<ast::Conditional, Diagnostic>> {
         self.pull_next_if_eq(Keyword::Rot).map(|kw| {
             Ok(ast::Conditional {
                 kw,
@@ -759,7 +754,7 @@ impl PreProcessor<'_> {
     }
 
     /// `alternative -> "tor" ( conditional | replacer )`
-    fn alternative(&mut self) -> Option<Result<ast::Alternative, Error>> {
+    fn alternative(&mut self) -> Option<Result<ast::Alternative, Diagnostic>> {
         self.pull_if_eq(Keyword::Tor).map(|kw| {
             Ok(ast::Alternative {
                 kw,
@@ -773,7 +768,7 @@ impl PreProcessor<'_> {
     }
 
     /// `call -> MACRO ( replacer )*`
-    fn call(&mut self) -> Option<Result<ast::Call, Error>> {
+    fn call(&mut self) -> Option<Result<ast::Call, Diagnostic>> {
         let start = self.eaten;
         self.pull_next_if_eq(TokenKind::Macro).map(|name| {
             let expected_args = self
@@ -800,7 +795,7 @@ impl PreProcessor<'_> {
     }
 
     /// `definition -> "def" MACRO ( params )? replacer`
-    fn definition(&mut self) -> Option<Result<ast::Definition, Error>> {
+    fn definition(&mut self) -> Option<Result<ast::Definition, Diagnostic>> {
         let start = self.eaten;
         self.pull_next_if_eq(Keyword::Def).map(|kw| {
             Ok(ast::Definition {
@@ -820,7 +815,7 @@ impl PreProcessor<'_> {
     }
 
     /// `params -> "(" ( MPARAM )* ")"`
-    fn params(&mut self) -> Option<Result<ast::ParamGroup, Error>> {
+    fn params(&mut self) -> Option<Result<ast::ParamGroup, Diagnostic>> {
         self.pull_if_delimited(Bracket::Paren, |pp| {
             Ok(std::iter::from_fn(|| pp.pull_if_eq(TokenKind::MParam)).collect())
         })
@@ -832,7 +827,7 @@ impl PreProcessor<'_> {
     }
 
     /// `replacer -> "{" tokens "}"`
-    fn replacer(&mut self) -> Option<Result<ast::Replacer, Error>> {
+    fn replacer(&mut self) -> Option<Result<ast::Replacer, Diagnostic>> {
         self.pull_if_delimited(Bracket::Brace, |pp| {
             Ok(pp.tokens_while({
                 let mut depth: usize = 0;

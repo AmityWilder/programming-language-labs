@@ -1,6 +1,6 @@
 use crate::{
     analyzer::types::bounds::Combinator,
-    error::{Error, ErrorKind, ExpectedToken},
+    error::{Diagnostic, DiagnosticKind, ExpectedToken},
     lex::token::{
         Operator, TokenKind,
         keyword::Keyword,
@@ -56,7 +56,7 @@ pub mod util {
 }
 use util::{MapInner, OkOrFlatten};
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, ()>;
 
 pub trait ParserExpect {
     type Item;
@@ -90,16 +90,34 @@ impl<T: Expectable> ParserExpect for Option<Result<T>> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Parser<I: Iterator> {
+pub fn parse<I>(
+    file: FileId,
+    file_len: uspan,
+    tokens: I,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> std::result::Result<ast::ProgramUnit, ()>
+where
+    I: IntoIterator<Item = (RelSpan, TokenKind)>,
+{
+    Parser::new(file, file_len, tokens, diagnostics).program()
+}
+
+#[derive(Debug)]
+pub struct Parser<'err, I: Iterator> {
     file: FileId,
     file_len: uspan,
     #[expect(clippy::type_complexity, reason = "type alias messes up derives")]
     tokens: std::iter::Peekable<std::iter::Filter<I, fn(&I::Item) -> bool>>,
+    diagnostics: &'err mut Vec<Diagnostic>,
 }
 
-impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
-    pub fn new<J>(file: FileId, file_len: uspan, tokens: J) -> Self
+impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
+    pub fn new<J>(
+        file: FileId,
+        file_len: uspan,
+        tokens: J,
+        diagnostics: &'err mut Vec<Diagnostic>,
+    ) -> Self
     where
         J: IntoIterator<IntoIter = I>,
     {
@@ -108,6 +126,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
             file,
             file_len,
             tokens: tokens.into_iter().filter(filter).peekable(),
+            diagnostics,
         }
     }
 
@@ -291,7 +310,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
                 self.pull_if_eq(brack.close_punc())
             }
             .ok_or_else(|| {
-                if let Some(&(span, kind)) = self.peek() {
+                let e = if let Some(&(span, kind)) = self.peek() {
                     let kind = 'err_kind: {
                         let close = match kind {
                             TokenKind::Punc(Punctuation::RBrack) => Bracket::Brack,
@@ -299,80 +318,70 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
                             TokenKind::Punc(Punctuation::RBrace) => Bracket::Brace,
                             // '>' should not be reported as an unexpected close bracket, only an unexpected token.
                             _ => {
-                                break 'err_kind ErrorKind::UnexpectedToken {
+                                break 'err_kind DiagnosticKind::UnexpectedToken {
                                     expected: ExpectedToken::Verbatim(brack.close_punc().into()),
                                 };
                             }
                         };
-                        ErrorKind::IncorrectCloseBracket {
+                        DiagnosticKind::IncorrectCloseBracket {
                             open_range: open.within_file(self.file),
                             failure: BadBracketCombo::new(brack, close)
                                 .expect("matching brackets should not produce an error"),
                         }
                     };
-                    Error::new(span.within_file(self.file), kind)
+                    Diagnostic::new(span.within_file(self.file), kind)
                 } else {
-                    Error::new(
+                    Diagnostic::new(
                         RelSpan::from(self.file_len..self.file_len).within_file(self.file),
-                        ErrorKind::MissingCloseBracket {
+                        DiagnosticKind::MissingCloseBracket {
                             open_range: open.within_file(self.file),
                             expect: brack,
                         },
                     )
-                }
+                };
+                self.diagnostics.push(e);
             })?;
             Ok((open, inner, close))
         })
     }
 
-    /// - if `trailing` is [`Some`]: `pull_separated -> ( f ( "," f )* )?`
-    /// - if `trailing` is [`None`]: `pull_separated -> ( f ( "," f )* ( "," )? )?`
-    ///
-    /// If a trailing separator is **allowed**, `trailing` should be [`None`]. If a trailing separator is **not allowed**,
-    /// `trailing` should be the error that occurs if a separator is not followed by another item.
-    // I know it's a big function, but `trailing` should be a literal, so inlining should allow the compiler to cut down on some of the branches
-    #[inline]
-    fn pull_separated<Q, T, F>(
-        &mut self,
-        trailing: Option<ExpectedToken>,
-        sep: Q,
-        mut f: F,
-    ) -> Result<Vec<T>>
+    /// `pull_terminated -> ( f ( "," f )* ( "," )? )?`
+    fn pull_terminated<Q, T, F>(&mut self, sep: Q, mut f: F) -> Result<Vec<T>>
     where
         Q: Into<TokenKind>,
         F: FnMut(&mut Self) -> Option<Result<T>>,
     {
+        let mut any_err = false;
         let sep = sep.into();
         let mut items = Vec::new();
-        if let Some(first) = f(self) {
-            items.push(first?);
-            while self.pull_if_eq(sep).is_some() {
-                let item = if let Some(expected) = trailing {
-                    f(self).ok_or_else_flat(|| self.error(expected))
-                } else if let Some(item) = f(self) {
-                    item
-                } else {
+        while let Some(item) = f(self) {
+            if let Ok(item) = item {
+                items.push(item);
+                if self.pull_if_eq(sep).is_none() {
                     break;
-                };
-                items.push(item?);
+                }
+            } else {
+                any_err = true;
+                self.sync();
             }
         }
-        Ok(items)
+        if any_err { Err(()) } else { Ok(items) }
     }
 
     /// Does not consume the next token
-    fn error(&mut self, expected: ExpectedToken) -> Error {
-        if let Some(&(span, _)) = self.peek() {
-            Error::new(
+    fn error(&mut self, expected: ExpectedToken) {
+        let err = if let Some(&(span, _)) = self.peek() {
+            Diagnostic::new(
                 span.within_file(self.file),
-                ErrorKind::UnexpectedToken { expected },
+                DiagnosticKind::UnexpectedToken { expected },
             )
         } else {
-            Error::new(
+            Diagnostic::new(
                 RelSpan::from(self.file_len..self.file_len).within_file(self.file),
-                ErrorKind::MissingToken { expected },
+                DiagnosticKind::MissingToken { expected },
             )
-        }
+        };
+        self.diagnostics.push(err);
     }
 
     fn sync(&mut self) {
@@ -382,7 +391,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
         };
         while let Some((_, kind)) = self.pull() {
             // end of current statement
-            if kind == TokenKind::Punc(Punctuation::Semi) {
+            if matches!(kind, TokenKind::Punc(Punctuation::Semi)) {
                 break;
             }
 
@@ -423,38 +432,23 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     }
 }
 
-pub fn parse<I>(
-    file: FileId,
-    file_len: uspan,
-    tokens: I,
-) -> std::result::Result<ast::ProgramUnit, Vec<Error>>
-where
-    I: IntoIterator<Item = (RelSpan, TokenKind)>,
-{
-    Parser::new(file, file_len, tokens)
-        .program()
-        .map_err(Vec::from_iter)
-}
-
-impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
+impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
     /// `program -> ( statement )*`
-    pub fn program(
-        &mut self,
-    ) -> std::result::Result<ast::ProgramUnit, impl IntoIterator<Item = Error>> {
+    pub fn program(&mut self) -> std::result::Result<ast::ProgramUnit, ()> {
         let mut iter = std::iter::from_fn(|| {
             self.tokens
                 .peek()
                 .is_some()
-                .then(|| self.declaration().inspect_err(|_| self.sync()))
+                .then(|| self.declaration().inspect_err(|()| self.sync()))
         });
         let (lo, hi) = iter.size_hint();
         let mut decls = Vec::with_capacity(hi.unwrap_or(lo));
         while let Some(res) = iter.next() {
-            match res {
-                Ok(stmt) => decls.push(stmt),
-                Err(first) => {
-                    return Err(std::iter::once(first).chain(iter.filter_map(Result::err)));
-                }
+            if let Ok(stmt) = res {
+                decls.push(stmt);
+            } else {
+                iter.for_each(drop);
+                return Err(());
             }
         }
         Ok(ast::ProgramUnit {
@@ -514,7 +508,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
 
     pub fn field_set(&mut self) -> Option<Result<ast::FieldSet>> {
         self.pull_if_delim(Bracket::Brace, |parser| {
-            parser.pull_separated(None, Punctuation::Comma, Self::field)
+            parser.pull_terminated(Punctuation::Comma, Self::field)
         })
         .map_inner(|(open, fields, close)| ast::FieldSet {
             open,
@@ -552,7 +546,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     /// `cat_disc_set -> "{" ( cat_disc ( "," cat_disc )* ( "," )? )? "}"`
     pub fn cat_disc_set(&mut self) -> Option<Result<ast::CatDiscSet>> {
         self.pull_if_delim(Bracket::Brace, |parser| {
-            parser.pull_separated(None, Punctuation::Comma, Self::cat_disc)
+            parser.pull_terminated(Punctuation::Comma, Self::cat_disc)
         })
         .map_inner(|(open, items, close)| ast::CatDiscSet { open, items, close })
     }
@@ -772,7 +766,13 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     /// `block_statement -> "{" ( declaration )* "}"`
     pub fn block_statement(&mut self) -> Option<Result<ast::BlockStmt>> {
         self.pull_if_delim(Bracket::Brace, |parser| {
-            std::iter::from_fn(|| (!parser.is_next_close()).then(|| parser.declaration())).collect()
+            std::iter::from_fn(|| {
+                (!parser.is_next_close())
+                    .then(|| parser.declaration().inspect_err(|()| parser.sync()))
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect::<Result<_>>()
         })
         .map_inner(|(open, body, close)| ast::BlockStmt { open, body, close })
     }
@@ -1115,8 +1115,8 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
     /// `generic_group -> "<" ( type_expression ( "," type_expression )* ( "," )? )? ">"`
     fn generic_group(&mut self) -> Option<Result<ast::GenericGroup>> {
         self.pull_if_delim(Bracket::Angle, |parser| {
-            parser.pull_separated(None, Punctuation::Comma, |parser| {
-                Some(parser.type_expression())
+            parser.pull_terminated(Punctuation::Comma, |parser| {
+                (!parser.is_next_angle_close()).then(|| parser.type_expression())
             })
         })
         .map_inner(|(open, list, close)| ast::GenericGroup { open, list, close })
@@ -1206,7 +1206,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
         self.pull_if_eq(Keyword::Fun).map(|kw| {
             let (open, args, close) = self
                 .pull_if_delim(Bracket::Paren, |parser| {
-                    parser.pull_separated(None, Punctuation::Comma, |parser| {
+                    parser.pull_terminated(Punctuation::Comma, |parser| {
                         (!parser.is_next_close()).then(|| parser.type_expression())
                     })
                 })
@@ -1423,7 +1423,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<I> {
         self.pull_if_eq(Keyword::Fun).map(|kw| {
             let (open, args, close) = self
                 .pull_if_delim(Bracket::Paren, |parser| {
-                    parser.pull_separated(None, Punctuation::Comma, |parser| {
+                    parser.pull_terminated(Punctuation::Comma, |parser| {
                         Some(parser.type_expression())
                     })
                 })
