@@ -73,14 +73,23 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                     // TODO: generics
                     let ident = inner.name;
                     let name = &source[ident];
-                    match self.decl_item(name, ident.within_file(file), inner.clone().into()) {
+                    match self.decl_item(name, ident.within_file(file), inner.clone()) {
                         Ok(id) => hir::Decl::Rec(hir::DeclRec {
                             id,
                             fields: inner
                                 .body
                                 .fields
                                 .into_iter()
-                                .map(|field| todo!("field"))
+                                .map(|field| {
+                                    let ident = field.name;
+                                    let name = &source[ident];
+                                    let ty = field.ty.ty.clone();
+                                    match self.decl_member(id, name, ident.within_file(file), field)
+                                    {
+                                        Ok(id) => hir::Field { id, ty },
+                                        Err(e) => todo!("error: {e:?}"),
+                                    }
+                                })
                                 .collect(),
                         }),
                         Err(e) => todo!("error: {e:?}"),
@@ -90,7 +99,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 ast::DeclType::Cat(inner) => {
                     let ident = inner.name;
                     let name = &source[ident];
-                    match self.decl_item(name, ident.within_file(file), inner.clone().into()) {
+                    match self.decl_item(name, ident.within_file(file), inner.clone()) {
                         Ok(id) => hir::Decl::Cat(hir::DeclCat {
                             id,
                             discriminants: inner
@@ -105,10 +114,54 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 }
             },
 
-            ast::Decl::Defer(inner) => todo!("analyze Decl::Defer"),
+            ast::Decl::Defer(inner) => hir::Decl::Defer(hir::DeclDefer {
+                param: inner.param.map(|x| {
+                    self.decl_var(&source[x.param.ident], x.param.ident.within_file(file), x)
+                }),
+                on_pop: hir::BlockStmt {
+                    decls: collect_all_errs_if_any(
+                        inner
+                            .on_pop
+                            .body
+                            .into_iter()
+                            .map(|decl| self.analyze_decl(file, source, decl, diagnostics)),
+                    )
+                    .map_err(|it| it.for_each(drop))?,
+                },
+            }),
 
-            ast::Decl::Stmt(inner) => todo!("analyze Decl::Stmt"),
+            ast::Decl::Stmt(inner) => self
+                .analyze_stmt(file, source, inner, diagnostics)
+                .map(hir::Decl::Stmt)?,
         })
+    }
+
+    fn analyze_stmt(
+        &mut self,
+        file: FileId,
+        source: &'src SourceCode,
+        stmt: ast::Stmt,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<hir::Stmt, ()> {
+        match stmt {
+            ast::Stmt::Expr(inner) => self
+                .analyze_expr(file, source, inner.expr, diagnostics)
+                .map(|expr| hir::Stmt::Expr(hir::ExprStmt { expr })),
+
+            ast::Stmt::Print(inner) => self
+                .analyze_expr(file, source, inner.group.expr, diagnostics)
+                .map(|expr| hir::Stmt::Print(hir::PrintStmt { expr })),
+
+            ast::Stmt::If(inner) => todo!(),
+
+            ast::Stmt::Loop(inner) => todo!(),
+
+            ast::Stmt::Done(inner) => todo!(),
+
+            ast::Stmt::Skip(inner) => todo!(),
+
+            ast::Stmt::Block(inner) => todo!(),
+        }
     }
 
     fn analyze_expr(
@@ -118,6 +171,22 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         expr: ast::Expr,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::Expr, ()> {
-        todo!("analyze_expr")
+        match expr {
+            ast::Expr::Block(inner) => todo!(),
+
+            ast::Expr::Binary(inner) => todo!(),
+
+            ast::Expr::Unary(inner) => todo!(),
+
+            ast::Expr::Literal(inner) => todo!(),
+
+            ast::Expr::Directive(inner) => todo!(),
+
+            ast::Expr::Variable(inner) => todo!(),
+
+            ast::Expr::Grouping(inner) => todo!(),
+
+            ast::Expr::Type(inner) => todo!(),
+        }
     }
 }
