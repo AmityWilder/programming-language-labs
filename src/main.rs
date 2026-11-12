@@ -143,7 +143,7 @@ pub(crate) use debug_unsafe;
 mod analyzer;
 mod arrayvec;
 mod error;
-mod exec;
+// mod exec;
 mod grammar;
 mod highlight;
 mod interp;
