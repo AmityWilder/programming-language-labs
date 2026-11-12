@@ -74,31 +74,23 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
-    error::{Diagnostic, Severity},
-    grammar::parse,
+    error::Diagnostic,
     highlight::{
         TokenHighlight, highlight,
         style::{Color, Style, StyleWrapper},
         syntax::{SyntaxStyle, syntax_style},
     },
     old_error::ContextError,
-    preproc::preprocess,
-    scanner::{
-        token::{
-            Token,
-            value::{CharLiteral, LexValue, TextLiteral},
-        },
-        tokenize,
-    },
+    scanner::token::Token,
     src_code::{
         code::{SourceCode, SourceLoc},
         map::SourceMap,
     },
 };
-use analyzer::static_env::var_scope::env::ScopeEnvironment;
+use analyzer::static_env::scope::env::ScopeEnvironment;
 use error::fail::Failure;
 use src_code::{code::ExpansionData, span::usize_to_uspan};
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 /// Indicates unfinished code.
 ///
@@ -739,16 +731,36 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
         );
     }
 
-    // // scope analysis
-    // let mut scope_env = ScopeEnvironment::new(HashMap::new(/* TODO */));
-    // for unit in &prgm_units {
-    //     scope_env.analyze(&source[unit.file], unit, &mut diagnostics);
-    // }
+    // scope analysis
+    let mut scope_env = ScopeEnvironment::new();
+    for unit in prgm_units {
+        let code = source
+            .get(unit.file)
+            .expect("all program units should be valid");
+        // TODO: submodules
+        let name = code.loc().path().map_or_default(|path| {
+            path.file_stem()
+                .expect("must be a file")
+                .to_str()
+                .unwrap_or_else(|| todo!("invalid characters in name"))
+        });
+        match scope_env.define_library(name.to_string()) {
+            Ok(mut env) => {
+                if let Ok(hir) = env.analyze(&source[unit.file], unit, &mut diagnostics) {
+                    println!("{hir:#?}");
+                    // TODO
+                }
+            }
+            Err(e) => {
+                todo!("error: {e:?}");
+            }
+        }
+    }
 
-    // // scope errors
-    // if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
-    //     return (Err(()), diagnostics);
-    // }
+    // scope errors
+    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
+        return (Err(()), diagnostics);
+    }
 
     // let (program, env) = match analyze(source, &prgm) {
     //     Ok(prgm) => prgm,

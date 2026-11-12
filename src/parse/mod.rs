@@ -627,6 +627,45 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         .map_inner(|(open, param, close)| ast::DeferParam { open, param, close })
     }
 
+    /// `pick_statement -> "pick" expression "{" ( pick_arm ( "," pick_arm )* ( "," )? )? "}"`
+    pub fn pick_statement(&mut self) -> Option<Result<ast::PickStmt>> {
+        self.pull_if_eq(Keyword::Pick).map(|kw| {
+            let expr = self.expression()?;
+            let (open, arms, close) = self
+                .pull_if_delim(Bracket::Brace, |parser| {
+                    parser.pull_terminated(Punctuation::Comma, |parser| {
+                        (!parser.is_next_close()).then(|| parser.pick_arm())
+                    })
+                })
+                .ok_or_else_flat(|| {
+                    self.error(ExpectedToken::Verbatim(TokenKind::Punc(
+                        Punctuation::LBrace,
+                    )))
+                })?;
+            Ok(ast::PickStmt {
+                kw,
+                expr,
+                open,
+                arms,
+                close,
+            })
+        })
+    }
+
+    /// `pick_arm -> pick_pattern "=>" expression`
+    pub fn pick_arm(&mut self) -> Result<ast::PickArm> {
+        Ok(ast::PickArm {
+            pattern: self.pick_pattern()?,
+            arrow: self.try_pull_eq(Punctuation::FatArrow)?,
+            then: self.expression()?,
+        })
+    }
+
+    /// `pick_pattern -> ?`
+    pub fn pick_pattern(&mut self) -> Result<ast::PickPattern> {
+        Ok(ast::PickPattern { /* TODO */ })
+    }
+
     /// `if_statement -> "if" expression block_statement ( or_statement )?`
     pub fn if_statement(&mut self) -> Option<Result<ast::IfStmt>> {
         self.pull_if_eq(Keyword::If).map(|kw| {
