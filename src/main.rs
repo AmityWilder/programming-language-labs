@@ -74,7 +74,7 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
-    error::Error,
+    error::{Diagnostic, Severity},
     grammar::parse,
     highlight::{
         TokenHighlight, highlight,
@@ -155,10 +155,10 @@ mod pre;
 mod preproc;
 mod regex;
 mod scanner;
-mod session;
 mod spec_ops;
 mod src_code;
 mod types;
+mod util;
 
 #[cfg(test)] // only include testing module in test builds
 mod tests;
@@ -548,7 +548,7 @@ CliParser! {
         #[option("print-errors")]
         print_errors: bool,
 
-        source_path: Option<PathBuf>,
+        source_path: Vec<PathBuf>,
     }
 }
 
@@ -556,7 +556,7 @@ impl Default for Cli {
     fn default() -> Self {
         Self {
             prgm: PathBuf::default(),
-            source_path: None,
+            source_path: Vec::new(),
             echo_src: false,
             scanner_tokens: false,
             scanner_highlight: true,
@@ -623,26 +623,17 @@ impl Cli {
                 });
             }
         }
-        config.source_path = args.next().map(PathBuf::from);
-        if config.source_path.is_some()
-            && let Some(unexpected) = args.next()
-        {
-            return Err(CliError::TooManyArgs {
-                prgm: config.prgm,
-                unexpected,
-            });
-        }
+        config.source_path.extend(args.map(PathBuf::from));
         Ok(config)
     }
 }
 
-fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
+fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diagnostic>) {
+    let mut diagnostics = Vec::new();
+
     // scanner
-    let mut token_errs = Vec::new();
     for (id, file) in source.iter_mut() {
-        let (tokens, errs) = lex::lex(id, file.content());
-        token_errs.extend(errs);
-        file.set_tokens(tokens);
+        file.set_tokens(lex::lex(id, file.content(), &mut diagnostics));
     }
 
     // syntax highlighted
@@ -678,31 +669,19 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     }
 
     // lex errors
-    if !token_errs.is_empty() {
-        if config.print_errors {
-            for e in &token_errs {
-                println!("{}\n", e.contextualize(source));
-            }
-        }
-        return Err(token_errs);
+    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
+        return (Err(()), diagnostics);
     }
 
     // TODO: how to prevent REPL from generating preprocessed copies every time?
 
     // preprocessing
-    let mut pp_errs = Vec::new();
     let preprocessed = source
         .iter()
-        .filter_map(|(id, file)| match pre::preprocess(id, file, source) {
-            Ok(x) => Some(x),
-            Err(e) => {
-                pp_errs.extend(e);
-                None
-            }
-        })
+        .filter_map(|(id, file)| pre::preprocess(id, file, source, &mut diagnostics))
         .collect::<Vec<_>>();
 
-    for code in preprocessed.into_iter().flatten() {
+    for code in preprocessed {
         let &(SourceLoc::PreprocRepl(og_id) | SourceLoc::PreprocFile(og_id, _)) = code.loc() else {
             unimplemented!("preprocessor should only output preprocessed files")
         };
@@ -747,16 +726,10 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     }
 
     // preprocesor errors
-    if !pp_errs.is_empty() {
-        if config.print_errors {
-            for e in &pp_errs {
-                println!("{}\n", e.contextualize(source));
-            }
-        }
-        return Err(pp_errs);
+    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
+        return (Err(()), diagnostics);
     }
 
-    let mut parse_errs = Vec::new();
     let prgm_units: Vec<_> = source
         .iter_mut()
         .filter(|(_, code)| {
@@ -768,28 +741,19 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
                 )
         })
         .filter_map(|(id, code)| {
-            match parse::parse(
+            parse::parse(
                 id,
                 usize_to_uspan(code.content().len()),
                 code.tokens().iter(),
-            ) {
-                Ok(unit) => Some(unit),
-                Err(errs) => {
-                    parse_errs.extend(errs);
-                    None
-                }
-            }
+                &mut diagnostics,
+            )
+            .ok()
         })
         .collect();
 
     // parse errors
-    if !parse_errs.is_empty() {
-        if config.print_errors {
-            for e in &parse_errs {
-                println!("{}\n", e.contextualize(source));
-            }
-        }
-        return Err(parse_errs);
+    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
+        return (Err(()), diagnostics);
     }
 
     // lisp debug
@@ -801,27 +765,16 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
         println!("lisp: {:#}", parse::fmt::Lisp { source, node: unit });
     }
 
-    // scope analysis
-    let mut scope_env = ScopeEnvironment::new(HashMap::new(/* TODO */));
-    let scope_errs: Vec<_> = prgm_units
-        .iter()
-        .flat_map(|unit| {
-            scope_env
-                .analyze(&source[unit.file], unit)
-                .err()
-                .into_flat_iter()
-        })
-        .collect();
+    // // scope analysis
+    // let mut scope_env = ScopeEnvironment::new(HashMap::new(/* TODO */));
+    // for unit in &prgm_units {
+    //     scope_env.analyze(&source[unit.file], unit, &mut diagnostics);
+    // }
 
-    // scope errors
-    if !scope_errs.is_empty() {
-        if config.print_errors {
-            for e in &scope_errs {
-                println!("{}\n", e.contextualize(source));
-            }
-        }
-        return Err(scope_errs);
-    }
+    // // scope errors
+    // if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
+    //     return (Err(()), diagnostics);
+    // }
 
     // let (program, env) = match analyze(source, &prgm) {
     //     Ok(prgm) => prgm,
@@ -872,7 +825,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> Result<Dummy, Vec<Error>> {
     //     }
     // }
 
-    Ok(Dummy)
+    (Ok(Dummy), diagnostics)
 }
 
 fn run_program(prgm: &Dummy) -> Result<(), Failure> {
@@ -904,56 +857,55 @@ fn main() {
         )
         .expect("standard library should not be valid"),
     );
-    match &config.source_path {
-        // interactive
-        None => {
-            loop {
-                let mut input = String::new();
-                std::io::stdin()
-                    .read_line(&mut input)
-                    .expect("failed to obtain input");
-                pop_trailing_newline(&mut input);
-                if matches!(input.trim(), "exit" | "quit") {
-                    break; // finish
-                }
-                match SourceCode::new(SourceLoc::Repl, input) {
-                    Err(e) => eprintln!("failed to read source code: {e}"),
+    loop {
+        if config.source_path.is_empty() {
+            // interactive
+            let mut input = String::new();
+            std::io::stdin()
+                .read_line(&mut input)
+                .expect("failed to obtain input");
+            pop_trailing_newline(&mut input);
+            if matches!(input.trim(), "exit" | "quit") {
+                break; // finish
+            }
+            match SourceCode::new(SourceLoc::Repl, input) {
+                Err(e) => eprintln!("failed to read source code: {e}"),
 
-                    Ok(code) => {
-                        source_map.push(code);
-                        if let Ok(prgm) = compile(&mut source_map, &config) {
-                            println!("\x1b[90mrunning...\x1b[0m\n");
-                            if let Err(e) = run_program(&prgm) {
-                                eprintln!("runtime error: {e}");
-                            }
-                            println!("\n\x1b[90mfinished\x1b[0m");
+                Ok(code) => _ = source_map.push(code),
+            }
+        } else {
+            // from file
+            for source_path in &config.source_path {
+                match std::fs::read_to_string(source_path) {
+                    Err(e) => eprintln!("failed to read source code file: {e}"),
+
+                    Ok(mut source) => {
+                        pop_trailing_newline(&mut source);
+                        match SourceCode::new(SourceLoc::File(source_path.clone()), source) {
+                            Err(e) => eprintln!("failed to read source code file: {e}"),
+
+                            Ok(code) => _ = source_map.push(code),
                         }
                     }
                 }
             }
         }
 
-        // from file
-        Some(source_path) => match std::fs::read_to_string(source_path) {
-            Err(e) => eprintln!("failed to read source code file: {e}"),
+        let (res, diagnostics) = compile(&mut source_map, &config);
 
-            Ok(mut source) => {
-                pop_trailing_newline(&mut source);
-                match SourceCode::new(SourceLoc::File(source_path.clone()), source) {
-                    Err(e) => eprintln!("failed to read source code file: {e}"),
+        for e in diagnostics {
+            println!("{}\n", e.contextualize(&source_map));
+        }
 
-                    Ok(code) => {
-                        source_map.push(code);
-                        if let Ok(prgm) = compile(&mut source_map, &config) {
-                            println!("\x1b[90mrunning...\x1b[0m\n");
-                            if let Err(e) = run_program(&prgm) {
-                                eprintln!("runtime error: {e}");
-                            }
-                            println!("\n\x1b[90mfinished\x1b[0m");
-                        }
-                    }
-                }
+        if let Ok(prgm) = res {
+            println!();
+            if let Err(e) = run_program(&prgm) {
+                eprintln!("runtime error: {e}");
             }
-        },
+        }
+
+        if !config.source_path.is_empty() {
+            break;
+        }
     }
 }

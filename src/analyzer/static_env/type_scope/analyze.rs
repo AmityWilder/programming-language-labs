@@ -1,15 +1,19 @@
-use super::{env::TyScopeEnvironment, tir};
-use crate::{analyzer::static_env::TypeId, error::Error, parse::ast};
+use super::{env::ModScopeEnvironment, tir};
+use crate::{
+    analyzer::static_env::TypeId, error::Diagnostic, parse::ast, util::collect_all_errs_if_any,
+};
 
-impl TyScopeEnvironment<'_> {
-    pub fn analyze(&mut self, prgm: ast::ProgramUnit) -> Result<tir::TirUnit, Vec<Error>> {
-        tir::TirUnit {
-            file: prgm.file,
-            stmts: prgm.decls.into_iter().map(|decl| self.analyze_decl(decl)),
-        }
+impl ModScopeEnvironment<'_, '_> {
+    pub fn analyze(&mut self, prgm: ast::ProgramUnit) -> Result<tir::TirUnit, Vec<Diagnostic>> {
+        collect_all_errs_if_any(prgm.decls.into_iter().map(|decl| self.analyze_decl(decl)))
+            .map(|stmts| tir::TirUnit {
+                file: prgm.file,
+                stmts,
+            })
+            .map_err(|it| it.flatten().collect())
     }
 
-    fn analyze_decl(&mut self, decl: ast::Decl) -> Result<tir::Decl, Vec<Error>> {
+    fn analyze_decl(&mut self, decl: ast::Decl) -> Result<tir::Decl, Vec<Diagnostic>> {
         Ok(match decl {
             ast::Decl::Mod(_inner) => todo!("define module"),
 
@@ -64,11 +68,11 @@ impl TyScopeEnvironment<'_> {
         })
     }
 
-    fn analyze_expr(&mut self, expr: ast::Expr) -> Result<tir::Expr, Vec<Error>> {
+    fn analyze_expr(&mut self, expr: ast::Expr) -> Result<tir::Expr, Vec<Diagnostic>> {
         todo!("analyze_expr")
     }
 
-    fn analyze_type(&mut self, ty: ast::TypeExpr) -> Result<TypeId, Vec<Error>> {
+    fn analyze_type(&mut self, ty: ast::TypeExpr) -> Result<TypeId, Vec<Diagnostic>> {
         todo!("analyze_type")
     }
 }

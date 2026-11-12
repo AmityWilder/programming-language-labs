@@ -1,6 +1,6 @@
 use crate::{
     analyzer::static_env::var_scope::env::ScopeEnvironment,
-    error::Error,
+    error::Diagnostic,
     parse::ast::{self, AstNode},
     src_code::{code::SourceCode, span::FileId},
 };
@@ -10,14 +10,11 @@ impl<'src> ScopeEnvironment<'src> {
         &mut self,
         code: &'src SourceCode,
         prgm: &ast::ProgramUnit,
-    ) -> Result<(), Vec<Error>> {
-        let errors: Vec<_> = prgm
-            .decls
-            .iter()
-            .flat_map(|decl| self.analyze_decl(prgm.file, code, decl))
-            .collect();
-
-        errors.is_empty().ok_or(errors)
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        for decl in &prgm.decls {
+            self.analyze_decl(prgm.file, code, decl, diagnostics);
+        }
     }
 
     fn analyze_decl(
@@ -25,15 +22,15 @@ impl<'src> ScopeEnvironment<'src> {
         file: FileId,
         code: &'src SourceCode,
         decl: &ast::Decl,
-    ) -> Vec<Error> {
-        let mut errors = Vec::new();
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
         match decl {
             ast::Decl::Mod(mdl) => {
-                todo!()
+                todo!("module declaration scope analysis")
             }
 
             ast::Decl::Type(ty) => {
-                todo!()
+                todo!("type declaration scope analysis")
             }
 
             ast::Decl::Var(decl) => {
@@ -49,15 +46,14 @@ impl<'src> ScopeEnvironment<'src> {
                     self.mark_ref(ident.within_file(file), var);
                 }
                 for decl in &defer.on_pop.body {
-                    errors.extend(self.analyze_decl(file, code, decl));
+                    (self.analyze_decl(file, code, decl, diagnostics));
                 }
             }
 
             ast::Decl::Stmt(stmt) => {
-                errors.extend(self.analyze_stmt(file, code, stmt));
+                (self.analyze_stmt(file, code, stmt, diagnostics));
             }
         }
-        errors
     }
 
     fn analyze_block(
@@ -65,11 +61,11 @@ impl<'src> ScopeEnvironment<'src> {
         file: FileId,
         code: &'src SourceCode,
         block: &[ast::Decl],
-    ) -> Vec<Error> {
-        block
-            .iter()
-            .flat_map(|decl| self.analyze_decl(file, code, decl))
-            .collect()
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        for decl in block {
+            self.analyze_decl(file, code, decl, diagnostics);
+        }
     }
 
     fn analyze_stmt(
@@ -77,8 +73,8 @@ impl<'src> ScopeEnvironment<'src> {
         file: FileId,
         code: &'src SourceCode,
         stmt: &ast::Stmt,
-    ) -> Vec<Error> {
-        let mut errors = Vec::new();
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
         // make sure expressions are analyzed before declarations! `let x = x;` should not be a self-reference!
         match stmt {
             ast::Stmt::Expr(ast::ExprStmt { expr, .. })
@@ -89,7 +85,7 @@ impl<'src> ScopeEnvironment<'src> {
             | ast::Stmt::Done(ast::DoneStmt {
                 value: Some(expr), ..
             }) => {
-                errors.extend(self.analyze_expr(file, code, expr));
+                (self.analyze_expr(file, code, expr, diagnostics));
             }
 
             ast::Stmt::Loop(ast::LoopBlock {
@@ -97,8 +93,8 @@ impl<'src> ScopeEnvironment<'src> {
                 block: ast::BlockStmt { body, .. },
                 ..
             }) => {
-                errors.extend(self.analyze_expr(file, code, pred));
-                errors.extend(self.analyze_block(file, code, body));
+                (self.analyze_expr(file, code, pred, diagnostics));
+                (self.analyze_block(file, code, body, diagnostics));
             }
 
             ast::Stmt::Loop(ast::LoopBlock {
@@ -106,14 +102,14 @@ impl<'src> ScopeEnvironment<'src> {
                 block: ast::BlockStmt { body, .. },
                 ..
             }) => {
-                errors.extend(self.analyze_expr(file, code, iter));
+                (self.analyze_expr(file, code, iter, diagnostics));
 
                 let ident = bind.ident;
                 let def = ident.within_file(file); // TODO: which span represents the "definition" of the binding?
                 let id = self.decl_item(&code[ident], def);
                 self.mark_ref(ident.within_file(file), id);
 
-                errors.extend(self.analyze_block(file, code, body));
+                (self.analyze_block(file, code, body, diagnostics));
             }
 
             // TBD: should labels be analyzed?
@@ -129,14 +125,14 @@ impl<'src> ScopeEnvironment<'src> {
                         or,
                         ..
                     } = stmt;
-                    errors.extend(self.analyze_expr(file, code, pred));
-                    errors.extend(self.analyze_block(file, code, then));
+                    (self.analyze_expr(file, code, pred, diagnostics));
+                    (self.analyze_block(file, code, then, diagnostics));
                     if let Some(ast::OrStmt { body, .. }) = or {
                         match body {
                             ast::OrBody::More(nested) => stmt = nested,
 
                             ast::OrBody::Last(ast::BlockStmt { body, .. }) => {
-                                errors.extend(self.analyze_block(file, code, body));
+                                (self.analyze_block(file, code, body, diagnostics));
                                 break;
                             }
                         }
@@ -150,10 +146,9 @@ impl<'src> ScopeEnvironment<'src> {
                 ..
             })
             | ast::Stmt::Block(ast::BlockStmt { body, .. }) => {
-                errors.extend(self.analyze_block(file, code, body));
+                (self.analyze_block(file, code, body, diagnostics));
             }
         }
-        errors
     }
 
     fn analyze_expr(
@@ -161,7 +156,8 @@ impl<'src> ScopeEnvironment<'src> {
         file: FileId,
         code: &'src SourceCode,
         expr: &ast::Expr,
-    ) -> Vec<Error> {
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
         match expr {
             ast::Expr::Block(inner) => todo!(),
 

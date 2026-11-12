@@ -465,6 +465,7 @@ impl SourceCode {
         self.preproc = Some(preproc);
     }
 
+    /// The ID of the preprocessed version of this file
     pub const fn preproc(&self) -> Option<&FileId> {
         self.preproc.as_ref()
     }
