@@ -1,5 +1,5 @@
 use crate::{
-    analyzer::static_env::scope::env::ScopeEnvironment,
+    analyzer::static_env::var_scope::env::ScopeEnvironment,
     error::Error,
     parse::ast::{self, AstNode},
     src_code::{code::SourceCode, span::FileId},
@@ -28,6 +28,10 @@ impl<'src> ScopeEnvironment<'src> {
     ) -> Vec<Error> {
         let mut errors = Vec::new();
         match decl {
+            ast::Decl::Mod(mdl) => {
+                todo!()
+            }
+
             ast::Decl::Type(ty) => {
                 todo!()
             }

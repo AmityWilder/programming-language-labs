@@ -1,7 +1,7 @@
 use crate::{
     analyzer::{
         AnalysisBlockStmt, AnalysisFnDef, GetType,
-        static_env::{ConstantValue, VarId},
+        static_env::{ConstantValue, ItemId},
         types::{AbstractType, FunShape, TypeCompatible, TypeSize, TypeSizeError},
     },
     grammar::ast::AstNodeFinal,
@@ -116,7 +116,7 @@ impl std::fmt::Debug for StaticItem<'_> {
 
 #[derive(Debug, Default)]
 pub struct Scope<'src> {
-    pub items: Vec<(EnvKey<'src>, VarId)>,
+    pub items: Vec<(EnvKey<'src>, ItemId)>,
 }
 
 impl Scope<'_> {
@@ -201,7 +201,7 @@ pub struct MemLoc {
     /// Item will stack atop this variable
     ///
     /// [`None`] if this is the first item in either a function or global scope
-    pub atop: Option<VarId>,
+    pub atop: Option<ItemId>,
     /// Where the variable will actually be stored in the runtime environment
     pub range: Option<Range<usize>>,
 }
@@ -235,7 +235,7 @@ impl<'src> StaticEnvironment<'src> {
         }
     }
 
-    pub fn get_decl(&self, id: VarId) -> Option<&StaticItem<'src>> {
+    pub fn get_decl(&self, id: ItemId) -> Option<&StaticItem<'src>> {
         self.decls.get(id.0).map(|decl| &decl.item)
     }
 
@@ -253,7 +253,7 @@ impl<'src> StaticEnvironment<'src> {
     fn visible_ids<'env>(
         global: &'env Scope<'src>,
         layers: &'env Vec<Layer<'src>>,
-    ) -> impl DoubleEndedIterator<Item = VarId> {
+    ) -> impl DoubleEndedIterator<Item = ItemId> {
         let g_it = global.items.iter();
         let l_it = layers
             .last()
@@ -263,12 +263,12 @@ impl<'src> StaticEnvironment<'src> {
         g_it.chain(l_it).map(|(_, id)| *id).rev()
     }
 
-    fn id_offset(num_items: usize) -> impl FnMut(VarId) -> usize {
+    fn id_offset(num_items: usize) -> impl FnMut(ItemId) -> usize {
         // items: 1, ids: [0]: [0]
         // items: 2, ids: [0]: [1]
         // items: 2, ids: [1, 0]: [0, 0]
         // items: 3, ids: [2, 0]: [0, 1]
-        let mut prev = VarId(num_items);
+        let mut prev = ItemId(num_items);
         move |id| {
             let prev = std::mem::replace(&mut prev, id);
             assert!(
@@ -283,7 +283,7 @@ impl<'src> StaticEnvironment<'src> {
         }
     }
 
-    fn search(&self) -> impl Iterator<Item = (VarId, &StaticItem<'src>)> {
+    fn search(&self) -> impl Iterator<Item = (ItemId, &StaticItem<'src>)> {
         // Relies on the assumption that IDs increase monotonically along the stack
         let StaticEnvironment {
             decls: items,
@@ -308,7 +308,7 @@ impl<'src> StaticEnvironment<'src> {
             })
     }
 
-    fn search_mut(&mut self) -> impl Iterator<Item = (VarId, &mut StaticItem<'src>)> {
+    fn search_mut(&mut self) -> impl Iterator<Item = (ItemId, &mut StaticItem<'src>)> {
         // Relies on the assumption that IDs increase monotonically along the stack
         let StaticEnvironment {
             decls: items,
@@ -324,14 +324,17 @@ impl<'src> StaticEnvironment<'src> {
             .map(move |(id, diff)| (id, &mut items.nth(diff).expect("ID should be valid").item))
     }
 
-    pub fn lookup<Q>(&self, key: &Q) -> impl Iterator<Item = (VarId, &StaticItem<'src>)>
+    pub fn lookup<Q>(&self, key: &Q) -> impl Iterator<Item = (ItemId, &StaticItem<'src>)>
     where
         Q: ?Sized + for<'a> PartialEq<EnvKey<'a>>,
     {
         self.search().filter(|(_, item)| *key == item.key)
     }
 
-    pub fn lookup_mut<Q>(&mut self, key: &Q) -> impl Iterator<Item = (VarId, &mut StaticItem<'src>)>
+    pub fn lookup_mut<Q>(
+        &mut self,
+        key: &Q,
+    ) -> impl Iterator<Item = (ItemId, &mut StaticItem<'src>)>
     where
         Q: ?Sized + for<'a> PartialEq<EnvKey<'a>>,
     {
@@ -372,14 +375,14 @@ impl<'src> StaticEnvironment<'src> {
         key: EnvKey<'src>,
         val: EnvItem<'src>,
         node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
-    ) -> (VarId, &mut StaticItem<'src>) {
+    ) -> (ItemId, &mut StaticItem<'src>) {
         // TBD: should variables, globals, constants, and functions all be stored together?
         // should constants even be stored at runtime at all?
         let atop = self
             .search()
             .find(|(_, item)| matches!(item.val, EnvItem::Var(_, _) | EnvItem::Pvt(_)))
             .map(|(id, _)| id);
-        let id = VarId(self.decls.len());
+        let id = ItemId(self.decls.len());
         let decl = self.decls.push_mut(DeclItem {
             loc: MemLoc { atop, range: None },
             item: StaticItem { key, val, node },
@@ -404,7 +407,7 @@ impl<'src> StaticEnvironment<'src> {
         ty: Option<AbstractType<'src>>,
         is_global: bool,
         node: Option<Box<dyn 'src + AstNodeFinal<'src>>>,
-    ) -> Result<(VarId, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
+    ) -> Result<(ItemId, &mut Option<AbstractType<'src>>, bool), TypeSizeError> {
         if let Some(ty) = &ty
             && let Some(Err(e)) = ty.size()
         {
@@ -454,9 +457,9 @@ impl<'src> StaticEnvironment<'src> {
         self.decl_item(EnvKey::Op(op), EnvItem::Op(def), node);
     }
 
-    pub fn finalize_vars(&mut self) -> Result<(), Vec<VarId>> {
+    pub fn finalize_vars(&mut self) -> Result<(), Vec<ItemId>> {
         let mut unresolved = Vec::new();
-        for id in (0..self.decls.len()).map(VarId) {
+        for id in (0..self.decls.len()).map(ItemId) {
             let prev_end = if let Some(atop) = self.decls[id.0].loc.atop {
                 if let Some(range) = self.decls[atop.0].loc.range {
                     range.end
@@ -496,7 +499,9 @@ impl<'src> StaticEnvironment<'src> {
         }
     }
 
-    pub fn cement_ranges(mut self) -> Result<Box<[Range<usize>]>, impl IntoIterator<Item = VarId>> {
+    pub fn cement_ranges(
+        mut self,
+    ) -> Result<Box<[Range<usize>]>, impl IntoIterator<Item = ItemId>> {
         self.finalize_vars().map(|()| {
             self.decls
                 .iter()

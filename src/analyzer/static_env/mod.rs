@@ -1,5 +1,5 @@
 use crate::{
-    Dummy, Todo,
+    Todo,
     analyzer::{
         GetType,
         static_env::old::StaticEnvironment,
@@ -11,13 +11,18 @@ use crate::{
 pub mod morph;
 #[deprecated = "changing to multi-pass analyzer"]
 pub mod old;
-pub mod scope;
+pub mod type_scope;
+pub mod var_scope;
 
 /// A unique ID for distinguishing items that may have the same identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VarId(pub(self) usize);
+pub struct ItemId(pub(self) usize);
 
-impl std::fmt::Display for VarId {
+pub type TypeId = ItemId;
+pub type VarId = ItemId;
+pub type FunId = ItemId;
+
+impl std::fmt::Display for ItemId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:#x}", self.0)
     }

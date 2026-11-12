@@ -6,6 +6,8 @@ use crate::{
     src_code::span::{FileId, RelSpan, uspan},
 };
 
+// TODO: exact-lexeme RelSpans could be replaced with uspans
+
 pub trait Expectable {
     const EXPECTED: ExpectedToken;
 }
@@ -44,7 +46,7 @@ impl AstNode for RelSpan {
     }
 }
 
-macro_rules! AstNode {
+macro_rules! AstNodeEnum {
     derive() {
         $(#[$m:meta])*
         $vis:vis enum $Enum:ident {
@@ -57,20 +59,20 @@ macro_rules! AstNode {
             ),* $(,)?
         }
     } => {
-        impl AstNode for $Enum {
-            fn span_start(&self) -> uspan {
+        impl $crate::parse::ast::AstNode for $Enum {
+            fn span_start(&self) -> $crate::src_code::span::uspan {
                 match self {
                     $(Self::$Variant(x) => x.span_start()),*
                 }
             }
 
-            fn span_end(&self) -> uspan {
+            fn span_end(&self) -> $crate::src_code::span::uspan {
                 match self {
                     $(Self::$Variant(x) => x.span_end()),*
                 }
             }
 
-            fn span(&self) -> RelSpan {
+            fn span(&self) -> $crate::src_code::span::RelSpan {
                 match self {
                     $(Self::$Variant(x) => x.span()),*
                 }
@@ -78,6 +80,7 @@ macro_rules! AstNode {
         }
     };
 }
+pub(crate) use AstNodeEnum;
 
 pub trait ExpectableExt: Sized {
     type Item;
@@ -111,30 +114,6 @@ pub enum ExprPrecedence {
     Conversion,
     UnaryPost,
     Primary,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct BindingPattern {
-    // TBD: what else can a pattern be?
-    pub ident: RelSpan,
-}
-
-impl AstNode for BindingPattern {
-    fn span_start(&self) -> uspan {
-        self.ident.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.ident.end
-    }
-
-    fn span(&self) -> RelSpan {
-        self.ident
-    }
-}
-
-impl Expectable for BindingPattern {
-    const EXPECTED: ExpectedToken = ExpectedToken::Pattern;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -600,7 +579,7 @@ impl AstNode for GroupedType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNode)]
+#[derive(Debug, Clone, PartialEq, AstNodeEnum)]
 pub enum AssocTypeSource {
     Simple(Typename),
     Grouped(GroupedType),
@@ -667,7 +646,7 @@ impl AstNode for FunType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNode)]
+#[derive(Debug, Clone, PartialEq, AstNodeEnum)]
 pub enum TypeExpr {
     Primitive(PrimitiveType),
     Instance(TypeInstance),
@@ -855,7 +834,7 @@ impl AstNode for GroupedBound {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNode)]
+#[derive(Debug, Clone, PartialEq, AstNodeEnum)]
 pub enum TypeBound {
     Combo(Box<ComboBound>),
     Not(Box<NegativeBound>),
@@ -985,7 +964,7 @@ impl AstNode for Variable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNode)]
+#[derive(Debug, Clone, PartialEq, AstNodeEnum)]
 pub enum BlockExpr {
     If(Box<IfStmt>),
     /// Only `loop` or `cord`
@@ -993,7 +972,7 @@ pub enum BlockExpr {
     Block(BlockStmt),
 }
 
-#[derive(Debug, Clone, PartialEq, AstNode)]
+#[derive(Debug, Clone, PartialEq, AstNodeEnum)]
 pub enum Expr {
     Block(BlockExpr),
     Binary(Box<Binary>),
@@ -1009,7 +988,7 @@ impl Expectable for Expr {
     const EXPECTED: ExpectedToken = ExpectedToken::Expr;
 }
 
-#[derive(Debug, Clone, PartialEq, AstNode)]
+#[derive(Debug, Clone, PartialEq, AstNodeEnum)]
 pub enum OrBody {
     More(IfStmt),
     Last(BlockStmt),
@@ -1248,7 +1227,7 @@ impl AstNode for PrintStmt {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNode)]
+#[derive(Debug, Clone, PartialEq, AstNodeEnum)]
 pub enum Stmt {
     Expr(ExprStmt),
     // TODO: im not too fond of the print keyword
@@ -1262,6 +1241,52 @@ pub enum Stmt {
 
 impl Expectable for Stmt {
     const EXPECTED: ExpectedToken = ExpectedToken::Statement;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Program {
+    pub units: Vec<ProgramUnit>,
+}
+
+impl std::ops::Deref for Program {
+    type Target = Vec<ProgramUnit>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.units
+    }
+}
+
+impl std::ops::DerefMut for Program {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.units
+    }
+}
+
+impl IntoIterator for Program {
+    type Item = ProgramUnit;
+    type IntoIter = std::vec::IntoIter<ProgramUnit>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.units.into_iter()
+    }
+}
+
+impl<'prgm> IntoIterator for &'prgm Program {
+    type Item = &'prgm ProgramUnit;
+    type IntoIter = std::slice::Iter<'prgm, ProgramUnit>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.units.iter()
+    }
+}
+
+impl<'prgm> IntoIterator for &'prgm mut Program {
+    type Item = &'prgm mut ProgramUnit;
+    type IntoIter = std::slice::IterMut<'prgm, ProgramUnit>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.units.iter_mut()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1308,6 +1333,105 @@ impl<'prgm> IntoIterator for &'prgm mut ProgramUnit {
 
     fn into_iter(self) -> Self::IntoIter {
         self.decls.iter_mut()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeEnum)]
+pub enum Decl {
+    Mod(DeclMod),
+    Var(DeclVar),
+    Type(DeclType),
+    Defer(DeclDefer),
+    Stmt(Stmt),
+}
+
+impl Expectable for Decl {
+    const EXPECTED: ExpectedToken = ExpectedToken::Declaration;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclMod {
+    // TBD: visibility?
+    /// `mod`
+    pub kw: RelSpan,
+    /// Identifier
+    pub name: RelSpan,
+    /// `;`
+    pub semi: RelSpan,
+}
+
+impl AstNode for DeclMod {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclVar {
+    /// `uni`, `let`, or `pvt`
+    pub kw: VarKeyword,
+    pub kw_span: RelSpan,
+    /// Identifier
+    pub binding: BindingPattern,
+    pub ty: Option<TypeAnnotation>,
+    pub assignment: Option<Assignment>,
+    /// `;`
+    pub semi: RelSpan,
+}
+
+impl AstNode for DeclVar {
+    fn span_start(&self) -> uspan {
+        self.kw_span.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BindingPattern {
+    // TBD: what else can a pattern be?
+    pub ident: RelSpan,
+}
+
+impl AstNode for BindingPattern {
+    fn span_start(&self) -> uspan {
+        self.ident.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ident.end
+    }
+
+    fn span(&self) -> RelSpan {
+        self.ident
+    }
+}
+
+impl Expectable for BindingPattern {
+    const EXPECTED: ExpectedToken = ExpectedToken::Pattern;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeAnnotation {
+    /// `:`
+    pub colon: RelSpan,
+    // TODO: should type annotations be different from type expressions?
+    pub ty: TypeExpr,
+}
+
+impl AstNode for TypeAnnotation {
+    fn span_start(&self) -> uspan {
+        self.colon.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ty.span_end()
     }
 }
 
@@ -1363,24 +1487,6 @@ impl AstNode for ScopeLabel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct TypeAnnotation {
-    /// `:`
-    pub colon: RelSpan,
-    // TODO: should type annotations be different from type expressions?
-    pub ty: TypeExpr,
-}
-
-impl AstNode for TypeAnnotation {
-    fn span_start(&self) -> uspan {
-        self.colon.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.ty.span_end()
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum VarKeyword {
     #[default]
@@ -1433,25 +1539,23 @@ impl TryFrom<TokenKind> for VarKeyword {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclVar {
-    /// `uni`, `let`, or `pvt`
-    pub kw: VarKeyword,
-    pub kw_span: RelSpan,
+pub struct DeclRec {
+    // TODO: visibility?
+    /// `rec`
+    pub kw: RelSpan,
     /// Identifier
-    pub binding: BindingPattern,
-    pub ty: Option<TypeAnnotation>,
-    pub assignment: Option<Assignment>,
-    /// `;`
-    pub semi: RelSpan,
+    pub name: RelSpan,
+    pub generics: Option<GenericGroup>,
+    pub body: FieldSet,
 }
 
-impl AstNode for DeclVar {
+impl AstNode for DeclRec {
     fn span_start(&self) -> uspan {
-        self.kw_span.start
+        self.kw.start
     }
 
     fn span_end(&self) -> uspan {
-        self.semi.end
+        self.body.span_end()
     }
 }
 
@@ -1490,29 +1594,6 @@ impl AstNode for FieldSet {
 
     fn span_end(&self) -> uspan {
         self.close.end
-    }
-}
-
-// TODO: exact-lexeme RelSpans could be replaced with uspans
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DeclRec {
-    // TODO: visibility?
-    /// `rec`
-    pub kw: RelSpan,
-    /// Identifier
-    pub name: RelSpan,
-    pub generics: Option<GenericGroup>,
-    pub body: FieldSet,
-}
-
-impl AstNode for DeclRec {
-    fn span_start(&self) -> uspan {
-        self.kw.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.body.span_end()
     }
 }
 
@@ -1576,7 +1657,7 @@ impl AstNode for DeclCat {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, AstNode)]
+#[derive(Debug, Clone, PartialEq, AstNodeEnum)]
 pub enum DeclType {
     Rec(DeclRec),
     Cat(DeclCat),
@@ -1584,16 +1665,4 @@ pub enum DeclType {
     // TODO: supertypes
     // TODO: category types
     // TBD: aliases?
-}
-
-#[derive(Debug, Clone, PartialEq, AstNode)]
-pub enum Decl {
-    Var(DeclVar),
-    Type(DeclType),
-    Defer(DeclDefer),
-    Stmt(Stmt),
-}
-
-impl Expectable for Decl {
-    const EXPECTED: ExpectedToken = ExpectedToken::Declaration;
 }

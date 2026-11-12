@@ -27,18 +27,30 @@ pub enum Syntax {
     EscapeSeq,
     /// A language-defined constant like true/false
     LanguageDefined,
-    /// A local variable, field, or function parameter
+    /// A jump label
+    Label,
+    /// A local variable
     Variable,
+    /// A structure field
+    Field,
+    /// A function parameter
+    Param,
     /// A value that does not change at runtime
     Constant,
+    /// A categorical type discriminant
+    Discriminant,
+    /// A supertype variant
+    Variant,
     /// A function, method, or variable being called
     Callable,
     /// A language keyword that defines items or variables
     Keyword,
     /// A language keyword that resembles assembly labels
-    CtrlKeyword,
+    FlowKeyword,
     /// A type name
     Typename,
+    /// A module/library name
+    Modname,
     /// The name of a macro
     MacroName,
     /// The name of a macro parameter
@@ -69,22 +81,34 @@ pub struct SyntaxStyle<T, A> {
     pub escape_seq: T,
     /// Style for [`Syntax::LanguageDefined`]
     pub language_defined: T,
+    /// Style for [`Syntax::Label`]
+    pub label: T,
     /// Style for [`Syntax::Variable`]
     pub variable: T,
+    /// Style for [`Syntax::Field`]
+    pub field: T,
+    /// Style for [`Syntax::Param`]
+    pub param: T,
     /// Style for [`Syntax::Constant`]
     pub constant: T,
+    /// Style for [`Syntax::Discriminant`]
+    pub discriminant: T,
+    /// Style for [`Syntax::Variant`]
+    pub variant: T,
     /// Style for [`Syntax::Callable`]
     pub callable: T,
     /// Style for [`Syntax::Keyword`]
     pub keyword: T,
-    /// Style for [`Syntax::CtrlKeyword`]
-    pub ctrl_keyword: T,
+    /// Style for [`Syntax::FlowKeyword`]
+    pub flow_keyword: T,
     /// Style for [`Syntax::Typename`]
     pub typename: T,
+    /// Style for [`Syntax::Modname`]
+    pub modname: T,
     /// Style for [`Syntax::MacroName`]
     pub macro_name: T,
     /// Style for [`Syntax::MacroParam`]
-    pub macro_arg: T,
+    pub macro_param: T,
     /// Style for [`Syntax::Bracket`]
     /// WARNING: Cannot be empty
     pub bracket: A,
@@ -108,14 +132,20 @@ where
             Syntax::TextLiteral => &self.string_literal,
             Syntax::EscapeSeq => &self.escape_seq,
             Syntax::LanguageDefined => &self.language_defined,
+            Syntax::Label => &self.label,
             Syntax::Variable => &self.variable,
+            Syntax::Field => &self.field,
+            Syntax::Param => &self.param,
             Syntax::Constant => &self.constant,
+            Syntax::Discriminant => &self.discriminant,
+            Syntax::Variant => &self.variant,
             Syntax::Callable => &self.callable,
             Syntax::Keyword => &self.keyword,
-            Syntax::CtrlKeyword => &self.ctrl_keyword,
+            Syntax::FlowKeyword => &self.flow_keyword,
             Syntax::Typename => &self.typename,
+            Syntax::Modname => &self.modname,
             Syntax::MacroName => &self.macro_name,
-            Syntax::MacroParam => &self.macro_arg,
+            Syntax::MacroParam => &self.macro_param,
             Syntax::Bracket(depth) => self
                 .bracket
                 .as_ref()
@@ -143,14 +173,20 @@ impl<const N: usize> SyntaxStyle<Style, [Style; N]> {
             string_literal: Style::new(),
             escape_seq: Style::new(),
             language_defined: Style::new(),
+            label: Style::new(),
             variable: Style::new(),
+            field: Style::new(),
+            param: Style::new(),
             constant: Style::new(),
+            discriminant: Style::new(),
+            variant: Style::new(),
             callable: Style::new(),
             keyword: Style::new(),
-            ctrl_keyword: Style::new(),
+            flow_keyword: Style::new(),
             typename: Style::new(),
+            modname: Style::new(),
             macro_name: Style::new(),
-            macro_arg: Style::new(),
+            macro_param: Style::new(),
             bracket: [Style::new(); N],
             invalid: Style::new(),
         }
@@ -169,14 +205,20 @@ impl SyntaxStyle<Style, &[Style]> {
             string_literal: Style::new(),
             escape_seq: Style::new(),
             language_defined: Style::new(),
+            label: Style::new(),
             variable: Style::new(),
+            field: Style::new(),
+            param: Style::new(),
             constant: Style::new(),
+            discriminant: Style::new(),
+            variant: Style::new(),
             callable: Style::new(),
             keyword: Style::new(),
-            ctrl_keyword: Style::new(),
+            flow_keyword: Style::new(),
             typename: Style::new(),
+            modname: Style::new(),
             macro_name: Style::new(),
-            macro_arg: Style::new(),
+            macro_param: Style::new(),
             bracket: const { &[Style::new()] },
             invalid: Style::new(),
         }
@@ -251,6 +293,14 @@ where
         self
     }
 
+    pub const fn label(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
+        self.label = value;
+        self
+    }
+
     pub const fn variable(mut self, value: T) -> Self
     where
         T: [const] Destruct,
@@ -259,11 +309,43 @@ where
         self
     }
 
+    pub const fn field(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
+        self.field = value;
+        self
+    }
+
+    pub const fn param(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
+        self.param = value;
+        self
+    }
+
     pub const fn constant(mut self, value: T) -> Self
     where
         T: [const] Destruct,
     {
         self.constant = value;
+        self
+    }
+
+    pub const fn discriminant(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
+        self.discriminant = value;
+        self
+    }
+
+    pub const fn variant(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
+        self.variant = value;
         self
     }
 
@@ -283,11 +365,11 @@ where
         self
     }
 
-    pub const fn ctrl_keyword(mut self, value: T) -> Self
+    pub const fn flow_keyword(mut self, value: T) -> Self
     where
         T: [const] Destruct,
     {
-        self.ctrl_keyword = value;
+        self.flow_keyword = value;
         self
     }
 
@@ -299,6 +381,14 @@ where
         self
     }
 
+    pub const fn modname(mut self, value: T) -> Self
+    where
+        T: [const] Destruct,
+    {
+        self.modname = value;
+        self
+    }
+
     pub const fn macro_name(mut self, value: T) -> Self
     where
         T: [const] Destruct,
@@ -307,11 +397,11 @@ where
         self
     }
 
-    pub const fn macro_arg(mut self, value: T) -> Self
+    pub const fn macro_param(mut self, value: T) -> Self
     where
         T: [const] Destruct,
     {
-        self.macro_arg = value;
+        self.macro_param = value;
         self
     }
 
@@ -375,7 +465,7 @@ impl GetSyntax for Token<'_> {
 
             LexValue::Keyword(kw) => {
                 if kw.is_flow() {
-                    Syntax::CtrlKeyword
+                    Syntax::FlowKeyword
                 } else if kw.is_type() && /* TODO: differenciate type vs value in semantics */ !kw.is_value()
                 {
                     Syntax::Typename
@@ -393,7 +483,7 @@ impl GetSyntax for Token<'_> {
                 | Punctuation::MacroStringify
                 | Punctuation::MacroConst
                 | Punctuation::Coalesce,
-            ) => Syntax::CtrlKeyword,
+            ) => Syntax::FlowKeyword,
 
             LexValue::Punctuation(
                 Punctuation::Exists
@@ -433,7 +523,7 @@ impl GetSyntax for (&str, TokenKind) {
 
             TokenKind::Keyword(kw) => {
                 if kw.is_flow() {
-                    Syntax::CtrlKeyword
+                    Syntax::FlowKeyword
                 } else if kw.is_type() && /* TODO: differenciate type vs value in semantics */ !kw.is_value()
                 {
                     Syntax::Typename
@@ -447,7 +537,7 @@ impl GetSyntax for (&str, TokenKind) {
                 | Punctuation::MacroStringify
                 | Punctuation::MacroConst
                 | Punctuation::Coalesce,
-            ) => Syntax::CtrlKeyword,
+            ) => Syntax::FlowKeyword,
 
             TokenKind::Punc(
                 Punctuation::Exists
@@ -460,6 +550,12 @@ impl GetSyntax for (&str, TokenKind) {
 
             TokenKind::Punc(_) => Syntax::Normal,
         }
+    }
+}
+
+impl GetSyntax for (&str, Syntax) {
+    fn syntax(&self) -> Syntax {
+        self.1
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::{
     analyzer::{
-        static_env::VarId,
+        static_env::ItemId,
         types::{AbstractType, FunShape},
     },
     lex::token::{Operator, punc::OpSide},
@@ -87,7 +87,7 @@ pub struct Item<'src> {
 pub struct ScopeEnvironment<'src> {
     builtin: HashMap<Operator, HashSet<BuiltinOpSignature>>,
     items: Vec<Item<'src>>,
-    ids: HashMap<Span, VarId>,
+    ids: HashMap<Span, ItemId>,
     /// NOTE: this does NOT represent "the scope where all global variables belong",
     /// this is just the scope of all things outside of any function!!
     /// It is used to guarantee the stack is never empty.
@@ -120,7 +120,7 @@ impl<'src> ScopeEnvironment<'src> {
     fn visible_ids<'env>(
         global: &'env Scope<'src>,
         layers: &'env Vec<Layer<'src>>,
-    ) -> impl DoubleEndedIterator<Item = (&'src str, VarId)> {
+    ) -> impl DoubleEndedIterator<Item = (&'src str, ItemId)> {
         let g_it = global.items.iter();
         let l_it = layers
             .last()
@@ -131,12 +131,12 @@ impl<'src> ScopeEnvironment<'src> {
     }
 
     /// Converts an ID to the number of steps away from the previous one (assuming reverse order)
-    fn id_offset(num_items: usize) -> impl FnMut(VarId) -> usize {
+    fn id_offset(num_items: usize) -> impl FnMut(ItemId) -> usize {
         // items: 1, ids: [0]: [0]
         // items: 2, ids: [0]: [1]
         // items: 2, ids: [1, 0]: [0, 0]
         // items: 3, ids: [2, 0]: [0, 1]
-        let mut prev = VarId(num_items);
+        let mut prev = ItemId(num_items);
         move |id| {
             let diff = prev.0.checked_sub(id.0).and_then(NonZero::new).unwrap_or_else(|| {
                 panic!(
@@ -154,7 +154,7 @@ impl<'src> ScopeEnvironment<'src> {
     /// An iterator over all visible items in order of most recent to least recent declaration.
     ///
     /// Does not include builtin items.
-    fn search(&self) -> impl Iterator<Item = (&'src str, VarId, &Item<'src>)> {
+    fn search(&self) -> impl Iterator<Item = (&'src str, ItemId, &Item<'src>)> {
         // Relies on the assumption that IDs increase monotonically along the stack
         let Self {
             items,
@@ -172,7 +172,7 @@ impl<'src> ScopeEnvironment<'src> {
     /// An iterator over all visible items in order of most recent to least recent declaration.
     ///
     /// Does not include builtin items.
-    fn search_mut(&mut self) -> impl Iterator<Item = (&'src str, VarId, &mut Item<'src>)> {
+    fn search_mut(&mut self) -> impl Iterator<Item = (&'src str, ItemId, &mut Item<'src>)> {
         // Relies on the assumption that IDs increase monotonically along the stack
         let Self {
             items,
@@ -190,7 +190,7 @@ impl<'src> ScopeEnvironment<'src> {
     /// Finds visible items matching the key in order of most recent to least recent declaration.
     ///
     /// Does not include builtin items.
-    pub fn lookup<Q>(&self, key: &Q) -> impl Iterator<Item = (&'src str, VarId, &Item<'src>)>
+    pub fn lookup<Q>(&self, key: &Q) -> impl Iterator<Item = (&'src str, ItemId, &Item<'src>)>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -203,7 +203,7 @@ impl<'src> ScopeEnvironment<'src> {
     pub fn lookup_mut<Q>(
         &mut self,
         key: &Q,
-    ) -> impl Iterator<Item = (&'src str, VarId, &mut Item<'src>)>
+    ) -> impl Iterator<Item = (&'src str, ItemId, &mut Item<'src>)>
     where
         Q: ?Sized + PartialEq<str>,
     {
@@ -237,8 +237,8 @@ impl<'src> ScopeEnvironment<'src> {
     }
 
     /// Declare an item in the current scope
-    fn decl_item_internal(&mut self, key: &'src str, decl: Span) -> VarId {
-        let id = VarId(self.items.len());
+    fn decl_item_internal(&mut self, key: &'src str, decl: Span) -> ItemId {
+        let id = ItemId(self.items.len());
         self.items.push(Item { decl, shape: None });
         let curr_scope = if let Some(scope) = self.layers.last_mut().map(Layer::curr_scope_mut) {
             scope
@@ -249,11 +249,11 @@ impl<'src> ScopeEnvironment<'src> {
         id
     }
 
-    pub fn decl_item(&mut self, key: &'src str, decl: Span) -> VarId {
+    pub fn decl_item(&mut self, key: &'src str, decl: Span) -> ItemId {
         self.decl_item_internal(key, decl)
     }
 
-    pub fn mark_ref(&mut self, span: Span, id: VarId) {
+    pub fn mark_ref(&mut self, span: Span, id: ItemId) {
         let x = self.ids.insert(span, id);
         debug_assert_eq!(x, None);
     }
@@ -285,7 +285,7 @@ impl<'src> Layer<'src> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Scope<'src> {
-    items: Vec<(&'src str, VarId)>,
+    items: Vec<(&'src str, ItemId)>,
 }
 
 impl<'src> Scope<'src> {
@@ -293,7 +293,7 @@ impl<'src> Scope<'src> {
         Self { items: Vec::new() }
     }
 
-    fn insert(&mut self, key: &'src str, id: VarId) {
+    fn insert(&mut self, key: &'src str, id: ItemId) {
         self.items.push((key, id));
     }
 }

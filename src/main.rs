@@ -79,10 +79,8 @@ use crate::{
     highlight::{
         TokenHighlight, highlight,
         style::{Color, Style, StyleWrapper},
-        syntax::{GetSyntax, Syntax, SyntaxStyle, syntax_style},
-        write_highlight,
+        syntax::{SyntaxStyle, syntax_style},
     },
-    lex::token::TokenTable,
     old_error::ContextError,
     preproc::preprocess,
     scanner::{
@@ -95,17 +93,12 @@ use crate::{
     src_code::{
         code::{SourceCode, SourceLoc},
         map::SourceMap,
-        span::Span,
     },
 };
-use analyzer::{InterpProgram, analyze_interp, static_env::scope::env::ScopeEnvironment};
+use analyzer::static_env::var_scope::env::ScopeEnvironment;
 use error::fail::Failure;
-use interp::interpret;
-use src_code::{
-    code::ExpansionData,
-    span::{RelSpan, usize_to_uspan, uspan},
-};
-use std::{collections::HashMap, path::PathBuf, range::Range};
+use src_code::{code::ExpansionData, span::usize_to_uspan};
+use std::{collections::HashMap, path::PathBuf};
 
 /// Indicates unfinished code.
 ///
@@ -150,6 +143,7 @@ pub(crate) use debug_unsafe;
 mod analyzer;
 mod arrayvec;
 mod error;
+mod exec;
 mod grammar;
 mod highlight;
 mod interp;
@@ -194,11 +188,30 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
     language_defined: {
         foreground: Rgb(0x56, 0x9c, 0xd6)
     },
+    label: {
+        foreground: Rgb(0x56, 0x9c, 0xd6)
+    },
     variable: {
         foreground: Rgb(0x9c, 0xdc, 0xfe),
         underline: true
     },
+    field: {
+        foreground: Rgb(0x9c, 0xdc, 0xfe),
+        underline: true
+    },
+    param: {
+        foreground: Rgb(0x9c, 0xdc, 0xfe),
+        underline: true
+    },
     constant: {
+        foreground: Rgb(0x4f, 0xc1, 0xff),
+        underline: true
+    },
+    discriminant: {
+        foreground: Rgb(0x4f, 0xc1, 0xff),
+        underline: true
+    },
+    variant: {
         foreground: Rgb(0x4f, 0xc1, 0xff),
         underline: true
     },
@@ -209,7 +222,7 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
     keyword: {
         foreground: Rgb(0x56, 0x9c, 0xd6)
     },
-    ctrl_keyword: {
+    flow_keyword: {
         foreground: Rgb(0xc5, 0x86, 0xc0)
     },
     typename: {
@@ -219,7 +232,7 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
         foreground: Rgb(0x56, 0x9c, 0xd6),
         underline: true
     },
-    macro_arg: {
+    macro_param: {
         foreground: Rgb(0x4f, 0xc1, 0xff),
         underline: true
     },

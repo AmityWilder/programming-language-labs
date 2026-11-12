@@ -1,6 +1,6 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    highlight::{TokenHighlight, style::StyleWrapper, write_highlight},
+    highlight::{TokenHighlight, style::StyleWrapper, syntax::Syntax, write_highlight},
     lex::token::TokenKind,
     parse::ast,
     src_code::{code::SourceCode, span::RelSpan},
@@ -149,6 +149,10 @@ impl LispArgs for [ast::Decl] {
         let mut iter = self.iter();
         while let Some(item) = iter.next() {
             match item {
+                ast::Decl::Mod(mdl) => {
+                    f.write_arg(mdl, source)?;
+                }
+
                 ast::Decl::Type(ty) => {
                     f.write_arg(ty, source)?;
                 }
@@ -195,6 +199,14 @@ impl LispDisplay for ast::BlockStmt {
     }
 }
 
+impl LispDisplay for ast::DeclMod {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new(&self.kw, source, f)?
+            .write_arg((self.name, Syntax::Modname), source)?
+            .finish()
+    }
+}
+
 impl LispDisplay for ast::DeclType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -215,7 +227,7 @@ impl LispDisplay for ast::GenericGroup {
 impl LispDisplay for ast::DeclRec {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LispCall::new(&self.kw, source, f)?
-            .write_arg((self.name, TokenKind::Ident), source)?
+            .write_arg((self.name, Syntax::Typename), source)?
             .write_arg_iter(self.generics.as_ref(), source)?
             .write_arg(&self.body, source)?
             .finish()
@@ -224,7 +236,7 @@ impl LispDisplay for ast::DeclRec {
 
 impl LispDisplay for ast::FieldSet {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("fieldset", source, f)?
+        LispCall::new("block", source, f)?
             .write_arg_iter(self.fields.as_slice(), source)?
             .finish()
     }
@@ -232,8 +244,8 @@ impl LispDisplay for ast::FieldSet {
 
 impl LispDisplay for ast::Field {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("field", source, f)?
-            .write_arg((self.name, TokenKind::Ident), source)?
+        LispCall::new(":", source, f)?
+            .write_arg((self.name, Syntax::Field), source)?
             .write_arg(&self.ty.ty, source)?
             .finish()
     }
@@ -242,7 +254,7 @@ impl LispDisplay for ast::Field {
 impl LispDisplay for ast::DeclCat {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LispCall::new(&self.kw, source, f)?
-            .write_arg((self.name, TokenKind::Ident), source)?
+            .write_arg((self.name, Syntax::Typename), source)?
             .write_arg(&self.discriminants, source)?
             .finish()
     }
@@ -250,7 +262,7 @@ impl LispDisplay for ast::DeclCat {
 
 impl LispDisplay for ast::CatDiscSet {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("discset", source, f)?
+        LispCall::new("block", source, f)?
             .write_arg_iter(self.items.as_slice(), source)?
             .finish()
     }
@@ -259,7 +271,7 @@ impl LispDisplay for ast::CatDiscSet {
 impl LispDisplay for ast::CatDisc {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LispCall::new("=", source, f)?
-            .write_arg((self.name, TokenKind::Ident), source)?
+            .write_arg((self.name, Syntax::Discriminant), source)?
             .write_arg_iter(self.val.as_ref().map(|x| &x.expr), source)?
             .finish()
     }
@@ -296,7 +308,7 @@ impl LispDisplay for ast::Directive {
 
 impl LispDisplay for ast::Variable {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.ident, TokenKind::Ident).fmt_value(source, f)
+        (self.ident, Syntax::Variable).fmt_value(source, f)
     }
 }
 
@@ -383,7 +395,7 @@ impl LispDisplay for ast::ScopeLabel {
 impl LispDisplay for ast::Label {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LispCall::new(&self.dot, source, f)?
-            .write_arg((self.name, TokenKind::Ident), source)?
+            .write_arg((self.name, Syntax::Label), source)?
             .finish()
     }
 }
@@ -444,7 +456,7 @@ impl LispDisplay for ast::Stmt {
 
 impl LispDisplay for ast::BindingPattern {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.ident, TokenKind::Ident).fmt_value(source, f)
+        (self.ident, Syntax::Variable).fmt_value(source, f)
     }
 }
 
@@ -574,7 +586,7 @@ impl LispDisplay for ast::TypeInstance {
 
 impl LispDisplay for ast::Typename {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = (self.name, TokenKind::Ident);
+        let name = (self.name, Syntax::Typename);
         if self.path.is_empty() {
             LispCall::new("::", source, f)?
                 .write_arg_iter(&self.path, source)?
@@ -588,6 +600,6 @@ impl LispDisplay for ast::Typename {
 
 impl LispDisplay for ast::NamespacePathPart {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.name, TokenKind::Ident).fmt_value(source, f)
+        (self.name, Syntax::Modname).fmt_value(source, f)
     }
 }

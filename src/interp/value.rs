@@ -1,7 +1,7 @@
 use crate::{
     analyzer::{
         InterpExpr,
-        static_env::VarId,
+        static_env::ItemId,
         types::{FunShape, StaticType},
     },
     error::fail::Failure,
@@ -351,7 +351,7 @@ pub enum InterpVarValue<'src> {
     /// Has an accessible address
     ///
     /// Example: variable name
-    Lvalue(VarId),
+    Lvalue(ItemId),
 }
 
 /// An [`InterpVal`] that **can be** referenced
