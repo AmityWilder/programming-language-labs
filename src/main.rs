@@ -25,7 +25,7 @@
     deref_pure_trait,
     const_ops,
     iterator_try_reduce,
-    option_into_flat_iter,
+    map_try_insert,
 )]
 #![forbid(
     clippy::missing_safety_doc,

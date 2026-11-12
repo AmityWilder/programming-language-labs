@@ -109,7 +109,7 @@ pub struct DeclPvt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclLet {
-    // TODO
+    // TODO: complex bindings
     pub id: VarId,
     pub ty: Option<ast::TypeExpr>,
     pub init: Option<Expr>,
@@ -117,7 +117,8 @@ pub struct DeclLet {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclDefer {
-    // TODO
+    pub param: Option<VarId>,
+    pub on_pop: BlockStmt,
 }
 
 #[derive(Debug, Clone, PartialEq)]

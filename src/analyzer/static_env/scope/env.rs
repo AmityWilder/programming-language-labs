@@ -9,8 +9,10 @@ use std::collections::HashMap;
 pub enum Decl {
     Mod(ast::DeclMod),
     Rec(ast::DeclRec),
+    Field(ast::Field),
     Cat(ast::DeclCat),
     Var(ast::DeclVar),
+    DeferParam(ast::DeferParam),
 }
 
 impl From<ast::DeclMod> for Decl {
@@ -23,6 +25,11 @@ impl From<ast::DeclRec> for Decl {
         Self::Rec(value)
     }
 }
+impl From<ast::Field> for Decl {
+    fn from(value: ast::Field) -> Self {
+        Self::Field(value)
+    }
+}
 impl From<ast::DeclCat> for Decl {
     fn from(value: ast::DeclCat) -> Self {
         Self::Cat(value)
@@ -31,6 +38,11 @@ impl From<ast::DeclCat> for Decl {
 impl From<ast::DeclVar> for Decl {
     fn from(value: ast::DeclVar) -> Self {
         Self::Var(value)
+    }
+}
+impl From<ast::DeferParam> for Decl {
+    fn from(value: ast::DeferParam) -> Self {
+        Self::DeferParam(value)
     }
 }
 
@@ -75,6 +87,7 @@ pub struct DuplicateMarkingError {
 pub struct ScopeEnvironment<'src> {
     /// Indexed with [`ItemId`]
     decls: Vec<Decl>,
+    members: HashMap<ItemId, HashMap<&'src str, ItemId>>,
     ids: HashMap<Span, ItemId>,
     /// In the order their items would appear in [`Self::items`]
     libraries: Vec<LibEntry<'src>>,
@@ -84,6 +97,7 @@ impl<'src> ScopeEnvironment<'src> {
     pub fn new() -> Self {
         Self {
             decls: Vec::new(),
+            members: HashMap::new(),
             ids: HashMap::new(),
             libraries: Vec::new(),
         }
@@ -110,6 +124,7 @@ impl<'src> ScopeEnvironment<'src> {
             });
             Ok(ModScopeEnvironment {
                 decls: &mut self.decls,
+                members: &mut self.members,
                 ids: &mut self.ids,
                 module: &mut entry.def,
             })
@@ -121,6 +136,7 @@ impl<'src> ScopeEnvironment<'src> {
 pub struct ModScopeEnvironment<'env, 'src> {
     /// Indexed with [`ItemId`]
     decls: &'env mut Vec<Decl>,
+    members: &'env mut HashMap<ItemId, HashMap<&'src str, ItemId>>,
     ids: &'env mut HashMap<Span, ItemId>,
     module: &'env mut Module<'src>,
 }
@@ -164,6 +180,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         if let Some(ent) = self.module.get_submodule_mut(name) {
             Ok(ModScopeEnvironment {
                 decls: self.decls,
+                members: self.members,
                 ids: self.ids,
                 module: &mut ent.def,
             })
@@ -176,28 +193,46 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         &mut self,
         name: &'src str,
         name_span: Span,
-        decl: Decl,
+        decl: impl Into<Decl>,
     ) -> Result<ItemId, DuplicateItemError> {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_item(name, id)?;
-        self.decls.push(decl); // now `id` refers to an item
-        let res = self.mark_ref(name_span, id);
+        self.decls.push(decl.into()); // now `id` refers to an item
+        let res = self.mark_span_item(name_span, id);
         debug_assert_eq!(res, Ok(()), "span should only refer to one item");
         Ok(id)
     }
 
-    pub fn decl_var(&mut self, name: &'src str, name_span: Span, decl: ast::DeclVar) -> VarId {
+    pub fn decl_member(
+        &mut self,
+        on: ItemId,
+        name: &'src str,
+        name_span: Span,
+        decl: impl Into<Decl>,
+    ) -> Result<ItemId, DuplicateItemError> {
+        let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
+        if let Err(e) = self.members.entry(on).or_default().try_insert(name, id) {
+            return Err(DuplicateItemError { og: e.value });
+        }
+        self.decls.push(decl.into()); // now `id` refers to an item
+        let res = self.mark_span_item(name_span, id);
+        debug_assert_eq!(res, Ok(()), "span should only refer to one item");
+        Ok(id)
+    }
+
+    pub fn decl_var(&mut self, name: &'src str, name_span: Span, decl: impl Into<Decl>) -> VarId {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_var(name, id);
         self.decls.push(decl.into()); // now `id` refers to an item
-        let res = self.mark_ref(name_span, id);
+        let res = self.mark_span_item(name_span, id);
         debug_assert_eq!(res, Ok(()), "span should only refer to one item");
         id
     }
 
-    pub fn mark_ref(&mut self, span: Span, id: ItemId) -> Result<(), DuplicateMarkingError> {
-        if let Some(og) = self.ids.insert(span, id) {
-            Err(DuplicateMarkingError { og })
+    /// Indicate that a particular span represents a particular item
+    pub fn mark_span_item(&mut self, span: Span, id: ItemId) -> Result<(), DuplicateMarkingError> {
+        if let Err(e) = self.ids.try_insert(span, id) {
+            Err(DuplicateMarkingError { og: e.value })
         } else {
             Ok(())
         }
@@ -256,7 +291,7 @@ impl<'src> Module<'src> {
             .map_or(&mut self.global, |layer| {
                 layer.scopes.last_mut().unwrap_or(&mut layer.root)
             })
-            .decl_var(name, id)
+            .decl_var(name, id);
     }
 
     pub fn lookup_item(&self, name: &str) -> Option<ItemId> {
@@ -302,8 +337,8 @@ impl<'src> Scope<'src> {
     }
 
     fn decl_item(&mut self, key: &'src str, id: ItemId) -> Result<(), DuplicateItemError> {
-        if let Some(og) = self.items.insert(key, id) {
-            Err(DuplicateItemError { og })
+        if let Err(e) = self.items.try_insert(key, id) {
+            Err(DuplicateItemError { og: e.value })
         } else {
             Ok(())
         }
