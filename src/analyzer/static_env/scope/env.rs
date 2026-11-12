@@ -1,21 +1,47 @@
-use crate::{analyzer::static_env::ItemId, parse::ast, src_code::span::Span};
+use crate::{
+    analyzer::static_env::{ItemId, VarId},
+    parse::ast,
+    src_code::span::Span,
+};
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, ast::AstNodeEnum)]
-pub enum Item {
-    Type(ast::DeclType),
-    Var(ast::DeclVar),
+pub enum Decl {
     Mod(ast::DeclMod),
+    Rec(ast::DeclRec),
+    Cat(ast::DeclCat),
+    Var(ast::DeclVar),
+}
+
+impl From<ast::DeclMod> for Decl {
+    fn from(value: ast::DeclMod) -> Self {
+        Self::Mod(value)
+    }
+}
+impl From<ast::DeclRec> for Decl {
+    fn from(value: ast::DeclRec) -> Self {
+        Self::Rec(value)
+    }
+}
+impl From<ast::DeclCat> for Decl {
+    fn from(value: ast::DeclCat) -> Self {
+        Self::Cat(value)
+    }
+}
+impl From<ast::DeclVar> for Decl {
+    fn from(value: ast::DeclVar) -> Self {
+        Self::Var(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct LibEntry<'src> {
-    pub name: &'src str,
+pub struct LibEntry<'src> {
+    pub name: String,
     pub def: Module<'src>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct ModEntry<'src> {
+pub struct ModEntry<'src> {
     pub name: &'src str,
     pub decl: ast::DeclMod,
     pub def: Module<'src>,
@@ -46,18 +72,18 @@ pub struct DuplicateMarkingError {
 }
 
 #[derive(Debug, Default)]
-pub struct TyScopeEnvironment<'src> {
+pub struct ScopeEnvironment<'src> {
     /// Indexed with [`ItemId`]
-    items: Vec<Item>,
+    decls: Vec<Decl>,
     ids: HashMap<Span, ItemId>,
     /// In the order their items would appear in [`Self::items`]
     libraries: Vec<LibEntry<'src>>,
 }
 
-impl<'src> TyScopeEnvironment<'src> {
+impl<'src> ScopeEnvironment<'src> {
     pub fn new() -> Self {
         Self {
-            items: Vec::new(),
+            decls: Vec::new(),
             ids: HashMap::new(),
             libraries: Vec::new(),
         }
@@ -73,9 +99,9 @@ impl<'src> TyScopeEnvironment<'src> {
 
     pub fn define_library<'env>(
         &'env mut self,
-        name: &'src str, // TBD: where does the name come from?
+        name: String,
     ) -> Result<ModScopeEnvironment<'env, 'src>, DuplicateLibraryError> {
-        if self.get_library(name).is_some() {
+        if self.get_library(name.as_str()).is_some() {
             Err(DuplicateLibraryError)
         } else {
             let entry = self.libraries.push_mut(LibEntry {
@@ -83,7 +109,7 @@ impl<'src> TyScopeEnvironment<'src> {
                 def: Module::new(),
             });
             Ok(ModScopeEnvironment {
-                items: &mut self.items,
+                decls: &mut self.decls,
                 ids: &mut self.ids,
                 module: &mut entry.def,
             })
@@ -94,7 +120,7 @@ impl<'src> TyScopeEnvironment<'src> {
 #[derive(Debug)]
 pub struct ModScopeEnvironment<'env, 'src> {
     /// Indexed with [`ItemId`]
-    items: &'env mut Vec<Item>,
+    decls: &'env mut Vec<Decl>,
     ids: &'env mut HashMap<Span, ItemId>,
     module: &'env mut Module<'src>,
 }
@@ -137,7 +163,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     ) -> Result<ModScopeEnvironment<'sub, 'src>, UndeclaredModuleError> {
         if let Some(ent) = self.module.get_submodule_mut(name) {
             Ok(ModScopeEnvironment {
-                items: self.items,
+                decls: self.decls,
                 ids: self.ids,
                 module: &mut ent.def,
             })
@@ -150,14 +176,23 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         &mut self,
         name: &'src str,
         name_span: Span,
-        item: Item,
+        decl: Decl,
     ) -> Result<ItemId, DuplicateItemError> {
-        let id = ItemId(self.items.len()); // does not actually refer to an item yet!
+        let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_item(name, id)?;
-        self.items.push(item); // now `id` refers to an item
+        self.decls.push(decl); // now `id` refers to an item
         let res = self.mark_ref(name_span, id);
         debug_assert_eq!(res, Ok(()), "span should only refer to one item");
         Ok(id)
+    }
+
+    pub fn decl_var(&mut self, name: &'src str, name_span: Span, decl: ast::DeclVar) -> VarId {
+        let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
+        self.module.decl_var(name, id);
+        self.decls.push(decl.into()); // now `id` refers to an item
+        let res = self.mark_ref(name_span, id);
+        debug_assert_eq!(res, Ok(()), "span should only refer to one item");
+        id
     }
 
     pub fn mark_ref(&mut self, span: Span, id: ItemId) -> Result<(), DuplicateMarkingError> {
@@ -198,16 +233,6 @@ impl<'src> Module<'src> {
         self.submodules.iter_mut().find(|item| name == item.name)
     }
 
-    /// Returns [`None`] if not currently in a function
-    const fn curr_layer(&self) -> Option<&Layer<'src>> {
-        self.layers.last()
-    }
-
-    /// Returns [`None`] if not currently in a function
-    const fn curr_layer_mut(&mut self) -> Option<&mut Layer<'src>> {
-        self.layers.last_mut()
-    }
-
     fn decl_module(&mut self, name: &'src str, decl: ast::DeclMod) {
         self.submodules.push(ModEntry {
             name,
@@ -225,15 +250,21 @@ impl<'src> Module<'src> {
             .decl_item(name, id)
     }
 
-    pub fn lookup(&self, name: &str) -> Option<ItemId> {
+    fn decl_var(&mut self, name: &'src str, id: VarId) {
         self.layers
-            .last()
-            .map_or(&self.global, |layer| {
-                layer.scopes.last().unwrap_or(&layer.root)
+            .last_mut()
+            .map_or(&mut self.global, |layer| {
+                layer.scopes.last_mut().unwrap_or(&mut layer.root)
             })
-            .items
-            .get(name)
-            .copied()
+            .decl_var(name, id)
+    }
+
+    pub fn lookup_item(&self, name: &str) -> Option<ItemId> {
+        todo!("find tightest declaration visible")
+    }
+
+    pub fn lookup_var(&self, name: &str) -> Option<VarId> {
+        todo!("find most recent declaration visible")
     }
 }
 
@@ -244,32 +275,29 @@ pub struct Layer<'src> {
     pub scopes: Vec<Scope<'src>>,
 }
 
-impl<'src> Layer<'src> {
+impl Layer<'_> {
     pub fn new() -> Self {
         Self {
             root: Scope::new(),
             scopes: Vec::new(),
         }
     }
-
-    fn curr_scope(&self) -> &Scope<'src> {
-        self.scopes.last().unwrap_or(&self.root)
-    }
-
-    fn curr_scope_mut(&mut self) -> &mut Scope<'src> {
-        self.scopes.last_mut().unwrap_or(&mut self.root)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Scope<'src> {
+    /// Functions and types; unordered and must be unique within a scope
     items: HashMap<&'src str, ItemId>,
+
+    /// Variables; names can be shadowed and reused within the same scope
+    vars: Vec<(&'src str, VarId)>,
 }
 
 impl<'src> Scope<'src> {
     pub fn new() -> Self {
         Self {
             items: HashMap::new(),
+            vars: Vec::new(),
         }
     }
 
@@ -279,5 +307,9 @@ impl<'src> Scope<'src> {
         } else {
             Ok(())
         }
+    }
+
+    fn decl_var(&mut self, key: &'src str, id: VarId) {
+        self.vars.push((key, id));
     }
 }

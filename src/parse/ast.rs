@@ -1039,6 +1039,61 @@ impl AstNode for IfStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct PickPattern {
+    // TODO
+}
+
+impl AstNode for PickPattern {
+    fn span_start(&self) -> uspan {
+        todo!()
+    }
+
+    fn span_end(&self) -> uspan {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickArm {
+    pub pattern: PickPattern,
+    /// `=>`
+    pub arrow: RelSpan,
+    pub then: Expr,
+}
+
+impl AstNode for PickArm {
+    fn span_start(&self) -> uspan {
+        self.pattern.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.then.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickStmt {
+    /// `pick`
+    pub kw: RelSpan,
+    pub expr: Expr,
+    /// `{`
+    pub open: RelSpan,
+    pub arms: Vec<PickArm>,
+    /// `}`
+    pub close: RelSpan,
+}
+
+impl AstNode for PickStmt {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.span_end()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DeferParam {
     /// `(`
     pub open: RelSpan,

@@ -11,7 +11,7 @@ use crate::{
 pub mod morph;
 #[deprecated = "changing to multi-pass analyzer"]
 pub mod old;
-pub mod type_scope;
+pub mod scope;
 pub mod var_scope;
 
 /// A unique ID for distinguishing items that may have the same identifier.
