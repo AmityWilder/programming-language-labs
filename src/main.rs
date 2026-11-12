@@ -640,21 +640,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     if config.scanner_highlight {
         println!();
         for (id, file) in source.iter() {
-            print!("\x1b[0m");
-            let loc = source[id].loc();
-            match loc {
-                SourceLoc::Repl | SourceLoc::PreprocRepl(_) => print!("repl"),
-                SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => {
-                    print!("{}", path.display());
-                }
-            }
-            if matches!(
-                loc,
-                SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
-            ) {
-                print!(" (preprocessed)");
-            }
-            println!(":");
+            println!("\x1b[0m{}:", source[id].loc());
             print_highlighted(
                 source,
                 file,
@@ -695,23 +681,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     if config.preproc_highlight {
         println!();
         for (id, file) in source.iter() {
-            print!("\x1b[0m");
-            let loc = source[id].loc();
-            // only include preprocessed versions of files
-            if !matches!(
-                loc,
-                SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
-            ) {
-                continue;
-            }
-            match loc {
-                SourceLoc::Repl | SourceLoc::PreprocRepl(_) => print!("repl"),
-                SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => {
-                    print!("{}", path.display());
-                }
-            }
-            print!(" (preprocessed)");
-            println!(":");
+            println!("\x1b[0m{}:", source[id].loc());
             print_highlighted(
                 source,
                 file,
@@ -762,7 +732,11 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
             .get(unit.file)
             .expect("program unit should have valid file ID");
 
-        println!("lisp: {:#}", parse::fmt::Lisp { source, node: unit });
+        println!(
+            "lisp for {}:\n{:#}",
+            source.loc(),
+            parse::fmt::Lisp { source, node: unit }
+        );
     }
 
     // // scope analysis

@@ -82,6 +82,22 @@ impl SourceLoc {
     }
 }
 
+impl std::fmt::Display for SourceLoc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SourceLoc::Repl | SourceLoc::PreprocRepl(_) => f.write_str("repl"),
+            SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => path.display().fmt(f),
+        }?;
+        if matches!(
+            self,
+            SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
+        ) {
+            f.write_str(" (preprocessed)")?;
+        }
+        Ok(())
+    }
+}
+
 /// # Example
 /// ```not_code
 ///          vvvv field.param
