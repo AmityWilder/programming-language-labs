@@ -130,16 +130,7 @@ impl Span {
 impl std::fmt::Display for SpanLoc<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let code = self.source.source_of(self.span);
-        match code.loc() {
-            SourceLoc::Repl | SourceLoc::PreprocRepl(_) => write!(f, "terminal")?,
-            SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => path.display().fmt(f)?,
-        }
-        if matches!(
-            code.loc(),
-            SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
-        ) {
-            write!(f, " (preprocessed)")?;
-        }
+        write!(f, "{}", code.loc())?;
         let (start_linenum, start_charnum) = code
             .line_char(self.span.start)
             .expect("span should be in file it's from");
