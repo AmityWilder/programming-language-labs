@@ -13,6 +13,99 @@ pub struct HirUnit {
     pub decls: Vec<Decl>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum PrimitiveType {
+    #[default]
+    None,
+    Nevr,
+    Fail,
+    Bool,
+    Byte,
+    Uint,
+    Sint,
+    Flpt,
+    Char,
+    Text,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamespacePathPart {
+    /// Identifier
+    pub name: RelSpan, // TODO
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Typename {
+    pub path: Box<[NamespacePathPart]>,
+    /// Identifier
+    pub name: RelSpan, // TODO
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericGroup(pub Box<[TypeExpr]>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeInstance {
+    pub name: Typename,
+    pub args: Option<GenericGroup>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum OrType {
+    #[default]
+    None,
+    Fail,
+    Nevr,
+}
+
+/// Fallible Type
+#[derive(Debug, Clone, PartialEq)]
+pub struct FallType {
+    pub then_ty: TypeExpr,
+    pub ty: OrType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefType {
+    // TBD: reference mutability?
+    pub ty: TypeExpr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewType {
+    pub item: TypeExpr,
+    pub count: Option<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AssocTypeSource {
+    Simple(Typename),
+    Grouped(TypeExpr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssocType {
+    pub base: AssocTypeSource,
+    pub assoc: TypeInstance,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunType {
+    pub params: Box<[TypeExpr]>,
+    pub ret: Option<Box<TypeExpr>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeExpr {
+    Primitive(PrimitiveType),
+    Instance(TypeInstance),
+    Fallible(Box<FallType>),
+    Ref(Box<RefType>),
+    View(Box<ViewType>),
+    Assoc(Box<AssocType>),
+    FunPtr(FunType),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BindingPattern {
     pub var: VarId,
@@ -174,11 +267,11 @@ pub enum OrStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickExpr {
-    pub arms: Vec<PickExprArm>,
+    pub arms: Vec<PickArm>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PickExprArm {
+pub struct PickArm {
     pub pat: PickPattern,
     pub expr: BlockExpr,
 }

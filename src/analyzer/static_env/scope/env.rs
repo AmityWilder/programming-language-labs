@@ -1,9 +1,9 @@
 use crate::{
-    analyzer::static_env::{ItemId, VarId},
+    analyzer::static_env::{ItemId, LibId, ModId, VarId},
     parse::ast,
-    src_code::span::{RelSpan, Span},
+    src_code::span::RelSpan,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, Clone, PartialEq, ast::AstNodeEnum)]
 pub enum Decl {
@@ -60,9 +60,27 @@ impl From<ast::DeferParam> for Decl {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Item {
+pub struct Item<'src> {
     pub decl: Decl,
     pub parent: Option<ItemId>,
+    pub children: BTreeMap<&'src str, ItemId>,
+}
+
+impl Item<'_> {
+    pub const fn new(decl: Decl) -> Self {
+        Self {
+            decl,
+            parent: None,
+            children: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubEntry<'src> {
+    pub name: &'src str,
+    pub decl: ast::DeclMod,
+    pub def: Module<'src>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,14 +90,54 @@ pub struct LibEntry<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ModEntry<'src> {
-    pub name: &'src str,
-    pub decl: ast::DeclMod,
-    pub def: Module<'src>,
+pub enum ModEntry<'src> {
+    Submodule(SubEntry<'src>),
+    Library(LibEntry<'src>),
+}
+
+impl<'src> ModEntry<'src> {
+    pub const fn is_submodule(&self) -> bool {
+        matches!(self, Self::Submodule(_))
+    }
+
+    pub const fn is_library(&self) -> bool {
+        matches!(self, Self::Library(_))
+    }
+
+    pub const fn decl(&self) -> Option<&ast::DeclMod> {
+        match self {
+            Self::Submodule(ent) => Some(&ent.decl),
+            Self::Library(_) => None,
+        }
+    }
+
+    pub const fn name(&self) -> &str {
+        match self {
+            Self::Submodule(ent) => ent.name,
+            Self::Library(ent) => ent.name.as_str(),
+        }
+    }
+
+    pub const fn def(&self) -> &Module<'src> {
+        match self {
+            Self::Submodule(ent) => &ent.def,
+            Self::Library(ent) => &ent.def,
+        }
+    }
+
+    pub const fn def_mut(&mut self) -> &mut Module<'src> {
+        match self {
+            Self::Submodule(ent) => &mut ent.def,
+            Self::Library(ent) => &mut ent.def,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
-pub struct DuplicateLibraryError;
+pub struct DuplicateLibraryError {
+    /// The ID of the original library
+    pub og: LibId,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DuplicateModuleError<'env> {
@@ -87,10 +145,21 @@ pub struct DuplicateModuleError<'env> {
     pub og: &'env ast::DeclMod,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash, Default)]
+pub struct DuplicateSubmoduleError;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct DuplicateItemError {
     /// The ID of the original declaration
     pub og: ItemId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkMemberError {
+    Access(std::slice::GetDisjointMutError),
+    ReParent { existing: ItemId },
+    AlreadyLinked,
+    DuplicateChild(DuplicateItemError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -102,23 +171,28 @@ pub struct DuplicateMarkingError {
     pub og: ItemId,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum CreateSubmoduleError {
+    UnknownParent(UndeclaredModuleError),
+    DuplicateChild(DuplicateSubmoduleError),
+}
+
 #[derive(Debug, Default)]
 pub struct ScopeEnvironment<'src> {
     /// Indexed with [`ItemId`]
-    decls: Vec<Item>,
-    members: HashMap<ItemId, HashMap<&'src str, ItemId>>,
-    ids: HashMap<Span, ItemId>,
-    /// In the order their items would appear in [`Self::decls`]
-    libraries: Vec<LibEntry<'src>>,
+    decls: Vec<Item<'src>>,
+
+    /// The set of all modules in the program
+    ///
+    /// Indexed with [`ModId`]
+    modules: Vec<ModEntry<'src>>,
 }
 
 impl<'src> ScopeEnvironment<'src> {
     pub fn new() -> Self {
         Self {
             decls: Vec::new(),
-            members: HashMap::new(),
-            ids: HashMap::new(),
-            libraries: Vec::new(),
+            modules: Vec::new(),
         }
     }
 
@@ -126,45 +200,76 @@ impl<'src> ScopeEnvironment<'src> {
         self.decls.get(id.0)
     }
 
-    pub fn get_members(&self, of: ItemId) -> Option<&HashMap<&'src str, ItemId>> {
-        self.members.get(&of)
+    pub fn find_library(&self, name: &str) -> Option<LibId> {
+        self.modules
+            .iter()
+            .position(|ent| matches!(ent, ModEntry::Library(lib) if name == &lib.name))
+            .map(ModId)
     }
 
-    pub fn get_library(&self, name: &str) -> Option<&LibEntry<'src>> {
-        self.libraries.iter().find(|lib| name == lib.name)
+    pub fn get_module(&self, id: ModId) -> Option<&ModEntry<'src>> {
+        self.modules.get(id.0)
     }
 
-    pub fn get_library_mut(&mut self, name: &str) -> Option<&mut LibEntry<'src>> {
-        self.libraries.iter_mut().find(|lib| name == lib.name)
+    pub fn get_module_mut(&mut self, id: ModId) -> Option<&mut ModEntry<'src>> {
+        self.modules.get_mut(id.0)
     }
 
-    pub fn define_library<'env>(
-        &'env mut self,
-        name: String,
-    ) -> Result<ModScopeEnvironment<'env, 'src>, DuplicateLibraryError> {
-        if self.get_library(name.as_str()).is_some() {
-            Err(DuplicateLibraryError)
+    pub fn decl_library(&mut self, name: String) -> Result<LibId, DuplicateLibraryError> {
+        if let Some(og) = self.find_library(name.as_str()) {
+            Err(DuplicateLibraryError { og })
         } else {
-            let entry = self.libraries.push_mut(LibEntry {
+            let id = ModId(self.modules.len());
+            self.modules.push(ModEntry::Library(LibEntry {
                 name,
                 def: Module::new(),
-            });
-            Ok(ModScopeEnvironment {
-                decls: &mut self.decls,
-                members: &mut self.members,
-                ids: &mut self.ids,
-                module: &mut entry.def,
-            })
+            }));
+            Ok(id)
         }
+    }
+
+    pub fn decl_submodule(
+        &mut self,
+        parent: ModId,
+        name: &'src str,
+        decl: ast::DeclMod,
+    ) -> Result<ModId, CreateSubmoduleError> {
+        let id = ModId(self.modules.len());
+        self.modules
+            .get_mut(parent.0)
+            .ok_or(CreateSubmoduleError::UnknownParent(UndeclaredModuleError))
+            .and_then(|parent| {
+                parent
+                    .def_mut()
+                    .decl_submodule(id)
+                    .map_err(CreateSubmoduleError::DuplicateChild)
+            })?;
+        self.modules.push(ModEntry::Submodule(SubEntry {
+            name,
+            decl,
+            def: Module::new(),
+        }));
+        Ok(id)
+    }
+
+    pub fn define_library(
+        &mut self,
+        id: LibId,
+    ) -> Result<ModScopeEnvironment<'_, 'src>, UndeclaredModuleError> {
+        self.modules
+            .get_mut(id.0)
+            .map(|ent| ModScopeEnvironment {
+                decls: &mut self.decls,
+                module: ent.def_mut(),
+            })
+            .ok_or(UndeclaredModuleError)
     }
 }
 
 #[derive(Debug)]
 pub struct ModScopeEnvironment<'env, 'src> {
     /// Indexed with [`ItemId`]
-    decls: &'env mut Vec<Item>,
-    members: &'env mut HashMap<ItemId, HashMap<&'src str, ItemId>>,
-    ids: &'env mut HashMap<Span, ItemId>,
+    decls: &'env mut Vec<Item<'src>>,
     module: &'env mut Module<'src>,
 }
 
@@ -183,103 +288,61 @@ impl std::ops::DerefMut for ModScopeEnvironment<'_, '_> {
 }
 
 impl<'src> ModScopeEnvironment<'_, 'src> {
-    pub fn decl_module(
-        &mut self,
-        name: &'src str,
-        decl: impl FnOnce() -> ast::DeclMod,
-    ) -> Result<(), DuplicateModuleError<'_>> {
-        if let Some(ent) = self.module.get_submodule(name) {
-            Err(DuplicateModuleError { og: &ent.decl })
-        } else {
-            self.module.submodules.push(ModEntry {
-                name,
-                decl: decl(),
-                def: Module::new(),
-            });
-            Ok(())
-        }
-    }
-
-    pub fn define_module<'sub>(
-        &'sub mut self,
-        name: &str,
-    ) -> Result<ModScopeEnvironment<'sub, 'src>, UndeclaredModuleError> {
-        if let Some(ent) = self.module.get_submodule_mut(name) {
-            Ok(ModScopeEnvironment {
-                decls: self.decls,
-                members: self.members,
-                ids: self.ids,
-                module: &mut ent.def,
-            })
-        } else {
-            Err(UndeclaredModuleError)
-        }
-    }
-
     pub fn decl_item(
         &mut self,
         name: &'src str,
-        name_span: Span,
         decl: impl Into<Decl>,
     ) -> Result<ItemId, DuplicateItemError> {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_item(name, id)?;
-        self.decls.push(Item {
-            decl: decl.into(),
-            parent: None,
-        }); // now `id` refers to an item
-        let res = self.mark_span_item(name_span, id);
-        debug_assert_eq!(res, Ok(()), "span should only refer to one item");
+        self.decls.push(Item::new(decl.into())); // now `id` refers to an item
         Ok(id)
     }
 
     pub fn decl_member(
         &mut self,
-        on: ItemId,
+        parent: ItemId,
         name: &'src str,
-        name_span: Span,
         decl: impl Into<Decl>,
-    ) -> Result<ItemId, DuplicateItemError> {
-        let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
-        if let Err(e) = self.members.entry(on).or_default().try_insert(name, id) {
-            return Err(DuplicateItemError { og: e.value });
-        }
-        self.decls.push(Item {
-            decl: decl.into(),
-            parent: None,
-        }); // now `id` refers to an item
-        let res = self.mark_span_item(name_span, id);
-        debug_assert_eq!(res, Ok(()), "span should only refer to one item");
-        Ok(id)
+    ) -> Result<ItemId, LinkMemberError> {
+        let child = ItemId(self.decls.len());
+        self.decls.push(Item::new(decl.into()));
+        // TODO: duplicate name check on parent
+        self.decls
+            .get_disjoint_mut([parent.0, child.0])
+            .map_err(LinkMemberError::Access)
+            .and_then(|[parent_item, child_item]| {
+                // if there is already a parent, we don't want to add this as a child
+                if let Some(existing) = child_item.parent {
+                    return Err(if existing == child {
+                        LinkMemberError::AlreadyLinked
+                    } else {
+                        LinkMemberError::ReParent { existing }
+                    });
+                }
+                child_item.parent = Some(parent);
+
+                // if the child is already a member, then nothing structurally changes
+                if let Some(og) = parent_item.children.insert(name, child) {
+                    Err(LinkMemberError::DuplicateChild(DuplicateItemError { og }))
+                } else {
+                    Ok(child)
+                }
+            })
     }
 
-    pub fn decl_var(&mut self, name: &'src str, name_span: Span, decl: impl Into<Decl>) -> VarId {
+    pub fn decl_var(&mut self, name: &'src str, decl: impl Into<Decl>) -> VarId {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_var(name, id);
-        self.decls.push(Item {
-            decl: decl.into(),
-            parent: None,
-        }); // now `id` refers to an item
-        let res = self.mark_span_item(name_span, id);
-        debug_assert_eq!(res, Ok(()), "span should only refer to one item");
+        self.decls.push(Item::new(decl.into())); // now `id` refers to an item
         id
-    }
-
-    /// Indicate that a particular span represents a particular item
-    pub fn mark_span_item(&mut self, span: Span, id: ItemId) -> Result<(), DuplicateMarkingError> {
-        if let Err(e) = self.ids.try_insert(span, id) {
-            Err(DuplicateMarkingError { og: e.value })
-        } else {
-            Ok(())
-        }
     }
 }
 
 /// Functions have special scope limited to only themselves and global scope
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Module<'src> {
-    /// In the order their items would appear in [`Self::items`]
-    submodules: Vec<ModEntry<'src>>,
+    submodules: BTreeSet<ModId>,
     /// NOTE: this does NOT represent "the scope where all global variables belong",
     /// this is just the scope of all things outside of any function!!
     /// It is used to guarantee the stack is never empty.
@@ -290,26 +353,14 @@ pub struct Module<'src> {
 impl<'src> Module<'src> {
     pub fn new() -> Self {
         Self {
-            submodules: Vec::new(),
+            submodules: BTreeSet::new(),
             global: Scope::new(),
             layers: Vec::new(),
         }
     }
 
-    fn get_submodule<'env>(&'env self, name: &str) -> Option<&'env ModEntry<'src>> {
-        self.submodules.iter().find(|item| name == item.name)
-    }
-
-    fn get_submodule_mut<'env>(&'env mut self, name: &str) -> Option<&'env mut ModEntry<'src>> {
-        self.submodules.iter_mut().find(|item| name == item.name)
-    }
-
-    fn decl_module(&mut self, name: &'src str, decl: ast::DeclMod) {
-        self.submodules.push(ModEntry {
-            name,
-            decl,
-            def: Module::new(),
-        });
+    fn decl_submodule(&mut self, id: ModId) -> Result<(), DuplicateSubmoduleError> {
+        self.submodules.insert(id).ok_or(DuplicateSubmoduleError)
     }
 
     fn decl_item(&mut self, name: &'src str, id: ItemId) -> Result<(), DuplicateItemError> {

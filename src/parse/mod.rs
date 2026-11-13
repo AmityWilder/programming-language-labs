@@ -1257,7 +1257,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             Ok(ast::FunType {
                 kw,
                 open,
-                args,
+                params: args,
                 close,
                 ret: self.fun_ret().transpose()?.map(Box::new),
             })

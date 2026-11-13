@@ -1,13 +1,118 @@
 use crate::{
-    analyzer::static_env::scope::{
-        env::{self, ScopeEnvironment},
-        hir::{self, HirUnit},
+    analyzer::static_env::{
+        ItemId,
+        scope::{
+            env::{self, ScopeEnvironment},
+            hir::{self, HirUnit},
+        },
     },
-    lex::token::{keyword::Keyword, punc::OpSide},
+    lex::token::{
+        keyword::Keyword,
+        punc::{OpSide, Punctuation},
+    },
     parse::ast,
     src_code::code::SourceCode,
 };
 use std::fmt;
+
+mod helpers {
+    use super::HirDisplay;
+    use crate::{analyzer::static_env::scope::env::ScopeEnvironment, src_code::code::SourceCode};
+    use std::fmt;
+
+    pub struct HirBlock<'fmt, 'buf> {
+        f: &'fmt mut fmt::Formatter<'buf>,
+        res: fmt::Result,
+        has_decls: bool,
+    }
+
+    impl<'fmt, 'buf> HirBlock<'fmt, 'buf> {
+        pub fn new(f: &'fmt mut fmt::Formatter<'buf>) -> Self {
+            Self {
+                res: f.write_str("{"),
+                f,
+                has_decls: false,
+            }
+        }
+
+        pub fn finish(&mut self) -> fmt::Result {
+            self.res.and_then(|()| self.f.write_str("}"))
+        }
+
+        pub fn entry_with<F>(
+            &mut self,
+            fun: F,
+            source: &SourceCode,
+            env: &ScopeEnvironment<'_>,
+        ) -> &mut Self
+        where
+            F: FnOnce(&SourceCode, &ScopeEnvironment<'_>, &mut fmt::Formatter<'_>) -> fmt::Result,
+        {
+            self.res = self.res.and_then(|()| {
+                if self.f.alternate() {
+                    if !self.has_decls {
+                        self.f.write_str("\n")?;
+                    }
+                    // TODO: indent
+                    fun(source, env, &mut *self.f)?;
+                    self.f.write_str("\n")
+                } else {
+                    if self.has_decls {
+                        self.f.write_str(" ")?;
+                    }
+                    fun(source, env, &mut *self.f)
+                }
+            });
+            self.has_decls = true;
+            self
+        }
+
+        pub fn entry<D>(
+            &mut self,
+            item: &D,
+            source: &SourceCode,
+            env: &ScopeEnvironment<'_>,
+        ) -> &mut Self
+        where
+            D: ?Sized + HirDisplay,
+        {
+            self.entry_with(move |source, env, f| item.fmt(source, env, f), source, env)
+        }
+
+        pub fn entries<D, I>(
+            &mut self,
+            items: I,
+            source: &SourceCode,
+            env: &ScopeEnvironment<'_>,
+        ) -> &mut Self
+        where
+            D: HirDisplay,
+            I: IntoIterator<Item = D>,
+        {
+            for decl in items {
+                self.entry(&decl, source, env);
+            }
+            self
+        }
+
+        pub fn entries_with<F, I>(
+            &mut self,
+            items: I,
+            source: &SourceCode,
+            env: &ScopeEnvironment<'_>,
+        ) -> &mut Self
+        where
+            F: FnOnce(&SourceCode, &ScopeEnvironment<'_>, &mut fmt::Formatter<'_>) -> fmt::Result,
+            I: IntoIterator<Item = F>,
+        {
+            for fun in items {
+                self.entry_with(fun, source, env);
+            }
+            self
+        }
+    }
+}
+use helpers::*;
 
 pub trait HirDisplay {
     fn fmt(
@@ -16,6 +121,17 @@ pub trait HirDisplay {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result;
+}
+
+impl<T: ?Sized + HirDisplay> HirDisplay for &T {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        (*self).fmt(source, env, f)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -31,14 +147,15 @@ impl fmt::Display for DisplayHir<'_, '_, '_> {
     }
 }
 
-impl HirDisplay for env::Item {
+impl HirDisplay for ItemId {
     fn fmt(
         &self,
         source: &SourceCode,
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        f.write_str(&source[self.decl.identifier()])
+        let item = env.get_decl(*self).expect("HIR IDs should be valid");
+        write!(f, "{}{{{}}}", &source[item.decl.identifier()], self)
     }
 }
 
@@ -155,7 +272,28 @@ impl HirDisplay for ast::AssocType {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        todo!()
+        self.base.fmt(source, env, f)?;
+        f.write_str(Punctuation::PathSep.as_str())?;
+        self.assoc.fmt(source, env, f)
+    }
+}
+
+impl HirDisplay for ast::AssocTypeSource {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        match self {
+            Self::Simple(inner) => inner.fmt(source, env, f),
+
+            Self::Grouped(inner) => {
+                f.write_str("<")?;
+                inner.inner.fmt(source, env, f)?;
+                f.write_str(">")
+            }
+        }
     }
 }
 
@@ -166,8 +304,9 @@ impl HirDisplay for hir::HirUnit {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        for stmt in &self.decls {
-            stmt.fmt(source, env, f)?;
+        for decl in &self.decls {
+            decl.fmt(source, env, f)?;
+            f.write_str("\n")?;
         }
         Ok(())
     }
@@ -180,7 +319,22 @@ impl HirDisplay for ast::FunType {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        todo!()
+        write!(f, "{}(", Keyword::Fun)?;
+        let mut has_prev = false;
+        for arg in &self.params {
+            if has_prev {
+                f.write_str(", ")?;
+            } else {
+                has_prev = true;
+            }
+            arg.fmt(source, env, f)?;
+        }
+        f.write_str(")")?;
+        if let Some(ret) = &self.ret {
+            write!(f, " {} ", Punctuation::Arrow)?;
+            ret.ty.fmt(source, env, f)?;
+        }
+        Ok(())
     }
 }
 
@@ -211,19 +365,21 @@ impl HirDisplay for hir::DeclRec {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Rec)?;
-        env.get_decl(self.id)
-            .expect("HIR IDs should be valid")
-            .fmt(source, env, f)?;
-        f.write_str("{\n")?;
-        for field in &self.fields {
-            env.get_decl(field.id)
-                .expect("HIR IDs should be valid")
-                .fmt(source, env, f)?;
-            f.write_str(": ")?;
-            field.ty.fmt(source, env, f)?;
-            f.write_str(",\n")?;
-        }
-        f.write_str("}\n")
+        self.id.fmt(source, env, f)?;
+        HirBlock::new(f)
+            .entries_with(
+                self.fields.iter().map(|field| {
+                    |source: &SourceCode, env: &ScopeEnvironment<'_>, f: &mut fmt::Formatter<'_>| {
+                        field.id.fmt(source, env, f)?;
+                        f.write_str(": ")?;
+                        field.ty.fmt(source, env, f)?;
+                        f.write_str(",")
+                    }
+                }),
+                source,
+                env,
+            )
+            .finish()
     }
 }
 
@@ -234,8 +390,23 @@ impl HirDisplay for hir::DeclCat {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let item = env.get_decl(self.id).expect("HIR IDs should be valid");
-        todo!()
+        write!(f, "{} ", Keyword::Cat)?;
+        self.id.fmt(source, env, f)?;
+        HirBlock::new(f)
+            .entries(&self.discriminants, source, env)
+            .finish()
+    }
+}
+
+impl HirDisplay for hir::Discriminant {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        self.id.fmt(source, env, f)?;
+        self.val.fmt(source, env, f)
     }
 }
 
@@ -247,9 +418,7 @@ impl HirDisplay for hir::DeclUni {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Uni)?;
-        env.get_decl(self.id)
-            .expect("HIR IDs should be valid")
-            .fmt(source, env, f)
+        self.id.fmt(source, env, f)
     }
 }
 
@@ -261,9 +430,7 @@ impl HirDisplay for hir::DeclLet {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Let)?;
-        env.get_decl(self.id)
-            .expect("HIR IDs should be valid")
-            .fmt(source, env, f)?;
+        self.id.fmt(source, env, f)?;
         f.write_str(";")
     }
 }
@@ -276,9 +443,7 @@ impl HirDisplay for hir::DeclPvt {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Pvt)?;
-        env.get_decl(self.id)
-            .expect("HIR IDs should be valid")
-            .fmt(source, env, f)?;
+        self.id.fmt(source, env, f)?;
         f.write_str(";")
     }
 }
@@ -371,9 +536,11 @@ impl HirDisplay for hir::Binary {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
+        f.write_str("(")?;
         self.lhs.fmt(source, env, f)?;
-        fmt::Display::fmt(self.op.as_str(), f)?;
-        self.rhs.fmt(source, env, f)
+        write!(f, " {} ", self.op)?;
+        self.rhs.fmt(source, env, f)?;
+        f.write_str(")")
     }
 }
 
@@ -384,35 +551,37 @@ impl HirDisplay for hir::Unary {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
+        f.write_str("(")?;
         match self.side {
             OpSide::Postfix => {
                 self.operand.fmt(source, env, f)?;
-                fmt::Display::fmt(self.op.as_str(), f)
+                fmt::Display::fmt(self.op.as_str(), f)?;
             }
             OpSide::Prefix => {
                 fmt::Display::fmt(self.op.as_str(), f)?;
-                self.operand.fmt(source, env, f)
+                self.operand.fmt(source, env, f)?;
             }
         }
+        f.write_str(")")
     }
 }
 
 impl HirDisplay for hir::Literal {
     fn fmt(
         &self,
-        source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        _source: &SourceCode,
+        _env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        write!(f, "<TODO: LITERAL>")
+        write!(f, "<literal>") // TODO
     }
 }
 
 impl HirDisplay for hir::Directive {
     fn fmt(
         &self,
-        source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        _source: &SourceCode,
+        _env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
@@ -428,9 +597,7 @@ impl HirDisplay for hir::Variable {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        env.get_decl(self.id)
-            .expect("HIR IDs should be valid")
-            .fmt(source, env, f)
+        self.id.fmt(source, env, f)
     }
 }
 
@@ -485,18 +652,32 @@ impl HirDisplay for hir::PickExpr {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        todo!()
+        write!(f, "{} ", Keyword::Pick)?;
+        HirBlock::new(f).entries(&self.arms, source, env).finish()
     }
 }
 
-impl HirDisplay for hir::PickExprArm {
+impl HirDisplay for hir::PickArm {
     fn fmt(
         &self,
         source: &SourceCode,
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        todo!()
+        self.pat.fmt(source, env, f)?;
+        write!(f, " {} ", Punctuation::FatArrow)?;
+        self.expr.fmt(source, env, f)
+    }
+}
+
+impl HirDisplay for hir::PickPattern {
+    fn fmt(
+        &self,
+        _source: &SourceCode,
+        _env: &ScopeEnvironment<'_>,
+        _f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        todo!("pick pattern")
     }
 }
 
@@ -544,8 +725,7 @@ impl HirDisplay for hir::BindingPattern {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let item = env.get_decl(self.var).expect("HIR IDs should be valid");
-        todo!()
+        self.var.fmt(source, env, f)
     }
 }
 
@@ -568,7 +748,7 @@ impl HirDisplay for hir::Label {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        _env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, ".{}", &source[self.name])
@@ -618,11 +798,6 @@ impl HirDisplay for hir::BlockStmt {
         env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        f.write_str("{\n")?;
-        for decl in &self.decls {
-            decl.fmt(source, env, f)?;
-            f.write_str("\n")?;
-        }
-        f.write_str("}\n")
+        HirBlock::new(f).entries(&self.decls, source, env).finish()
     }
 }
