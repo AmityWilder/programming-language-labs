@@ -331,11 +331,24 @@ impl<'src> Module<'src> {
     }
 
     pub fn lookup_item(&self, name: &str) -> Option<ItemId> {
-        todo!("find tightest declaration visible")
+        std::iter::once(&self.global)
+            .chain(self.layers.iter().flat_map(|layer| layer.scopes.iter()))
+            .rev()
+            .find_map(|scope| scope.items.get(name).copied())
     }
 
     pub fn lookup_var(&self, name: &str) -> Option<VarId> {
-        todo!("find most recent declaration visible")
+        self.global
+            .vars
+            .iter()
+            .chain(
+                self.layers
+                    .iter()
+                    .flat_map(|layer| layer.scopes.iter().flat_map(|scope| scope.vars.iter())),
+            )
+            .rev()
+            .find(|(key, _)| *key == name)
+            .map(|(_, val)| *val)
     }
 }
 
