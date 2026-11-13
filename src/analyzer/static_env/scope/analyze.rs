@@ -298,9 +298,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 operand: self.analyze_expr(file, source, inner.operand, diagnostics)?,
             }))),
 
-            ast::Expr::Literal(inner) => Ok(hir::Expr::Literal(hir::Literal {
-                // TODO
-            })),
+            ast::Expr::Literal(inner) => Ok(hir::Expr::Literal(inner)),
 
             ast::Expr::Directive(inner) => Ok(hir::Expr::Directive(match inner.kw {
                 ast::DirectiveKw::Inpt => hir::Directive::Inpt,

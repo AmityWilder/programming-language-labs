@@ -163,7 +163,7 @@ pub enum Expr {
     Block(BlockExpr),
     Binary(Box<Binary>),
     Unary(Box<Unary>),
-    Literal(Literal),
+    Literal(ast::Literal),
     Directive(Directive),
     Variable(Variable),
 }
@@ -180,11 +180,6 @@ pub struct Unary {
     pub op: Operator,
     pub operand: Expr,
     pub side: OpSide,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Literal {
-    // TODO
 }
 
 #[derive(Debug, Clone, PartialEq)]

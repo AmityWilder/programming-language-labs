@@ -1125,18 +1125,8 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
 
     /// `literal -> "true" | "fals" | "none" | BYTE | UINT | SINT | FLPT | CHAR | TEXT | MACRO`
     fn literal(&mut self) -> Option<ast::Literal> {
-        self.pull_if(|(_, kind)| {
-            matches!(
-                kind,
-                TokenKind::BoolLit(_)
-                    | TokenKind::Keyword(Keyword::None)
-                    | TokenKind::NumberLit
-                    | TokenKind::CharLit
-                    | TokenKind::TextLit
-                    | TokenKind::Macro
-            )
-        })
-        .map(|(span, kind)| ast::Literal { kind, span })
+        self.pull_into()
+            .map(|(span, kind)| ast::Literal { kind, span })
     }
 
     /// `sequence -> "[" expression "]"`

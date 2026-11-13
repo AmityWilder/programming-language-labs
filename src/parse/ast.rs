@@ -849,9 +849,59 @@ impl Expectable for TypeBound {
     const EXPECTED: ExpectedToken = ExpectedToken::TypeBound;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum LiteralKind {
+    #[default]
+    None,
+    Bool(bool),
+    Number,
+    Char,
+    Text,
+    Macro,
+}
+
+impl LiteralKind {
+    pub const fn new(value: TokenKind) -> Option<Self> {
+        Some(match value {
+            TokenKind::Keyword(Keyword::None) => Self::None,
+            TokenKind::BoolLit(b) => Self::Bool(b),
+            TokenKind::NumberLit => Self::Number,
+            TokenKind::CharLit => Self::Char,
+            TokenKind::TextLit => Self::Text,
+            TokenKind::Macro => Self::Macro,
+            _ => return None,
+        })
+    }
+
+    pub const fn to_token_kind(self) -> TokenKind {
+        match self {
+            Self::None => TokenKind::Keyword(Keyword::None),
+            Self::Bool(b) => TokenKind::BoolLit(b),
+            Self::Number => TokenKind::NumberLit,
+            Self::Char => TokenKind::CharLit,
+            Self::Text => TokenKind::TextLit,
+            Self::Macro => TokenKind::Macro,
+        }
+    }
+}
+
+impl TryFrom<TokenKind> for LiteralKind {
+    type Error = ();
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or(())
+    }
+}
+
+impl From<LiteralKind> for TokenKind {
+    fn from(value: LiteralKind) -> Self {
+        value.to_token_kind()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Literal {
-    pub kind: TokenKind,
+    pub kind: LiteralKind,
     pub span: RelSpan,
 }
 

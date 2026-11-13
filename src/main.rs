@@ -26,6 +26,7 @@
     const_ops,
     iterator_try_reduce,
     map_try_insert,
+    formatting_options,
 )]
 #![forbid(
     clippy::missing_safety_doc,
