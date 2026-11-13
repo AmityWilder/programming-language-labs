@@ -486,7 +486,6 @@ impl AstNode for TypeInstance {
 /// Fallible Type
 #[derive(Debug, Clone, PartialEq)]
 pub struct FallType {
-    /// Identifier
     pub then_ty: Box<TypeExpr>,
     // `|`
     pub pipe: RelSpan,
@@ -509,7 +508,7 @@ impl AstNode for FallType {
 pub struct RefType {
     /// `@`
     pub sym: RelSpan,
-    // TODO: mutability?
+    // TBD: reference mutability?
     pub ty: Box<TypeExpr>,
 }
 
@@ -626,7 +625,7 @@ pub struct FunType {
     pub kw: RelSpan,
     /// `(`
     pub open: RelSpan,
-    pub args: Vec<TypeExpr>,
+    pub params: Vec<TypeExpr>,
     /// `)`
     pub close: RelSpan,
     pub ret: Option<Box<FunRet>>,

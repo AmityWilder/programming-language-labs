@@ -20,7 +20,12 @@ pub struct ItemId(pub(self) usize);
 
 pub type TypeId = ItemId;
 pub type VarId = ItemId;
-pub type FunId = ItemId;
+
+/// A unique ID for modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ModId(pub(self) usize);
+
+pub type LibId = ModId;
 
 impl std::fmt::Display for ItemId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

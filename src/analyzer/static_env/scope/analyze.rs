@@ -55,7 +55,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
             ast::Decl::Var(inner) => {
                 let ident = inner.binding.ident;
                 let name = &source[ident];
-                let id = self.decl_var(name, ident.within_file(file), inner.clone());
+                let id = self.decl_var(name, inner.clone());
                 let ty = inner.ty.map(|annotation| annotation.ty);
                 let init = inner
                     .assignment
@@ -90,33 +90,30 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                     // TODO: generics
                     let ident = inner.name;
                     let name = &source[ident];
-                    match self.decl_item(name, ident.within_file(file), inner.clone()) {
-                        Ok(id) => hir::Decl::Rec(hir::DeclRec {
-                            id,
-                            fields: inner
-                                .body
-                                .fields
-                                .into_iter()
-                                .map(|field| {
-                                    let ident = field.name;
-                                    let name = &source[ident];
-                                    let ty = field.ty.ty.clone();
-                                    match self.decl_member(id, name, ident.within_file(file), field)
-                                    {
-                                        Ok(id) => hir::Field { id, ty },
-                                        Err(e) => todo!("error: {e:?}"),
-                                    }
-                                })
-                                .collect(),
-                        }),
-                        Err(e) => todo!("error: {e:?}"),
-                    }
+                    let id = self
+                        .decl_item(name, inner.clone())
+                        .map_err(|e| todo!("error declaring rec {name}: {e:?}"))?;
+                    hir::Decl::Rec(hir::DeclRec {
+                        id,
+                        fields: collect_all_errs_if_any(inner.body.fields.into_iter().map(
+                            |field| -> Result<hir::Field, ()> {
+                                let ident = field.name;
+                                let field_name = &source[ident];
+                                let ty = field.ty.ty.clone();
+                                let id = self.decl_member(id, field_name, field).map_err(|e| {
+                                    todo!("error declaring field {name}::{field_name}: {e:?}")
+                                })?;
+                                Ok(hir::Field { id, ty })
+                            },
+                        ))
+                        .map_err(|it| it.for_each(drop))?,
+                    })
                 }
 
                 ast::DeclType::Cat(inner) => {
                     let ident = inner.name;
                     let name = &source[ident];
-                    match self.decl_item(name, ident.within_file(file), inner.clone()) {
+                    match self.decl_item(name, inner.clone()) {
                         Ok(id) => hir::Decl::Cat(hir::DeclCat {
                             id,
                             discriminants: inner
@@ -132,9 +129,9 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
             },
 
             ast::Decl::Defer(inner) => hir::Decl::Defer(hir::DeclDefer {
-                param: inner.param.map(|x| {
-                    self.decl_var(&source[x.param.ident], x.param.ident.within_file(file), x)
-                }),
+                param: inner
+                    .param
+                    .map(|x| self.decl_var(&source[x.param.ident], x)),
                 on_pop: self.analyze_block(file, source, inner.on_pop, diagnostics)?,
             }),
 

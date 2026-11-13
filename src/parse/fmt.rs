@@ -547,7 +547,7 @@ impl LispDisplay for ast::FunType {
             f.write_arg(&ret.ty, source);
         }
         f.call("params", source)
-            .write_arg_iter(self.args.as_slice(), source)
+            .write_arg_iter(self.params.as_slice(), source)
             .finish()?;
         f.finish()
     }

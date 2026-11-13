@@ -741,16 +741,16 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
             .expect("all program units should be valid");
         // TODO: submodules
         let name = code.loc().path().map_or_default(|path| {
-            path.file_stem()
-                .expect("must be a file")
-                .to_str()
-                .unwrap_or_else(|| todo!("invalid characters in name"))
+            let name = path.file_stem().expect("must be a file");
+            name.to_str()
+                .unwrap_or_else(|| todo!("invalid characters in library name {name:?}"))
         });
-        match scope_env.define_library(name.to_string()) {
-            Ok(mut env) => {
+        match scope_env.decl_library(name.to_string()) {
+            Ok(id) => {
+                let mut env = scope_env.define_library(id).expect("just declared");
                 if let Ok(hir) = env.analyze(&source[unit.file], unit, &mut diagnostics) {
                     println!(
-                        "hir:\n{}",
+                        "hir:\n{:#}",
                         DisplayHir {
                             code,
                             env: &scope_env,
@@ -766,7 +766,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
                 }
             }
             Err(e) => {
-                todo!("error: {e:?}");
+                todo!("error declaring library {name}: {e:?}");
             }
         }
     }
