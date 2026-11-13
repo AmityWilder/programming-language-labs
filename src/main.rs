@@ -74,6 +74,7 @@
 // #![warn(unsafe_code)] // not actually a problem, just be very careful
 
 use crate::{
+    analyzer::static_env::scope::fmt::DisplayHir,
     error::Diagnostic,
     highlight::{
         TokenHighlight, highlight,
@@ -734,6 +735,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     // scope analysis
     let mut scope_env = ScopeEnvironment::new();
     for unit in prgm_units {
+        println!("analyzing {:?}", unit.file);
         let code = source
             .get(unit.file)
             .expect("all program units should be valid");
@@ -747,8 +749,20 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
         match scope_env.define_library(name.to_string()) {
             Ok(mut env) => {
                 if let Ok(hir) = env.analyze(&source[unit.file], unit, &mut diagnostics) {
-                    println!("{hir:#?}");
+                    println!(
+                        "hir:\n{}",
+                        DisplayHir {
+                            code,
+                            env: &scope_env,
+                            hir: &hir
+                        }
+                    );
                     // TODO
+                } else {
+                    debug_assert!(
+                        diagnostics.iter().any(|e| e.kind.severity().is_err()),
+                        "should have an error if analysis failed"
+                    );
                 }
             }
             Err(e) => {

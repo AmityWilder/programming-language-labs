@@ -10,12 +10,17 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct HirUnit {
     pub file: FileId,
-    pub stmts: Vec<Decl>,
+    pub decls: Vec<Decl>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BindingPattern {
     pub var: VarId,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PickPattern {
+    // TODO
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,9 +67,11 @@ pub struct DeclUni {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    Block(BlockExpr),
     Binary(Box<Binary>),
     Unary(Box<Unary>),
     Literal(Literal),
+    Directive(Directive),
     Variable(Variable),
 }
 
@@ -85,6 +92,11 @@ pub struct Unary {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Literal {
     // TODO
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Directive {
+    Inpt,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -167,19 +179,8 @@ pub struct PickExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickExprArm {
-    pub pat: BindingPattern,
+    pub pat: PickPattern,
     pub expr: BlockExpr,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PickStmt {
-    pub arms: Vec<PickStmtArm>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PickStmtArm {
-    pub pat: BindingPattern,
-    pub block: BlockStmt,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -201,11 +202,14 @@ pub struct CordStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepStmt {
+    pub pred: Expr,
     pub body: BlockStmt,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForStmt {
+    pub var: BindingPattern,
+    pub iter: Expr,
     pub body: BlockStmt,
 }
 

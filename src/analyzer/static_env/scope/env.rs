@@ -1,11 +1,11 @@
 use crate::{
     analyzer::static_env::{ItemId, VarId},
     parse::ast,
-    src_code::span::Span,
+    src_code::span::{RelSpan, Span},
 };
 use std::collections::HashMap;
 
-#[derive(Debug, PartialEq, ast::AstNodeEnum)]
+#[derive(Debug, Clone, PartialEq, ast::AstNodeEnum)]
 pub enum Decl {
     Mod(ast::DeclMod),
     Rec(ast::DeclRec),
@@ -13,6 +13,19 @@ pub enum Decl {
     Cat(ast::DeclCat),
     Var(ast::DeclVar),
     DeferParam(ast::DeferParam),
+}
+
+impl Decl {
+    pub const fn identifier(&self) -> RelSpan {
+        match self {
+            Self::Mod(inner) => inner.name,
+            Self::Rec(inner) => inner.name,
+            Self::Field(inner) => inner.name,
+            Self::Cat(inner) => inner.name,
+            Self::Var(inner) => inner.binding.ident,
+            Self::DeferParam(inner) => inner.param.ident,
+        }
+    }
 }
 
 impl From<ast::DeclMod> for Decl {
@@ -44,6 +57,12 @@ impl From<ast::DeferParam> for Decl {
     fn from(value: ast::DeferParam) -> Self {
         Self::DeferParam(value)
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Item {
+    pub decl: Decl,
+    pub parent: Option<ItemId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,10 +105,10 @@ pub struct DuplicateMarkingError {
 #[derive(Debug, Default)]
 pub struct ScopeEnvironment<'src> {
     /// Indexed with [`ItemId`]
-    decls: Vec<Decl>,
+    decls: Vec<Item>,
     members: HashMap<ItemId, HashMap<&'src str, ItemId>>,
     ids: HashMap<Span, ItemId>,
-    /// In the order their items would appear in [`Self::items`]
+    /// In the order their items would appear in [`Self::decls`]
     libraries: Vec<LibEntry<'src>>,
 }
 
@@ -101,6 +120,14 @@ impl<'src> ScopeEnvironment<'src> {
             ids: HashMap::new(),
             libraries: Vec::new(),
         }
+    }
+
+    pub fn get_decl(&self, id: ItemId) -> Option<&Item> {
+        self.decls.get(id.0)
+    }
+
+    pub fn get_members(&self, of: ItemId) -> Option<&HashMap<&'src str, ItemId>> {
+        self.members.get(&of)
     }
 
     pub fn get_library(&self, name: &str) -> Option<&LibEntry<'src>> {
@@ -135,7 +162,7 @@ impl<'src> ScopeEnvironment<'src> {
 #[derive(Debug)]
 pub struct ModScopeEnvironment<'env, 'src> {
     /// Indexed with [`ItemId`]
-    decls: &'env mut Vec<Decl>,
+    decls: &'env mut Vec<Item>,
     members: &'env mut HashMap<ItemId, HashMap<&'src str, ItemId>>,
     ids: &'env mut HashMap<Span, ItemId>,
     module: &'env mut Module<'src>,
@@ -197,7 +224,10 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     ) -> Result<ItemId, DuplicateItemError> {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_item(name, id)?;
-        self.decls.push(decl.into()); // now `id` refers to an item
+        self.decls.push(Item {
+            decl: decl.into(),
+            parent: None,
+        }); // now `id` refers to an item
         let res = self.mark_span_item(name_span, id);
         debug_assert_eq!(res, Ok(()), "span should only refer to one item");
         Ok(id)
@@ -214,7 +244,10 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         if let Err(e) = self.members.entry(on).or_default().try_insert(name, id) {
             return Err(DuplicateItemError { og: e.value });
         }
-        self.decls.push(decl.into()); // now `id` refers to an item
+        self.decls.push(Item {
+            decl: decl.into(),
+            parent: None,
+        }); // now `id` refers to an item
         let res = self.mark_span_item(name_span, id);
         debug_assert_eq!(res, Ok(()), "span should only refer to one item");
         Ok(id)
@@ -223,7 +256,10 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     pub fn decl_var(&mut self, name: &'src str, name_span: Span, decl: impl Into<Decl>) -> VarId {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_var(name, id);
-        self.decls.push(decl.into()); // now `id` refers to an item
+        self.decls.push(Item {
+            decl: decl.into(),
+            parent: None,
+        }); // now `id` refers to an item
         let res = self.mark_span_item(name_span, id);
         debug_assert_eq!(res, Ok(()), "span should only refer to one item");
         id
