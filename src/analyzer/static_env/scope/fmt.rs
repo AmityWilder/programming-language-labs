@@ -2,7 +2,7 @@ use crate::{
     analyzer::static_env::{
         ItemId,
         scope::{
-            env::{self, ScopeEnvironment},
+            env::ScopeEnvironment,
             hir::{self, HirUnit},
         },
     },
@@ -18,12 +18,58 @@ use std::fmt;
 mod helpers {
     use super::HirDisplay;
     use crate::{analyzer::static_env::scope::env::ScopeEnvironment, src_code::code::SourceCode};
-    use std::fmt;
+    use std::fmt::{self, Write};
+
+    /// [`std::fmt::PadAdapter`] is private :c
+    pub struct Indented<'buf> {
+        buf: &'buf mut (dyn 'buf + fmt::Write),
+        on_newline: bool,
+    }
+
+    impl<'buf> Indented<'buf> {
+        const INDENT: &str = "  ";
+
+        fn wrap<'slot, 'fmt: 'buf + 'slot>(
+            f: &'fmt mut fmt::Formatter<'_>,
+            slot: &'slot mut Option<Self>,
+        ) -> fmt::Formatter<'slot> {
+            fmt::FormattingOptions::new()
+                .alternate(f.alternate()) // <- the only option that's important in this situation
+                .create_formatter(slot.insert(Self {
+                    buf: f,
+                    on_newline: true,
+                }))
+        }
+    }
+
+    impl Write for Indented<'_> {
+        // while this function looks exactly identical to the one in the standard library,
+        // I actually wrote it BEFORE checking the implementation and I just happened to "convergent evolution" the same definition.
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            for line in s.split_inclusive('\n') {
+                if self.on_newline {
+                    self.buf.write_str(Self::INDENT)?;
+                }
+                self.on_newline = line.ends_with('\n');
+                self.buf.write_str(line)?;
+            }
+            Ok(())
+        }
+
+        // this one I wrote after finding the implementation, and it's basically copy-pasted
+        fn write_char(&mut self, c: char) -> fmt::Result {
+            if self.on_newline {
+                self.buf.write_str(Self::INDENT)?;
+            }
+            self.on_newline = c == '\n';
+            self.buf.write_char(c)
+        }
+    }
 
     pub struct HirBlock<'fmt, 'buf> {
         f: &'fmt mut fmt::Formatter<'buf>,
         res: fmt::Result,
-        has_decls: bool,
+        has_prev: bool,
     }
 
     impl<'fmt, 'buf> HirBlock<'fmt, 'buf> {
@@ -31,7 +77,7 @@ mod helpers {
             Self {
                 res: f.write_str("{"),
                 f,
-                has_decls: false,
+                has_prev: false,
             }
         }
 
@@ -50,20 +96,21 @@ mod helpers {
         {
             self.res = self.res.and_then(|()| {
                 if self.f.alternate() {
-                    if !self.has_decls {
+                    if !self.has_prev {
                         self.f.write_str("\n")?;
                     }
-                    // TODO: indent
-                    fun(source, env, &mut *self.f)?;
+                    let mut slot = None;
+                    let mut writer = Indented::wrap(self.f, &mut slot);
+                    fun(source, env, &mut writer)?;
                     self.f.write_str("\n")
                 } else {
-                    if self.has_decls {
+                    if self.has_prev {
                         self.f.write_str(" ")?;
                     }
                     fun(source, env, &mut *self.f)
                 }
             });
-            self.has_decls = true;
+            self.has_prev = true;
             self
         }
 
@@ -89,24 +136,8 @@ mod helpers {
             D: HirDisplay,
             I: IntoIterator<Item = D>,
         {
-            for decl in items {
-                self.entry(&decl, source, env);
-            }
-            self
-        }
-
-        pub fn entries_with<F, I>(
-            &mut self,
-            items: I,
-            source: &SourceCode,
-            env: &ScopeEnvironment<'_>,
-        ) -> &mut Self
-        where
-            F: FnOnce(&SourceCode, &ScopeEnvironment<'_>, &mut fmt::Formatter<'_>) -> fmt::Result,
-            I: IntoIterator<Item = F>,
-        {
-            for fun in items {
-                self.entry_with(fun, source, env);
+            for item in items {
+                self.entry(&item, source, env);
             }
             self
         }
@@ -155,7 +186,7 @@ impl HirDisplay for ItemId {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         let item = env.get_decl(*self).expect("HIR IDs should be valid");
-        write!(f, "{}{{{}}}", &source[item.decl.identifier()], self)
+        write!(f, "{}#[{}]", &source[item.decl.identifier()], self)
     }
 }
 
@@ -366,20 +397,22 @@ impl HirDisplay for hir::DeclRec {
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Rec)?;
         self.id.fmt(source, env, f)?;
-        HirBlock::new(f)
-            .entries_with(
-                self.fields.iter().map(|field| {
-                    |source: &SourceCode, env: &ScopeEnvironment<'_>, f: &mut fmt::Formatter<'_>| {
-                        field.id.fmt(source, env, f)?;
-                        f.write_str(": ")?;
-                        field.ty.fmt(source, env, f)?;
-                        f.write_str(",")
-                    }
-                }),
-                source,
-                env,
-            )
-            .finish()
+        f.write_str(" ")?;
+        HirBlock::new(f).entries(&self.fields, source, env).finish()
+    }
+}
+
+impl HirDisplay for hir::Field {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        self.id.fmt(source, env, f)?;
+        f.write_str(": ")?;
+        self.ty.fmt(source, env, f)?;
+        f.write_str(",")
     }
 }
 
@@ -566,14 +599,26 @@ impl HirDisplay for hir::Unary {
     }
 }
 
-impl HirDisplay for hir::Literal {
+impl HirDisplay for ast::Literal {
     fn fmt(
         &self,
-        _source: &SourceCode,
+        source: &SourceCode,
         _env: &ScopeEnvironment<'_>,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        write!(f, "<literal>") // TODO
+        write!(
+            f,
+            "{}#[{} literal]",
+            &source[self.span],
+            match self.kind {
+                ast::LiteralKind::None => "none",
+                ast::LiteralKind::Bool(_) => "bool",
+                ast::LiteralKind::Number => "number",
+                ast::LiteralKind::Char => "char",
+                ast::LiteralKind::Text => "text",
+                ast::LiteralKind::Macro => "macro",
+            }
+        )
     }
 }
 
@@ -623,8 +668,10 @@ impl HirDisplay for hir::IfStmt {
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::If)?;
         self.pred.fmt(source, env, f)?;
+        f.write_str(" ")?;
         self.then.fmt(source, env, f)?;
         if let Some(or) = self.or.as_deref() {
+            write!(f, " {} ", Keyword::Or)?;
             or.fmt(source, env, f)?;
         }
         Ok(())

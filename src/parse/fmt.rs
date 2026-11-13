@@ -294,7 +294,7 @@ impl LispDisplay for ast::Unary {
 
 impl LispDisplay for ast::Literal {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        (self.span, self.kind).fmt_value(source, f)
+        (self.span, self.kind.to_token_kind()).fmt_value(source, f)
     }
 }
 
