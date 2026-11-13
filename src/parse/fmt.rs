@@ -36,72 +36,70 @@ mod helpers {
         fn fmt(&self, source: &SourceCode, f: &mut LispCall<'_, '_>) -> fmt::Result;
     }
 
-    pub struct LispCall<'fmt, 'buf>(&'fmt mut fmt::Formatter<'buf>);
+    /// Takes inspiration from [`fmt::Formatter::debug_list`] and the like
+    pub struct LispCall<'fmt, 'buf> {
+        f: &'fmt mut fmt::Formatter<'buf>,
+        res: fmt::Result,
+    }
 
     impl<'fmt, 'buf> LispCall<'fmt, 'buf> {
         pub fn new(
             op: &(impl ?Sized + LispOp),
             source: &SourceCode,
             f: &'fmt mut fmt::Formatter<'buf>,
-        ) -> Result<Self, fmt::Error> {
-            f.write_char('(')?;
-            op.fmt_op(source, f)?;
-            Ok(Self(f))
+        ) -> Self {
+            Self {
+                res: f.write_char('(').and_then(|()| op.fmt_op(source, f)),
+                f,
+            }
         }
 
         pub fn call<'me>(
             &'me mut self,
             op: &(impl ?Sized + LispOp),
             source: &SourceCode,
-        ) -> Result<LispCall<'me, 'buf>, fmt::Error> {
-            self.0.write_char(' ')?;
-            LispCall::new(op, source, self.0)
-        }
-
-        pub fn call_with<'me>(
-            &'me mut self,
-            op: &(impl ?Sized + LispOp),
-            source: &SourceCode,
-            f: impl FnOnce(&mut LispCall<'me, 'buf>) -> Result<(), fmt::Error>,
-        ) -> Result<(), fmt::Error> {
-            let mut call = self.call(op, source)?;
-            f(&mut call)?;
-            call.finish()
+        ) -> LispCall<'me, 'buf> {
+            let f = &mut *self.f;
+            match f.write_char(' ') {
+                Ok(()) => LispCall::new(op, source, f),
+                Err(e) => LispCall { f, res: Err(e) },
+            }
         }
 
         pub fn write_arg<'me>(
             &'me mut self,
             arg: impl LispDisplayValue,
             source: &SourceCode,
-        ) -> Result<&'me mut Self, fmt::Error> {
-            self.0.write_char(' ')?;
-            arg.fmt_value(source, self.0)?;
-            Ok(self)
+        ) -> &'me mut Self {
+            self.res = self
+                .res
+                .and_then(|()| self.f.write_char(' '))
+                .and_then(|()| arg.fmt_value(source, self.f));
+            self
         }
 
         pub fn write_arg_iter<'me>(
             &'me mut self,
             args: impl IntoIterator<Item: LispDisplayValue>,
             source: &SourceCode,
-        ) -> Result<&'me mut Self, fmt::Error> {
+        ) -> &'me mut Self {
             for arg in args {
-                self.0.write_char(' ')?;
-                arg.fmt_value(source, self.0)?;
+                self.write_arg(arg, source);
             }
-            Ok(self)
+            self
         }
 
         pub fn write_args<'me>(
             &'me mut self,
             args: &(impl ?Sized + LispArgs),
             source: &SourceCode,
-        ) -> Result<&'me mut Self, fmt::Error> {
-            args.fmt(source, self)?;
-            Ok(self)
+        ) -> &'me mut Self {
+            self.res = self.res.and_then(|()| args.fmt(source, self));
+            self
         }
 
         pub fn finish(&mut self) -> fmt::Result {
-            self.0.write_char(')')
+            self.res.and_then(|()| self.f.write_char(')'))
         }
     }
 }
@@ -150,32 +148,32 @@ impl LispArgs for [ast::Decl] {
         while let Some(item) = iter.next() {
             match item {
                 ast::Decl::Mod(mdl) => {
-                    f.write_arg(mdl, source)?;
+                    f.write_arg(mdl, source);
                 }
 
                 ast::Decl::Type(ty) => {
-                    f.write_arg(ty, source)?;
+                    f.write_arg(ty, source);
                 }
 
                 ast::Decl::Var(var) => {
-                    f.write_arg(var, source)?;
+                    f.write_arg(var, source);
                     if let Some(assignment) = &var.assignment {
-                        f.call(&assignment.op, source)?
-                            .write_arg(&var.binding, source)?
-                            .write_arg(&assignment.expr, source)?
+                        f.call(&assignment.op, source)
+                            .write_arg(&var.binding, source)
+                            .write_arg(&assignment.expr, source)
                             .finish()?;
                     }
                 }
 
                 ast::Decl::Defer(defer) => {
-                    f.call(&defer.kw, source)?
-                        .write_arg(&defer.on_pop, source)?
-                        .write_args(iter.as_slice(), source)?
+                    f.call(&defer.kw, source)
+                        .write_arg(&defer.on_pop, source)
+                        .write_args(iter.as_slice(), source)
                         .finish()?;
                 }
 
                 ast::Decl::Stmt(inner) => {
-                    f.write_arg(inner, source)?.finish()?;
+                    f.write_arg(inner, source).finish()?;
                 }
             }
         }
@@ -185,24 +183,24 @@ impl LispArgs for [ast::Decl] {
 
 impl LispDisplay for ast::ProgramUnit {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("program_unit", source, f)?
-            .write_args(self.decls.as_slice(), source)?
+        LispCall::new("program_unit", source, f)
+            .write_args(self.decls.as_slice(), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::BlockStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("block", source, f)?
-            .write_args(self.body.as_slice(), source)?
+        LispCall::new("block", source, f)
+            .write_args(self.body.as_slice(), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::DeclMod {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw, source, f)?
-            .write_arg((self.name, Syntax::Modname), source)?
+        LispCall::new(&self.kw, source, f)
+            .write_arg((self.name, Syntax::Modname), source)
             .finish()
     }
 }
@@ -218,78 +216,78 @@ impl LispDisplay for ast::DeclType {
 
 impl LispDisplay for ast::GenericGroup {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("generics", source, f)?
-            .write_arg_iter(self.list.as_slice(), source)?
+        LispCall::new("generics", source, f)
+            .write_arg_iter(self.list.as_slice(), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::DeclRec {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw, source, f)?
-            .write_arg((self.name, Syntax::Typename), source)?
-            .write_arg_iter(self.generics.as_ref(), source)?
-            .write_arg(&self.body, source)?
+        LispCall::new(&self.kw, source, f)
+            .write_arg((self.name, Syntax::Typename), source)
+            .write_arg_iter(self.generics.as_ref(), source)
+            .write_arg(&self.body, source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::FieldSet {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("block", source, f)?
-            .write_arg_iter(self.fields.as_slice(), source)?
+        LispCall::new("block", source, f)
+            .write_arg_iter(self.fields.as_slice(), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::Field {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(":", source, f)?
-            .write_arg((self.name, Syntax::Field), source)?
-            .write_arg(&self.ty.ty, source)?
+        LispCall::new(":", source, f)
+            .write_arg((self.name, Syntax::Field), source)
+            .write_arg(&self.ty.ty, source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::DeclCat {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw, source, f)?
-            .write_arg((self.name, Syntax::Typename), source)?
-            .write_arg(&self.discriminants, source)?
+        LispCall::new(&self.kw, source, f)
+            .write_arg((self.name, Syntax::Typename), source)
+            .write_arg(&self.discriminants, source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::CatDiscSet {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("block", source, f)?
-            .write_arg_iter(self.items.as_slice(), source)?
+        LispCall::new("block", source, f)
+            .write_arg_iter(self.items.as_slice(), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::CatDisc {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("=", source, f)?
-            .write_arg((self.name, Syntax::Discriminant), source)?
-            .write_arg_iter(self.val.as_ref().map(|x| &x.expr), source)?
+        LispCall::new("=", source, f)
+            .write_arg((self.name, Syntax::Discriminant), source)
+            .write_arg_iter(self.val.as_ref().map(|x| &x.expr), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::Binary {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(self.op.as_str(), source, f)?
-            .write_arg(&self.lhs, source)?
-            .write_arg(&self.rhs, source)?
+        LispCall::new(self.op.as_str(), source, f)
+            .write_arg(&self.lhs, source)
+            .write_arg(&self.rhs, source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::Unary {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(self.op.as_str(), source, f)?
-            .write_arg(&self.operand, source)?
+        LispCall::new(self.op.as_str(), source, f)
+            .write_arg(&self.operand, source)
             .finish()
     }
 }
@@ -314,8 +312,8 @@ impl LispDisplay for ast::Variable {
 
 impl LispDisplay for ast::Grouping {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("group", source, f)?
-            .write_arg(&self.expr, source)?
+        LispCall::new("group", source, f)
+            .write_arg(&self.expr, source)
             .finish()
     }
 }
@@ -353,26 +351,26 @@ impl LispDisplay for ast::ExprStmt {
 
 impl LispDisplay for ast::PrintStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw, source, f)?
-            .write_arg(&self.group.expr, source)?
+        LispCall::new(&self.kw, source, f)
+            .write_arg(&self.group.expr, source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::IfStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw, source, f)?
-            .write_arg(&self.pred, source)?
-            .write_arg(&self.then, source)?
-            .write_arg_iter(self.or.as_deref(), source)?
+        LispCall::new(&self.kw, source, f)
+            .write_arg(&self.pred, source)
+            .write_arg(&self.then, source)
+            .write_arg_iter(self.or.as_deref(), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::OrStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw, source, f)?
-            .write_arg(&self.body, source)?
+        LispCall::new(&self.kw, source, f)
+            .write_arg(&self.body, source)
             .finish()
     }
 }
@@ -394,46 +392,44 @@ impl LispDisplay for ast::ScopeLabel {
 
 impl LispDisplay for ast::Label {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.dot, source, f)?
-            .write_arg((self.name, Syntax::Label), source)?
+        LispCall::new(&self.dot, source, f)
+            .write_arg((self.name, Syntax::Label), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::DoneStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw, source, f)?
-            .write_arg_iter(self.label.as_ref(), source)?
-            .write_arg_iter(self.value.as_ref(), source)?
+        LispCall::new(&self.kw, source, f)
+            .write_arg_iter(self.label.as_ref(), source)
+            .write_arg_iter(self.value.as_ref(), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::SkipStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw, source, f)?
-            .write_arg_iter(self.label.as_ref(), source)?
+        LispCall::new(&self.kw, source, f)
+            .write_arg_iter(self.label.as_ref(), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::LoopBlock {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = LispCall::new(&self.kw, source, f)?;
-        f.write_arg_iter(self.label.as_ref(), source)?;
+        let mut f = LispCall::new(&self.kw, source, f);
+        f.write_arg_iter(self.label.as_ref(), source);
         match &self.kind {
-            ast::LoopKind::Loop | ast::LoopKind::Cord => f.write_arg(&self.block, source)?,
+            ast::LoopKind::Loop | ast::LoopKind::Cord => f.write_arg(&self.block, source),
 
-            ast::LoopKind::Rep { pred } => {
-                f.write_arg(pred, source)?.write_arg(&self.block, source)?
-            }
+            ast::LoopKind::Rep { pred } => f.write_arg(pred, source).write_arg(&self.block, source),
 
             ast::LoopKind::For { bind, in_kw, iter } => {
-                f.call(in_kw, source)?
-                    .write_arg(bind, source)?
-                    .write_arg(iter, source)?
+                f.call(in_kw, source)
+                    .write_arg(bind, source)
+                    .write_arg(iter, source)
                     .finish()?;
-                f.write_arg(&self.block, source)?
+                f.write_arg(&self.block, source)
             }
         }
         .finish()
@@ -468,9 +464,9 @@ impl LispDisplay for ast::DeferParam {
 
 impl LispDisplay for ast::DeclVar {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw_span, source, f)?
-            .write_arg(&self.binding, source)?
-            .write_arg_iter(self.ty.as_ref(), source)?
+        LispCall::new(&self.kw_span, source, f)
+            .write_arg(&self.binding, source)
+            .write_arg_iter(self.ty.as_ref(), source)
             // assignment should be handled by the parent Block
             .finish()
     }
@@ -490,37 +486,37 @@ impl LispDisplay for ast::PrimitiveType {
 
 impl LispDisplay for ast::FallType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.pipe, source, f)?
-            .write_arg(&*self.then_ty, source)?
+        LispCall::new(&self.pipe, source, f)
+            .write_arg(&*self.then_ty, source)
             .write_arg(
                 (self.ty_span, TokenKind::from(self.ty.to_keyword())),
                 source,
-            )?
+            )
             .finish()
     }
 }
 
 impl LispDisplay for ast::RefType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.sym, source, f)?
-            .write_arg(&*self.ty, source)?
+        LispCall::new(&self.sym, source, f)
+            .write_arg(&*self.ty, source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::ViewType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("view", source, f)?
-            .write_arg(&*self.item, source)?
-            .write_arg_iter(self.count.as_ref().map(|x| &x.count), source)?
+        LispCall::new("view", source, f)
+            .write_arg(&*self.item, source)
+            .write_arg_iter(self.count.as_ref().map(|x| &x.count), source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::GroupedType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("type_group", source, f)?
-            .write_arg(&self.inner, source)?
+        LispCall::new("type_group", source, f)
+            .write_arg(&self.inner, source)
             .finish()
     }
 }
@@ -536,22 +532,22 @@ impl LispDisplay for ast::AssocTypeSource {
 
 impl LispDisplay for ast::AssocType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.sep, source, f)?
-            .write_arg(&self.base, source)?
-            .write_arg(&self.assoc, source)?
+        LispCall::new(&self.sep, source, f)
+            .write_arg(&self.base, source)
+            .write_arg(&self.assoc, source)
             .finish()
     }
 }
 
 impl LispDisplay for ast::FunType {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = LispCall::new(&self.kw, source, f)?;
+        let mut f = LispCall::new(&self.kw, source, f);
         if let Some(ret) = self.ret.as_deref() {
             // TBD: what about the arrow?
-            f.write_arg(&ret.ty, source)?;
+            f.write_arg(&ret.ty, source);
         }
-        f.call("params", source)?
-            .write_arg_iter(self.args.as_slice(), source)?
+        f.call("params", source)
+            .write_arg_iter(self.args.as_slice(), source)
             .finish()?;
         f.finish()
     }
@@ -574,9 +570,9 @@ impl LispDisplay for ast::TypeExpr {
 impl LispDisplay for ast::TypeInstance {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(args) = self.args.as_ref() {
-            LispCall::new("generic", source, f)?
-                .write_arg(&self.name, source)?
-                .write_arg_iter(args.list.as_slice(), source)?
+            LispCall::new("generic", source, f)
+                .write_arg(&self.name, source)
+                .write_arg_iter(args.list.as_slice(), source)
                 .finish()
         } else {
             self.name.fmt(source, f)
@@ -588,9 +584,9 @@ impl LispDisplay for ast::Typename {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name = (self.name, Syntax::Typename);
         if self.path.is_empty() {
-            LispCall::new("::", source, f)?
-                .write_arg_iter(&self.path, source)?
-                .write_arg(name, source)?
+            LispCall::new("::", source, f)
+                .write_arg_iter(&self.path, source)
+                .write_arg(name, source)
                 .finish()
         } else {
             name.fmt_value(source, f)
