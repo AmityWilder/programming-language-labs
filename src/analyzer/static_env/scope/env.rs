@@ -12,7 +12,7 @@ pub enum Decl {
     Field(ast::Field),
     Cat(ast::DeclCat),
     Var(ast::DeclVar),
-    DeferParam(ast::DeferParam),
+    DferParam(ast::DferParam),
 }
 
 impl Decl {
@@ -23,7 +23,7 @@ impl Decl {
             Self::Field(inner) => inner.name,
             Self::Cat(inner) => inner.name,
             Self::Var(inner) => inner.binding.ident,
-            Self::DeferParam(inner) => inner.param.ident,
+            Self::DferParam(inner) => inner.param.ident,
         }
     }
 }
@@ -53,9 +53,9 @@ impl From<ast::DeclVar> for Decl {
         Self::Var(value)
     }
 }
-impl From<ast::DeferParam> for Decl {
-    fn from(value: ast::DeferParam) -> Self {
-        Self::DeferParam(value)
+impl From<ast::DferParam> for Decl {
+    fn from(value: ast::DferParam) -> Self {
+        Self::DferParam(value)
     }
 }
 

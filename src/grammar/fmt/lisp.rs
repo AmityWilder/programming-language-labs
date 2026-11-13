@@ -240,7 +240,7 @@ impl LispDisplay for Declaration<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Var(inner) => LispDisplay::fmt(inner, f),
-            Self::Defer(_inner) => Ok(()), // wont this leave an extra space?
+            Self::Dfer(_inner) => Ok(()), // wont this leave an extra space?
             Self::Stmt(inner) => LispDisplay::fmt(inner, f),
         }
     }

@@ -1365,7 +1365,7 @@ impl<'src> AstNode<'src> for IfStmt<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct DeferParam<'src> {
+pub struct DferParam<'src> {
     /// `(`
     pub open: Lexeme<'src>,
     pub param: BindingPattern<'src>,
@@ -1373,7 +1373,7 @@ pub struct DeferParam<'src> {
     pub close: Lexeme<'src>,
 }
 
-impl<'src> AstNode<'src> for DeferParam<'src> {
+impl<'src> AstNode<'src> for DferParam<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
         self.open.get_range_start(source)
     }
@@ -1392,14 +1392,14 @@ impl<'src> AstNode<'src> for DeferParam<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq, AstNodeF)]
-pub struct DeclDefer<'src> {
-    /// `defer`
+pub struct DeclDfer<'src> {
+    /// `dfer`
     pub kw: Lexeme<'src>,
-    pub param: Option<DeferParam<'src>>,
+    pub param: Option<DferParam<'src>>,
     pub on_pop: BlockStmt<'src>,
 }
 
-impl<'src> AstNode<'src> for DeclDefer<'src> {
+impl<'src> AstNode<'src> for DeclDfer<'src> {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
         self.kw.get_range_start(source)
     }
@@ -1896,7 +1896,7 @@ impl<'src> AstNode<'src> for DeclVar<'src> {
 #[derive(Debug, Clone, PartialEq, AstEnum, AstNodeF)]
 pub enum Declaration<'src> {
     Var(DeclVar<'src>),
-    Defer(DeclDefer<'src>),
+    Dfer(DeclDfer<'src>),
     Stmt(Statement<'src>),
 }
 
@@ -1905,8 +1905,8 @@ impl<'src> Declaration<'src> {
         Self::Var(inner)
     }
 
-    pub const fn defer(inner: DeclDefer<'src>) -> Self {
-        Self::Defer(inner)
+    pub const fn dfer(inner: DeclDfer<'src>) -> Self {
+        Self::Dfer(inner)
     }
 
     pub const fn stmt(inner: Statement<'src>) -> Self {

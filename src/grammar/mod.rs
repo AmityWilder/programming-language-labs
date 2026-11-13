@@ -6,7 +6,7 @@ use crate::{
     analyzer::types::bounds::Combinator,
     error::ExpectedToken,
     grammar::ast::{
-        Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DeferParam, DoneStmt, ExprStmt,
+        Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DferParam, DoneStmt, ExprStmt,
         IfStmt, OrBody, OrStmt, PrintStmt, Program, Statement, Variable,
     },
     lex::token::Operator,
@@ -323,13 +323,13 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         Ok(Program { decls })
     }
 
-    /// `declaration -> var_declaration | defer_declaration | statement`
+    /// `declaration -> var_declaration | dfer_declaration | statement`
     pub fn declaration(&mut self) -> Result<Declaration<'src>, ContextError<'src>> {
         self.var_declaration()
             .map(|res| res.map(Declaration::var))
             .or_else(|| {
-                self.defer_declaration()
-                    .map(|res| res.map(Declaration::defer))
+                self.dfer_declaration()
+                    .map(|res| res.map(Declaration::dfer))
             })
             .or_else(|| Some(self.statement().map(Declaration::stmt)))
             .ok_or_else(|| self.error(ExpectedToken::Declaration))
@@ -426,28 +426,25 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         })
     }
 
-    /// `defer_declaration -> "defer" ( defer_param )? block_statement`
-    pub fn defer_declaration(
-        &mut self,
-    ) -> Option<Result<ast::DeclDefer<'src>, ContextError<'src>>> {
-        self.pull_if_eq(LexValue::Keyword(Keyword::Defer))
-            .map(|kw| {
-                Ok(ast::DeclDefer {
-                    kw,
-                    param: self.defer_param().transpose()?,
-                    on_pop: self
-                        .block_statement()
-                        .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
-                        .flatten()?,
-                })
+    /// `dfer_declaration -> "dfer" ( dfer_param )? block_statement`
+    pub fn dfer_declaration(&mut self) -> Option<Result<ast::DeclDfer<'src>, ContextError<'src>>> {
+        self.pull_if_eq(LexValue::Keyword(Keyword::Dfer)).map(|kw| {
+            Ok(ast::DeclDfer {
+                kw,
+                param: self.dfer_param().transpose()?,
+                on_pop: self
+                    .block_statement()
+                    .ok_or_else(|| self.error(ExpectedToken::BlockStmt))
+                    .flatten()?,
             })
+        })
     }
 
-    /// `defer_param -> "(" bind_pattern ")"`
-    pub fn defer_param(&mut self) -> Option<Result<ast::DeferParam<'src>, ContextError<'src>>> {
+    /// `dfer_param -> "(" bind_pattern ")"`
+    pub fn dfer_param(&mut self) -> Option<Result<ast::DferParam<'src>, ContextError<'src>>> {
         self.pull_if_eq(LexValue::Punctuation(Punctuation::LParen))
             .map(|open| {
-                Ok(ast::DeferParam {
+                Ok(ast::DferParam {
                     open,
                     param: self
                         .bind_pattern()

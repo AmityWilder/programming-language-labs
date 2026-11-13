@@ -457,14 +457,14 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         })
     }
 
-    /// `declaration -> rec_declaration | cat_declaration | var_declaration | defer_declaration | statement`
+    /// `declaration -> rec_declaration | cat_declaration | var_declaration | dfer_declaration | statement`
     pub fn declaration(&mut self) -> Result<ast::Decl> {
         self.rec_declaration()
             .map_inner(ast::DeclType::Rec)
             .or_else(|| self.cat_declaration().map_inner(ast::DeclType::Cat))
             .map_inner(ast::Decl::Type)
             .or_else(|| self.var_declaration().map_inner(ast::Decl::Var))
-            .or_else(|| self.defer_declaration().map_inner(ast::Decl::Defer))
+            .or_else(|| self.dfer_declaration().map_inner(ast::Decl::Dfer))
             .unwrap_or_else(|| self.statement().map(ast::Decl::Stmt))
     }
 
@@ -608,23 +608,23 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         })
     }
 
-    /// `defer_declaration -> "defer" ( defer_param )? block_statement`
-    pub fn defer_declaration(&mut self) -> Option<Result<ast::DeclDefer>> {
-        self.pull_if_eq(Keyword::Defer).map(|kw| {
-            Ok(ast::DeclDefer {
+    /// `dfer_declaration -> "dfer" ( dfer_param )? block_statement`
+    pub fn dfer_declaration(&mut self) -> Option<Result<ast::DeclDfer>> {
+        self.pull_if_eq(Keyword::Dfer).map(|kw| {
+            Ok(ast::DeclDfer {
                 kw,
-                param: self.defer_param().transpose()?,
+                param: self.dfer_param().transpose()?,
                 on_pop: self.block_statement().ok_or_unexpected(self)?,
             })
         })
     }
 
-    /// `defer_param -> "(" bind_pattern ")"`
-    pub fn defer_param(&mut self) -> Option<Result<ast::DeferParam>> {
+    /// `dfer_param -> "(" bind_pattern ")"`
+    pub fn dfer_param(&mut self) -> Option<Result<ast::DferParam>> {
         self.pull_if_delim(Bracket::Paren, |parser| {
             parser.bind_pattern().ok_or_unexpected(parser)
         })
-        .map_inner(|(open, param, close)| ast::DeferParam { open, param, close })
+        .map_inner(|(open, param, close)| ast::DferParam { open, param, close })
     }
 
     /// `pick_statement -> "pick" expression "{" ( pick_arm ( "," pick_arm )* ( "," )? )? "}"`
