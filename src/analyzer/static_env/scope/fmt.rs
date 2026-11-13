@@ -382,7 +382,7 @@ impl HirDisplay for hir::Decl {
             hir::Decl::Uni(inner) => inner.fmt(source, env, f),
             hir::Decl::Let(inner) => inner.fmt(source, env, f),
             hir::Decl::Pvt(inner) => inner.fmt(source, env, f),
-            hir::Decl::Defer(inner) => inner.fmt(source, env, f),
+            hir::Decl::Dfer(inner) => inner.fmt(source, env, f),
             hir::Decl::Stmt(inner) => inner.fmt(source, env, f),
         }
     }
@@ -481,7 +481,7 @@ impl HirDisplay for hir::DeclPvt {
     }
 }
 
-impl HirDisplay for hir::DeclDefer {
+impl HirDisplay for hir::DeclDfer {
     fn fmt(
         &self,
         source: &SourceCode,

@@ -123,7 +123,7 @@ pub enum Decl {
     Uni(DeclUni),
     Let(DeclLet),
     Pvt(DeclPvt),
-    Defer(DeclDefer),
+    Dfer(DeclDfer),
     Stmt(Stmt),
 }
 
@@ -216,7 +216,7 @@ pub struct DeclLet {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclDefer {
+pub struct DeclDfer {
     pub param: Option<VarId>,
     pub on_pop: BlockStmt,
 }

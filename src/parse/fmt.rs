@@ -165,9 +165,9 @@ impl LispArgs for [ast::Decl] {
                     }
                 }
 
-                ast::Decl::Defer(defer) => {
-                    f.call(&defer.kw, source)
-                        .write_arg(&defer.on_pop, source)
+                ast::Decl::Dfer(dfer) => {
+                    f.call(&dfer.kw, source)
+                        .write_arg(&dfer.on_pop, source)
                         .write_args(iter.as_slice(), source)
                         .finish()?;
                 }
@@ -456,7 +456,7 @@ impl LispDisplay for ast::BindingPattern {
     }
 }
 
-impl LispDisplay for ast::DeferParam {
+impl LispDisplay for ast::DferParam {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.param.fmt(source, f)
     }

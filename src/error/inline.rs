@@ -147,7 +147,7 @@ where
 }
 
 struct CodeRefsQueue<T> {
-    deferred: VecDeque<T>,
+    dferred: VecDeque<T>,
     upcoming: VecDeque<T>,
 }
 
@@ -191,15 +191,15 @@ impl<'src, T: CodeReference> CodeRefs<'src, T> {
         Self {
             source,
             q: CodeRefsQueue {
-                deferred: VecDeque::from(refs),
+                dferred: VecDeque::from(refs),
                 upcoming: VecDeque::new(),
             },
         }
     }
 
     fn render(&mut self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        while !self.q.deferred.is_empty() {
-            std::mem::swap(&mut self.q.upcoming, &mut self.q.deferred);
+        while !self.q.dferred.is_empty() {
+            std::mem::swap(&mut self.q.upcoming, &mut self.q.dferred);
             while let Some(mut group) = CodeRefsGroup::new(self) {
                 group.render(f)?;
             }
@@ -246,7 +246,7 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
                 if prev.file != item.span().file {
                     break;
                 } else if item.span().overlaps(prev) {
-                    self.q.deferred.push_back(item);
+                    self.q.dferred.push_back(item);
                     continue;
                 }
             }

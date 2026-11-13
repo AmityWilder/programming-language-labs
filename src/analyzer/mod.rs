@@ -659,7 +659,7 @@ impl<'src> Analyze<'src> for ast::BlockExpr<'src> {
                 | Statement::Done(_)
                 | Statement::Skip(_)
                 | Statement::Block(_)
-                | Statement::Defer(_) => unreachable!("analysis came from a LoopBlock"),
+                | Statement::Dfer(_) => unreachable!("analysis came from a LoopBlock"),
             }),
             ast::BlockExpr::Block(stmt) => stmt.analyze(source, env, ret).map(BlockExpr::Block),
         }
@@ -1722,7 +1722,7 @@ impl<'src> GetType<'src> for AnalysisBlockStmt<'src> {
     }
 }
 
-fn analyze_defers<'ast, 'src: 'ast, I>(
+fn analyze_dfers<'ast, 'src: 'ast, I>(
     iter: I,
     source: &'src str,
     env: &mut StaticEnvironment<'src>,
@@ -1735,8 +1735,8 @@ where
     let (lo, hi) = iter.size_hint();
     let mut stmts = Vec::with_capacity(hi.unwrap_or(lo));
     while let Some(decl) = iter.next() {
-        if let ast::Declaration::Defer(decl) = decl {
-            stmts.push(Statement::Defer(DeferNode {
+        if let ast::Declaration::Dfer(decl) = decl {
+            stmts.push(Statement::Dfer(DferNode {
                 on_pop: decl.on_pop.analyze(source, env, ret)?,
                 ret_param: decl
                     .param
@@ -1758,7 +1758,7 @@ where
                         .map_err(|e| vec![ContextError::node_error(source, &x.param, e.into())])
                     })
                     .transpose()?,
-                inner: analyze_defers(iter, source, env, ret)?,
+                inner: analyze_dfers(iter, source, env, ret)?,
             }));
             break;
         } else if let Some(stmt) = decl.analyze(source, env, None).transpose() {
@@ -1780,7 +1780,7 @@ impl<'src> Analyze<'src> for ast::BlockStmt<'src> {
         env.push_scope().unwrap_or_else(|| {
             todo!("warning: cannot push a scope here, need to be in a function");
         });
-        let res = analyze_defers(&self.body, source, env, ret);
+        let res = analyze_dfers(&self.body, source, env, ret);
         if env.pop_scope().is_none() {
             todo!("scope pushes and pops should be balanced - tried to pop global scope");
         }
@@ -1807,17 +1807,17 @@ impl<'src> CoagulateVars<'src> for AnalysisBlockStmt<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeferNode<L, O, V> {
+pub struct DferNode<L, O, V> {
     pub inner: BlockStmt<L, O, V>,
     pub ret_param: Option<V>,
     pub on_pop: BlockStmt<L, O, V>,
 }
 
-pub type AnalysisDeferNode<'src> =
-    DeferNode<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
-pub type InterpDeferNode<'src> = DeferNode<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
+pub type AnalysisDferNode<'src> =
+    DferNode<AnalysisLabel<'src>, AnalysisOp<'src>, AnalysisVar<'src>>;
+pub type InterpDferNode<'src> = DferNode<InterpLabel<'src>, InterpOp<'src>, InterpVar<'src>>;
 
-impl<'src> GetType<'src> for AnalysisDeferNode<'src> {
+impl<'src> GetType<'src> for AnalysisDferNode<'src> {
     type Output<'ty>
         = &'ty AbstractType<'src>
     where
@@ -1827,7 +1827,7 @@ impl<'src> GetType<'src> for AnalysisDeferNode<'src> {
         &'ty self,
         env: &'ty StaticEnvironment<'src>,
     ) -> Option<&'ty AbstractType<'src>> {
-        // TBD: can defer change the return type?
+        // TBD: can dfer change the return type?
         self.on_pop
             .get_type(env)
             .filter(|ty| !ty.is_type_eq(&AbstractType::None))
@@ -1835,15 +1835,15 @@ impl<'src> GetType<'src> for AnalysisDeferNode<'src> {
     }
 }
 
-impl<'src> CoagulateVars<'src> for AnalysisDeferNode<'src> {
-    type Interp = InterpDeferNode<'src>;
+impl<'src> CoagulateVars<'src> for AnalysisDferNode<'src> {
+    type Interp = InterpDferNode<'src>;
 
     fn coagulate_vars(
         self,
         s_env: &StaticEnvironment<'src>,
         i_env: &mut InterpEnvironment<'src>,
     ) -> Self::Interp {
-        DeferNode {
+        DferNode {
             inner: self.inner.coagulate_vars(s_env, i_env),
             ret_param: self.ret_param.map(|x| x.coagulate_vars(s_env, i_env)),
             on_pop: self.on_pop.coagulate_vars(s_env, i_env),
@@ -1863,7 +1863,7 @@ pub enum Statement<L, O, V> {
     Done(DoneStmt<L, O, V>),
     Skip(SkipStmt<L>),
     Block(BlockStmt<L, O, V>),
-    Defer(DeferNode<L, O, V>),
+    Dfer(DferNode<L, O, V>),
 }
 
 pub type AnalysisStatement<'src> =
@@ -1888,7 +1888,7 @@ impl<'src> GetType<'src> for AnalysisStatement<'src> {
             Self::Done(stmt) => stmt.get_type(env),
             Self::Skip(stmt) => stmt.get_type(env),
             Self::Block(stmt) => stmt.get_type(env),
-            Self::Defer(node) => node.get_type(env),
+            Self::Dfer(node) => node.get_type(env),
         }
     }
 }
@@ -1934,7 +1934,7 @@ impl<'src> CoagulateVars<'src> for AnalysisStatement<'src> {
             Self::Done(stmt) => Statement::Done(stmt.coagulate_vars(s_env, i_env)),
             Self::Skip(stmt) => Statement::Skip(stmt.coagulate_vars(s_env, i_env)),
             Self::Block(stmt) => Statement::Block(stmt.coagulate_vars(s_env, i_env)),
-            Self::Defer(node) => Statement::Defer(node.coagulate_vars(s_env, i_env)),
+            Self::Dfer(node) => Statement::Dfer(node.coagulate_vars(s_env, i_env)),
         }
     }
 }
@@ -2094,7 +2094,7 @@ impl<'src> Analyze<'src> for ast::Declaration<'src> {
             Self::Var(decl) => decl
                 .analyze(source, env, ret)
                 .map(|x| x.map(Statement::Expr)),
-            Self::Defer(_) => {
+            Self::Dfer(_) => {
                 // TODO: error when at global scope
                 unimplemented!("should be handled by block")
             }

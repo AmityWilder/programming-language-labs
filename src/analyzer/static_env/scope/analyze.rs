@@ -128,7 +128,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 }
             },
 
-            ast::Decl::Defer(inner) => hir::Decl::Defer(hir::DeclDefer {
+            ast::Decl::Dfer(inner) => hir::Decl::Dfer(hir::DeclDfer {
                 param: inner
                     .param
                     .map(|x| self.decl_var(&source[x.param.ident], x)),

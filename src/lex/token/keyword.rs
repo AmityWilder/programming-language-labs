@@ -395,7 +395,7 @@ define_token_eq! {
 
         /// Code that will be executed when scope pops,
         /// whether it's natural or because of a `done`/`give`/`fail`
-        Defer = "defer",
+        Dfer = "dfer",
 
         // Loop control
         /// Quit the loop.
@@ -476,7 +476,7 @@ impl Keyword {
                 | Self::In
                 | Self::Loop
                 | Self::Cord
-                | Self::Defer
+                | Self::Dfer
                 | Self::Done
                 | Self::Skip
                 | Self::Give

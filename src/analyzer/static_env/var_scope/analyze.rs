@@ -39,13 +39,13 @@ impl<'src> ScopeEnvironment<'src> {
                 self.mark_ref(ident.within_file(file), var);
             }
 
-            ast::Decl::Defer(defer) => {
-                if let Some(param) = &defer.param {
+            ast::Decl::Dfer(dfer) => {
+                if let Some(param) = &dfer.param {
                     let ident = param.param.ident;
                     let var = self.decl_item(&code[ident], decl.span().within_file(file));
                     self.mark_ref(ident.within_file(file), var);
                 }
-                for decl in &defer.on_pop.body {
+                for decl in &dfer.on_pop.body {
                     (self.analyze_decl(file, code, decl, diagnostics));
                 }
             }

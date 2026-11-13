@@ -33,8 +33,8 @@ fn test_fruit() {
 }
 
 #[test]
-fn test_defer() {
-    let res = integration_test!("example/defer.bats");
+fn test_dfer() {
+    let res = integration_test!("example/dfer.bats");
     assert!(res.0.is_ok());
 }
 

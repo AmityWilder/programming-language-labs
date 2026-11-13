@@ -1143,7 +1143,7 @@ impl AstNode for PickStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeferParam {
+pub struct DferParam {
     /// `(`
     pub open: RelSpan,
     pub param: BindingPattern,
@@ -1151,7 +1151,7 @@ pub struct DeferParam {
     pub close: RelSpan,
 }
 
-impl AstNode for DeferParam {
+impl AstNode for DferParam {
     fn span_start(&self) -> uspan {
         self.open.start
     }
@@ -1162,14 +1162,14 @@ impl AstNode for DeferParam {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclDefer {
-    /// `defer`
+pub struct DeclDfer {
+    /// `dfer`
     pub kw: RelSpan,
-    pub param: Option<DeferParam>,
+    pub param: Option<DferParam>,
     pub on_pop: BlockStmt,
 }
 
-impl AstNode for DeclDefer {
+impl AstNode for DeclDfer {
     fn span_start(&self) -> uspan {
         self.kw.start
     }
@@ -1445,7 +1445,7 @@ pub enum Decl {
     Mod(DeclMod),
     Var(DeclVar),
     Type(DeclType),
-    Defer(DeclDefer),
+    Dfer(DeclDfer),
     Stmt(Stmt),
 }
 

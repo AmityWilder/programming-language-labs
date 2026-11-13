@@ -6,7 +6,7 @@
 
 use crate::{
     analyzer::{
-        Directive, Expr, InterpAssignment, InterpBlockStmt, InterpCordStmt, InterpDeferNode,
+        Directive, Expr, InterpAssignment, InterpBlockStmt, InterpCordStmt, InterpDferNode,
         InterpDoneStmt, InterpExpr, InterpExprStmt, InterpForStmt, InterpIfStmt, InterpLoopStmt,
         InterpPrintStmt, InterpProgram, InterpRepStmt, InterpSkipStmt, InterpStatement, Literal,
         OrStmt,
@@ -436,48 +436,48 @@ impl<'src> InterpBlockStmt<'src> {
     }
 }
 
-impl<'src> InterpDeferNode<'src> {
+impl<'src> InterpDferNode<'src> {
     fn interp_exec(&self, env: &mut InterpEnvironment<'src>) -> Result<ControlFlow<'src>, Failure> {
-        // defer takes precedence over inner, unless inner fails or the defer has no output, in which case inner wins.
+        // dfer takes precedence over inner, unless inner fails or the dfer has no output, in which case inner wins.
 
         let inner_res = self.inner.interp_exec(env);
         // TODO: pass inner_res into self.ret_param
 
         // even if inner errors, we still want to unwind
-        let defer_res = self.on_pop.interp_exec(env);
+        let dfer_res = self.on_pop.interp_exec(env);
 
         // TBD: what's the difference between Err and ControlFlow::Fail? does it need to be preserved?
         if let Err(inner_err) | Ok(ControlFlow::Fail(inner_err)) = inner_res {
-            // inner error wins, since any defer errors may have cascaded from inner error.
+            // inner error wins, since any dfer errors may have cascaded from inner error.
             return Err(inner_err);
         }
 
-        match defer_res {
+        match dfer_res {
             // TBD: what's the difference between Err and ControlFlow::Fail? does it need to be preserved?
-            Err(defer_err) | Ok(ControlFlow::Fail(defer_err)) => {
+            Err(dfer_err) | Ok(ControlFlow::Fail(dfer_err)) => {
                 // inner didn't error, since it would have been handled earlier.
-                // if defer fails, and inner doesn't, defer always wins.
-                Err(defer_err)
+                // if dfer fails, and inner doesn't, dfer always wins.
+                Err(dfer_err)
             }
 
             Ok(ControlFlow::Continue) => {
-                // defer has no output, inner wins.
+                // dfer has no output, inner wins.
                 inner_res
             }
 
-            Ok(defer_res) => {
-                // defer has a non-error output, defer wins.
+            Ok(dfer_res) => {
+                // dfer has a non-error output, dfer wins.
                 if let Ok(ControlFlow::Skip(_) | ControlFlow::Done(_, _) | ControlFlow::Give(_)) =
                     inner_res
                 {
                     // TBD: what to do with the inner result? is discarding it the most logical plan?
                     debug_warn!(
                         "if `{0}` yeilds a result, then the result of the rest of the scope is consumed! \
-                        give the `{0}` a parameter to pass the result into the defer block.",
-                        Keyword::Defer
+                        give the `{0}` a parameter to pass the result into the dfer block.",
+                        Keyword::Dfer
                     );
                 }
-                Ok(defer_res)
+                Ok(dfer_res)
             }
         }
     }
@@ -496,7 +496,7 @@ impl<'src> InterpStatement<'src> {
             Self::Done(stmt) => stmt.interp_exec(env),
             Self::Skip(stmt) => Ok(stmt.interp_exec(env)),
             Self::Block(stmt) => stmt.interp_exec(env),
-            Self::Defer(node) => node.interp_exec(env),
+            Self::Dfer(node) => node.interp_exec(env),
         }
     }
 }
