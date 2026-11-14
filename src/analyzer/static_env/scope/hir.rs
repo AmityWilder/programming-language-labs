@@ -1,7 +1,7 @@
 //! Type Intermediate Representation
 
 use crate::{
-    analyzer::static_env::{ItemId, TypeId, VarId},
+    analyzer::static_env::{ItemId, ModId, TypeId, VarId},
     lex::token::{Operator, punc::OpSide},
     parse::ast,
     src_code::span::{FileId, RelSpan},
@@ -118,6 +118,7 @@ pub struct PickPattern {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
+    Mod(DeclMod),
     Rec(DeclRec),
     Cat(DeclCat),
     Uni(DeclUni),
@@ -125,6 +126,11 @@ pub enum Decl {
     Pvt(DeclPvt),
     Dfer(DeclDfer),
     Stmt(Stmt),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclMod {
+    pub id: ModId,
 }
 
 #[derive(Debug, Clone, PartialEq)]

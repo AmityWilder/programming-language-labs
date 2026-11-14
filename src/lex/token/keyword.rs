@@ -40,6 +40,12 @@ define_token_eq! {
         // Definitions
         // ----------------------------
 
+        /// Declare a submodule.
+        /// ### Syntax
+        /// ```rs
+        /// mod /* name */;
+        /// ```
+        Mod = "mod",
         /// Define a record structure.
         /// ### Syntax
         /// ```rs

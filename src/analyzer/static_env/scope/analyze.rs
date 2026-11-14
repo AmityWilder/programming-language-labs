@@ -1,10 +1,116 @@
 use super::{env::ModScopeEnvironment, hir};
 use crate::{
+    analyzer::static_env::{ModId, scope::env::ScopeEnvironment},
     error::Diagnostic,
     parse::{ast, util::OkOrFlatten},
-    src_code::{code::SourceCode, span::FileId},
+    src_code::{code::SourceCode, map::SourceMap, span::FileId},
     util::collect_all_errs_if_any,
 };
+use std::collections::{HashMap, HashSet};
+
+impl<'src> ScopeEnvironment<'src> {
+    // needs to be done separately because ModScopEnvironment exclusively borrows the module tree
+    pub fn analyze_module_tree(
+        &mut self,
+        source: &'src SourceMap,
+        prgm: &ast::Program,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> HashMap<FileId, ModId> {
+        #[derive(Debug)]
+        struct TreeNode<'src> {
+            file: FileId,
+            unfound: HashSet<&'src str>,
+            found: HashMap<&'src str, (TreeNode<'src>, ast::DeclMod)>,
+        }
+
+        impl<'src> TreeNode<'src> {
+            fn new(file: FileId) -> Self {
+                Self {
+                    file,
+                    unfound: HashSet::new(),
+                    found: HashMap::new(),
+                }
+            }
+
+            fn decl_children(
+                self,
+                id: ModId,
+                mapping: &mut HashMap<FileId, ModId>,
+                env: &mut ScopeEnvironment<'src>,
+                diagnostics: &mut Vec<Diagnostic>,
+            ) {
+                if self.unfound.is_empty() {
+                    for (child, (node, submod)) in self.found {
+                        match env.decl_submodule(id, child, submod) {
+                            Ok(id) => {
+                                mapping.insert(node.file, id);
+                                node.decl_children(id, mapping, env, diagnostics);
+                            }
+                            Err(e) => {
+                                diagnostics.push(todo!("error declaring submodule {child}: {e:?}"));
+                            }
+                        }
+                    }
+                } else {
+                    diagnostics.push(todo!(
+                        "error: not all submodules located, missing: {:?}",
+                        self.unfound
+                    ));
+                }
+            }
+        }
+
+        let mut forest = HashMap::<String, TreeNode>::new();
+        for unit in prgm {
+            let code = source
+                .get(unit.file)
+                .expect("all program units should be valid");
+
+            let name = code.loc().path().map_or_default(|path| {
+                let name = path.file_stem().expect("must be a file");
+                name.to_str()
+                    .unwrap_or_else(|| todo!("invalid characters in module name {name:?}"))
+            });
+
+            #[expect(
+                irrefutable_let_patterns,
+                reason = "only irrefutable because it's unfinished"
+            )]
+            let Ok(tree) = forest
+                // TODO: what if two modules have the same name on different paths?
+                .try_insert(name.to_string(), TreeNode::new(unit.file))
+                .map_err(|e| todo!("two modules with same name but different path: {e:?}"))
+            else {
+                continue;
+            };
+            // TODO: search forest recursively for unfound modules this could match
+
+            for decl in &unit.decls {
+                if let ast::Decl::Mod(submod) = decl {
+                    let subname = &code[submod.name];
+                    if !tree.unfound.insert(subname) {
+                        diagnostics.push(todo!(
+                            "error: multiple submodules within {name} have the same name ({subname})"
+                        ));
+                    }
+                    // TODO: search forest (root only) for matches
+                }
+            }
+        }
+
+        let mut mapping = HashMap::new();
+        for (name, node) in forest {
+            match self.decl_library(name) {
+                Ok(id) => {
+                    mapping.insert(node.file, id);
+                    node.decl_children(id, &mut mapping, self, diagnostics);
+                }
+                Err(e) => todo!("error declaring library: {e:?}"),
+            }
+        }
+        mapping
+    }
+}
 
 impl<'src> ModScopeEnvironment<'_, 'src> {
     pub fn analyze(
@@ -50,7 +156,12 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::Decl, ()> {
         Ok(match decl {
-            ast::Decl::Mod(_inner) => todo!("submodules"),
+            ast::Decl::Mod(inner) => {
+                let id = self
+                    .find_submodule(&source[inner.name])
+                    .expect("should be handled in pre-scan");
+                hir::Decl::Mod(hir::DeclMod { id })
+            }
 
             ast::Decl::Var(inner) => {
                 let ident = inner.binding.ident;
