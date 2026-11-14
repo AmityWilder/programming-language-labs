@@ -174,13 +174,13 @@ define_token_eq! {
         /// Define member items of a `rec`/`union`/`cat`.
         /// ### Syntax
         /// ```rs
-        /// mem /* rec/union/cat */ {
+        /// on /* rec/union/cat */ {
         ///     // types
         ///     // constants
         ///     // methods
         /// }
         /// ```
-        Mem = "mem",
+        On = "on",
 
         // ----------------------------
         // Value
