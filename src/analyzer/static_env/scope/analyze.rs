@@ -1,10 +1,10 @@
 use super::{env::ModScopeEnvironment, hir};
 use crate::{
     analyzer::static_env::{ModId, scope::env::ScopeEnvironment},
-    error::Diagnostic,
+    error::{CheckDiagnostics, Diagnostic},
     parse::{ast, util::OkOrFlatten},
     src_code::{code::SourceCode, map::SourceMap, span::FileId},
-    util::collect_all_errs_if_any,
+    util::OrAllErrsExt,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -118,17 +118,16 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         source: &'src SourceCode,
         prgm: ast::ProgramUnit,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::HirUnit, ()> {
-        collect_all_errs_if_any(
-            prgm.decls
-                .into_iter()
-                .map(|decl| self.analyze_decl(prgm.file, source, decl, diagnostics)),
-        )
-        .map(|decls| hir::HirUnit {
-            file: prgm.file,
-            decls,
-        })
-        .map_err(|it| it.for_each(drop))
+    ) -> Result<hir::HirUnit, CheckDiagnostics> {
+        prgm.decls
+            .into_iter()
+            .map(|decl| self.analyze_decl(prgm.file, source, decl, diagnostics))
+            .collect_or_drop_all_errs()
+            .map(|decls| hir::HirUnit {
+                file: prgm.file,
+                decls,
+            })
+            .ok_or(CheckDiagnostics)
     }
 
     fn analyze_block(
@@ -137,15 +136,14 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         source: &'src SourceCode,
         block: ast::BlockStmt,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::BlockStmt, ()> {
-        collect_all_errs_if_any(
-            block
-                .body
-                .into_iter()
-                .map(|decl| self.analyze_decl(file, source, decl, diagnostics)),
-        )
-        .map(|decls| hir::BlockStmt { decls })
-        .map_err(|it| it.for_each(drop))
+    ) -> Result<hir::BlockStmt, CheckDiagnostics> {
+        block
+            .body
+            .into_iter()
+            .map(|decl| self.analyze_decl(file, source, decl, diagnostics))
+            .collect_or_drop_all_errs()
+            .map(|decls| hir::BlockStmt { decls })
+            .ok_or(CheckDiagnostics)
     }
 
     fn analyze_decl(
@@ -154,7 +152,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         source: &'src SourceCode,
         decl: ast::Decl,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::Decl, ()> {
+    ) -> Result<hir::Decl, CheckDiagnostics> {
         Ok(match decl {
             ast::Decl::Mod(inner) => {
                 let id = self
@@ -206,8 +204,11 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                         .map_err(|e| todo!("error declaring rec {name}: {e:?}"))?;
                     hir::Decl::Rec(hir::DeclRec {
                         id,
-                        fields: collect_all_errs_if_any(inner.body.fields.into_iter().map(
-                            |field| -> Result<hir::Field, ()> {
+                        fields: inner
+                            .body
+                            .fields
+                            .into_iter()
+                            .map(|field| -> Result<hir::Field, ()> {
                                 let ident = field.name;
                                 let field_name = &source[ident];
                                 let ty = field.ty.ty.clone();
@@ -215,9 +216,9 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                                     todo!("error declaring field {name}::{field_name}: {e:?}")
                                 })?;
                                 Ok(hir::Field { id, ty })
-                            },
-                        ))
-                        .map_err(|it| it.for_each(drop))?,
+                            })
+                            .collect_or_drop_all_errs()
+                            .ok_or(CheckDiagnostics)?,
                     })
                 }
 
@@ -258,7 +259,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         source: &'src SourceCode,
         stmt: ast::Stmt,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::Stmt, ()> {
+    ) -> Result<hir::Stmt, CheckDiagnostics> {
         match stmt {
             ast::Stmt::Expr(inner) => self
                 .analyze_expr(file, source, inner.expr, diagnostics)
@@ -298,7 +299,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         source: &'src SourceCode,
         stmt: ast::IfStmt,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::IfStmt, ()> {
+    ) -> Result<hir::IfStmt, CheckDiagnostics> {
         let pred = self.analyze_expr(file, source, stmt.pred, diagnostics);
         let then = self.analyze_block(file, source, stmt.then, diagnostics);
         let or = stmt
@@ -325,7 +326,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         source: &'src SourceCode,
         stmt: ast::LoopBlock,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::Stmt, ()> {
+    ) -> Result<hir::Stmt, CheckDiagnostics> {
         let label = stmt.label.map(|name| hir::Label {
             name: name.label.name,
         });
@@ -360,7 +361,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         source: &'src SourceCode,
         expr: ast::Expr,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::Expr, ()> {
+    ) -> Result<hir::Expr, CheckDiagnostics> {
         match expr {
             ast::Expr::Block(inner) => Ok(hir::Expr::Block(match inner {
                 ast::BlockExpr::If(inner) => self
