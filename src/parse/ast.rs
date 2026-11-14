@@ -370,7 +370,7 @@ impl TryFrom<TokenKind> for Option<TypenameKeyword> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NamespacePathPart {
     /// Identifier
     pub name: RelSpan,
@@ -424,7 +424,7 @@ impl AstNode for IffClause {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PrimitiveType {
     pub ty: TypenameKeyword,
     pub span: RelSpan,
@@ -899,7 +899,7 @@ impl From<LiteralKind> for TokenKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Literal {
     pub kind: LiteralKind,
     pub span: RelSpan,
@@ -973,7 +973,7 @@ impl TryFrom<TokenKind> for DirectiveKw {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Directive {
     pub kw: DirectiveKw,
     pub kw_span: RelSpan,
@@ -993,7 +993,7 @@ impl AstNode for Directive {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Variable {
     /// Identifier
     pub ident: RelSpan,
@@ -1253,7 +1253,7 @@ impl AstNode for DoneStmt {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SkipStmt {
     /// `skip`
     pub kw: RelSpan,
@@ -1453,7 +1453,7 @@ impl Expectable for Decl {
     const EXPECTED: ExpectedToken = ExpectedToken::Declaration;
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DeclMod {
     // TBD: visibility?
     /// `mod`
@@ -1556,7 +1556,7 @@ impl AstNode for Assignment {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Label {
     /// `.`
     pub dot: RelSpan,
@@ -1574,7 +1574,7 @@ impl AstNode for Label {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScopeLabel {
     pub label: Label,
     /// `:`

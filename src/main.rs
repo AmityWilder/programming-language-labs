@@ -694,26 +694,19 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
         return (Err(()), diagnostics);
     }
 
-    let prgm_units: Vec<_> = source
-        .iter_mut()
-        .filter(|(_, code)| {
+    let Ok(prgm) = parse::parse(
+        source.iter().filter(|(_, code)| {
             // only parse post-processed files, or files that have no preprocessor directives
             code.preproc().is_none()
                 || matches!(
                     code.loc(),
                     SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
                 )
-        })
-        .filter_map(|(id, code)| {
-            parse::parse(
-                id,
-                usize_to_uspan(code.content().len()),
-                code.tokens().iter(),
-                &mut diagnostics,
-            )
-            .ok()
-        })
-        .collect();
+        }),
+        &mut diagnostics,
+    ) else {
+        return (Err(()), diagnostics);
+    };
 
     // parse errors
     if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
@@ -721,7 +714,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     }
 
     // lisp debug
-    for unit in &prgm_units {
+    for unit in &prgm {
         let source = source
             .get(unit.file)
             .expect("program unit should have valid file ID");
@@ -735,40 +728,42 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
 
     // scope analysis
     let mut scope_env = ScopeEnvironment::new();
-    for unit in prgm_units {
+
+    println!("generating module tree...");
+    let mapping = scope_env.analyze_module_tree(source, &prgm, &mut diagnostics);
+
+    // module tree errors
+    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
+        return (Err(()), diagnostics);
+    }
+    println!();
+
+    for unit in prgm {
+        let &id = mapping
+            .get(&unit.file)
+            .expect("should have been defined by `analyze_module_tree`");
         println!("analyzing {:?}", unit.file);
         let code = source
             .get(unit.file)
             .expect("all program units should be valid");
-        // TODO: submodules
-        let name = code.loc().path().map_or_default(|path| {
-            let name = path.file_stem().expect("must be a file");
-            name.to_str()
-                .unwrap_or_else(|| todo!("invalid characters in library name {name:?}"))
-        });
-        match scope_env.decl_library(name.to_string()) {
-            Ok(id) => {
-                let mut env = scope_env.define_library(id).expect("just declared");
-                if let Ok(hir) = env.analyze(&source[unit.file], unit, &mut diagnostics) {
-                    println!(
-                        "hir:\n{:#}",
-                        DisplayHir {
-                            code,
-                            env: &scope_env,
-                            hir: &hir
-                        }
-                    );
-                    // TODO
-                } else {
-                    debug_assert!(
-                        diagnostics.iter().any(|e| e.kind.severity().is_err()),
-                        "should have an error if analysis failed"
-                    );
+        let mut env = scope_env
+            .define_module(id)
+            .expect("should have been defined by `analyze_module_tree`");
+        if let Ok(hir) = env.analyze(&source[unit.file], unit, &mut diagnostics) {
+            println!(
+                "hir:\n{:#}",
+                DisplayHir {
+                    code,
+                    env: &scope_env,
+                    hir: &hir
                 }
-            }
-            Err(e) => {
-                todo!("error declaring library {name}: {e:?}");
-            }
+            );
+            // TODO
+        } else {
+            debug_assert!(
+                diagnostics.iter().any(|e| e.kind.severity().is_err()),
+                "should have an error if analysis failed"
+            );
         }
     }
 

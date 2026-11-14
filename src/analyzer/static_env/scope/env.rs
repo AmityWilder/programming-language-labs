@@ -3,7 +3,7 @@ use crate::{
     parse::ast,
     src_code::span::RelSpan,
 };
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, PartialEq, ast::AstNodeEnum)]
 pub enum Decl {
@@ -134,19 +134,10 @@ impl<'src> ModEntry<'src> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
-pub struct DuplicateLibraryError {
-    /// The ID of the original library
-    pub og: LibId,
+pub struct DuplicateModuleError {
+    /// The ID of the original declaration
+    pub og: ModId,
 }
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DuplicateModuleError<'env> {
-    /// The site of the original declaration
-    pub og: &'env ast::DeclMod,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash, Default)]
-pub struct DuplicateSubmoduleError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct DuplicateItemError {
@@ -174,7 +165,7 @@ pub struct DuplicateMarkingError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateSubmoduleError {
     UnknownParent(UndeclaredModuleError),
-    DuplicateChild(DuplicateSubmoduleError),
+    DuplicateChild(DuplicateModuleError),
 }
 
 #[derive(Debug, Default)]
@@ -215,9 +206,9 @@ impl<'src> ScopeEnvironment<'src> {
         self.modules.get_mut(id.0)
     }
 
-    pub fn decl_library(&mut self, name: String) -> Result<LibId, DuplicateLibraryError> {
+    pub fn decl_library(&mut self, name: String) -> Result<LibId, DuplicateModuleError> {
         if let Some(og) = self.find_library(name.as_str()) {
-            Err(DuplicateLibraryError { og })
+            Err(DuplicateModuleError { og })
         } else {
             let id = ModId(self.modules.len());
             self.modules.push(ModEntry::Library(LibEntry {
@@ -241,7 +232,7 @@ impl<'src> ScopeEnvironment<'src> {
             .and_then(|parent| {
                 parent
                     .def_mut()
-                    .decl_submodule(id)
+                    .decl_submodule(name, id)
                     .map_err(CreateSubmoduleError::DuplicateChild)
             })?;
         self.modules.push(ModEntry::Submodule(SubEntry {
@@ -252,9 +243,9 @@ impl<'src> ScopeEnvironment<'src> {
         Ok(id)
     }
 
-    pub fn define_library(
+    pub fn define_module(
         &mut self,
-        id: LibId,
+        id: ModId,
     ) -> Result<ModScopeEnvironment<'_, 'src>, UndeclaredModuleError> {
         self.modules
             .get_mut(id.0)
@@ -342,7 +333,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
 /// Functions have special scope limited to only themselves and global scope
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Module<'src> {
-    submodules: BTreeSet<ModId>,
+    submodules: BTreeMap<&'src str, ModId>,
     /// NOTE: this does NOT represent "the scope where all global variables belong",
     /// this is just the scope of all things outside of any function!!
     /// It is used to guarantee the stack is never empty.
@@ -353,14 +344,22 @@ pub struct Module<'src> {
 impl<'src> Module<'src> {
     pub fn new() -> Self {
         Self {
-            submodules: BTreeSet::new(),
+            submodules: BTreeMap::new(),
             global: Scope::new(),
             layers: Vec::new(),
         }
     }
 
-    fn decl_submodule(&mut self, id: ModId) -> Result<(), DuplicateSubmoduleError> {
-        self.submodules.insert(id).ok_or(DuplicateSubmoduleError)
+    pub fn find_submodule(&self, name: &str) -> Option<ModId> {
+        self.submodules.get(name).copied()
+    }
+
+    fn decl_submodule(&mut self, name: &'src str, id: ModId) -> Result<(), DuplicateModuleError> {
+        if let Some(og) = self.submodules.insert(name, id) {
+            Err(DuplicateModuleError { og })
+        } else {
+            Ok(())
+        }
     }
 
     fn decl_item(&mut self, name: &'src str, id: ItemId) -> Result<(), DuplicateItemError> {

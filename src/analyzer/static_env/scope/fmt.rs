@@ -1,6 +1,6 @@
 use crate::{
     analyzer::static_env::{
-        ItemId,
+        ItemId, ModId,
         scope::{
             env::ScopeEnvironment,
             hir::{self, HirUnit},
@@ -187,6 +187,18 @@ impl HirDisplay for ItemId {
     ) -> fmt::Result {
         let item = env.get_decl(*self).expect("HIR IDs should be valid");
         write!(f, "{}#[{}]", &source[item.decl.identifier()], self)
+    }
+}
+
+impl HirDisplay for ModId {
+    fn fmt(
+        &self,
+        _source: &SourceCode,
+        env: &ScopeEnvironment<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        let module = env.get_module(*self).expect("HIR IDs should be valid");
+        write!(f, "{}#[{}]", module.name(), self)
     }
 }
 
@@ -377,6 +389,7 @@ impl HirDisplay for hir::Decl {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
+            hir::Decl::Mod(inner) => inner.fmt(source, env, f),
             hir::Decl::Rec(inner) => inner.fmt(source, env, f),
             hir::Decl::Cat(inner) => inner.fmt(source, env, f),
             hir::Decl::Uni(inner) => inner.fmt(source, env, f),
@@ -385,6 +398,19 @@ impl HirDisplay for hir::Decl {
             hir::Decl::Dfer(inner) => inner.fmt(source, env, f),
             hir::Decl::Stmt(inner) => inner.fmt(source, env, f),
         }
+    }
+}
+
+impl HirDisplay for hir::DeclMod {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        write!(f, "{} ", Keyword::Mod)?;
+        self.id.fmt(source, env, f)?;
+        f.write_str(";")
     }
 }
 

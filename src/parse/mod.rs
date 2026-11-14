@@ -6,7 +6,12 @@ use crate::{
         keyword::Keyword,
         punc::{BadBracketCombo, Bracket, OpSide, Punctuation},
     },
-    src_code::span::{FileId, RelSpan, uspan},
+    src_code::{
+        code::SourceCode,
+        map::SourceMap,
+        span::{FileId, RelSpan, usize_to_uspan, uspan},
+    },
+    util::collect_all_errs_if_any,
 };
 use ast::{Expectable, ExpectableExt};
 
@@ -90,7 +95,27 @@ impl<T: Expectable> ParserExpect for Option<Result<T>> {
     }
 }
 
-pub fn parse<I>(
+pub fn parse<'src, I>(
+    iter: I,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> std::result::Result<ast::Program, ()>
+where
+    I: IntoIterator<Item = (FileId, &'src SourceCode)>,
+{
+    Ok(ast::Program {
+        units: collect_all_errs_if_any(iter.into_iter().map(|(id, code)| {
+            parse_unit(
+                id,
+                usize_to_uspan(code.content().len()),
+                code.tokens().iter(),
+                diagnostics,
+            )
+        }))
+        .map_err(|it| it.for_each(drop))?,
+    })
+}
+
+pub fn parse_unit<I>(
     file: FileId,
     file_len: uspan,
     tokens: I,
