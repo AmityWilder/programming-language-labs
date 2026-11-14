@@ -490,7 +490,7 @@ impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
 
     fn sync(&mut self) {
         use Keyword::{
-            Alt, Cat, Cord, Def, Done, Emit, Fail, For, Fun, Give, If, Let, Loop, Mem, Or, Pick,
+            Alt, Cat, Cord, Def, Done, Emit, Fail, For, Fun, Give, If, Let, Loop, On, Or, Pick,
             Prnt, Pvt, Rec, Rep, Skip, Sub, Sup, Uni,
         };
         while let Some((_, kind)) = self.pull() {
@@ -510,12 +510,11 @@ impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
                             | Sub
                             | Def
                             | Fun
-                            | Mem
+                            | On
                             | Let
                             | Uni
                             | Pvt
                             | If
-                            | Or
                             | Pick
                             | Rep
                             | For

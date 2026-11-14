@@ -291,7 +291,7 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
 
             // start of new statement/definition
             if self.tokens.peek().is_some_and(match_token!(Keyword::{
-                Rec | Sup | Cat | Alt | Sub | Def | Fun | Mem | Let | Uni | Pvt | If |
+                Rec | Sup | Cat | Alt | Sub | Def | Fun | On | Let | Uni | Pvt | If |
                 Or | Pick | Rep | For | Loop | Cord | Done | Skip | Give | Fail | Emit | Prnt
             })) {
                 break;
