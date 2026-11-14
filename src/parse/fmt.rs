@@ -292,6 +292,24 @@ impl LispDisplay for ast::Unary {
     }
 }
 
+impl LispDisplay for ast::Subscript {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("index", source, f)
+            .write_arg(&self.arr, source)
+            .write_arg(&self.index, source)
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::FnCall {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("call", source, f)
+            .write_arg(&self.fun, source)
+            .write_arg_iter(&self.args, source)
+            .finish()
+    }
+}
+
 impl LispDisplay for ast::Literal {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         (self.span, self.kind.to_token_kind()).fmt_value(source, f)
@@ -334,6 +352,8 @@ impl LispDisplay for ast::Expr {
             Self::Block(inner) => inner.fmt(source, f),
             Self::Binary(inner) => inner.fmt(source, f),
             Self::Unary(inner) => inner.fmt(source, f),
+            Self::Index(inner) => inner.fmt(source, f),
+            Self::Call(inner) => inner.fmt(source, f),
             Self::Literal(inner) => inner.fmt(source, f),
             Self::Directive(inner) => inner.fmt(source, f),
             Self::Variable(inner) => inner.fmt(source, f),

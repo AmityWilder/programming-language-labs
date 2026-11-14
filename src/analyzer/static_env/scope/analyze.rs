@@ -410,6 +410,29 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 operand: self.analyze_expr(file, source, inner.operand, diagnostics)?,
             }))),
 
+            ast::Expr::Index(inner) => {
+                let arr = self.analyze_expr(file, source, inner.arr, diagnostics);
+                let idx = self.analyze_expr(file, source, inner.index, diagnostics);
+                Ok(hir::Expr::Index(Box::new(hir::Subscript {
+                    arr: arr?,
+                    idx: idx?,
+                })))
+            }
+
+            ast::Expr::Call(inner) => {
+                let fun = self.analyze_expr(file, source, inner.fun, diagnostics);
+                let args = inner
+                    .args
+                    .into_iter()
+                    .map(|arg| self.analyze_expr(file, source, arg, diagnostics))
+                    .collect_or_drop_all_errs()
+                    .ok_or(CheckDiagnostics);
+                Ok(hir::Expr::Call(Box::new(hir::FnCall {
+                    fun: fun?,
+                    args: args?,
+                })))
+            }
+
             ast::Expr::Literal(inner) => Ok(hir::Expr::Literal(inner)),
 
             ast::Expr::Directive(inner) => Ok(hir::Expr::Directive(match inner.kw {

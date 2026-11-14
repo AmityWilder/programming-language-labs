@@ -565,6 +565,8 @@ impl HirDisplay for hir::Expr {
             hir::Expr::Block(inner) => inner.fmt(source, env, f),
             hir::Expr::Binary(inner) => inner.fmt(source, env, f),
             hir::Expr::Unary(inner) => inner.fmt(source, env, f),
+            hir::Expr::Index(inner) => inner.fmt(source, env, f),
+            hir::Expr::Call(inner) => inner.fmt(source, env, f),
             hir::Expr::Literal(inner) => inner.fmt(source, env, f),
             hir::Expr::Directive(inner) => inner.fmt(source, env, f),
             hir::Expr::Variable(inner) => inner.fmt(source, env, f),
@@ -620,6 +622,41 @@ impl HirDisplay for hir::Unary {
                 fmt::Display::fmt(self.op.as_str(), f)?;
                 self.operand.fmt(source, env, f)?;
             }
+        }
+        f.write_str(")")
+    }
+}
+
+impl HirDisplay for hir::Subscript {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        self.arr.fmt(source, env, f)?;
+        f.write_str("[")?;
+        self.idx.fmt(source, env, f)?;
+        f.write_str("]")
+    }
+}
+
+impl HirDisplay for hir::FnCall {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment<'_>,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        self.fun.fmt(source, env, f)?;
+        f.write_str("(")?;
+        let mut has_prev = false;
+        for arg in &self.args {
+            if has_prev {
+                f.write_str(", ")?;
+            }
+            has_prev = true;
+            arg.fmt(source, env, f)?;
         }
         f.write_str(")")
     }

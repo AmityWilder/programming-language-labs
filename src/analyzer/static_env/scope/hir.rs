@@ -169,6 +169,8 @@ pub enum Expr {
     Block(BlockExpr),
     Binary(Box<Binary>),
     Unary(Box<Unary>),
+    Index(Box<Subscript>),
+    Call(Box<FnCall>),
     Literal(ast::Literal),
     Directive(Directive),
     Variable(Variable),
@@ -186,6 +188,18 @@ pub struct Unary {
     pub op: Operator,
     pub operand: Expr,
     pub side: OpSide,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Subscript {
+    pub arr: Expr,
+    pub idx: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnCall {
+    pub fun: Expr,
+    pub args: Vec<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

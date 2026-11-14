@@ -1309,7 +1309,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "conversion", x))
     }
 
-    /// `unary_postfix -> primary ( "?" | "++" | "--" )*`
+    /// `unary_postfix -> primary ( "?" | "++" | "--" | subscript | fn_call )*`
     fn unary_postfix(&mut self) -> Result<ast::Expr> {
         push_parse_call!(self, "unary_postfix");
         self.primary()
@@ -1328,6 +1328,8 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             })
             .inspect_always(|x| pop_parse_call!(self, "unary_postfix", x))
     }
+
+    // TODO: index and call
 
     /// `primary -> literal | group | variable | directive`
     fn primary(&mut self) -> Result<ast::Expr> {
