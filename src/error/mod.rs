@@ -30,6 +30,10 @@ use std::fmt::{self, Display, Formatter};
 pub mod fail;
 pub mod inline;
 
+/// Indicator that the error(s) have been output to the diagnostics vec, rather than being in the return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct CheckDiagnostics;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum NumberBase {
     Bin,

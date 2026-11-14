@@ -626,6 +626,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     let mut diagnostics = Vec::new();
 
     // scanner
+    println!("scanning...");
     for (id, file) in source.iter_mut() {
         file.set_tokens(lex::lex(id, file.content(), &mut diagnostics));
     }
@@ -656,6 +657,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     // TODO: how to prevent REPL from generating preprocessed copies every time?
 
     // preprocessing
+    println!("preprocessing...");
     let preprocessed = source
         .iter()
         .filter_map(|(id, file)| pre::preprocess(id, file, source, &mut diagnostics))
@@ -671,6 +673,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
             .expect("preprocessor should reference legitimate, existing files")
             .set_preproc(pp_id);
     }
+
     // preprocessor syntax highlighted
     if config.preproc_highlight {
         println!();
@@ -694,6 +697,8 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
         return (Err(()), diagnostics);
     }
 
+    // parse
+    println!("parsing...");
     let Ok(prgm) = parse::parse(
         source.iter().filter(|(_, code)| {
             // only parse post-processed files, or files that have no preprocessor directives
@@ -738,6 +743,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     }
     println!();
 
+    println!("analyzing scope...");
     for unit in prgm {
         let &id = mapping
             .get(&unit.file)

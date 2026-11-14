@@ -1,3 +1,5 @@
+mod apples;
+
 {
     prnt("name a fruit\n");
     cord {
@@ -7,7 +9,8 @@
             let color;
             cord {
                 color = inpt;
-                if color != "red" & color != "yellow" & color != "green" {
+                let apple = Apple { color };
+                if is_valid(apple) {
                     prnt("I don't know any " + color + " apples\n");
                     skip;
                 }
