@@ -158,22 +158,6 @@ impl<'src> ScopeEnvironment<'src> {
         expr: &ast::Expr,
         diagnostics: &mut Vec<Diagnostic>,
     ) {
-        match expr {
-            ast::Expr::Block(inner) => todo!(),
-
-            ast::Expr::Binary(inner) => todo!(),
-
-            ast::Expr::Unary(inner) => todo!(),
-
-            ast::Expr::Literal(inner) => todo!(),
-
-            ast::Expr::Directive(inner) => todo!(),
-
-            ast::Expr::Variable(inner) => todo!(),
-
-            ast::Expr::Grouping(inner) => todo!(),
-
-            ast::Expr::Type(inner) => todo!(),
-        }
+        todo!()
     }
 }

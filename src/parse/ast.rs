@@ -179,6 +179,61 @@ impl Unary {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Subscript {
+    /// Primary expression
+    pub arr: Expr,
+    /// `[`
+    pub open: RelSpan,
+    pub index: Expr,
+    /// `]`
+    pub close: RelSpan,
+}
+
+impl AstNode for Subscript {
+    fn span_start(&self) -> uspan {
+        self.arr.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
+}
+
+impl Subscript {
+    pub const fn precedence(&self) -> ExprPrecedence {
+        ExprPrecedence::UnaryPost
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnCall {
+    /// Primary expression
+    pub fun: Expr,
+    /// `(`
+    pub open: RelSpan,
+    /// Comma-separated, but the commas arent kept
+    pub args: Vec<Expr>,
+    /// `)`
+    pub close: RelSpan,
+}
+
+impl AstNode for FnCall {
+    fn span_start(&self) -> uspan {
+        self.fun.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
+}
+
+impl FnCall {
+    pub const fn precedence(&self) -> ExprPrecedence {
+        ExprPrecedence::UnaryPost
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Grouping {
     /// `(`
     pub open: RelSpan,
@@ -1026,6 +1081,8 @@ pub enum Expr {
     Block(BlockExpr),
     Binary(Box<Binary>),
     Unary(Box<Unary>),
+    Index(Box<Subscript>),
+    Call(Box<FnCall>),
     Literal(Literal),
     Directive(Directive),
     Variable(Variable),
