@@ -490,8 +490,8 @@ impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
 
     fn sync(&mut self) {
         use Keyword::{
-            Alt, Cat, Cord, Def, Done, Emit, Fail, For, Fun, Give, If, Let, Loop, On, Or, Pick,
-            Prnt, Pvt, Rec, Rep, Skip, Sub, Sup, Uni,
+            Alt, Cat, Cord, Def, Done, Emit, Fail, For, Fun, Give, If, Let, Loop, On, Pick, Prnt,
+            Pvt, Rec, Rep, Skip, Sub, Sup, Uni,
         };
         while let Some((_, kind)) = self.pull() {
             // end of current statement
@@ -1767,7 +1767,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "colon_bound", x))
     }
 
-    /// `shape_bound -> "fun" "(" ( type_expression ( "," type_expression )* ( "," )? )? ")" "->" type_expression`
+    /// `shape_bound -> "fun" "(" ( type_expression ( "," type_expression )* ( "," )? )? ")" ( shape_bound_ret )?`
     fn shape_bound(&mut self) -> Option<Result<ast::ShapeBound>> {
         push_parse_call!(self, "shape_bound");
         self.pull_if_eq(Keyword::Fun)
@@ -1788,11 +1788,23 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                     open,
                     args,
                     close,
-                    arrow: self.try_pull_eq(Punctuation::Arrow)?,
-                    ret: self.type_expression()?,
+                    ret: self.shape_bound_ret().transpose()?,
                 })
             })
             .inspect_always(|x| pop_parse_call!(self, "shape_bound", x))
+    }
+
+    /// `shape_bound_ret -> "->" type_expression`
+    fn shape_bound_ret(&mut self) -> Option<Result<ast::ShapeBoundRet>> {
+        push_parse_call!(self, "shape_bound_ret");
+        self.pull_if_eq(Punctuation::Arrow)
+            .map(|arrow| {
+                Ok(ast::ShapeBoundRet {
+                    arrow,
+                    ty: self.type_expression()?,
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "shape_bound_ret", x))
     }
 
     /// `expr_bound -> "for" IDENTIFIER ":" expression`

@@ -477,6 +477,15 @@ pub enum TokenEq {
     Punctuation(Punctuation),
 }
 
+impl From<TokenEq> for TokenKind {
+    fn from(value: TokenEq) -> Self {
+        match value {
+            TokenEq::Keyword(x) => TokenKind::Keyword(x),
+            TokenEq::Punctuation(x) => TokenKind::Punc(x),
+        }
+    }
+}
+
 impl TokenEq {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -595,6 +604,11 @@ pub enum Operator : TokenEq {
     Punctuation::Convert,
     Punctuation::Transmute,
 
+    // preprocessor only
+    Punctuation::MacroConcat,
+    Punctuation::MacroStringify,
+    Punctuation::MacroConst,
+
     Keyword::Szof,
 }
 }
@@ -664,6 +678,9 @@ impl Operator {
             Self::Lt | Self::Gt | Self::Le | Self::Ge => ExprPrecedence::Comparison,
             Self::Ne | Self::Eq => ExprPrecedence::Equality,
             Self::Convert | Self::Transmute => ExprPrecedence::Conversion,
+
+            // TBD
+            Self::MacroConcat | Self::MacroStringify | Self::MacroConst => todo!(),
         }
     }
 }

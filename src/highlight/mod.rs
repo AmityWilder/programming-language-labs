@@ -341,16 +341,20 @@ fn highlight_iter_closure<'src, T>(item: T) -> HighlightToken<'src>
 where
     T: TokenHighlight<'src>,
 {
-    let (lex, syn, val) = item.get_syntax();
-    match val {
-        // char literal with escape - an iterator
-        SubTokenable::EscapedChar => HighlightToken::CharLiteral(escaped_char_literal(lex, syn)),
+    let (lex, syn) = item.get_syntax();
+    match syn {
+        // char literal with escape
+        Syntax::CharLiteral if lex.contains(ESCAPE) => {
+            HighlightToken::CharLiteral(escaped_char_literal(lex, syn))
+        }
 
-        // string literal with escapes or interpolated string with escapes and no expressions - an iterator
-        SubTokenable::EscapedText => HighlightToken::TextLiteral(escaped_text_literal(lex, syn)),
+        // string literal with escapes
+        Syntax::TextLiteral if lex.contains(ESCAPE) => {
+            HighlightToken::TextLiteral(escaped_text_literal(lex, syn))
+        }
 
-        // string literal with escapes or interpolated string with escapes and no expressions - an iterator
-        SubTokenable::CodeComment if lex.contains('`') => {
+        // comment with code segments
+        Syntax::Comment if lex.contains('`') => {
             HighlightToken::Comment(SubTokenSyntax::new(lex, syn, CommentCode::new(lex)))
         }
 
@@ -364,72 +368,40 @@ pub type HighlightIter<'src, I> =
     std::iter::FlatMap<I, HighlightToken<'src>, fn(<I as Iterator>::Item) -> HighlightToken<'src>>;
 
 pub trait TokenHighlight<'src> {
-    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable);
+    fn get_syntax(&self) -> (&'src str, Syntax);
 }
 
 impl<'src, T> TokenHighlight<'src> for &T
 where
     T: ?Sized + TokenHighlight<'src>,
 {
-    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
+    fn get_syntax(&self) -> (&'src str, Syntax) {
         (*self).get_syntax()
     }
 }
 
-impl<'src> TokenHighlight<'src> for (&'src str, Syntax, SubTokenable) {
-    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
+impl<'src> TokenHighlight<'src> for (&'src str, Syntax) {
+    fn get_syntax(&self) -> (&'src str, Syntax) {
         *self
     }
 }
 
-impl<'src> TokenHighlight<'src> for (&'src str, Syntax) {
-    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
-        let (src, syn) = *self;
-        (src, syn, SubTokenable::Normal)
-    }
-}
-
 impl<'src> TokenHighlight<'src> for (&'src str, TokenKind) {
-    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
-        let syn = self.syntax();
-        let (src, kind) = *self;
-        (
-            src,
-            syn,
-            match kind {
-                TokenKind::Comment if src.contains('`') => SubTokenable::CodeComment,
-                TokenKind::CharLit if src.contains(ESCAPE) => SubTokenable::EscapedChar,
-                TokenKind::TextLit if src.contains(ESCAPE) => SubTokenable::EscapedText,
-                _ => SubTokenable::Normal,
-            },
-        )
+    fn get_syntax(&self) -> (&'src str, Syntax) {
+        (self.0, self.syntax())
     }
 }
 
 impl<'src> TokenHighlight<'src> for Token<'src> {
-    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
-        use crate::scanner::token::value::LexValue;
-        (
-            self.lex.src,
-            self.syntax(),
-            match &self.val {
-                LexValue::Comment if self.contains('`') => SubTokenable::CodeComment,
-                LexValue::CharLiteral(lit) if lit.is_escaped => SubTokenable::EscapedChar,
-                LexValue::TextLiteral(lit) if lit.has_escapes() => SubTokenable::EscapedText,
-                _ => SubTokenable::Normal,
-            },
-        )
+    fn get_syntax(&self) -> (&'src str, Syntax) {
+        (self.lex.src, self.syntax())
     }
 }
 
 impl<'src> TokenHighlight<'src> for ContextError<'src> {
-    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
+    fn get_syntax(&self) -> (&'src str, Syntax) {
         #[expect(clippy::string_slice, reason = "range should be a range of source")]
-        (
-            &self.source[self.range],
-            Syntax::Invalid,
-            const { SubTokenable::Normal },
-        )
+        (&self.source[self.range], Syntax::Invalid)
     }
 }
 
@@ -437,8 +409,8 @@ impl<'src> TokenHighlight<'src> for ContextError<'src> {
 pub struct GenericError<'a>(pub &'a str);
 
 impl<'src> TokenHighlight<'src> for GenericError<'src> {
-    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
-        (self.0, Syntax::Invalid, SubTokenable::Normal)
+    fn get_syntax(&self) -> (&'src str, Syntax) {
+        (self.0, Syntax::Invalid)
     }
 }
 
@@ -447,7 +419,7 @@ where
     T: TokenHighlight<'src>,
     E: TokenHighlight<'src>,
 {
-    fn get_syntax(&self) -> (&'src str, Syntax, SubTokenable) {
+    fn get_syntax(&self) -> (&'src str, Syntax) {
         match self {
             Ok(x) => x.get_syntax(),
             Err(e) => e.get_syntax(),
