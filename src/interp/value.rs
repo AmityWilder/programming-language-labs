@@ -546,7 +546,7 @@ macro_rules! convert_interp_primitive {
 
 convert_interp_primitive! {
     None(NoneObject(none)),
-    #[expect(unreachable_code, reason = "nevr is not constructable")]
+    #[allow(unreachable_code, reason = "nevr is not constructable")]
     Nevr(NevrObject(nevr)),
     Fail(FailObject(fail)),
     Bool(BoolObject(bool)),

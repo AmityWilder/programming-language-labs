@@ -180,21 +180,21 @@ pub struct ScopeEnvironment<'src> {
 }
 
 impl<'src> ScopeEnvironment<'src> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             decls: Vec::new(),
             modules: Vec::new(),
         }
     }
 
-    pub fn get_decl(&self, id: ItemId) -> Option<&Item> {
+    pub fn get_decl(&self, id: ItemId) -> Option<&Item<'_>> {
         self.decls.get(id.0)
     }
 
     pub fn find_library(&self, name: &str) -> Option<LibId> {
         self.modules
             .iter()
-            .position(|ent| matches!(ent, ModEntry::Library(lib) if name == &lib.name))
+            .position(|ent| matches!(ent, ModEntry::Library(lib) if *name == lib.name))
             .map(ModId)
     }
 

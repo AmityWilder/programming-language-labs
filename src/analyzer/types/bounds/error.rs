@@ -1,12 +1,13 @@
 #![allow(dead_code, reason = "under construction")]
 
 use crate::{
-    SYNTAX_STYLE_ANSI, Todo,
+    SYNTAX_STYLE_ANSI,
     analyzer::types::{
         AbstractType, FunShape,
         bounds::{Combinator, TypeBound},
     },
     highlight::style::StyleWrapper,
+    todo_types::Todo,
 };
 use std::{
     assert_matches, borrow::Cow, collections::BTreeMap, fmt::Display, iter::once,
@@ -820,6 +821,11 @@ impl<T: Reason> Display for BoundCheck<'_, T> {
     }
 }
 
+#[expect(
+    private_bounds,
+    reason = "BoundsCheck methods should be accessible outside this module,
+        but the trait itself should not be implemented outside this module."
+)]
 impl<T: Reason> BoundCheck<'_, T> {
     fn fmt_check(
         &self,

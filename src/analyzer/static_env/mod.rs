@@ -1,15 +1,13 @@
 use crate::{
-    Todo,
     analyzer::{
         GetType,
         static_env::old::StaticEnvironment,
         types::{AbstractType, StaticTypeSize, TypeSize, TypeSizeError},
     },
-    parse::ast,
+    todo_types::Todo,
 };
 
 pub mod morph;
-#[deprecated = "changing to multi-pass analyzer"]
 pub mod old;
 pub mod scope;
 pub mod var_scope;

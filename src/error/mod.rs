@@ -1307,6 +1307,7 @@ impl Display for ContextDiagnostic<'_, '_> {
 
         // render
         {
+            #[expect(unused_mut, reason = "will be mutated in the future")]
             let mut refs: Vec<Box<dyn CodeReference>> = vec![Box::new(CodeRef::new(
                 MessageKind::Error,
                 self.error.span,

@@ -1,3 +1,6 @@
+#![deprecated = "changing to multi-pass analyzer"]
+#![allow(warnings)]
+
 use crate::{
     analyzer::{
         AnalysisBlockStmt, AnalysisFnDef, GetType,

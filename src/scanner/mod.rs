@@ -1,6 +1,7 @@
 //! The iterator that breaks source code into tokens (which are defined in [`token`] module).
 
 #![deprecated = "use `lex` instead"]
+#![allow(warnings)]
 
 use crate::{
     lex::symbols::{

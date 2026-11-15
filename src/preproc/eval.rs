@@ -1,4 +1,4 @@
-use crate::{Todo, types::fsize};
+use crate::{todo_types::Todo, types::fsize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[deprecated]

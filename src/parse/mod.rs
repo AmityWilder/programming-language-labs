@@ -182,13 +182,12 @@ macro_rules! push_parse_call {
         }
     }};
 }
-
 macro_rules! pop_parse_call {
     ($parser:ident, $fn_name:expr, $val:expr) => {{
         #[cfg(debug_assertions)]
         {
             let fn_name: &'static str = $fn_name;
-            if false {
+            if cfg!(false) {
                 println!("  finished with {fn_name}, found: {:?}", $val);
             }
             let popped = $parser.call_stack.pop();
@@ -217,7 +216,9 @@ impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
             file_len,
             tokens: tokens.into_iter().filter(filter).peekable(),
             diagnostics,
+            #[cfg(debug_assertions)]
             consumed: 0,
+            #[cfg(debug_assertions)]
             call_stack: Vec::new(),
         }
     }
@@ -268,18 +269,20 @@ impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
     }
 
     fn pull(&mut self) -> Option<I::Item> {
-        self.tokens
-            .next()
-            .inspect(|_| self.consumed = self.consumed.strict_add(1))
+        self.tokens.next().inspect(|_| {
+            #[cfg(debug_assertions)]
+            (self.consumed = self.consumed.strict_add(1));
+        })
     }
 
     fn pull_if<P>(&mut self, p: P) -> Option<I::Item>
     where
         P: FnOnce(&I::Item) -> bool,
     {
-        self.tokens
-            .next_if(p)
-            .inspect(|_| self.consumed = self.consumed.strict_add(1))
+        self.tokens.next_if(p).inspect(|_| {
+            #[cfg(debug_assertions)]
+            (self.consumed = self.consumed.strict_add(1));
+        })
     }
 
     fn pull_if_map<T, F>(&mut self, f: F) -> Option<T>
@@ -288,7 +291,10 @@ impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
     {
         self.tokens
             .next_if_map(|item| f(item).ok_or(item))
-            .inspect(|_| self.consumed = self.consumed.strict_add(1))
+            .inspect(|_| {
+                #[cfg(debug_assertions)]
+                (self.consumed = self.consumed.strict_add(1));
+            })
     }
 
     fn pull_if_eq<Q>(&mut self, kind: Q) -> Option<RelSpan>
@@ -1017,7 +1023,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
     fn assign(&mut self) -> Result<ast::Expr> {
         push_parse_call!(self, "assign");
         self.expression()
-            .and_then(|mut expr| {
+            .and_then(|expr| {
                 if let Some((op_span, op)) = self.pull_into_if(|op| {
                     matches!(
                         op,

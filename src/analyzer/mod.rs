@@ -1753,6 +1753,7 @@ where
                             unique_id,
                             ident,
                             is_global,
+                            #[cfg(debug_assertions)]
                             _ty: None,
                         })
                         .map_err(|e| vec![ContextError::node_error(source, &x.param, e.into())])
