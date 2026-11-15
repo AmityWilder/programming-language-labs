@@ -753,7 +753,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
                         .inspect(|(x, _)| curr_end = x.end)
                         .is_some()
                     {
-                        // ignore
+                        // ignore; these were already handled by visit_spans
                     }
                     tokens.extend(
                         std::iter::from_fn(|| skipped_tokens.next_if(|(x, _)| x.end <= span.start))
