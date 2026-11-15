@@ -1,6 +1,7 @@
 //! Errors regarding code validity
 
 #![deprecated = "use crate::error"]
+#![allow(warnings)]
 
 use crate::{
     SYNTAX_STYLE_ANSI,

@@ -5,6 +5,7 @@
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
+#![allow(dead_code, deprecated, reason = "UNDER CONSTRUCTION")]
 #![feature(
     try_from_int_error_kind, // used in number literal error
     deque_extend_front,
@@ -82,32 +83,18 @@ use crate::{
         style::{Color, Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle, syntax_style},
     },
-    old_error::ContextError,
     parse::ast::VisitSpans,
-    scanner::token::Token,
     src_code::{
         code::{SourceCode, SourceLoc},
         map::SourceMap,
         span::RelSpan,
     },
+    todo_types::Dummy,
 };
 use analyzer::static_env::scope::env::ScopeEnvironment;
 use error::fail::Failure;
-use src_code::{code::ExpansionData, span::usize_to_uspan};
+use src_code::code::ExpansionData;
 use std::path::PathBuf;
-
-/// Indicates unfinished code.
-///
-/// This can be useful if you are prototyping and just
-/// want a placeholder to let your code pass type analysis.
-pub type Todo = !;
-
-/// Indicates unfinished code.
-///
-/// This can be useful if you are prototyping and just
-/// want a placeholder to let your code pass type analysis.
-#[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
-pub struct Dummy;
 
 macro_rules! debug_info {
     ($($args:tt)*) => {
@@ -139,6 +126,7 @@ pub(crate) use debug_unsafe;
 mod analyzer;
 mod arrayvec;
 mod error;
+mod todo_types;
 // mod exec;
 mod grammar;
 mod highlight;
@@ -243,86 +231,6 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
         foreground: BrightRed
     }
 };
-
-trait ContextErrorOrRef<'src> {
-    fn as_ref(&self) -> &ContextError<'src>;
-}
-
-impl<'src> ContextErrorOrRef<'src> for ContextError<'src> {
-    fn as_ref(&self) -> &ContextError<'src> {
-        self
-    }
-}
-
-impl<'src> ContextErrorOrRef<'src> for &ContextError<'src> {
-    fn as_ref(&self) -> &ContextError<'src> {
-        self
-    }
-}
-
-/// Print a list of all errors with clean formatting
-///
-/// Returns true if the iterator was not empty
-#[must_use = "indicates that an error occurred"]
-fn list_errors<'src, 'err, I>(title: &str, errs: I) -> bool
-where
-    'src: 'err,
-    I: IntoIterator<IntoIter: 'err, Item: ContextErrorOrRef<'src>>,
-{
-    println!("{title} errors:");
-    let mut any_errors = false;
-    for e in errs {
-        const INDENT: &str = "          ";
-        let e = e.as_ref();
-        print!(
-            "  \x1b[91m{}:\x1b[0m {}\n{}    \x1b[92mhelp:\x1b[0m ",
-            e.code(),
-            e.err,
-            e.render(),
-        );
-        let mut has_prev = false;
-        for line in e.help().to_string().lines() {
-            if has_prev {
-                print!("{INDENT}");
-            }
-            println!("{line}");
-            has_prev = true;
-        }
-        println!();
-        any_errors = true;
-    }
-    if !any_errors {
-        println!("  \x1b[92mnone\x1b[0m");
-    }
-    any_errors
-}
-
-/// Display the debug of tokens in a stream
-fn print_tokens<'src: 'arr, 'arr, I>(source: &str, tokens: I)
-where
-    I: IntoIterator<Item = &'arr Result<Token<'src>, ContextError<'src>>>,
-{
-    let max_cols = source.lines().map(str::len).max().unwrap_or(0);
-    let max_range_digits = max_cols.to_string().len().strict_mul(2);
-    for item in tokens {
-        let (_, syn) = item.get_syntax();
-        let style = SYNTAX_STYLE_ANSI[syn];
-        let range = match item {
-            Ok(token) => token.lex_range(source),
-            Err(e) => e.range,
-        };
-        print!("\x1b[90m{range:>max_range_digits$?}:\x1b[0m ");
-        match item {
-            Ok(token) => {
-                println!("{}", style.style_dbg(token));
-            }
-            Err(e) => {
-                let style = &SYNTAX_STYLE_ANSI.invalid;
-                println!("{}", style.style_dbg(e));
-            }
-        }
-    }
-}
 
 /// # Panics
 /// This function may panic if `pos` is not a valid index in `src`
@@ -750,16 +658,23 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
                     let mut curr_end = span.start; // if no tokens are visited, default to the value that is legitimate
                     while skipped_tokens
                         .next_if(|(x, _)| x.end <= prev_end)
-                        .inspect(|(x, _)| curr_end = x.end)
+                        .inspect(|(x, _)| {
+                            #[cfg(debug_assertions)]
+                            (curr_end = x.end);
+                        })
                         .is_some()
                     {
                         // ignore; these were already handled by visit_spans
                     }
                     tokens.extend(
                         std::iter::from_fn(|| skipped_tokens.next_if(|(x, _)| x.end <= span.start))
-                            .inspect(|(x, _)| curr_end = x.end)
+                            .inspect(|(x, _)| {
+                                #[cfg(debug_assertions)]
+                                (curr_end = x.end);
+                            })
                             .map(|(span, kind)| (&code[span], kind).get_syntax()),
                     );
+                    #[cfg(debug_assertions)]
                     debug_assert_eq!(curr_end, span.start, "missed some token(s)");
                     prev_end = span.end;
                     tokens.push((&code[span], syn));
@@ -872,7 +787,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     (Ok(Dummy), diagnostics)
 }
 
-fn run_program(prgm: &Dummy) -> Result<(), Failure> {
+fn run_program(_prgm: &Dummy) -> Result<(), Failure> {
     todo!("runtime")
 }
 

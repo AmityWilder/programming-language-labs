@@ -1,6 +1,7 @@
 //! Context-free grammar
 
 #![deprecated = "use crate::parse instead"]
+#![allow(warnings)]
 
 use crate::{
     analyzer::types::bounds::Combinator,

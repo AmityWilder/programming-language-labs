@@ -1,6 +1,7 @@
 //! Preprocessing (macros)
 
 #![deprecated = "use `pre` instead"]
+#![allow(warnings)]
 
 use crate::{
     grammar::{ast::AstNodeFinal, parse, token_matches},
@@ -165,7 +166,7 @@ impl<'src> Preprocessor<'src> {
                 )
                 .collect::<Result<Vec<_>, _>>()?;
                 let mut parser = parse(self.stream.source, pred_preproc);
-                let expr = parser.expression()?;
+                let _expr = parser.expression()?;
                 assert!(parser.next().is_none(), "leftover tokens"); // TODO: make this an error
                 todo!("preproc_eval");
                 #[cfg(false)]

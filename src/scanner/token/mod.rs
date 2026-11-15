@@ -1,6 +1,7 @@
 //! Definitions of tokens and their values.
 
 #![deprecated = "use `lex` instead"]
+#![allow(warnings)]
 
 pub use crate::lex::token::{keyword, punc};
 use crate::{
