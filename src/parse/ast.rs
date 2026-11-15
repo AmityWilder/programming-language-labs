@@ -6,7 +6,6 @@ use crate::{
     scanner::token::value::Keyword,
     src_code::span::{FileId, RelSpan, uspan},
 };
-use std::ops::ControlFlow;
 
 // TODO: exact-lexeme RelSpans could be replaced with uspans
 
@@ -27,17 +26,15 @@ pub trait AstNode {
         debug_assert!(
             start <= end,
             "span should be ordered\
-                \n start: {start}\
-                \n   end: {end}"
+            \n start: {start}\
+            \n   end: {end}"
         );
         RelSpan(std::range::Range { start, end })
     }
 }
 
-pub trait VisitSpans {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>;
+pub trait VisitSpans<F: FnMut(RelSpan, Syntax)> {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F);
 }
 
 impl AstNode for RelSpan {
@@ -103,11 +100,8 @@ macro_rules! VisitSpansEnum {
             ),* $(,)?
         }
     } => {
-        impl $crate::parse::ast::VisitSpans for $Enum {
-            fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-            where
-                F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-            {
+        impl<F: FnMut(RelSpan, Syntax)> $crate::parse::ast::VisitSpans<F> for $Enum {
+            fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
                 match self {
                     $(Self::$Variant(x) => x.visit_spans(brack_depth, visit)),*
                 }
@@ -169,12 +163,9 @@ impl AstNode for Binary {
     }
 }
 
-impl VisitSpans for Binary {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        self.lhs.visit_spans(brack_depth, visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Binary {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.lhs.visit_spans(brack_depth, visit);
         visit(
             self.op_span,
             match self.op {
@@ -190,7 +181,7 @@ impl VisitSpans for Binary {
 
                 _ => Syntax::Normal,
             },
-        )?;
+        );
         self.rhs.visit_spans(brack_depth, visit)
     }
 }
@@ -229,11 +220,8 @@ impl AstNode for Unary {
     }
 }
 
-impl VisitSpans for Unary {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Unary {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         let op_syn = match self.op {
             Operator::Szof => Syntax::Keyword,
 
@@ -249,11 +237,11 @@ impl VisitSpans for Unary {
         };
         match self.side {
             OpSide::Postfix => {
-                self.operand.visit_spans(brack_depth, visit)?;
+                self.operand.visit_spans(brack_depth, visit);
                 visit(self.op_span, op_syn)
             }
             OpSide::Prefix => {
-                visit(self.op_span, op_syn)?;
+                visit(self.op_span, op_syn);
                 self.operand.visit_spans(brack_depth, visit)
             }
         }
@@ -291,14 +279,11 @@ impl AstNode for Subscript {
     }
 }
 
-impl VisitSpans for Subscript {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        self.arr.visit_spans(brack_depth, visit)?;
-        visit(self.open, Syntax::Bracket(brack_depth))?;
-        self.index.visit_spans(brack_depth.wrapping_add(1), visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Subscript {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.arr.visit_spans(brack_depth, visit);
+        visit(self.open, Syntax::Bracket(brack_depth));
+        self.index.visit_spans(brack_depth.wrapping_add(1), visit);
         visit(self.close, Syntax::Bracket(brack_depth))
     }
 }
@@ -331,16 +316,13 @@ impl AstNode for FnCall {
     }
 }
 
-impl VisitSpans for FnCall {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        self.fun.visit_spans(brack_depth, visit)?;
-        visit(self.open, Syntax::Bracket(brack_depth))?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnCall {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.fun.visit_spans(brack_depth, visit);
+        visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for arg in &self.args {
-            arg.visit_spans(inner_depth, visit)?;
+            arg.visit_spans(inner_depth, visit);
         }
         visit(self.close, Syntax::Bracket(brack_depth))
     }
@@ -371,13 +353,10 @@ impl AstNode for Grouping {
     }
 }
 
-impl VisitSpans for Grouping {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
-        self.expr.visit_spans(brack_depth.wrapping_add(1), visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Grouping {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
+        self.expr.visit_spans(brack_depth.wrapping_add(1), visit);
         visit(self.close, Syntax::Bracket(brack_depth))
     }
 }
@@ -405,13 +384,10 @@ impl AstNode for Sequence {
     }
 }
 
-impl VisitSpans for Sequence {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
-        self.expr.visit_spans(brack_depth.wrapping_add(1), visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Sequence {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
+        self.expr.visit_spans(brack_depth.wrapping_add(1), visit);
         visit(self.close, Syntax::Bracket(brack_depth))
     }
 }
@@ -584,12 +560,9 @@ impl AstNode for NamespacePathPart {
     }
 }
 
-impl VisitSpans for NamespacePathPart {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.name, Syntax::Modname)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for NamespacePathPart {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
+        visit(self.name, Syntax::Modname);
         visit(self.sep, Syntax::Normal)
     }
 }
@@ -613,15 +586,12 @@ impl AstNode for GenericGroup {
     }
 }
 
-impl VisitSpans for GenericGroup {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GenericGroup {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for item in &self.list {
-            item.visit_spans(inner_depth, visit)?;
+            item.visit_spans(inner_depth, visit);
         }
         visit(self.close, Syntax::Bracket(brack_depth))
     }
@@ -644,12 +614,9 @@ impl AstNode for IffClause {
     }
 }
 
-impl VisitSpans for IffClause {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.iff, Syntax::Keyword)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for IffClause {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.iff, Syntax::Keyword);
         self.bound.visit_spans(brack_depth, visit)
     }
 }
@@ -674,11 +641,8 @@ impl AstNode for PrimitiveType {
     }
 }
 
-impl VisitSpans for PrimitiveType {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PrimitiveType {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
         visit(self.span, Syntax::Typename)
     }
 }
@@ -702,13 +666,10 @@ impl AstNode for Typename {
     }
 }
 
-impl VisitSpans for Typename {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Typename {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         for part in &self.path {
-            part.visit_spans(brack_depth, visit)?;
+            part.visit_spans(brack_depth, visit);
         }
         visit(self.name, Syntax::Typename)
     }
@@ -734,16 +695,11 @@ impl AstNode for TypeInstance {
     }
 }
 
-impl VisitSpans for TypeInstance {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        let x = self.name.visit_spans(brack_depth, visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for TypeInstance {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.name.visit_spans(brack_depth, visit);
         if let Some(args) = &self.args {
             args.visit_spans(brack_depth, visit)
-        } else {
-            ControlFlow::Continue(x)
         }
     }
 }
@@ -769,13 +725,10 @@ impl AstNode for FallType {
     }
 }
 
-impl VisitSpans for FallType {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        self.then_ty.visit_spans(brack_depth, visit)?;
-        visit(self.pipe, Syntax::Keyword)?; // TBD: what syntax should this be?
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FallType {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.then_ty.visit_spans(brack_depth, visit);
+        visit(self.pipe, Syntax::Keyword); // TBD: what syntax should this be?
         visit(self.ty_span, Syntax::Typename)
     }
 }
@@ -798,12 +751,9 @@ impl AstNode for RefType {
     }
 }
 
-impl VisitSpans for RefType {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.sym, Syntax::Keyword)?; // TBD: what syntax should this be?
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for RefType {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.sym, Syntax::Keyword); // TBD: what syntax should this be?
         self.ty.visit_spans(brack_depth, visit)
     }
 }
@@ -825,12 +775,9 @@ impl AstNode for ArrCount {
     }
 }
 
-impl VisitSpans for ArrCount {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.semi, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ArrCount {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.semi, Syntax::Normal);
         self.count.visit_spans(brack_depth, visit)
     }
 }
@@ -855,16 +802,13 @@ impl AstNode for ViewType {
     }
 }
 
-impl VisitSpans for ViewType {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ViewType {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
-        self.item.visit_spans(inner_depth, visit)?;
+        self.item.visit_spans(inner_depth, visit);
         if let Some(count) = &self.count {
-            count.visit_spans(inner_depth, visit)?;
+            count.visit_spans(inner_depth, visit);
         }
         visit(self.close, Syntax::Bracket(brack_depth))
     }
@@ -889,13 +833,10 @@ impl AstNode for GroupedType {
     }
 }
 
-impl VisitSpans for GroupedType {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
-        self.inner.visit_spans(brack_depth.wrapping_add(1), visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GroupedType {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
+        self.inner.visit_spans(brack_depth.wrapping_add(1), visit);
         visit(self.close, Syntax::Bracket(brack_depth))
     }
 }
@@ -924,13 +865,10 @@ impl AstNode for AssocType {
     }
 }
 
-impl VisitSpans for AssocType {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        self.base.visit_spans(brack_depth, visit)?;
-        visit(self.sep, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for AssocType {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.base.visit_spans(brack_depth, visit);
+        visit(self.sep, Syntax::Normal);
         self.assoc.visit_spans(brack_depth, visit)
     }
 }
@@ -952,12 +890,9 @@ impl AstNode for FunRet {
     }
 }
 
-impl VisitSpans for FunRet {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.arrow, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FunRet {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.arrow, Syntax::Normal);
         self.ty.visit_spans(brack_depth, visit)
     }
 }
@@ -988,22 +923,17 @@ impl AstNode for FunType {
     }
 }
 
-impl VisitSpans for FunType {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::Keyword)?;
-        visit(self.open, Syntax::Bracket(brack_depth))?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FunType {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for param in &self.params {
-            param.visit_spans(inner_depth, visit)?;
+            param.visit_spans(inner_depth, visit);
         }
-        let x = visit(self.close, Syntax::Bracket(brack_depth))?;
+        visit(self.close, Syntax::Bracket(brack_depth));
         if let Some(ret) = self.ret.as_deref() {
             ret.visit_spans(brack_depth, visit)
-        } else {
-            ControlFlow::Continue(x)
         }
     }
 }
@@ -1041,13 +971,10 @@ impl AstNode for ComboBound {
     }
 }
 
-impl VisitSpans for ComboBound {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        self.lhs.visit_spans(brack_depth, visit)?;
-        visit(self.sep_span, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ComboBound {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.lhs.visit_spans(brack_depth, visit);
+        visit(self.sep_span, Syntax::Normal);
         self.rhs.visit_spans(brack_depth, visit)
     }
 }
@@ -1069,12 +996,9 @@ impl AstNode for NegativeBound {
     }
 }
 
-impl VisitSpans for NegativeBound {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.not, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for NegativeBound {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.not, Syntax::Normal);
         self.rhs.visit_spans(brack_depth, visit)
     }
 }
@@ -1096,12 +1020,9 @@ impl AstNode for ExactTypeBound {
     }
 }
 
-impl VisitSpans for ExactTypeBound {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::Keyword)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ExactTypeBound {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
         self.ty.visit_spans(brack_depth, visit)
     }
 }
@@ -1123,12 +1044,9 @@ impl AstNode for ColonBound {
     }
 }
 
-impl VisitSpans for ColonBound {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.colon, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ColonBound {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.colon, Syntax::Normal);
         self.bound.visit_spans(brack_depth, visit)
     }
 }
@@ -1156,17 +1074,12 @@ impl AstNode for MemberBound {
     }
 }
 
-impl VisitSpans for MemberBound {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::Keyword)?;
-        let x = visit(self.member, Syntax::Param)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for MemberBound {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        visit(self.member, Syntax::Param);
         if let Some(req) = &self.req {
             req.visit_spans(brack_depth, visit)
-        } else {
-            ControlFlow::Continue(x)
         }
     }
 }
@@ -1188,12 +1101,9 @@ impl AstNode for ShapeBoundRet {
     }
 }
 
-impl VisitSpans for ShapeBoundRet {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.arrow, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ShapeBoundRet {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.arrow, Syntax::Normal);
         self.ty.visit_spans(brack_depth, visit)
     }
 }
@@ -1224,22 +1134,17 @@ impl AstNode for ShapeBound {
     }
 }
 
-impl VisitSpans for ShapeBound {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::Keyword)?;
-        visit(self.open, Syntax::Bracket(brack_depth))?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ShapeBound {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for arg in &self.args {
-            arg.visit_spans(inner_depth, visit)?;
+            arg.visit_spans(inner_depth, visit);
         }
-        let x = visit(self.close, Syntax::Bracket(brack_depth))?;
+        visit(self.close, Syntax::Bracket(brack_depth));
         if let Some(ret) = &self.ret {
             ret.visit_spans(brack_depth, visit)
-        } else {
-            ControlFlow::Continue(x)
         }
     }
 }
@@ -1260,11 +1165,8 @@ impl AstNode for OverloadBound {
     }
 }
 
-impl VisitSpans for OverloadBound {
-    fn visit_spans<B, F>(&self, _brack_depth: u8, _visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for OverloadBound {
+    fn visit_spans(&self, _brack_depth: u8, _visit: &mut F) {
         todo!()
     }
 }
@@ -1290,14 +1192,11 @@ impl AstNode for ExprBound {
     }
 }
 
-impl VisitSpans for ExprBound {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::Keyword)?;
-        visit(self.name, Syntax::Param)?;
-        visit(self.colon, Syntax::Keyword)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ExprBound {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        visit(self.name, Syntax::Param);
+        visit(self.colon, Syntax::Keyword);
         self.expr.visit_spans(brack_depth, visit)
     }
 }
@@ -1321,13 +1220,10 @@ impl AstNode for GroupedBound {
     }
 }
 
-impl VisitSpans for GroupedBound {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
-        self.inner.visit_spans(brack_depth.wrapping_add(1), visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GroupedBound {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
+        self.inner.visit_spans(brack_depth.wrapping_add(1), visit);
         visit(self.close, Syntax::Bracket(brack_depth))
     }
 }
@@ -1418,11 +1314,8 @@ impl AstNode for Literal {
     }
 }
 
-impl VisitSpans for Literal {
-    fn visit_spans<B, F>(&self, _brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Literal {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
         visit(
             self.span,
             match self.kind {
@@ -1510,11 +1403,8 @@ impl AstNode for Directive {
     }
 }
 
-impl VisitSpans for Directive {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Directive {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
         visit(self.kw_span, Syntax::LanguageDefined)
     }
 }
@@ -1539,11 +1429,8 @@ impl AstNode for Variable {
     }
 }
 
-impl VisitSpans for Variable {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Variable {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
         visit(self.ident, Syntax::Variable)
     }
 }
@@ -1601,12 +1488,9 @@ impl AstNode for OrStmt {
     }
 }
 
-impl VisitSpans for OrStmt {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::FlowKeyword)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for OrStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::FlowKeyword);
         self.body.visit_spans(brack_depth, visit)
     }
 }
@@ -1634,18 +1518,13 @@ impl AstNode for IfStmt {
     }
 }
 
-impl VisitSpans for IfStmt {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::FlowKeyword)?;
-        self.pred.visit_spans(brack_depth, visit)?;
-        let x = self.then.visit_spans(brack_depth, visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for IfStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::FlowKeyword);
+        self.pred.visit_spans(brack_depth, visit);
+        self.then.visit_spans(brack_depth, visit);
         if let Some(or) = &self.or {
             or.visit_spans(brack_depth, visit)
-        } else {
-            ControlFlow::Continue(x)
         }
     }
 }
@@ -1665,11 +1544,8 @@ impl AstNode for PickPattern {
     }
 }
 
-impl VisitSpans for PickPattern {
-    fn visit_spans<B, F>(&self, _brack_depth: u8, _visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PickPattern {
+    fn visit_spans(&self, _brack_depth: u8, _visit: &mut F) {
         todo!()
     }
 }
@@ -1692,13 +1568,10 @@ impl AstNode for PickArm {
     }
 }
 
-impl VisitSpans for PickArm {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        self.pattern.visit_spans(brack_depth, visit)?;
-        visit(self.arrow, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PickArm {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.pattern.visit_spans(brack_depth, visit);
+        visit(self.arrow, Syntax::Normal);
         self.then.visit_spans(brack_depth, visit)
     }
 }
@@ -1725,17 +1598,14 @@ impl AstNode for PickStmt {
     }
 }
 
-impl VisitSpans for PickStmt {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::FlowKeyword)?;
-        self.expr.visit_spans(brack_depth, visit)?;
-        visit(self.open, Syntax::Bracket(brack_depth))?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PickStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::FlowKeyword);
+        self.expr.visit_spans(brack_depth, visit);
+        visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for arm in &self.arms {
-            arm.visit_spans(inner_depth, visit)?;
+            arm.visit_spans(inner_depth, visit);
         }
         visit(self.close, Syntax::Bracket(brack_depth))
     }
@@ -1760,13 +1630,10 @@ impl AstNode for DferParam {
     }
 }
 
-impl VisitSpans for DferParam {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
-        self.param.visit_spans(brack_depth.wrapping_add(1), visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DferParam {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
+        self.param.visit_spans(brack_depth.wrapping_add(1), visit);
         visit(self.close, Syntax::Bracket(brack_depth))
     }
 }
@@ -1789,14 +1656,11 @@ impl AstNode for DeclDfer {
     }
 }
 
-impl VisitSpans for DeclDfer {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::FlowKeyword)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclDfer {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::FlowKeyword);
         if let Some(param) = &self.param {
-            param.visit_spans(brack_depth, visit)?;
+            param.visit_spans(brack_depth, visit);
         }
         self.on_pop.visit_spans(brack_depth, visit)
     }
@@ -1852,24 +1716,21 @@ impl AstNode for LoopBlock {
     }
 }
 
-impl VisitSpans for LoopBlock {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for LoopBlock {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         if let Some(label) = &self.label {
-            label.visit_spans(brack_depth, visit)?;
+            label.visit_spans(brack_depth, visit);
         }
-        visit(self.kw, Syntax::FlowKeyword)?;
+        visit(self.kw, Syntax::FlowKeyword);
         match &self.kind {
             LoopKind::Loop | LoopKind::Cord => {}
             LoopKind::Rep { pred } => {
-                pred.visit_spans(brack_depth, visit)?;
+                pred.visit_spans(brack_depth, visit);
             }
             LoopKind::For { bind, in_kw, iter } => {
-                bind.visit_spans(brack_depth, visit)?;
-                visit(*in_kw, Syntax::FlowKeyword)?;
-                iter.visit_spans(brack_depth, visit)?;
+                bind.visit_spans(brack_depth, visit);
+                visit(*in_kw, Syntax::FlowKeyword);
+                iter.visit_spans(brack_depth, visit);
             }
         }
         self.block.visit_spans(brack_depth, visit)
@@ -1900,17 +1761,14 @@ impl AstNode for DoneStmt {
     }
 }
 
-impl VisitSpans for DoneStmt {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::FlowKeyword)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DoneStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::FlowKeyword);
         if let Some(label) = &self.label {
-            label.visit_spans(brack_depth, visit)?;
+            label.visit_spans(brack_depth, visit);
         }
         if let Some(value) = &self.value {
-            value.visit_spans(brack_depth, visit)?;
+            value.visit_spans(brack_depth, visit);
         }
         visit(self.semi, Syntax::Normal)
     }
@@ -1935,14 +1793,11 @@ impl AstNode for SkipStmt {
     }
 }
 
-impl VisitSpans for SkipStmt {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::FlowKeyword)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for SkipStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::FlowKeyword);
         if let Some(label) = &self.label {
-            label.visit_spans(brack_depth, visit)?;
+            label.visit_spans(brack_depth, visit);
         }
         visit(self.semi, Syntax::Normal)
     }
@@ -1967,15 +1822,12 @@ impl AstNode for BlockStmt {
     }
 }
 
-impl VisitSpans for BlockStmt {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for BlockStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for decl in &self.body {
-            decl.visit_spans(inner_depth, visit)?;
+            decl.visit_spans(inner_depth, visit);
         }
         visit(self.close, Syntax::Bracket(brack_depth))
     }
@@ -2002,12 +1854,9 @@ impl AstNode for ExprStmt {
     }
 }
 
-impl VisitSpans for ExprStmt {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        self.expr.visit_spans(brack_depth, visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ExprStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.expr.visit_spans(brack_depth, visit);
         visit(self.semi, Syntax::Normal)
     }
 }
@@ -2032,13 +1881,10 @@ impl AstNode for PrintStmt {
     }
 }
 
-impl VisitSpans for PrintStmt {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::Callable)?;
-        self.group.visit_spans(brack_depth, visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PrintStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        self.group.visit_spans(brack_depth, visit);
         visit(self.semi, Syntax::Normal)
     }
 }
@@ -2186,13 +2032,10 @@ impl AstNode for DeclMod {
     }
 }
 
-impl VisitSpans for DeclMod {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::Keyword)?;
-        visit(self.name, Syntax::Modname)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclMod {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        visit(self.name, Syntax::Modname);
         visit(self.semi, Syntax::Normal)
     }
 }
@@ -2219,18 +2062,15 @@ impl AstNode for DeclVar {
     }
 }
 
-impl VisitSpans for DeclVar {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw_span, Syntax::Keyword)?;
-        self.binding.visit_spans(brack_depth, visit)?; // TODO: highlight depending on keyword
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclVar {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw_span, Syntax::Keyword);
+        self.binding.visit_spans(brack_depth, visit); // TODO: highlight depending on keyword
         if let Some(ty) = &self.ty {
-            ty.visit_spans(brack_depth, visit)?;
+            ty.visit_spans(brack_depth, visit);
         }
         if let Some(assignment) = &self.assignment {
-            assignment.visit_spans(brack_depth, visit)?;
+            assignment.visit_spans(brack_depth, visit);
         }
         visit(self.semi, Syntax::Normal)
     }
@@ -2256,11 +2096,8 @@ impl AstNode for BindingPattern {
     }
 }
 
-impl VisitSpans for BindingPattern {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for BindingPattern {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
         visit(self.ident, Syntax::Variable)
     }
 }
@@ -2287,12 +2124,9 @@ impl AstNode for TypeAnnotation {
     }
 }
 
-impl VisitSpans for TypeAnnotation {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.colon, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for TypeAnnotation {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.colon, Syntax::Normal);
         self.ty.visit_spans(brack_depth, visit)
     }
 }
@@ -2314,12 +2148,9 @@ impl AstNode for Assignment {
     }
 }
 
-impl VisitSpans for Assignment {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.op, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Assignment {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.op, Syntax::Normal);
         self.expr.visit_spans(brack_depth, visit)
     }
 }
@@ -2342,12 +2173,9 @@ impl AstNode for Label {
     }
 }
 
-impl VisitSpans for Label {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.dot, Syntax::Normal)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Label {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
+        visit(self.dot, Syntax::Normal);
         visit(self.name, Syntax::Label)
     }
 }
@@ -2369,12 +2197,9 @@ impl AstNode for ScopeLabel {
     }
 }
 
-impl VisitSpans for ScopeLabel {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        self.label.visit_spans(brack_depth, visit)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ScopeLabel {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.label.visit_spans(brack_depth, visit);
         visit(self.colon, Syntax::Normal)
     }
 }
@@ -2451,15 +2276,12 @@ impl AstNode for DeclRec {
     }
 }
 
-impl VisitSpans for DeclRec {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::Keyword)?;
-        visit(self.name, Syntax::Typename)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclRec {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        visit(self.name, Syntax::Typename);
         if let Some(generics) = &self.generics {
-            generics.visit_spans(brack_depth, visit)?;
+            generics.visit_spans(brack_depth, visit);
         }
         self.body.visit_spans(brack_depth, visit)
     }
@@ -2483,12 +2305,9 @@ impl AstNode for Field {
     }
 }
 
-impl VisitSpans for Field {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.name, Syntax::Field)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Field {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.name, Syntax::Field);
         self.ty.visit_spans(brack_depth, visit)
     }
 }
@@ -2513,15 +2332,12 @@ impl AstNode for FieldSet {
     }
 }
 
-impl VisitSpans for FieldSet {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FieldSet {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for field in &self.fields {
-            field.visit_spans(inner_depth, visit)?;
+            field.visit_spans(inner_depth, visit);
         }
         visit(self.close, Syntax::Bracket(brack_depth))
     }
@@ -2548,16 +2364,11 @@ impl AstNode for CatDisc {
     }
 }
 
-impl VisitSpans for CatDisc {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        let x = visit(self.name, Syntax::Typename)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for CatDisc {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.name, Syntax::Typename);
         if let Some(val) = &self.val {
             val.visit_spans(brack_depth, visit)
-        } else {
-            ControlFlow::Continue(x)
         }
     }
 }
@@ -2582,15 +2393,12 @@ impl AstNode for CatDiscSet {
     }
 }
 
-impl VisitSpans for CatDiscSet {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.open, Syntax::Bracket(brack_depth))?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for CatDiscSet {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for item in &self.items {
-            item.visit_spans(inner_depth, visit)?;
+            item.visit_spans(inner_depth, visit);
         }
         visit(self.close, Syntax::Bracket(brack_depth))
     }
@@ -2615,13 +2423,10 @@ impl AstNode for DeclCat {
     }
 }
 
-impl VisitSpans for DeclCat {
-    fn visit_spans<B, F>(&self, brack_depth: u8, visit: &mut F) -> ControlFlow<B>
-    where
-        F: FnMut(RelSpan, Syntax) -> ControlFlow<B>,
-    {
-        visit(self.kw, Syntax::Keyword)?;
-        visit(self.name, Syntax::Typename)?;
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclCat {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        visit(self.name, Syntax::Typename);
         self.discriminants.visit_spans(brack_depth, visit)
     }
 }
