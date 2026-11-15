@@ -303,7 +303,7 @@ where
     let max_cols = source.lines().map(str::len).max().unwrap_or(0);
     let max_range_digits = max_cols.to_string().len().strict_mul(2);
     for item in tokens {
-        let (_, syn, _) = item.get_syntax();
+        let (_, syn) = item.get_syntax();
         let style = SYNTAX_STYLE_ANSI[syn];
         let range = match item {
             Ok(token) => token.lex_range(source),

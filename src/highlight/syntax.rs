@@ -5,7 +5,6 @@ use crate::{
     lex::token::{IdentCase, TokenKind},
     scanner::token::{Token, punc::Punctuation, value::LexValue},
 };
-use std::marker::Destruct;
 
 /// Syntactic element category for highlighting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -56,7 +55,7 @@ pub enum Syntax {
     /// The name of a macro parameter
     MacroParam,
     /// A bracket with depth-based coloring (other punctuation handled with [`Self::Normal`])
-    Bracket(usize),
+    Bracket(u8),
     /// Syntax errors
     Invalid,
 }
@@ -150,7 +149,7 @@ where
                 .bracket
                 .as_ref()
                 .get(
-                    depth
+                    usize::from(depth)
                         .checked_rem(self.bracket.as_ref().len())
                         .expect("BracketPair list should be non-empty"),
                 )
