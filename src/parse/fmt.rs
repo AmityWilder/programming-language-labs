@@ -165,6 +165,10 @@ impl LispArgs for [ast::Decl] {
                     }
                 }
 
+                ast::Decl::Fun(f) => {
+                    // TODO
+                }
+
                 ast::Decl::Dfer(dfer) => {
                     f.call(&dfer.kw, source)
                         .write_arg(&dfer.on_pop, source)
@@ -418,6 +422,30 @@ impl LispDisplay for ast::Label {
     }
 }
 
+impl LispDisplay for ast::FailStmt {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new(&self.kw, source, f)
+            .write_arg_iter(self.value.as_ref(), source)
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::GiveStmt {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new(&self.kw, source, f)
+            .write_arg_iter(self.value.as_ref(), source)
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::EmitStmt {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new(&self.kw, source, f)
+            .write_arg_iter(self.value.as_ref(), source)
+            .finish()
+    }
+}
+
 impl LispDisplay for ast::DoneStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LispCall::new(&self.kw, source, f)
@@ -463,6 +491,9 @@ impl LispDisplay for ast::Stmt {
             Self::Print(inner) => inner.fmt(source, f),
             Self::If(inner) => inner.fmt(source, f),
             Self::Loop(inner) => inner.fmt(source, f),
+            Self::Fail(inner) => inner.fmt(source, f),
+            Self::Give(inner) => inner.fmt(source, f),
+            Self::Emit(inner) => inner.fmt(source, f),
             Self::Done(inner) => inner.fmt(source, f),
             Self::Skip(inner) => inner.fmt(source, f),
             Self::Block(inner) => inner.fmt(source, f),

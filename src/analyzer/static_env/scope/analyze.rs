@@ -194,6 +194,10 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 }
             }
 
+            ast::Decl::Fun(_inner) => {
+                todo!("function declaration analysis")
+            }
+
             ast::Decl::Type(inner) => match inner {
                 ast::DeclType::Rec(inner) => {
                     // TODO: generics
@@ -274,6 +278,10 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 .map(hir::Stmt::If),
 
             ast::Stmt::Loop(inner) => self.analyze_loop_stmt(file, source, inner, diagnostics),
+
+            ast::Stmt::Fail(_inner) => todo!("fail statement analysis"),
+            ast::Stmt::Give(_inner) => todo!("give statement analysis"),
+            ast::Stmt::Emit(_inner) => todo!("emit statement analysis"),
 
             ast::Stmt::Done(inner) => Ok(hir::Stmt::Done(hir::DoneStmt {
                 label: inner.label.map(|lbl| hir::Label { name: lbl.name }),

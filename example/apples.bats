@@ -1,7 +1,3 @@
-rec Apple {
-    color: text,
-}
-
-fun is_valid(apple: Apple) -> bool {
+fun is_valid(color: text) -> bool {
     give color == "red" | color == "yellow" | color == "green";
 }
