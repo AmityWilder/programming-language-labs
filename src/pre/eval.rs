@@ -3,8 +3,9 @@ use crate::{
     error::{Diagnostic, DiagnosticKind},
     lex::token::{Operator, TokenKind, punc::OpSide},
     pre::{StreamSpan, ast},
+    spec_ops::{BitRotate, BitShift},
     src_code::{map::SourceMap, span::FileId},
-    types::{byte, sint, text, uint},
+    types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -59,16 +60,248 @@ impl<'src> PreExpr<'src> {
             PreExpr::Binary(inner) => {
                 let lhs = inner.lhs.eval(source)?;
                 let rhs = inner.rhs.eval(source)?;
-                match inner.op {
-                    _ => todo!("error: incompatible in preprocessing"),
-                }
+                Ok(match inner.op {
+                    Operator::And => match (lhs, rhs) {
+                        (PreVal::Bool(l), PreVal::Bool(r)) => PreVal::Bool(l & r),
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(l & r),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l & r),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l & r),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Or => match (lhs, rhs) {
+                        (PreVal::Bool(l), PreVal::Bool(r)) => PreVal::Bool(l | r),
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(l | r),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l | r),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l | r),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Xor => match (lhs, rhs) {
+                        (PreVal::Bool(l), PreVal::Bool(r)) => PreVal::Bool(l ^ r),
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(l ^ r),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l ^ r),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l ^ r),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Nand => match (lhs, rhs) {
+                        (PreVal::Bool(l), PreVal::Bool(r)) => PreVal::Bool(!(l & r)),
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(!(l & r)),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(!(l & r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(!(l & r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Nor => match (lhs, rhs) {
+                        (PreVal::Bool(l), PreVal::Bool(r)) => PreVal::Bool(!(l | r)),
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(!(l | r)),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(!(l | r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(!(l | r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Xnor => match (lhs, rhs) {
+                        (PreVal::Bool(l), PreVal::Bool(r)) => PreVal::Bool(!(l ^ r)),
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(!(l ^ r)),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(!(l ^ r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(!(l ^ r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Add => match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(l.wrapping_add(r)),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l.wrapping_add(r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l.wrapping_add(r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Sub => match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(l.wrapping_sub(r)),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l.wrapping_sub(r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l.wrapping_sub(r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Mul => match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(l.wrapping_mul(r)),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l.wrapping_mul(r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l.wrapping_mul(r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Div => match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => {
+                            PreVal::Byte(l.checked_div(r).unwrap_or(byte::MAX))
+                        }
+                        (PreVal::Uint(l), PreVal::Uint(r)) => {
+                            PreVal::Uint(l.checked_div(r).unwrap_or(uint::MAX))
+                        }
+                        (PreVal::Sint(l), PreVal::Sint(r)) => {
+                            PreVal::Sint(l.checked_div(r).unwrap_or(sint::MAX))
+                        }
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Rem => match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => {
+                            PreVal::Byte(l.checked_rem(r).unwrap_or(l))
+                        }
+                        (PreVal::Uint(l), PreVal::Uint(r)) => {
+                            PreVal::Uint(l.checked_rem(r).unwrap_or(l))
+                        }
+                        (PreVal::Sint(l), PreVal::Sint(r)) => {
+                            PreVal::Sint(l.checked_rem(r).unwrap_or(l))
+                        }
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Shl => match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => {
+                            PreVal::Byte(l.unbounded_shl(r.into()))
+                        }
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l.bshl(r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l.bshl(r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Shr => match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => {
+                            PreVal::Byte(l.unbounded_shr(r.into()))
+                        }
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l.bshr(r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l.bshr(r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Rotl => match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => PreVal::Byte(l.rotate_left(r.into())),
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l.rotl(r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l.rotl(r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Rotr => match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => {
+                            PreVal::Byte(l.rotate_right(r.into()))
+                        }
+                        (PreVal::Uint(l), PreVal::Uint(r)) => PreVal::Uint(l.rotr(r)),
+                        (PreVal::Sint(l), PreVal::Sint(r)) => PreVal::Sint(l.rotr(r)),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Eq => PreVal::Bool(match (lhs, rhs) {
+                        (PreVal::Bool(l), PreVal::Bool(r)) => l == r,
+                        (PreVal::Byte(l), PreVal::Byte(r)) => l == r,
+                        (PreVal::Uint(l), PreVal::Uint(r)) => l == r,
+                        (PreVal::Sint(l), PreVal::Sint(r)) => l == r,
+                        (PreVal::Char(l), PreVal::Char(r)) => l == r,
+                        (PreVal::Text(l), PreVal::Text(r)) => l == r,
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    }),
+                    Operator::Ne => PreVal::Bool(match (lhs, rhs) {
+                        (PreVal::Bool(l), PreVal::Bool(r)) => l != r,
+                        (PreVal::Byte(l), PreVal::Byte(r)) => l != r,
+                        (PreVal::Uint(l), PreVal::Uint(r)) => l != r,
+                        (PreVal::Sint(l), PreVal::Sint(r)) => l != r,
+                        (PreVal::Char(l), PreVal::Char(r)) => l != r,
+                        (PreVal::Text(l), PreVal::Text(r)) => l != r,
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    }),
+                    Operator::Lt => PreVal::Bool(match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => l < r,
+                        (PreVal::Uint(l), PreVal::Uint(r)) => l < r,
+                        (PreVal::Sint(l), PreVal::Sint(r)) => l < r,
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    }),
+                    Operator::Gt => PreVal::Bool(match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => l > r,
+                        (PreVal::Uint(l), PreVal::Uint(r)) => l > r,
+                        (PreVal::Sint(l), PreVal::Sint(r)) => l > r,
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    }),
+                    Operator::Le => PreVal::Bool(match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => l <= r,
+                        (PreVal::Uint(l), PreVal::Uint(r)) => l <= r,
+                        (PreVal::Sint(l), PreVal::Sint(r)) => l <= r,
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    }),
+                    Operator::Ge => PreVal::Bool(match (lhs, rhs) {
+                        (PreVal::Byte(l), PreVal::Byte(r)) => l >= r,
+                        (PreVal::Uint(l), PreVal::Uint(r)) => l >= r,
+                        (PreVal::Sint(l), PreVal::Sint(r)) => l >= r,
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    }),
+
+                    Operator::MacroConcat => unimplemented!("should be handled by expansion"),
+                    _ => todo!("error: unsupported in preprocessing"),
+                })
             }
 
             PreExpr::Unary(inner) => {
                 let operand = inner.operand.eval(source)?;
-                match inner {
+                Ok(match inner.op {
+                    Operator::Not => match operand {
+                        PreVal::Bool(x) => PreVal::Bool(!x),
+                        PreVal::Byte(x) => PreVal::Byte(!x),
+                        PreVal::Uint(x) => PreVal::Uint(!x),
+                        PreVal::Sint(x) => PreVal::Sint(!x),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Exists => PreVal::Bool(match operand {
+                        PreVal::Bool(x) => x,
+                        PreVal::Byte(x) => x != 0,
+                        PreVal::Uint(x) => x != 0,
+                        PreVal::Sint(x) => x != 0,
+                        PreVal::Char(x) => x != '\0',
+                        PreVal::Text(x) => !x.is_empty(),
+                        PreVal::Macro(_x) => todo!("macro existence"),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    }),
+                    Operator::Neg => match operand {
+                        PreVal::Sint(x) => PreVal::Sint(x.wrapping_neg()), // TBD: how should overflow be handled?
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    },
+                    Operator::Szof => PreVal::Uint(match operand {
+                        PreVal::Char(x) => x.len_utf8(),
+                        PreVal::Text(x) => x.len(),
+                        PreVal::Typename(PrimitiveType::None) => std::mem::size_of::<none>(),
+                        PreVal::Typename(PrimitiveType::Nevr) => std::mem::size_of::<nevr>(),
+                        PreVal::Typename(PrimitiveType::Bool) => std::mem::size_of::<bool>(),
+                        PreVal::Typename(PrimitiveType::Byte) => std::mem::size_of::<byte>(),
+                        PreVal::Typename(PrimitiveType::Uint) => std::mem::size_of::<uint>(),
+                        PreVal::Typename(PrimitiveType::Sint) => std::mem::size_of::<sint>(),
+                        PreVal::Typename(PrimitiveType::Flpt) => std::mem::size_of::<flpt>(),
+                        PreVal::Typename(PrimitiveType::Char) => std::mem::size_of::<char>(),
+                        PreVal::Typename(PrimitiveType::Text) => std::mem::size_of::<text>(),
+
+                        _ => todo!("error: incompatible in preprocessing"),
+                    }),
+
+                    // TBD: should this even be handled by eval?
+                    Operator::MacroStringify => PreVal::Text(match operand {
+                        PreVal::Bool(x) => (if x { "true" } else { "fals" }).to_string(),
+                        PreVal::Byte(x) => x.to_string(),
+                        PreVal::Uint(x) => x.to_string(),
+                        PreVal::Sint(x) => x.to_string(),
+                        PreVal::Char(x) => x.to_string(),
+                        PreVal::Text(x) => x,
+                        PreVal::Typename(x) => x.to_string(),
+                        PreVal::Macro(x) => x.to_string(),
+                    }),
+
+                    Operator::MacroConst => unimplemented!("should be handled by expansion"),
                     _ => todo!("error: unsupported in preprocessing"),
-                }
+                })
             }
 
             PreExpr::Group(PreGroup { expr, .. }) => expr.eval(source),
