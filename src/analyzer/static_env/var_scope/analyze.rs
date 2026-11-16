@@ -33,6 +33,10 @@ impl<'src> ScopeEnvironment<'src> {
                 todo!("type declaration scope analysis")
             }
 
+            ast::Decl::Fun(ty) => {
+                todo!("function declaration scope analysis")
+            }
+
             ast::Decl::Var(decl) => {
                 let ident = decl.binding.ident;
                 let var = self.decl_item(&code[ident], decl.span().within_file(file));
@@ -82,6 +86,15 @@ impl<'src> ScopeEnvironment<'src> {
                 group: ast::Grouping { expr, .. },
                 ..
             })
+            | ast::Stmt::Fail(ast::FailStmt {
+                value: Some(expr), ..
+            })
+            | ast::Stmt::Give(ast::GiveStmt {
+                value: Some(expr), ..
+            })
+            | ast::Stmt::Emit(ast::EmitStmt {
+                value: Some(expr), ..
+            })
             | ast::Stmt::Done(ast::DoneStmt {
                 value: Some(expr), ..
             }) => {
@@ -113,7 +126,10 @@ impl<'src> ScopeEnvironment<'src> {
             }
 
             // TBD: should labels be analyzed?
-            ast::Stmt::Done(ast::DoneStmt { value: None, .. })
+            ast::Stmt::Fail(ast::FailStmt { value: None, .. })
+            | ast::Stmt::Give(ast::GiveStmt { value: None, .. })
+            | ast::Stmt::Emit(ast::EmitStmt { value: None, .. })
+            | ast::Stmt::Done(ast::DoneStmt { value: None, .. })
             | ast::Stmt::Skip(ast::SkipStmt { .. }) => {}
 
             ast::Stmt::If(stmt) => {

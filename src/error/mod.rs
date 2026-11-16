@@ -145,6 +145,7 @@ expected_token! {
         ExprOrRBrack = "an expression or `]`",
         Expr = "an expression",
         TypeExpr = "a type",
+        TypeAnnotation = "a type annotation (`:` followed by a type)",
         Typename = "a typename (identifier, optionally prefixed with a `::`-separated path)",
         TypeBound = "a type bound",
         OrType = "an \"or-type\" (`fail`, `none`, or `nevr`)",
@@ -163,6 +164,7 @@ expected_token! {
         LoopBlock = "a loop block after the label",
         #[deprecated = "use ExpectedToken::Verbatim"]
         Arrow = "a `->`",
+        SemiOrBody = "a `;` or function body starting with `{`",
         RecBody = "rec body, starting with `{`",
     }
 }

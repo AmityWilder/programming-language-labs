@@ -559,14 +559,17 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         .inspect_always(|x| pop_parse_call!(self, "program", x))
     }
 
-    /// `declaration -> rec_declaration | cat_declaration | var_declaration | dfer_declaration | statement`
+    /// `declaration -> rec_declaration | cat_declaration | mod_declaration | var_declaration | dfer_declaration | statement`
     pub fn declaration(&mut self) -> Result<ast::Decl> {
         push_parse_call!(self, "declaration");
+
         self.rec_declaration()
             .map_inner(ast::DeclType::Rec)
             .or_else(|| self.cat_declaration().map_inner(ast::DeclType::Cat))
             .map_inner(ast::Decl::Type)
+            .or_else(|| self.mod_declaration().map_inner(ast::Decl::Mod))
             .or_else(|| self.var_declaration().map_inner(ast::Decl::Var))
+            .or_else(|| self.fun_declaration().map_inner(ast::Decl::Fun))
             .or_else(|| self.dfer_declaration().map_inner(ast::Decl::Dfer))
             .unwrap_or_else(|| self.statement().map(ast::Decl::Stmt))
             .inspect_always(|x| pop_parse_call!(self, "declaration", x))
@@ -583,6 +586,20 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 })
             })
             .inspect_always(|x| pop_parse_call!(self, "assignment", x))
+    }
+
+    /// `mod_declaration -> "mod" IDENT ";"`
+    pub fn mod_declaration(&mut self) -> Option<Result<ast::DeclMod>> {
+        push_parse_call!(self, "mod_declaration");
+        self.pull_if_eq(Keyword::Mod)
+            .map(|kw| {
+                Ok(ast::DeclMod {
+                    kw,
+                    name: self.try_pull_eq(TokenKind::Ident)?,
+                    semi: self.try_pull_eq(Punctuation::Semi)?,
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "mod_declaration", x))
     }
 
     /// `var_declaration -> ( "uni" | "pvt" | "let" ) pattern ( type_annotation )? ( assignment )? ";"`
@@ -602,7 +619,74 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "var_declaration", x))
     }
 
-    /// `rec_declaration -> "rec" IDENT ( generic_group )? "{" ( field ( "," field )* ( "," )? )? "}"`
+    /// `fun_declaration -> fun_signature ( ";" | block_statement )`
+    pub fn fun_declaration(&mut self) -> Option<Result<ast::DeclFun>> {
+        push_parse_call!(self, "fun_declaration");
+        self.fun_signature()
+            .map(|head| {
+                head.and_then(|head| {
+                    if let Some(semi) = self.pull_if_eq(Punctuation::Semi) {
+                        Ok(ast::DeclFun::Declare(ast::AnnounceFun { head, semi }))
+                    } else if let Some(body) = self.block_statement() {
+                        body.map(|body| ast::DeclFun::Define(ast::DefFun { head, body }))
+                    } else {
+                        Err(self.error(ExpectedToken::SemiOrBody))
+                    }
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "fun_declaration", x))
+    }
+
+    /// `fun_signature -> "fun" IDENT ( generic_group )?
+    ///     "(" ( IDENT type_annotation ( "," IDENT type_annotation )* ( "," )? )? ")"
+    ///     ( fun_ret )? ( iff_clause )?`
+    pub fn fun_signature(&mut self) -> Option<Result<ast::FnSignature>> {
+        push_parse_call!(self, "fun_signature");
+        self.pull_if_eq(Keyword::Fun)
+            .map(|kw| {
+                let name = self.try_pull_eq(TokenKind::Ident)?;
+                let generics = self.generic_group().transpose()?;
+                let (open, params, close) = self
+                    .pull_if_delim(Bracket::Paren, |parser| {
+                        parser.pull_terminated(Punctuation::Comma, |parser| parser.fun_param())
+                    })
+                    .ok_or_else_flat(|| {
+                        self.error(ExpectedToken::Verbatim(TokenKind::Punc(
+                            Punctuation::LParen,
+                        )))
+                    })?;
+                Ok(ast::FnSignature {
+                    kw,
+                    name,
+                    generics,
+                    open,
+                    params,
+                    close,
+                    ret: self.fun_ret().transpose()?,
+                    iff: self.iff_clause().transpose()?,
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "fun_signature", x))
+    }
+
+    /// `fun_param -> IDENT type_annotation`
+    pub fn fun_param(&mut self) -> Option<Result<ast::FnParam>> {
+        push_parse_call!(self, "fun_param");
+        Some(
+            self.try_pull_eq(TokenKind::Ident)
+                .and_then(|name| {
+                    Ok(ast::FnParam {
+                        name,
+                        ty: self
+                            .type_annotation()
+                            .ok_or_else_flat(|| self.error(ExpectedToken::TypeAnnotation))?,
+                    })
+                })
+                .inspect_always(|x| pop_parse_call!(self, "fun_param", x)),
+        )
+    }
+
+    /// `rec_declaration -> "rec" IDENT ( generic_group )? field_set`
     pub fn rec_declaration(&mut self) -> Option<Result<ast::DeclRec>> {
         push_parse_call!(self, "rec_declaration");
         self.pull_if_eq(Keyword::Rec)
@@ -619,6 +703,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "rec_declaration", x))
     }
 
+    /// `field_set -> "{" ( field ( "," field )* ( "," )? )? "}"`
     pub fn field_set(&mut self) -> Option<Result<ast::FieldSet>> {
         push_parse_call!(self, "field_set");
         self.pull_if_delim(Bracket::Brace, |parser| {
@@ -632,6 +717,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         .inspect_always(|x| pop_parse_call!(self, "field_set", x))
     }
 
+    /// `field -> IDENT type_annotation`
     pub fn field(&mut self) -> Option<Result<ast::Field>> {
         push_parse_call!(self, "field");
         self.pull_if_eq(TokenKind::Ident)
@@ -712,6 +798,9 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         self.block_statement()
             .map_inner(ast::Stmt::Block)
             .or_else(|| self.print_statement().map_inner(ast::Stmt::Print))
+            .or_else(|| self.fail_statement().map_inner(ast::Stmt::Fail))
+            .or_else(|| self.give_statement().map_inner(ast::Stmt::Give))
+            .or_else(|| self.emit_statement().map_inner(ast::Stmt::Emit))
             .or_else(|| self.done_statement().map_inner(ast::Stmt::Done))
             .or_else(|| self.skip_statement().map_inner(ast::Stmt::Skip))
             .or_else(|| self.if_statement().map_inner(ast::Stmt::If))
@@ -953,7 +1042,52 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "loop_block1", x))
     }
 
-    /// `done_statement -> "done" ( label )? expression ";"`
+    /// `fail_statement -> "fail" ( expression )? ";"`
+    pub fn fail_statement(&mut self) -> Option<Result<ast::FailStmt>> {
+        push_parse_call!(self, "fail_statement");
+        self.pull_if_eq(Keyword::Fail)
+            .map(|kw| {
+                let semi_upcoming = self.is_next_eq(Punctuation::Semi);
+                Ok(ast::FailStmt {
+                    kw,
+                    value: (!semi_upcoming).then(|| self.expression()).transpose()?,
+                    semi: self.try_pull_eq(Punctuation::Semi)?,
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "fail_statement", x))
+    }
+
+    /// `give_statement -> "give" ( expression )? ";"`
+    pub fn give_statement(&mut self) -> Option<Result<ast::GiveStmt>> {
+        push_parse_call!(self, "give_statement");
+        self.pull_if_eq(Keyword::Give)
+            .map(|kw| {
+                let semi_upcoming = self.is_next_eq(Punctuation::Semi);
+                Ok(ast::GiveStmt {
+                    kw,
+                    value: (!semi_upcoming).then(|| self.expression()).transpose()?,
+                    semi: self.try_pull_eq(Punctuation::Semi)?,
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "give_statement", x))
+    }
+
+    /// `emit_statement -> "emit" ( expression )? ";"`
+    pub fn emit_statement(&mut self) -> Option<Result<ast::EmitStmt>> {
+        push_parse_call!(self, "emit_statement");
+        self.pull_if_eq(Keyword::Emit)
+            .map(|kw| {
+                let semi_upcoming = self.is_next_eq(Punctuation::Semi);
+                Ok(ast::EmitStmt {
+                    kw,
+                    value: (!semi_upcoming).then(|| self.expression()).transpose()?,
+                    semi: self.try_pull_eq(Punctuation::Semi)?,
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "emit_statement", x))
+    }
+
+    /// `done_statement -> "done" ( label )? ( expression )? ";"`
     pub fn done_statement(&mut self) -> Option<Result<ast::DoneStmt>> {
         push_parse_call!(self, "done_statement");
         self.pull_if_eq(Keyword::Done)
@@ -1315,10 +1449,10 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "conversion", x))
     }
 
-    /// `unary_postfix -> primary ( "?" | "++" | "--" | subscript | fn_call )*`
+    /// `unary_postfix -> postfix_bracketed ( "?" | "++" | "--" | subscript | fn_call )*`
     fn unary_postfix(&mut self) -> Result<ast::Expr> {
         push_parse_call!(self, "unary_postfix");
-        self.primary()
+        self.postfix_bracketed()
             .map(|mut expr| {
                 while let Some((op_span, op)) = self.pull_into_if(|kind| {
                     matches!(kind, Operator::Coalesce | Operator::Incr | Operator::Decr)
@@ -1335,7 +1469,41 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "unary_postfix", x))
     }
 
-    // TODO: index and call
+    /// `postfix_bracketed -> primary ( "[" expression "]" | "(" ( expression ( "," expression )* ( "," )? )? ")" )`
+    fn postfix_bracketed(&mut self) -> Result<ast::Expr> {
+        push_parse_call!(self, "postfix_bracketed");
+        self.primary()
+            .and_then(|expr| {
+                if let Some((open, index, close)) = self
+                    .pull_if_delim(Bracket::Brack, Self::expression)
+                    .transpose()?
+                {
+                    Ok(ast::Expr::Index(Box::new(ast::Subscript {
+                        arr: expr,
+                        open,
+                        index,
+                        close,
+                    })))
+                } else if let Some((open, args, close)) = self
+                    .pull_if_delim(Bracket::Paren, |parser| {
+                        parser.pull_terminated(Punctuation::Comma, |parser| {
+                            parser.is_next_not_close().then(|| parser.expression())
+                        })
+                    })
+                    .transpose()?
+                {
+                    Ok(ast::Expr::Call(Box::new(ast::FnCall {
+                        fun: expr,
+                        open,
+                        args,
+                        close,
+                    })))
+                } else {
+                    Ok(expr)
+                }
+            })
+            .inspect_always(|x| pop_parse_call!(self, "postfix_bracketed", x))
+    }
 
     /// `primary -> literal | group | variable | directive`
     fn primary(&mut self) -> Result<ast::Expr> {
@@ -1619,14 +1787,33 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "typename", x))
     }
 
-    /// `iff_clause -> "<=>" type_bound`
+    /// `type_bound_clause -> type_expression ":" type_bound`
+    fn type_bound_clause(&mut self) -> Result<ast::TypeBoundClause> {
+        push_parse_call!(self, "iff_clause");
+        self.type_expression()
+            .and_then(|ty| {
+                Ok(ast::TypeBoundClause {
+                    ty,
+                    colon: self.try_pull_eq(Punctuation::Colon)?,
+                    bound: self.type_bound()?,
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "iff_clause", x))
+    }
+
+    /// `iff_clause -> "<=>" type_bound_clause ( "," type_bound_clause )* ( "," )?`
     fn iff_clause(&mut self) -> Option<Result<ast::IffClause>> {
         push_parse_call!(self, "iff_clause");
         self.pull_if_eq(Punctuation::Iff)
             .map(|iff| {
                 Ok(ast::IffClause {
                     iff,
-                    bound: self.type_bound()?,
+                    bounds: match self.pull_terminated(Punctuation::Comma, |p| {
+                        p.is_next_not_close().then(|| p.type_bound_clause())
+                    })? {
+                        v @ [_, ..] => v,
+                        [] => return Err(self.error(ExpectedToken::TypeBound)),
+                    },
                 })
             })
             .inspect_always(|x| pop_parse_call!(self, "iff_clause", x))

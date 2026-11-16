@@ -598,10 +598,37 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GenericGroup {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct TypeBoundClause {
+    pub ty: TypeExpr,
+    /// `:`
+    pub colon: RelSpan,
+    pub bound: TypeBound,
+}
+
+impl AstNode for TypeBoundClause {
+    fn span_start(&self) -> uspan {
+        self.ty.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.bound.span_end()
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for TypeBoundClause {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.ty.visit_spans(brack_depth, visit);
+        visit(self.colon, Syntax::Normal);
+        self.bound.visit_spans(brack_depth, visit);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct IffClause {
     /// `<=>`
     pub iff: RelSpan,
-    pub bound: TypeBound,
+    /// Comma separated (comma is not stored)
+    pub bounds: Vec<TypeBoundClause>,
 }
 
 impl AstNode for IffClause {
@@ -610,14 +637,18 @@ impl AstNode for IffClause {
     }
 
     fn span_end(&self) -> uspan {
-        self.bound.span_end()
+        self.bounds
+            .last()
+            .map_or(self.iff.end, TypeBoundClause::span_end)
     }
 }
 
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for IffClause {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.iff, Syntax::Keyword);
-        self.bound.visit_spans(brack_depth, visit)
+        for bound in &self.bounds {
+            bound.visit_spans(brack_depth, visit);
+        }
     }
 }
 
@@ -1742,6 +1773,93 @@ impl Expectable for LoopBlock {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FailStmt {
+    /// `fail`
+    pub kw: RelSpan,
+    pub value: Option<Expr>,
+    /// `;`
+    pub semi: RelSpan,
+}
+
+impl AstNode for FailStmt {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FailStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::FlowKeyword);
+        if let Some(value) = &self.value {
+            value.visit_spans(brack_depth, visit);
+        }
+        visit(self.semi, Syntax::Normal);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GiveStmt {
+    /// `give`
+    pub kw: RelSpan,
+    pub value: Option<Expr>,
+    /// `;`
+    pub semi: RelSpan,
+}
+
+impl AstNode for GiveStmt {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GiveStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::FlowKeyword);
+        if let Some(value) = &self.value {
+            value.visit_spans(brack_depth, visit);
+        }
+        visit(self.semi, Syntax::Normal);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmitStmt {
+    /// `emit`
+    pub kw: RelSpan,
+    pub value: Option<Expr>,
+    /// `;`
+    pub semi: RelSpan,
+}
+
+impl AstNode for EmitStmt {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for EmitStmt {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::FlowKeyword);
+        if let Some(value) = &self.value {
+            value.visit_spans(brack_depth, visit);
+        }
+        visit(self.semi, Syntax::Normal);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DoneStmt {
     /// `done`
     pub kw: RelSpan,
@@ -1896,6 +2014,9 @@ pub enum Stmt {
     Print(PrintStmt),
     If(IfStmt),
     Loop(LoopBlock),
+    Fail(FailStmt),
+    Give(GiveStmt),
+    Emit(EmitStmt),
     Done(DoneStmt),
     Skip(SkipStmt),
     Block(BlockStmt),
@@ -2002,6 +2123,7 @@ impl<'prgm> IntoIterator for &'prgm mut ProgramUnit {
 pub enum Decl {
     Mod(DeclMod),
     Var(DeclVar),
+    Fun(DeclFun),
     Type(DeclType),
     Dfer(DeclDfer),
     Stmt(Stmt),
@@ -2074,6 +2196,140 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclVar {
         }
         visit(self.semi, Syntax::Normal)
     }
+}
+
+/// Same syntax as [`Field`], for now.
+/// Guaranteed not to use visibility modifiers in the future, and uses [`Syntax::Param`] instead of [`Syntax::Field`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnParam {
+    /// Ident
+    pub name: RelSpan,
+    pub ty: TypeAnnotation,
+}
+
+impl AstNode for FnParam {
+    fn span_start(&self) -> uspan {
+        self.name.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ty.span_end()
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnParam {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.name, Syntax::Param);
+        self.ty.visit_spans(brack_depth, visit);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnSignature {
+    /// `fun`
+    pub kw: RelSpan,
+    /// Ident
+    pub name: RelSpan,
+    pub generics: Option<GenericGroup>,
+    /// `(`
+    pub open: RelSpan,
+    /// Comma-separated (commas are not stored)
+    pub params: Vec<FnParam>,
+    /// `)`
+    pub close: RelSpan,
+    pub ret: Option<FunRet>,
+    pub iff: Option<IffClause>,
+}
+
+impl AstNode for FnSignature {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        if let Some(iff) = &self.iff {
+            iff.span_end()
+        } else if let Some(ret) = &self.ret {
+            ret.span_end()
+        } else {
+            self.close.end
+        }
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnSignature {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        visit(self.name, Syntax::Callable);
+        if let Some(generics) = &self.generics {
+            generics.visit_spans(brack_depth, visit);
+        }
+        visit(self.open, Syntax::Bracket(brack_depth));
+        let inner_depth = brack_depth.wrapping_add(1);
+        for param in &self.params {
+            param.visit_spans(inner_depth, visit);
+        }
+        visit(self.close, Syntax::Bracket(brack_depth));
+        if let Some(ret) = &self.ret {
+            ret.visit_spans(brack_depth, visit);
+        }
+        if let Some(iff) = &self.iff {
+            iff.visit_spans(brack_depth, visit);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DefFun {
+    pub head: FnSignature,
+    pub body: BlockStmt,
+}
+
+impl AstNode for DefFun {
+    fn span_start(&self) -> uspan {
+        self.head.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.body.span_end()
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DefFun {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.head.visit_spans(brack_depth, visit);
+        self.body.visit_spans(brack_depth, visit);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnnounceFun {
+    pub head: FnSignature,
+    /// `;`
+    pub semi: RelSpan,
+}
+
+impl AstNode for AnnounceFun {
+    fn span_start(&self) -> uspan {
+        self.head.span_start()
+    }
+
+    fn span_end(&self) -> uspan {
+        self.semi.end
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for AnnounceFun {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        self.head.visit_spans(brack_depth, visit);
+        visit(self.semi, Syntax::Normal);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, AstNodeEnum, VisitSpansEnum)]
+pub enum DeclFun {
+    Declare(AnnounceFun),
+    Define(DefFun),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -212,6 +212,9 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
     typename: {
         foreground: Rgb(0x4e, 0xc9, 0xb0)
     },
+    modname: {
+        foreground: Rgb(0x4e, 0xc9, 0xb0)
+    },
     macro_name: {
         foreground: Rgb(0x56, 0x9c, 0xd6),
         underline: true
