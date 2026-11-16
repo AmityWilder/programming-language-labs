@@ -94,7 +94,7 @@ use crate::{
 use analyzer::static_env::scope::env::ScopeEnvironment;
 use error::fail::Failure;
 use src_code::code::ExpansionData;
-use std::path::PathBuf;
+use std::{collections::VecDeque, path::PathBuf};
 
 macro_rules! debug_info {
     ($($args:tt)*) => {
@@ -455,7 +455,10 @@ CliParser! {
         #[option("print-errors")]
         print_errors: bool,
 
-        source_path: Vec<PathBuf>,
+        /// The source files used as the roots of each library.
+        /// If there is a folder with the same name as one of these files,
+        /// all files within that folder will also be included.
+        source_paths: Vec<PathBuf>,
     }
 }
 
@@ -463,7 +466,7 @@ impl Default for Cli {
     fn default() -> Self {
         Self {
             prgm: PathBuf::default(),
-            source_path: Vec::new(),
+            source_paths: Vec::new(),
             echo_src: false,
             scanner_tokens: false,
             scanner_highlight: true,
@@ -530,7 +533,7 @@ impl Cli {
                 });
             }
         }
-        config.source_path.extend(args.map(PathBuf::from));
+        config.source_paths.extend(args.map(PathBuf::from));
         Ok(config)
     }
 }
@@ -820,7 +823,7 @@ fn main() {
         .expect("standard library should not be valid"),
     );
     loop {
-        if config.source_path.is_empty() {
+        if config.source_paths.is_empty() {
             // interactive
             let mut input = String::new();
             std::io::stdin()
@@ -837,16 +840,55 @@ fn main() {
             }
         } else {
             // from file
-            for source_path in &config.source_path {
-                match std::fs::read_to_string(source_path) {
-                    Err(e) => eprintln!("failed to read source code file: {e}"),
+            for source_path in &config.source_paths {
+                let mut files = vec![source_path.clone()];
+                if let Some((parent, stem)) = source_path.parent().zip(source_path.file_stem()) {
+                    // remove the extension(s)
+                    let root = parent.join(stem);
+                    let mut dirs = VecDeque::from([root]);
+                    while let Some(dir) = dirs.pop_front() {
+                        if !dir.exists() {
+                            continue; // no problem, module has no submodules
+                        }
+                        let dir = match std::fs::read_dir(dir) {
+                            Ok(dir) => dir,
+                            Err(e) => {
+                                eprintln!("failed to read module directory: {e}");
+                                continue;
+                            }
+                        };
+                        for ent in dir {
+                            let ent = match ent {
+                                Ok(ent) => ent,
+                                Err(e) => {
+                                    eprintln!("failed to read module directory entry: {e}");
+                                    continue;
+                                }
+                            };
+                            let path = ent.path();
+                            if path.is_dir() {
+                                dirs.push_back(path);
+                            } else if path.extension().is_some_and(|ext| ext == "bats") {
+                                files.push(path);
+                            }
+                        }
+                    }
+                } else {
+                    eprintln!("failed to get source code directory");
+                }
 
-                    Ok(mut source) => {
-                        pop_trailing_newline(&mut source);
-                        match SourceCode::new(SourceLoc::File(source_path.clone()), source) {
-                            Err(e) => eprintln!("failed to read source code file: {e}"),
+                for path in files {
+                    match std::fs::read_to_string(&path) {
+                        Err(e) => eprintln!("failed to read source code file: {e}"),
 
-                            Ok(code) => _ = source_map.push(code),
+                        Ok(mut source) => {
+                            pop_trailing_newline(&mut source);
+
+                            match SourceCode::new(SourceLoc::File(path), source) {
+                                Err(e) => eprintln!("failed to read source code file: {e}"),
+
+                                Ok(code) => _ = source_map.push(code),
+                            }
                         }
                     }
                 }
@@ -866,7 +908,7 @@ fn main() {
             }
         }
 
-        if !config.source_path.is_empty() {
+        if !config.source_paths.is_empty() {
             break;
         }
     }
