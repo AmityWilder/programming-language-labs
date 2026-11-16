@@ -92,12 +92,12 @@ use crate::{
     todo_types::Dummy,
 };
 use analyzer::static_env::scope::env::ScopeEnvironment;
-use error::fail::Failure;
-use src_code::code::ExpansionData;
-use std::{
-    collections::{BTreeSet, VecDeque},
-    path::PathBuf,
+use error::{CheckDiagnostics, fail::Failure};
+use src_code::{
+    code::ExpansionData,
+    span::{FileId, usize_to_uspan},
 };
+use std::{collections::VecDeque, path::PathBuf};
 
 macro_rules! debug_info {
     ($($args:tt)*) => {
@@ -541,63 +541,74 @@ impl Cli {
     }
 }
 
-fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diagnostic>) {
-    let mut diagnostics = Vec::new();
+pub trait ContainsError {
+    fn contains_err(&self) -> bool;
 
+    #[inline]
+    fn ok_or_err(&self) -> Result<(), CheckDiagnostics> {
+        if self.contains_err() {
+            Err(CheckDiagnostics)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl ContainsError for [Diagnostic] {
+    fn contains_err(&self) -> bool {
+        self.iter().any(|e| e.kind.severity().is_err())
+    }
+}
+
+fn comp_file(
+    config: &Cli,
+    source: &mut SourceMap,
+    id: FileId,
+    diagnostics: &mut Vec<Diagnostic>,
+    scope_env: &mut ScopeEnvironment,
+) -> Result<Dummy, CheckDiagnostics> {
     // scanner
     println!("scanning...");
-    for (id, file) in source.iter_mut() {
-        file.set_tokens(lex::lex(id, file.content(), &mut diagnostics));
-    }
+    let file = &mut source[id];
+    file.set_tokens(lex::lex(id, file.content(), diagnostics));
 
     // syntax highlighted
     if config.scanner_highlight {
+        println!("\n\x1b[0m{}:", source[id].loc());
+        print_highlighted(
+            source,
+            file,
+            file.tokens()
+                .iter()
+                .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
+            file.expansions(),
+            &SYNTAX_STYLE_ANSI,
+        );
         println!();
-        for (id, file) in source.iter() {
-            println!("\x1b[0m{}:", source[id].loc());
-            print_highlighted(
-                source,
-                file,
-                file.tokens()
-                    .iter()
-                    .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
-                file.expansions(),
-                &SYNTAX_STYLE_ANSI,
-            );
-            println!();
-        }
     }
 
     // lex errors
-    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
-        return (Err(()), diagnostics);
-    }
+    diagnostics.ok_or_err()?;
 
     // TODO: how to prevent REPL from generating preprocessed copies every time?
 
     // preprocessing
     println!("preprocessing...");
-    let preprocessed = source
-        .iter()
-        .filter_map(|(id, file)| pre::preprocess(id, file, source, &mut diagnostics))
-        .collect::<Vec<_>>();
+    let preprocessed = pre::preprocess(id, file, source, diagnostics);
 
-    for code in preprocessed {
-        let &(SourceLoc::PreprocRepl(og_id) | SourceLoc::PreprocFile(og_id, _)) = code.loc() else {
+    if let Some(pp) = preprocessed {
+        let &(SourceLoc::PreprocRepl(og_id) | SourceLoc::PreprocFile(og_id, _)) = pp.loc() else {
             unimplemented!("preprocessor should only output preprocessed files")
         };
-        let pp_id = source.push(code);
+        let pp_id = source.push(pp);
         source
             .get_mut(og_id)
             .expect("preprocessor should reference legitimate, existing files")
             .set_preproc(pp_id);
-    }
 
-    // preprocessor syntax highlighted
-    if config.preproc_highlight {
-        println!();
-        for (id, file) in source.iter() {
-            println!("\x1b[0m{}:", source[id].loc());
+        // preprocessor syntax highlighted
+        if config.preproc_highlight {
+            println!("\n\x1b[0m{}:", source[id].loc());
             print_highlighted(
                 source,
                 file,
@@ -612,101 +623,109 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     }
 
     // preprocesor errors
-    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
-        return (Err(()), diagnostics);
-    }
+    diagnostics.ok_or_err()?;
+
+    // use the preprocessed version from now on
+    let id = source[id].preproc().copied().unwrap_or(id);
 
     // parse
     println!("parsing...");
-    let Ok(prgm) = parse::parse(
-        source.iter().filter(|(_, code)| {
-            // only parse post-processed files, or files that have no preprocessor directives
-            code.preproc().is_none()
-                || matches!(
-                    code.loc(),
-                    SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
-                )
-        }),
-        &mut diagnostics,
-    ) else {
-        return (Err(()), diagnostics);
+    let code = &source[id];
+    let unit = match parse::parse_unit(
+        id,
+        usize_to_uspan(code.content().len()),
+        code.tokens().iter(),
+        diagnostics,
+    ) {
+        Ok(x) => x,
+
+        Err(CheckDiagnostics) => {
+            debug_assert!(
+                diagnostics.contains_err(),
+                "should have an error on failure"
+            );
+            return Err(CheckDiagnostics);
+        }
     };
 
     // parse errors
-    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
-        return (Err(()), diagnostics);
-    }
+    diagnostics.ok_or_err()?;
 
     // lisp debug
-    for unit in &prgm {
-        let source = source
-            .get(unit.file)
-            .expect("program unit should have valid file ID");
-
-        println!(
-            "lisp for {}:\n{:#}",
-            source.loc(),
-            parse::fmt::Lisp { source, node: unit }
-        );
-    }
+    println!(
+        "lisp for {}:\n{:#}",
+        code.loc(),
+        parse::fmt::Lisp {
+            source: code,
+            node: &unit
+        }
+    );
 
     // semantic highlighted
     if config.scanner_highlight {
         println!();
-        for unit in &prgm {
-            let id = unit.file;
-            let code = &source[id];
-            println!("\x1b[0m{}:", code.loc());
-            let mut tokens = Vec::with_capacity(code.tokens().tokens.len());
-            let mut skipped_tokens = code.tokens().iter().peekable();
-            let mut f = {
-                let tokens = &mut tokens;
-                let mut prev_end = 0;
-                move |span: RelSpan, syn: Syntax| {
-                    #[cfg(debug_assertions)]
-                    let mut curr_end = span.start; // if no tokens are visited, default to the value that is legitimate
-                    while skipped_tokens
-                        .next_if(|(x, _)| x.end <= prev_end)
+        let id = unit.file;
+        let code = &source[id];
+        println!("\x1b[0m{}:", code.loc());
+        let mut tokens = Vec::with_capacity(code.tokens().tokens.len());
+        let mut skipped_tokens = code.tokens().iter().peekable();
+        let mut f = {
+            let tokens = &mut tokens;
+            let mut prev_end = 0;
+            move |span: RelSpan, syn: Syntax| {
+                #[cfg(debug_assertions)]
+                let mut curr_end = span.start; // if no tokens are visited, default to the value that is legitimate
+                while skipped_tokens
+                    .next_if(|(x, _)| x.end <= prev_end)
+                    .inspect(|(x, _)| {
+                        #[cfg(debug_assertions)]
+                        (curr_end = x.end);
+                    })
+                    .is_some()
+                {
+                    // ignore; these were already handled by visit_spans
+                }
+                tokens.extend(
+                    std::iter::from_fn(|| skipped_tokens.next_if(|(x, _)| x.end <= span.start))
                         .inspect(|(x, _)| {
                             #[cfg(debug_assertions)]
                             (curr_end = x.end);
                         })
-                        .is_some()
-                    {
-                        // ignore; these were already handled by visit_spans
-                    }
-                    tokens.extend(
-                        std::iter::from_fn(|| skipped_tokens.next_if(|(x, _)| x.end <= span.start))
-                            .inspect(|(x, _)| {
-                                #[cfg(debug_assertions)]
-                                (curr_end = x.end);
-                            })
-                            .map(|(span, kind)| (&code[span], kind).get_syntax()),
-                    );
-                    #[cfg(debug_assertions)]
-                    debug_assert_eq!(curr_end, span.start, "missed some token(s)");
-                    prev_end = span.end;
-                    tokens.push((&code[span], syn));
-                }
-            };
-            for decl in &unit.decls {
-                decl.visit_spans(0, &mut f);
+                        .map(|(span, kind)| (&code[span], kind).get_syntax()),
+                );
+                #[cfg(debug_assertions)]
+                debug_assert_eq!(curr_end, span.start, "missed some token(s)");
+                prev_end = span.end;
+                tokens.push((&code[span], syn));
             }
-            print_highlighted(source, code, tokens, code.expansions(), &SYNTAX_STYLE_ANSI);
-            println!();
+        };
+        for decl in &unit.decls {
+            decl.visit_spans(0, &mut f);
         }
+        print_highlighted(source, code, tokens, code.expansions(), &SYNTAX_STYLE_ANSI);
+        println!();
     }
-
-    // scope analysis
-    let mut scope_env = ScopeEnvironment::new();
 
     println!("generating module tree...");
-    let mapping = scope_env.analyze_module_tree(source, &prgm, &mut diagnostics);
+    let mapping = scope_env.analyze_module_tree(source, &prgm, diagnostics);
+
+    todo!()
+}
+
+fn compile(
+    source: &mut SourceMap,
+    config: &Cli,
+    diagnostics: &mut Vec<Diagnostic>,
+    scope_env: &mut ScopeEnvironment,
+) -> Result<Dummy, CheckDiagnostics> {
+    todo!("per-file compilation");
+
+    // scope analysis
+    println!("generating module tree...");
+    let mapping = scope_env.analyze_module_tree(source, &prgm, diagnostics);
 
     // module tree errors
-    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
-        return (Err(()), diagnostics);
-    }
+    diagnostics.ok_or_err()?;
     println!();
 
     println!("analyzing scope...");
@@ -721,7 +740,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
         let mut env = scope_env
             .define_module(id)
             .expect("should have been defined by `analyze_module_tree`");
-        if let Ok(hir) = env.analyze(&source[unit.file], unit, &mut diagnostics) {
+        if let Ok(hir) = env.analyze(&source[unit.file], unit, diagnostics) {
             println!(
                 "hir:\n{:#}",
                 DisplayHir {
@@ -740,9 +759,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     }
 
     // scope errors
-    if diagnostics.iter().any(|e| e.kind.severity().is_err()) {
-        return (Err(()), diagnostics);
-    }
+    diagnostics.ok_or_err()?;
 
     // let (program, env) = match analyze(source, &prgm) {
     //     Ok(prgm) => prgm,
@@ -793,7 +810,7 @@ fn compile(source: &mut SourceMap, config: &Cli) -> (Result<Dummy, ()>, Vec<Diag
     //     }
     // }
 
-    (Ok(Dummy), diagnostics)
+    Ok(Dummy)
 }
 
 fn run_program(_prgm: &Dummy) -> Result<(), Failure> {
@@ -822,6 +839,7 @@ fn main() {
         SourceCode::new(
             SourceLoc::File(PathBuf::from("builtin").join("std").with_extension("bats")),
             include_str!("batstd/std.bats").to_string(),
+            true,
         )
         .expect("standard library should not be valid"),
     );
@@ -836,72 +854,71 @@ fn main() {
             if matches!(input.trim(), "exit" | "quit") {
                 break; // finish
             }
-            match SourceCode::new(SourceLoc::Repl, input) {
+            match SourceCode::new(SourceLoc::Repl, input, true) {
                 Err(e) => eprintln!("failed to read source code: {e}"),
 
                 Ok(code) => _ = source_map.push(code),
             }
         } else {
             // from file
+            let mut files = Vec::with_capacity(config.source_paths.len());
             for source_path in &config.source_paths {
-                let mut files = vec![source_path.clone()];
-                {
-                    let mut dirs = VecDeque::from([source_path.with_extension("")]);
-                    while let Some(dir) = dirs.pop_front() {
-                        if !dir.exists() {
-                            continue; // not a problem, module just has no submodules.
+                files.push((source_path.clone(), true));
+                let mut dirs = VecDeque::from([source_path.with_extension("")]);
+                while let Some(dir) = dirs.pop_front() {
+                    if !dir.exists() {
+                        continue; // not a problem, module just has no submodules.
+                    }
+                    let dir = match std::fs::read_dir(dir) {
+                        Ok(dir) => dir,
+                        Err(e) => {
+                            eprintln!("failed to read module directory: {e}");
+                            continue;
                         }
-                        let dir = match std::fs::read_dir(dir) {
-                            Ok(dir) => dir,
+                    };
+                    let mut dir_file_count = 0usize;
+                    for ent in dir {
+                        let ent = match ent {
+                            Ok(ent) => ent,
                             Err(e) => {
-                                eprintln!("failed to read module directory: {e}");
+                                eprintln!("failed to read module directory entry: {e}");
                                 continue;
                             }
                         };
-                        let mut dir_file_count = 0usize;
-                        for ent in dir {
-                            let ent = match ent {
-                                Ok(ent) => ent,
-                                Err(e) => {
-                                    eprintln!("failed to read module directory entry: {e}");
-                                    continue;
-                                }
-                            };
-                            let path = ent.path();
-                            if path.extension().is_some_and(|ext| ext == "bats") {
-                                dir_file_count = dir_file_count.strict_add(1);
-                                files.push(path);
-                            }
+                        let path = ent.path();
+                        if path.extension().is_some_and(|ext| ext == "bats") {
+                            dir_file_count = dir_file_count.strict_add(1);
+                            files.push((path, false));
                         }
-                        dirs.extend(
-                            files
-                                .iter()
-                                .rev()
-                                .take(dir_file_count)
-                                .map(|path| path.with_extension("")),
-                        );
                     }
+                    dirs.extend(
+                        files
+                            .iter()
+                            .rev()
+                            .take(dir_file_count)
+                            .map(|(path, _)| path.with_extension("")),
+                    );
                 }
-
-                for path in files {
-                    match std::fs::read_to_string(&path) {
-                        Err(e) => eprintln!("failed to read source code file: {e}"),
-
-                        Ok(mut source) => {
-                            pop_trailing_newline(&mut source);
-
-                            match SourceCode::new(SourceLoc::File(path), source) {
-                                Err(e) => eprintln!("failed to read source code file: {e}"),
-
-                                Ok(code) => _ = source_map.push(code),
-                            }
-                        }
+            }
+            for (path, is_root) in files {
+                let mut source = match std::fs::read_to_string(&path) {
+                    Ok(source) => source,
+                    Err(e) => {
+                        eprintln!("failed to read source code file: {e}");
+                        continue;
                     }
+                };
+                pop_trailing_newline(&mut source);
+                match SourceCode::new(SourceLoc::File(path), source, is_root) {
+                    Ok(code) => _ = source_map.push(code),
+                    Err(e) => eprintln!("failed to read source code file: {e}"),
                 }
             }
         }
 
-        let (res, diagnostics) = compile(&mut source_map, &config);
+        let mut diagnostics = Vec::new();
+        let mut scope_env = ScopeEnvironment::new();
+        let res = compile(&mut source_map, &config, &mut diagnostics, &mut scope_env);
 
         for e in diagnostics {
             println!("{}\n", e.contextualize(&source_map));

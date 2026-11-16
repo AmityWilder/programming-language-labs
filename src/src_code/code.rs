@@ -407,6 +407,7 @@ impl std::iter::FusedIterator for LineContentSpans<'_> {}
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SourceCode {
     loc: SourceLoc,
+    is_root: bool,
     src: String,
     /// Macro expansion ranges
     mac: Vec<ExpansionData>,
@@ -436,19 +437,21 @@ impl std::ops::IndexMut<RelSpan> for SourceCode {
 }
 
 impl SourceCode {
-    pub fn new(loc: SourceLoc, src: String) -> Result<Self, CreateSourceCodeError> {
-        Self::with_expansion(loc, src, Vec::new())
+    pub fn new(loc: SourceLoc, src: String, is_root: bool) -> Result<Self, CreateSourceCodeError> {
+        Self::with_expansion(loc, src, is_root, Vec::new())
     }
 
     pub fn with_expansion(
         loc: SourceLoc,
         src: String,
+        is_root: bool,
         mac: Vec<ExpansionData>,
     ) -> Result<Self, CreateSourceCodeError> {
         let len = src.len();
         if uspan::try_from(len).is_ok() {
             Ok(Self {
                 loc,
+                is_root,
                 lines: src
                     .split_inclusive('\n')
                     .map(str::len)

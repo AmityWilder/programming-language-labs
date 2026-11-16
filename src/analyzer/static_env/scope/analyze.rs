@@ -6,10 +6,52 @@ use crate::{
     src_code::{code::SourceCode, map::SourceMap, span::FileId},
     util::OrAllErrsExt,
 };
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    path::PathBuf,
+};
 
 impl<'src> ScopeEnvironment<'src> {
+    pub fn declared_submodules(
+        &mut self,
+        code: &'src SourceCode,
+        unit: &ast::ProgramUnit,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> HashMap<&'src str, ModId> {
+        let name = code.loc().path().map_or_default(|path| {
+            let name = path.file_stem().expect("must be a file");
+            name.to_str()
+                .unwrap_or_else(|| todo!("invalid characters in module name {name:?}"))
+        });
+
+        #[expect(
+            irrefutable_let_patterns,
+            reason = "only irrefutable because it's unfinished"
+        )]
+        let tree = forest
+            // TODO: what if two modules have the same name on different paths?
+            .try_insert(name.to_string(), TreeNode::new(unit.file))
+            .map_err(|e| todo!("two modules with same name but different path: {e:?}"))?;
+        // TODO: search forest recursively for unfound modules this could match
+
+        for decl in &unit.decls {
+            if let ast::Decl::Mod(submod) = decl {
+                let subname = &code[submod.name];
+                if !tree.unfound.insert(subname) {
+                    diagnostics.push(todo!(
+                        "error: multiple submodules within {name} have the same name ({subname})"
+                    ));
+                }
+                if let Some(node) = forest.remove(subname) {
+                } else {
+                    // may not have been encountered yet
+                }
+            }
+        }
+    }
+
     // needs to be done separately because ModScopEnvironment exclusively borrows the module tree
+    #[deprecated = "use declared_submodules instead"]
     pub fn analyze_module_tree(
         &mut self,
         source: &'src SourceMap,
@@ -61,6 +103,7 @@ impl<'src> ScopeEnvironment<'src> {
         }
 
         let mut forest = HashMap::<String, TreeNode>::new();
+        // non-root nodes that have not been grouped with their parents yet
         for unit in prgm {
             let code = source
                 .get(unit.file)
@@ -93,7 +136,10 @@ impl<'src> ScopeEnvironment<'src> {
                             "error: multiple submodules within {name} have the same name ({subname})"
                         ));
                     }
-                    // TODO: search forest (root only) for matches
+                    if let Some(node) = forest.remove(subname) {
+                    } else {
+                        // may not have been encountered yet
+                    }
                 }
             }
         }
