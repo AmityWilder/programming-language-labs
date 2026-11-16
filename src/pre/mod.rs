@@ -284,15 +284,28 @@ impl<'src, 'err> PreProcessor<'src, 'err> {
         self.queue
             .iter()
             .position(|(_, k)| !k.is_ignored())
-            .filter(|&i| p(&self.queue[i]))
+            .filter(|&i| {
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "position() should produce a valid index"
+                )]
+                (p(&self.queue[i]))
+            })
             .map(|i| {
-                for j in 0..i.strict_add(1) {
-                    self.track_munch(self.queue[j].0);
+                // this has to loop over indices instead of elements, because `track_munch` mutates self,
+                // preventing the queue from being borrowed for iteration even though it isn't being mutated.
+                for i in 0..=i  {
+                    #[expect(
+                        clippy::indexing_slicing,
+                        reason = "position() should produce a valid index"
+                    )]
+                    self.track_munch(self.queue[i].0);
                 }
-                drop(self.queue.drain(..i));
+                #[expect(clippy::arithmetic_side_effects, reason = "valid indices should always be at most `len - 1`")]
+                self.queue.retain_back(self.queue.len() - i);
                 self.queue
                     .pop_front()
-                    .expect("position should produce a valid index")
+                    .expect("position() should produce a valid index; so after removing everything before it, there should still be at least one item")
             })
     }
 
