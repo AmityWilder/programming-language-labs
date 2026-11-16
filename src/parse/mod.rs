@@ -1511,8 +1511,8 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         self.literal()
             .map(|x| Ok(ast::Expr::Literal(x)))
             .or_else(|| self.group().map_inner(|x| ast::Expr::Grouping(Box::new(x))))
-            .or_else(|| self.variable().map(|x| Ok(ast::Expr::Variable(x))))
             .or_else(|| self.directive().map(|x| Ok(ast::Expr::Directive(x))))
+            .or_else(|| self.variable().map_inner(ast::Expr::Variable))
             .ok_or_else_flat(|| self.error(ExpectedToken::Expr))
             .inspect_always(|x| pop_parse_call!(self, "primary", x))
     }
@@ -1533,11 +1533,18 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "bind_pattern", x))
     }
 
-    /// `variable -> IDENTIFIER`
-    fn variable(&mut self) -> Option<ast::Variable> {
+    /// `variable -> ( IDENT "::" )* IDENT`
+    fn variable(&mut self) -> Option<Result<ast::Variable>> {
         push_parse_call!(self, "variable");
         self.pull_if_eq(TokenKind::Ident)
-            .map(|ident| ast::Variable { ident })
+            .map(|mut ident| {
+                let mut path = Vec::new();
+                while let Some(sep) = self.pull_if_eq(Punctuation::PathSep) {
+                    path.push(ast::ModPathPart { ident, sep });
+                    ident = self.try_pull_eq(TokenKind::Ident)?;
+                }
+                Ok(ast::Variable { path, ident })
+            })
             .inspect_always(|x| pop_parse_call!(self, "variable", x))
     }
 
@@ -1809,7 +1816,11 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 Ok(ast::IffClause {
                     iff,
                     bounds: match self.pull_terminated(Punctuation::Comma, |p| {
-                        p.is_next_not_close().then(|| p.type_bound_clause())
+                        p.peek()
+                            // HACK: this is incompatible with types being wrapped in braces
+                            // (fortunately that has no meaning at the moment)
+                            .is_some_and(|(_, kind)| *kind != TokenKind::Punc(Punctuation::LBrace))
+                            .then(|| p.type_bound_clause())
                     })? {
                         v @ [_, ..] => v,
                         [] => return Err(self.error(ExpectedToken::TypeBound)),

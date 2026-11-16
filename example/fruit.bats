@@ -9,7 +9,7 @@ mod apples;
             let color;
             cord {
                 color = inpt;
-                if is_valid(color) {
+                if apples::is_valid(color) {
                     prnt("I don't know any " + color + " apples\n");
                     skip;
                 }

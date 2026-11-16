@@ -169,20 +169,19 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Binary {
         visit(
             self.op_span,
             match self.op {
-                Operator::Szof => Syntax::Keyword,
-
                 Operator::Coalesce => Syntax::FlowKeyword,
 
                 Operator::Exists
                 | Operator::Convert
                 | Operator::Transmute
                 | Operator::Incr
-                | Operator::Decr => Syntax::Keyword,
+                | Operator::Decr
+                | Operator::Szof => Syntax::Keyword,
 
                 _ => Syntax::Normal,
             },
         );
-        self.rhs.visit_spans(brack_depth, visit)
+        self.rhs.visit_spans(brack_depth, visit);
     }
 }
 
@@ -223,26 +222,25 @@ impl AstNode for Unary {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Unary {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         let op_syn = match self.op {
-            Operator::Szof => Syntax::Keyword,
-
             Operator::Coalesce => Syntax::FlowKeyword,
 
             Operator::Exists
             | Operator::Convert
             | Operator::Transmute
             | Operator::Incr
-            | Operator::Decr => Syntax::Keyword,
+            | Operator::Decr
+            | Operator::Szof => Syntax::Keyword,
 
             _ => Syntax::Normal,
         };
         match self.side {
             OpSide::Postfix => {
                 self.operand.visit_spans(brack_depth, visit);
-                visit(self.op_span, op_syn)
+                visit(self.op_span, op_syn);
             }
             OpSide::Prefix => {
                 visit(self.op_span, op_syn);
-                self.operand.visit_spans(brack_depth, visit)
+                self.operand.visit_spans(brack_depth, visit);
             }
         }
     }
@@ -318,13 +316,21 @@ impl AstNode for FnCall {
 
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnCall {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
-        self.fun.visit_spans(brack_depth, visit);
+        if let Expr::Variable(fun) = &self.fun {
+            // HACK: super special case
+            for part in &fun.path {
+                part.visit_spans(brack_depth, visit);
+            }
+            visit(fun.ident, Syntax::Callable);
+        } else {
+            self.fun.visit_spans(brack_depth, visit);
+        }
         visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for arg in &self.args {
             arg.visit_spans(inner_depth, visit);
         }
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -1441,12 +1447,14 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Directive {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Variable {
+pub struct ModPathPart {
     /// Identifier
     pub ident: RelSpan,
+    /// `::`
+    pub sep: RelSpan,
 }
 
-impl AstNode for Variable {
+impl AstNode for ModPathPart {
     fn span_start(&self) -> uspan {
         self.ident.start
     }
@@ -1454,15 +1462,41 @@ impl AstNode for Variable {
     fn span_end(&self) -> uspan {
         self.ident.end
     }
+}
 
-    fn span(&self) -> RelSpan {
-        self.ident
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ModPathPart {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
+        visit(self.ident, Syntax::Modname);
+        visit(self.sep, Syntax::Normal);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Variable {
+    // TODO: what about type-associated methods?
+    pub path: Vec<ModPathPart>,
+    /// Identifier
+    pub ident: RelSpan,
+}
+
+impl AstNode for Variable {
+    fn span_start(&self) -> uspan {
+        self.path
+            .first()
+            .map_or(self.ident.start, ModPathPart::span_start)
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ident.end
     }
 }
 
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Variable {
-    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
-        visit(self.ident, Syntax::Variable)
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        for part in &self.path {
+            part.visit_spans(brack_depth, visit);
+        }
+        visit(self.ident, Syntax::Variable);
     }
 }
 
