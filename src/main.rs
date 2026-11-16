@@ -94,7 +94,10 @@ use crate::{
 use analyzer::static_env::scope::env::ScopeEnvironment;
 use error::fail::Failure;
 use src_code::code::ExpansionData;
-use std::{collections::VecDeque, path::PathBuf};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    path::PathBuf,
+};
 
 macro_rules! debug_info {
     ($($args:tt)*) => {
@@ -842,13 +845,11 @@ fn main() {
             // from file
             for source_path in &config.source_paths {
                 let mut files = vec![source_path.clone()];
-                if let Some((parent, stem)) = source_path.parent().zip(source_path.file_stem()) {
-                    // remove the extension(s)
-                    let root = parent.join(stem);
-                    let mut dirs = VecDeque::from([root]);
+                {
+                    let mut dirs = VecDeque::from([source_path.with_extension("")]);
                     while let Some(dir) = dirs.pop_front() {
                         if !dir.exists() {
-                            continue; // no problem, module has no submodules
+                            continue; // not a problem, module just has no submodules.
                         }
                         let dir = match std::fs::read_dir(dir) {
                             Ok(dir) => dir,
@@ -857,6 +858,7 @@ fn main() {
                                 continue;
                             }
                         };
+                        let mut dir_file_count = 0usize;
                         for ent in dir {
                             let ent = match ent {
                                 Ok(ent) => ent,
@@ -866,15 +868,19 @@ fn main() {
                                 }
                             };
                             let path = ent.path();
-                            if path.is_dir() {
-                                dirs.push_back(path);
-                            } else if path.extension().is_some_and(|ext| ext == "bats") {
+                            if path.extension().is_some_and(|ext| ext == "bats") {
+                                dir_file_count = dir_file_count.strict_add(1);
                                 files.push(path);
                             }
                         }
+                        dirs.extend(
+                            files
+                                .iter()
+                                .rev()
+                                .take(dir_file_count)
+                                .map(|path| path.with_extension("")),
+                        );
                     }
-                } else {
-                    eprintln!("failed to get source code directory");
                 }
 
                 for path in files {
