@@ -646,7 +646,7 @@ impl Operator {
     //     self.to_token_eq().op_description(operands)
     // }
 
-    pub const fn precedence(&self) -> ExprPrecedence {
+    pub const fn precedence(self) -> ExprPrecedence {
         match self {
             Self::Assign
             | Self::AndAssign

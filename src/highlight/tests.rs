@@ -1,5 +1,8 @@
 use super::*;
-use crate::scanner::token::{Lexeme, value::LexValue};
+use crate::scanner::token::{
+    Lexeme,
+    value::{CharLiteral, LexValue, TextLiteral},
+};
 
 // Escape sequences are the only difficult ones
 

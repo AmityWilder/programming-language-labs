@@ -17,10 +17,7 @@ use crate::{
     old_error::ContextError,
     scanner::{
         Scanner,
-        token::{
-            Token,
-            value::{CharLiteral, Escapes, TextLiteral},
-        },
+        token::{Token, value::Escapes},
     },
 };
 use std::range::Range;
@@ -166,6 +163,7 @@ const fn escaped_ranges_closure(range: Range<usize>) -> (Range<usize>, Syntax) {
 /// Offsets [`Range`]s by the length of a char/string delimiter and tuples them with [`Syntax::EscapeSeq`]
 pub type EscapedRanges<I> = std::iter::Map<I, fn(Range<usize>) -> (Range<usize>, Syntax)>;
 
+#[expect(clippy::needless_pass_by_value, reason = "need to fit closure shape")]
 fn escape_ranges_closure<E>(item: Result<(Range<usize>, char), E>) -> Option<Range<usize>> {
     match item {
         Ok((r, _)) => Some(r),
