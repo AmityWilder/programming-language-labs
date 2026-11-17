@@ -221,6 +221,7 @@ impl HirDisplay for ast::TypeExpr {
             ast::TypeExpr::View(inner) => inner.fmt(source, env, f),
             ast::TypeExpr::Assoc(inner) => inner.fmt(source, env, f),
             ast::TypeExpr::FunPtr(inner) => inner.fmt(source, env, f),
+            ast::TypeExpr::Opaque(_inner) => todo!(),
         }
     }
 }

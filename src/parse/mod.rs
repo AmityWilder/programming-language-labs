@@ -1716,11 +1716,12 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "type_source", x))
     }
 
-    /// `primary_type -> view_type | fun_type | primitive_type | type_instance`
+    /// `primary_type -> opaque_type | view_type | fun_type | primitive_type | type_instance`
     fn primary_type(&mut self) -> Result<ast::TypeExpr> {
         push_parse_call!(self, "primary_type");
-        self.view_type()
-            .map_inner(ast::TypeExpr::View)
+        self.opaque_type()
+            .map_inner(ast::TypeExpr::Opaque)
+            .or_else(|| self.view_type().map_inner(ast::TypeExpr::View))
             .or_else(|| self.fun_type().map_inner(ast::TypeExpr::FunPtr))
             .or_else(|| {
                 self.primitive_type()
@@ -1728,6 +1729,20 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             })
             .unwrap_or_else(|| self.type_instance().map(ast::TypeExpr::Instance))
             .inspect_always(|x| pop_parse_call!(self, "primary_type", x))
+    }
+
+    // TBD: are the parentheses necessary?
+    /// `opaque_type -> ":" "(" type_bound ")"`
+    fn opaque_type(&mut self) -> Option<Result<ast::OpaqueType>> {
+        push_parse_call!(self, "opaque_type");
+        self.pull_if_eq(Punctuation::Colon)
+            .map(|colon| {
+                Ok(ast::OpaqueType {
+                    colon,
+                    bound: self.type_bound()?,
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "opaque_type", x))
     }
 
     /// `fun_type -> "fun" "(" ( type_expression ( "," type_expression )* ( "," )? )? ")" "->" type_expression`
