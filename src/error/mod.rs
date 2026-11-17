@@ -1316,7 +1316,7 @@ impl Display for ContextDiagnostic<'_, '_> {
             f,
             "  {}-->\x1b[0m ",
             Style::new()
-                .foreground(Color::BrightCyan)
+                .foreground(Color::BrightBlue)
                 .bold(true)
                 .begin()
         )?;
@@ -1348,7 +1348,7 @@ impl Display for ContextDiagnostic<'_, '_> {
             f,
             "{}help\x1b[0m: ",
             Style::new()
-                .foreground(Color::BrightCyan)
+                .foreground(Color::BrightBlue)
                 .bold(true)
                 .begin()
         )?;

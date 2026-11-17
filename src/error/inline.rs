@@ -231,7 +231,7 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
     }
 
     fn render(&mut self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        const LINE_PRELUDE_STYLE: Style = Style::new().foreground(Color::BrightCyan).bold(true);
+        const LINE_PRELUDE_STYLE: Style = Style::new().foreground(Color::BrightBlue).bold(true);
         let max_linenum = self.curr_file.line_lens().len();
         let max_linenum_width = max_linenum.to_string().len();
         write!(
