@@ -679,7 +679,7 @@ impl AstNode for PrimitiveType {
 
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PrimitiveType {
     fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
-        visit(self.span, Syntax::Typename)
+        visit(self.span, Syntax::Primitive);
     }
 }
 
@@ -765,7 +765,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FallType {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         self.then_ty.visit_spans(brack_depth, visit);
         visit(self.pipe, Syntax::Keyword); // TBD: what syntax should this be?
-        visit(self.ty_span, Syntax::Typename)
+        visit(self.ty_span, Syntax::Primitive)
     }
 }
 

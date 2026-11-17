@@ -48,6 +48,8 @@ pub enum Syntax {
     Keyword,
     /// A language keyword that resembles assembly labels
     FlowKeyword,
+    /// A primitive type name
+    Primitive,
     /// A type name
     Typename,
     /// A module/library name
@@ -104,6 +106,8 @@ pub struct SyntaxStyle<T, A> {
     pub keyword: T,
     /// Style for [`Syntax::FlowKeyword`]
     pub flow_keyword: T,
+    /// Style for [`Syntax::Primitive`]
+    pub primitive: T,
     /// Style for [`Syntax::Typename`]
     pub typename: T,
     /// Style for [`Syntax::Modname`]
@@ -146,6 +150,7 @@ where
             Syntax::Callable => &self.callable,
             Syntax::Keyword => &self.keyword,
             Syntax::FlowKeyword => &self.flow_keyword,
+            Syntax::Primitive => &self.primitive,
             Syntax::Typename => &self.typename,
             Syntax::Modname => &self.modname,
             Syntax::MacroName => &self.macro_name,
@@ -188,6 +193,7 @@ impl<const N: usize> SyntaxStyle<Style, [Style; N]> {
             callable: Style::new(),
             keyword: Style::new(),
             flow_keyword: Style::new(),
+            primitive: Style::new(),
             typename: Style::new(),
             modname: Style::new(),
             macro_name: Style::new(),
@@ -221,6 +227,7 @@ impl SyntaxStyle<Style, &[Style]> {
             callable: Style::new(),
             keyword: Style::new(),
             flow_keyword: Style::new(),
+            primitive: Style::new(),
             typename: Style::new(),
             modname: Style::new(),
             macro_name: Style::new(),
