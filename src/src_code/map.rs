@@ -120,19 +120,28 @@ impl SourceMap {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpanLoc<'src> {
-    source: &'src SourceMap,
-    span: Span,
+    source: &'src SourceCode,
+    span: RelSpan,
+}
+
+impl RelSpan {
+    pub const fn display_loc(self, source: &SourceCode) -> SpanLoc<'_> {
+        SpanLoc { source, span: self }
+    }
 }
 
 impl Span {
-    pub const fn display_loc(self, source: &SourceMap) -> SpanLoc<'_> {
-        SpanLoc { source, span: self }
+    pub fn display_loc(self, source: &SourceMap) -> SpanLoc<'_> {
+        SpanLoc {
+            source: source.source_of(self),
+            span: self.rel,
+        }
     }
 }
 
 impl std::fmt::Display for SpanLoc<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let code = self.source.source_of(self.span);
+        let code = self.source;
         write!(f, "{}", code.loc())?;
         let (start_linenum, start_charnum) = code
             .line_char(self.span.start)

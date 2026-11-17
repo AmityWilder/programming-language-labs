@@ -408,12 +408,12 @@ impl HirDisplay for hir::HirUnit {
 impl HirDisplay for hir::SelfParam {
     fn fmt(
         &self,
-        _source: &SourceCode,
-        _env: &ScopeEnvironment,
+        source: &SourceCode,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self {} = self;
-        write!(f, "{}", Keyword::Me)
+        let Self { id } = self;
+        id.fmt(source, env, f)
     }
 }
 

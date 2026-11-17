@@ -216,7 +216,9 @@ pub struct DeclOn {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SelfParam;
+pub struct SelfParam {
+    pub id: VarId,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclFun {
