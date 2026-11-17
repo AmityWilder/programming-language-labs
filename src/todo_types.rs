@@ -10,5 +10,7 @@ pub type Todo = !;
 ///
 /// This can be useful if you are prototyping and just
 /// want a placeholder to let your code pass type analysis.
+///
+/// Similar to [`Todo`], but without panicking.
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash, Default)]
 pub struct Dummy;

@@ -44,11 +44,19 @@ pub trait OrAllErrsExt<T, E>: Sized + IntoIterator<Item = Result<T, E>> {
         iter.ok_or_all_errs(|x| buf.extend_one(x)).map(|()| buf)
     }
 
+    fn collect_boxed_or_all_errs(self) -> Result<Box<[T]>, ErrorIter<Self::IntoIter, E>> {
+        self.collect_or_all_errs().map(Vec::into_boxed_slice)
+    }
+
     fn collect_or_drop_all_errs<A>(self) -> Option<A>
     where
         A: Default + Extend<T>,
     {
         self.collect_or_all_errs().map_err(drop_all).ok()
+    }
+
+    fn collect_boxed_or_drop_all_errs(self) -> Option<Box<[T]>> {
+        self.collect_boxed_or_all_errs().map_err(drop_all).ok()
     }
 }
 

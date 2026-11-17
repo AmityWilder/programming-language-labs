@@ -85,7 +85,6 @@ macro_rules! AstNodeEnum {
         }
     };
 }
-pub(crate) use AstNodeEnum;
 
 macro_rules! VisitSpansEnum {
     derive() {
@@ -1169,47 +1168,6 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ShapeBoundRet {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ShapeBound {
-    /// `fun`
-    pub kw: RelSpan,
-    /// `(`
-    pub open: RelSpan,
-    pub args: Vec<TypeExpr>,
-    /// `)`
-    pub close: RelSpan,
-    pub ret: Option<ShapeBoundRet>,
-}
-
-impl AstNode for ShapeBound {
-    fn span_start(&self) -> uspan {
-        self.kw.start
-    }
-
-    fn span_end(&self) -> uspan {
-        if let Some(ret) = &self.ret {
-            ret.span_end()
-        } else {
-            self.close.end
-        }
-    }
-}
-
-impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ShapeBound {
-    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
-        visit(self.kw, Syntax::Keyword);
-        visit(self.open, Syntax::Bracket(brack_depth));
-        let inner_depth = brack_depth.wrapping_add(1);
-        for arg in &self.args {
-            arg.visit_spans(inner_depth, visit);
-        }
-        visit(self.close, Syntax::Bracket(brack_depth));
-        if let Some(ret) = &self.ret {
-            ret.visit_spans(brack_depth, visit)
-        }
-    }
-}
-
 /// UNDER CONSTRUCTION
 #[derive(Debug, Clone, PartialEq)]
 pub struct OverloadBound {
@@ -1295,7 +1253,7 @@ pub enum TypeBound {
     Not(Box<NegativeBound>),
     Exact(Box<ExactTypeBound>),
     Has(Box<MemberBound>),
-    Shape(Box<ShapeBound>),
+    Shape(Box<FunType>),
     Supports(Box<OverloadBound>),
     Satisfies(Box<ExprBound>),
     Group(Box<GroupedBound>),

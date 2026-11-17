@@ -1,7 +1,7 @@
 //! Type Intermediate Representation
 
 use crate::{
-    analyzer::static_env::{ItemId, ModId, TypeId, VarId},
+    analyzer::static_env::{FuncId, ItemId, ModId, TypeId, VarId},
     lex::token::{Operator, punc::OpSide},
     parse::ast,
     src_code::span::{FileId, RelSpan},
@@ -96,6 +96,72 @@ pub struct FunType {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct OpaqueType(pub TypeBound);
+
+/// All
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConjunctionBound(pub Box<[TypeBound]>);
+
+/// Any
+#[derive(Debug, Clone, PartialEq)]
+pub struct DisjunctionBound(pub Box<[TypeBound]>);
+
+/// One
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelectionBound(pub Box<[TypeBound]>);
+
+/// Not
+#[derive(Debug, Clone, PartialEq)]
+pub struct NegativeBound {
+    pub bound: TypeBound,
+}
+
+/// Only
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExactTypeBound {
+    pub ty: TypeExpr,
+}
+
+/// Has
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemberBound {
+    /// Identifier
+    pub member: ItemId,
+    pub req: Option<TypeBound>,
+}
+
+/// Shape
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShapeBound(pub FunType);
+
+/// Supports
+#[derive(Debug, Clone, PartialEq)]
+pub struct OverloadBound {
+    // TODO
+}
+
+/// Satisfies
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExprBound {
+    // TBD: should this be a special ID since it never actually appears in the program?
+    pub name: VarId,
+    pub expr: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeBound {
+    Conjunction(ConjunctionBound),
+    Disjunction(DisjunctionBound),
+    Selection(SelectionBound),
+    Not(Box<NegativeBound>),
+    Exact(ExactTypeBound),
+    Has(Box<MemberBound>),
+    Shape(ShapeBound),
+    Supports(Box<OverloadBound>),
+    Satisfies(Box<ExprBound>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
     Primitive(PrimitiveType),
     Instance(TypeInstance),
@@ -104,6 +170,7 @@ pub enum TypeExpr {
     View(Box<ViewType>),
     Assoc(Box<AssocType>),
     FunPtr(FunType),
+    Opaque(Box<OpaqueType>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,6 +186,8 @@ pub struct PickPattern {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     Mod(DeclMod),
+    On(DeclOn),
+    Fun(DeclFun),
     Rec(DeclRec),
     Cat(DeclCat),
     Uni(DeclUni),
@@ -134,21 +203,53 @@ pub struct DeclMod {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct IffClause(pub Box<[TypeBound]>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclOn {
+    pub generics: Option<GenericGroup>,
+    pub target: TypeExpr,
+    pub iff: Option<IffClause>,
+    pub members: Box<[Decl]>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SelfParam;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclFun {
+    pub id: FuncId,
+    pub generics: Option<GenericGroup>,
+    pub self_param: Option<SelfParam>,
+    pub params: Box<[FunParam]>,
+    pub ret: Option<TypeExpr>,
+    pub iff: Option<IffClause>,
+    pub body: Option<BlockStmt>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunParam {
+    /// Treated as a member of the function
+    pub id: VarId,
+    pub ty: TypeExpr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DeclRec {
     pub id: TypeId,
-    pub fields: Vec<Field>,
+    pub fields: Box<[Field]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field {
     pub id: ItemId, // TODO: these should be treated like unique items
-    pub ty: ast::TypeExpr,
+    pub ty: TypeExpr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclCat {
     pub id: TypeId, // TODO: these should be treated like unique items
-    pub discriminants: Vec<Discriminant>,
+    pub discriminants: Box<[Discriminant]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,7 +261,7 @@ pub struct Discriminant {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclUni {
     pub id: VarId,
-    pub ty: Option<ast::TypeExpr>,
+    pub ty: Option<TypeExpr>,
     pub init: Option<Expr>,
 }
 
@@ -199,8 +300,10 @@ pub struct Subscript {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnCall {
     pub fun: Expr,
-    pub args: Vec<Expr>,
+    pub args: Box<[Expr]>,
 }
+
+pub use ast::{Literal, LiteralKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Directive {
@@ -223,7 +326,7 @@ pub enum BlockExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclPvt {
     pub id: VarId,
-    pub ty: Option<ast::TypeExpr>,
+    pub ty: Option<TypeExpr>,
     pub init: Expr,
 }
 
@@ -231,7 +334,7 @@ pub struct DeclPvt {
 pub struct DeclLet {
     // TODO: complex bindings
     pub id: VarId,
-    pub ty: Option<ast::TypeExpr>,
+    pub ty: Option<TypeExpr>,
     pub init: Option<Expr>,
 }
 
@@ -282,7 +385,7 @@ pub enum OrStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickExpr {
-    pub arms: Vec<PickArm>,
+    pub arms: Box<[PickArm]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -334,5 +437,5 @@ pub struct SkipStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockStmt {
-    pub decls: Vec<Decl>,
+    pub decls: Box<[Decl]>,
 }

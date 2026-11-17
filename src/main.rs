@@ -121,6 +121,7 @@
 )]
 
 use crate::{
+    analyzer::static_env::scope::fmt::DisplayHir,
     error::Diagnostic,
     highlight::{
         TokenHighlight, highlight,
@@ -797,36 +798,34 @@ fn compile(
 
     println!("--- linking ---");
 
-    // // scope analysis
-    // println!("analyzing scope...");
-    // for unit in prgm {
-    //     let &id = mapping
-    //         .get(&unit.file)
-    //         .expect("should have been defined by `analyze_module_tree`");
-    //     println!("analyzing {:?}", unit.file);
-    //     let code = source
-    //         .get(unit.file)
-    //         .expect("all program units should be valid");
-    //     let mut env = scope_env
-    //         .define_module(id)
-    //         .expect("should have been defined by `analyze_module_tree`");
-    //     if let Ok(hir) = env.analyze(&source[unit.file], unit, diagnostics) {
-    //         println!(
-    //             "hir:\n{:#}",
-    //             DisplayHir {
-    //                 code,
-    //                 env: &scope_env,
-    //                 hir: &hir
-    //             }
-    //         );
-    //         // TODO
-    //     } else {
-    //         debug_assert!(
-    //             diagnostics.iter().any(|e| e.kind.severity().is_err()),
-    //             "should have an error if analysis failed"
-    //         );
-    //     }
-    // }
+    // scope analysis
+    println!("analyzing scope...");
+    for unit in units {
+        println!("analyzing {:?}", unit.file);
+        let code = &source[unit.file];
+        let &mod_id = file_mod_ids
+            .get(&unit.file)
+            .expect("should have been defined by `analyze_module_tree`");
+        let mut env = scope_env
+            .define_module(mod_id)
+            .expect("should have been defined by `analyze_module_tree`");
+        if let Ok(hir) = env.analyze(code, unit, diagnostics) {
+            println!(
+                "hir:\n{:#}",
+                DisplayHir {
+                    code,
+                    env: scope_env,
+                    hir: &hir
+                }
+            );
+            // TODO
+        } else {
+            debug_assert!(
+                diagnostics.iter().any(|e| e.kind.severity().is_err()),
+                "should have an error if analysis failed"
+            );
+        }
+    }
 
     // // scope errors
     // diagnostics.ok_or_err()?;
