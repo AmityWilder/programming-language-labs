@@ -747,7 +747,10 @@ fn compile(
     let mut units = Vec::new();
     while let Some(id) = ids.pop_front() {
         let loc = source[id].loc();
-        println!("processing file {loc} ({})", loc.name().unwrap_or("<REPL>"));
+        println!(
+            "processing file {loc} (mod {})",
+            loc.name().unwrap_or("<REPL>")
+        );
         if let Ok(unit) = comp_file(config, source, id, diagnostics) {
             let code = &source[unit.file];
             let unit = units.push_mut(unit);
