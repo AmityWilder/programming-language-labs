@@ -13,16 +13,22 @@ pub mod scope;
 pub mod var_scope;
 
 /// A unique ID for distinguishing items that may have the same identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ItemId(pub(self) usize);
 
 pub type TypeId = ItemId;
 pub type FuncId = ItemId;
 pub type VarId = ItemId;
 
+impl std::fmt::Debug for ItemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ItemId({:#X})", self.0)
+    }
+}
+
 impl std::fmt::Display for ItemId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "item{:#x}", self.0)
+        write!(f, "item.{:#x}", self.0)
     }
 }
 
@@ -34,7 +40,7 @@ pub type LibId = ModId;
 
 impl std::fmt::Display for ModId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "mod{:#x}", self.0)
+        write!(f, "mod.{:#x}", self.0)
     }
 }
 

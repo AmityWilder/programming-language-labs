@@ -12,11 +12,12 @@ use crate::{
     error::{
         CheckDiagnostics, Diagnostic, DiagnosticCategory::StaticAnalysis, DiagnosticKind, Severity,
     },
+    lex::token::keyword::Keyword,
     parse::{
         ast::{self, AstNode as _},
         util::OkOrFlatten as _,
     },
-    src_code::{code::SourceCode, span::FileId},
+    src_code::{code::SourceCode, map::SourceMap, span::FileId},
     util::OrAllErrsExt as _,
 };
 use std::collections::BTreeMap;
@@ -66,7 +67,7 @@ impl ModScopeEnvironment<'_> {
     pub fn analyze(
         &mut self,
         prgm: ast::ProgramUnit,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::HirUnit, CheckDiagnostics> {
         prgm.decls
@@ -88,7 +89,7 @@ trait ScopeAnalyze {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics>;
 }
@@ -100,7 +101,7 @@ impl ScopeAnalyze for ast::BlockStmt {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         self.body
@@ -119,7 +120,7 @@ impl ScopeAnalyze for ast::Decl {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
@@ -156,12 +157,12 @@ impl ScopeAnalyze for ast::DeclMod {
     fn analyze(
         self,
         env: &mut ModScopeEnvironment<'_>,
-        _file: FileId,
-        source: &SourceCode,
+        file: FileId,
+        source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let id = env
-            .find_submodule(&source[self.name])
+            .find_submodule(&source[file][self.name])
             .expect("should be handled in pre-scan");
         Ok(hir::DeclMod { id })
     }
@@ -174,7 +175,7 @@ impl ScopeAnalyze for ast::DeclVar {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         // definition should be BEFORE binding
@@ -193,7 +194,7 @@ impl ScopeAnalyze for ast::DeclVar {
         let kw = self.kw;
 
         let ident = self.binding.ident;
-        let id = env.decl_var(source[ident].to_owned(), ident.within_file(file));
+        let id = env.decl_var(source[file][ident].to_owned(), ident.within_file(file));
         Ok(match kw {
             ast::VarKeyword::Let => hir::Decl::Let(hir::DeclLet {
                 id,
@@ -236,7 +237,7 @@ impl ScopeAnalyze for ast::DeclOn {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let generics = self
@@ -268,7 +269,7 @@ impl ScopeAnalyze for ast::TypeBoundClause {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let target = self.ty.analyze(env, file, source, diagnostics);
@@ -287,7 +288,7 @@ impl ScopeAnalyze for ast::IffClause {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         self.bounds
@@ -304,12 +305,18 @@ impl ScopeAnalyze for ast::SelfParam {
 
     fn analyze(
         self,
-        _env: &mut ModScopeEnvironment<'_>,
-        _file: FileId,
-        _source: &SourceCode,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        Ok(hir::SelfParam)
+        debug_assert_eq!(
+            &source[file][self.span],
+            Keyword::Me.as_str(),
+            "ident should be `me`"
+        );
+        let id = env.decl_var(Keyword::Me.to_string(), self.span.within_file(file));
+        Ok(hir::SelfParam { id })
     }
 }
 
@@ -320,11 +327,11 @@ impl ScopeAnalyze for ast::FnParam {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let ident = self.name;
-        let id = env.decl_var(source[self.name].to_owned(), ident.within_file(file));
+        let id = env.decl_var(source[file][self.name].to_owned(), ident.within_file(file));
         let ty = self.ty.ty.analyze(env, file, source, diagnostics);
         Ok(hir::FunParam { id, ty: ty? })
     }
@@ -337,7 +344,7 @@ impl ScopeAnalyze for ast::DeclFun {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let (head, body) = match self {
@@ -345,7 +352,7 @@ impl ScopeAnalyze for ast::DeclFun {
             Self::Define(def) => (def.head, Some(def.body)),
         };
         let ident = head.name;
-        let name = &source[ident];
+        let name = &source[file][ident];
         let id = env
             .decl_item(name.to_owned(), ident.within_file(file))
             .map_err(|e| {
@@ -354,7 +361,13 @@ impl ScopeAnalyze for ast::DeclFun {
                     DiagnosticKind::Other {
                         severity: Severity::Error,
                         category: StaticAnalysis,
-                        msg: format!("could not declare function {name}: {e:?}"),
+                        msg: format!(
+                            "duplicate function `{name}`: first definition: {:?}",
+                            env.get_decl(e.og)
+                                .expect("duplicate item error should give a valid ID")
+                                .decl
+                                .display_loc(source)
+                        ),
                     },
                 ));
                 CheckDiagnostics
@@ -403,7 +416,7 @@ impl ScopeAnalyze for ast::DeclType {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
@@ -425,12 +438,12 @@ impl ScopeAnalyze for (ast::Field, ItemId) {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let (field, parent) = self;
         let ident = field.name;
-        let field_name = &source[ident];
+        let field_name = &source[file][ident];
         let ty = field.ty.ty.clone().analyze(env, file, source, diagnostics);
         let id = env
             .decl_member(parent, field_name.to_owned(), ident.within_file(file))
@@ -456,12 +469,12 @@ impl ScopeAnalyze for ast::DeclRec {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         // TODO: generics
         let ident = self.name;
-        let name = &source[ident];
+        let name = &source[file][ident];
         let id = env
             .decl_item(name.to_owned(), ident.within_file(file))
             .map_err(|e| {
@@ -496,11 +509,11 @@ impl ScopeAnalyze for ast::DeclCat {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let ident = self.name;
-        let name = &source[ident];
+        let name = &source[file][ident];
         let id = env
             .decl_item(name.to_owned(), ident.within_file(file))
             .map_err(|e| {
@@ -534,12 +547,15 @@ impl ScopeAnalyze for ast::DeclDfer {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let param = self.param.map(|x| {
             let ident = x.param.ident;
-            env.decl_var(source[x.param.ident].to_owned(), ident.within_file(file))
+            env.decl_var(
+                source[file][x.param.ident].to_owned(),
+                ident.within_file(file),
+            )
         });
         let on_pop = self.on_pop.analyze(env, file, source, diagnostics);
         Ok(hir::DeclDfer {
@@ -556,7 +572,7 @@ impl ScopeAnalyze for ast::Stmt {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
@@ -610,7 +626,7 @@ impl ScopeAnalyze for ast::LoopBlock {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let label = self.label.map(|name| hir::Label {
@@ -635,7 +651,7 @@ impl ScopeAnalyze for ast::LoopBlock {
 
             ast::LoopKind::For { bind, iter, .. } => {
                 let ident = bind.ident;
-                let name = &source[ident];
+                let name = &source[file][ident];
                 let var = env.decl_var(name.to_owned(), ident.within_file(file));
                 hir::Stmt::For(hir::ForStmt {
                     var: hir::BindingPattern { var },
@@ -654,7 +670,7 @@ impl ScopeAnalyze for ast::PrintStmt {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         self.group
@@ -671,7 +687,7 @@ impl ScopeAnalyze for ast::GiveStmt {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         self.value
@@ -688,7 +704,7 @@ impl ScopeAnalyze for ast::FailStmt {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         self.value
@@ -705,7 +721,7 @@ impl ScopeAnalyze for ast::DoneStmt {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let label = self.label.map(|lbl| hir::Label { name: lbl.name });
@@ -724,7 +740,7 @@ impl ScopeAnalyze for ast::Expr {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
@@ -774,7 +790,7 @@ impl ScopeAnalyze for ast::BlockExpr {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
@@ -809,7 +825,7 @@ impl ScopeAnalyze for ast::Directive {
         self,
         _env: &mut ModScopeEnvironment<'_>,
         _file: FileId,
-        _source: &SourceCode,
+        _source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         Ok(match self.kw {
@@ -825,11 +841,11 @@ impl ScopeAnalyze for ast::Variable {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let ident = self.ident;
-        let name = &source[ident];
+        let name = &source[file][ident];
         env.lookup_var(name)
             .ok_or_else(|| {
                 diagnostics.push(Diagnostic::new(
@@ -849,7 +865,7 @@ impl ScopeAnalyze for ast::IfStmt {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let pred = self.pred.analyze(env, file, source, diagnostics);
@@ -884,7 +900,7 @@ impl ScopeAnalyze for ast::TypeExpr {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
@@ -939,7 +955,7 @@ impl ScopeAnalyze for ast::FallType {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let then_ty = self.then_ty.analyze(env, file, source, diagnostics);
@@ -962,7 +978,7 @@ impl ScopeAnalyze for ast::ViewType {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let item = self.item.analyze(env, file, source, diagnostics);
@@ -984,7 +1000,7 @@ impl ScopeAnalyze for ast::AssocType {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let base = self.base.analyze(env, file, source, diagnostics);
@@ -1003,7 +1019,7 @@ impl ScopeAnalyze for ast::AssocTypeSource {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
@@ -1025,7 +1041,7 @@ impl ScopeAnalyze for ast::OpaqueType {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         self.bound
@@ -1041,7 +1057,7 @@ impl ScopeAnalyze for ast::Typename {
         self,
         _env: &mut ModScopeEnvironment<'_>,
         _file: FileId,
-        _source: &SourceCode,
+        _source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         // TODO: can the module name be located?
@@ -1063,7 +1079,7 @@ impl ScopeAnalyze for ast::FunType {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let params = self
@@ -1090,7 +1106,7 @@ impl ScopeAnalyze for ast::RefType {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         Ok(hir::RefType {
@@ -1106,7 +1122,7 @@ impl ScopeAnalyze for ast::TypeInstance {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let name = self.name.analyze(env, file, source, diagnostics);
@@ -1128,7 +1144,7 @@ impl ScopeAnalyze for ast::Binary {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let lhs = self.lhs.analyze(env, file, source, diagnostics);
@@ -1148,7 +1164,7 @@ impl ScopeAnalyze for ast::Unary {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let operand = self.operand.analyze(env, file, source, diagnostics);
@@ -1167,7 +1183,7 @@ impl ScopeAnalyze for ast::Subscript {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let arr = self.arr.analyze(env, file, source, diagnostics);
@@ -1186,7 +1202,7 @@ impl ScopeAnalyze for ast::FnCall {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let fun = self.fun.analyze(env, file, source, diagnostics);
@@ -1210,7 +1226,7 @@ impl ScopeAnalyze for ast::GenericGroup {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         self.list
@@ -1229,7 +1245,7 @@ impl ScopeAnalyze for ast::TypeBound {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
@@ -1271,7 +1287,7 @@ impl ScopeAnalyze for ast::ComboBound {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let lhs = self.lhs.analyze(env, file, source, diagnostics);
@@ -1292,7 +1308,7 @@ impl ScopeAnalyze for ast::NegativeBound {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         self.rhs
@@ -1308,7 +1324,7 @@ impl ScopeAnalyze for ast::ExactTypeBound {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         self.ty
@@ -1324,7 +1340,7 @@ impl ScopeAnalyze for ast::MemberBound {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let req = self
@@ -1345,7 +1361,7 @@ impl ScopeAnalyze for ast::OverloadBound {
         self,
         _env: &mut ModScopeEnvironment<'_>,
         _file: FileId,
-        _source: &SourceCode,
+        _source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         Ok(hir::OverloadBound {
@@ -1361,11 +1377,14 @@ impl ScopeAnalyze for ast::ExprBound {
         self,
         env: &mut ModScopeEnvironment<'_>,
         file: FileId,
-        source: &SourceCode,
+        source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         // TODO: scope the parameter
-        let param = env.decl_var(source[self.name].to_owned(), self.name.within_file(file));
+        let param = env.decl_var(
+            source[file][self.name].to_owned(),
+            self.name.within_file(file),
+        );
         let expr = self.expr.analyze(env, file, source, diagnostics);
         Ok(hir::ExprBound { param, expr: expr? })
     }

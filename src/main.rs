@@ -809,7 +809,7 @@ fn compile(
         let mut env = scope_env
             .define_module(mod_id)
             .expect("should have been defined by `analyze_module_tree`");
-        if let Ok(hir) = env.analyze(unit, code, diagnostics) {
+        if let Ok(hir) = env.analyze(unit, source, diagnostics) {
             println!(
                 "hir:\n{:#}",
                 DisplayHir {
@@ -881,6 +881,8 @@ fn compile(
     //     }
     // }
 
+    // any remaining errors
+    diagnostics.ok_or_err()?;
     println!("--- compilation successful ---");
     Ok(Dummy)
 }
