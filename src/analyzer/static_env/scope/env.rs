@@ -1,18 +1,62 @@
 use crate::{
     analyzer::static_env::{ItemId, LibId, ModId, VarId},
     parse::ast,
-    src_code::span::RelSpan,
+    src_code::span::{RelSpan, uspan},
 };
 use std::collections::{BTreeMap, HashMap};
 
-#[derive(Debug, Clone, PartialEq, ast::AstNodeEnum)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Decl {
     Mod(ast::DeclMod),
     Rec(ast::DeclRec),
     Field(ast::Field),
     Cat(ast::DeclCat),
     Var(ast::DeclVar),
+    For(ast::LoopKind),
     DferParam(ast::DferParam),
+}
+
+impl ast::AstNode for Decl {
+    fn span_start(&self) -> uspan {
+        match self {
+            Decl::Mod(inner) => inner.span_start(),
+            Decl::Rec(inner) => inner.span_start(),
+            Decl::Field(inner) => inner.span_start(),
+            Decl::Cat(inner) => inner.span_start(),
+            Decl::Var(inner) => inner.span_start(),
+            Decl::For(ast::LoopKind::For { bind, .. }) => bind.span_start(),
+            Decl::For(_) => unimplemented!("should be a for loop"),
+            Decl::DferParam(inner) => inner.span_start(),
+        }
+    }
+
+    fn span_end(&self) -> uspan {
+        match self {
+            Decl::Mod(inner) => inner.span_end(),
+            Decl::Rec(inner) => inner.span_end(),
+            Decl::Field(inner) => inner.span_end(),
+            Decl::Cat(inner) => inner.span_end(),
+            Decl::Var(inner) => inner.span_end(),
+            Decl::For(ast::LoopKind::For { iter, .. }) => iter.span_end(),
+            Decl::For(_) => unimplemented!("should be a for loop"),
+            Decl::DferParam(inner) => inner.span_end(),
+        }
+    }
+
+    fn span(&self) -> RelSpan {
+        match self {
+            Decl::Mod(inner) => inner.span(),
+            Decl::Rec(inner) => inner.span(),
+            Decl::Field(inner) => inner.span(),
+            Decl::Cat(inner) => inner.span(),
+            Decl::Var(inner) => inner.span(),
+            Decl::For(_) => RelSpan(std::range::Range {
+                start: self.span_start(),
+                end: self.span_end(),
+            }),
+            Decl::DferParam(inner) => inner.span(),
+        }
+    }
 }
 
 impl Decl {
@@ -23,6 +67,13 @@ impl Decl {
             Self::Field(inner) => inner.name,
             Self::Cat(inner) => inner.name,
             Self::Var(inner) => inner.binding.ident,
+            Self::For(inner) => match &inner {
+                ast::LoopKind::For { bind, .. } => bind.ident,
+
+                ast::LoopKind::Loop => panic!("Decl::For should be a for loop; found Loop"),
+                ast::LoopKind::Cord => panic!("Decl::For should be a for loop; found Cord"),
+                ast::LoopKind::Rep { .. } => panic!("Decl::For should be a for loop; found Rep"),
+            },
             Self::DferParam(inner) => inner.param.ident,
         }
     }
@@ -51,6 +102,11 @@ impl From<ast::DeclCat> for Decl {
 impl From<ast::DeclVar> for Decl {
     fn from(value: ast::DeclVar) -> Self {
         Self::Var(value)
+    }
+}
+impl From<ast::LoopKind> for Decl {
+    fn from(value: ast::LoopKind) -> Self {
+        Self::For(value)
     }
 }
 impl From<ast::DferParam> for Decl {

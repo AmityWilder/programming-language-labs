@@ -17,6 +17,7 @@ pub mod var_scope;
 pub struct ItemId(pub(self) usize);
 
 pub type TypeId = ItemId;
+pub type FuncId = ItemId;
 pub type VarId = ItemId;
 
 impl std::fmt::Display for ItemId {

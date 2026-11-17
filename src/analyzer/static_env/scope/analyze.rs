@@ -1,12 +1,17 @@
 use super::{env::ModScopeEnvironment, hir};
 use crate::{
-    analyzer::static_env::{ModId, scope::env::ScopeEnvironment},
+    analyzer::{
+        static_env::{ModId, scope::env::ScopeEnvironment},
+        types::bounds::Combinator,
+    },
     error::{CheckDiagnostics, Diagnostic},
     parse::{ast, util::OkOrFlatten as _},
     src_code::{code::SourceCode, span::FileId},
     util::OrAllErrsExt as _,
 };
 use std::collections::BTreeMap;
+
+// bindings are fontloaded in this module so that all errors can all be found before returning with failure
 
 impl ScopeEnvironment {
     pub fn declared_submodules(
@@ -63,7 +68,7 @@ impl ModScopeEnvironment<'_> {
             .body
             .into_iter()
             .map(|decl| self.analyze_decl(file, source, decl, diagnostics))
-            .collect_or_drop_all_errs()
+            .collect_boxed_or_drop_all_errs()
             .map(|decls| hir::BlockStmt { decls })
             .ok_or(CheckDiagnostics)
     }
@@ -91,7 +96,10 @@ impl ModScopeEnvironment<'_> {
                 let ident = inner.binding.ident;
                 let name = &source[ident];
                 let id = self.decl_var(name.to_owned(), inner.clone());
-                let ty = inner.ty.map(|annotation| annotation.ty);
+                let ty = inner
+                    .ty
+                    .map(|annotation| self.analyze_type(file, source, annotation.ty, diagnostics))
+                    .transpose();
                 let init = inner
                     .assignment
                     .map(|x| self.analyze_expr(file, source, x.expr, diagnostics))
@@ -99,19 +107,19 @@ impl ModScopeEnvironment<'_> {
                 match inner.kw {
                     ast::VarKeyword::Let => hir::Decl::Let(hir::DeclLet {
                         id,
-                        ty,
+                        ty: ty?,
                         init: init?,
                     }),
 
                     ast::VarKeyword::Uni => hir::Decl::Uni(hir::DeclUni {
                         id,
-                        ty,
+                        ty: ty?,
                         init: init?,
                     }),
 
                     ast::VarKeyword::Pvt => hir::Decl::Pvt(hir::DeclPvt {
                         id,
-                        ty,
+                        ty: ty?,
                         init: {
                             init.transpose()
                                 .ok_or_else_flat(|| todo!("error: pvt needs to be initialized"))?
@@ -138,18 +146,23 @@ impl ModScopeEnvironment<'_> {
                             .body
                             .fields
                             .into_iter()
-                            .map(|field| -> Result<hir::Field, ()> {
+                            .map(|field| -> Result<_, CheckDiagnostics> {
                                 let ident = field.name;
                                 let field_name = &source[ident];
-                                let ty = field.ty.ty.clone();
+                                let ty = self.analyze_type(
+                                    file,
+                                    source,
+                                    field.ty.ty.clone(),
+                                    diagnostics,
+                                );
                                 let id = self
                                     .decl_member(id, field_name.to_owned(), field)
                                     .map_err(|e| {
-                                        todo!("error declaring field {name}::{field_name}: {e:?}")
-                                    })?;
-                                Ok(hir::Field { id, ty })
+                                        todo!("error declaring field {name}::{field_name}: {e:?}");
+                                    });
+                                Ok(hir::Field { id: id?, ty: ty? })
                             })
-                            .collect_or_drop_all_errs()
+                            .collect_boxed_or_drop_all_errs()
                             .ok_or(CheckDiagnostics)?,
                     })
                 }
@@ -283,12 +296,127 @@ impl ModScopeEnvironment<'_> {
                 body: block?,
             }),
 
-            ast::LoopKind::For { bind, iter, .. } => hir::Stmt::For(hir::ForStmt {
-                var: todo!("analyze {bind:?}"),
-                iter: self.analyze_expr(file, source, iter, diagnostics)?,
-                body: block?,
-            }),
+            kind @ ast::LoopKind::For { .. } => {
+                let ast::LoopKind::For { bind, iter, .. } = kind.clone() else {
+                    unreachable!()
+                };
+                let ident = bind.ident;
+                let name = &source[ident];
+                let var = self.decl_var(name.to_owned(), kind);
+                hir::Stmt::For(hir::ForStmt {
+                    var: hir::BindingPattern { var },
+                    iter: self.analyze_expr(file, source, iter, diagnostics)?,
+                    body: block?,
+                })
+            }
         })
+    }
+
+    fn analyze_func_type(
+        &mut self,
+        file: FileId,
+        source: &SourceCode,
+        ty: ast::FunType,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<hir::FunType, CheckDiagnostics> {
+        todo!()
+    }
+
+    fn analyze_type(
+        &mut self,
+        file: FileId,
+        source: &SourceCode,
+        ty: ast::TypeExpr,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<hir::TypeExpr, CheckDiagnostics> {
+        match ty {
+            // TODO: hmm...
+            ast::TypeExpr::Primitive(inner) => Ok(hir::TypeExpr::Primitive(match inner.ty {
+                ast::TypenameKeyword::None => hir::PrimitiveType::None,
+                ast::TypenameKeyword::Nevr => hir::PrimitiveType::Nevr,
+                ast::TypenameKeyword::Fail => hir::PrimitiveType::Fail,
+                ast::TypenameKeyword::Bool => hir::PrimitiveType::Bool,
+                ast::TypenameKeyword::Uint => hir::PrimitiveType::Uint,
+                ast::TypenameKeyword::Sint => hir::PrimitiveType::Sint,
+                ast::TypenameKeyword::Flpt => hir::PrimitiveType::Flpt,
+                ast::TypenameKeyword::Char => hir::PrimitiveType::Char,
+                ast::TypenameKeyword::Text => hir::PrimitiveType::Text,
+            })),
+
+            ast::TypeExpr::Instance(inner) => Ok(hir::TypeExpr::Instance(todo!())),
+
+            ast::TypeExpr::Fallible(inner) => Ok(hir::TypeExpr::Fallible(todo!())),
+
+            ast::TypeExpr::Ref(inner) => Ok(hir::TypeExpr::Ref(Box::new(hir::RefType {
+                ty: self.analyze_type(file, source, *inner.ty, diagnostics)?,
+            }))),
+
+            ast::TypeExpr::View(inner) => Ok(hir::TypeExpr::View(todo!())),
+
+            ast::TypeExpr::Assoc(inner) => Ok(hir::TypeExpr::Assoc(todo!())),
+
+            ast::TypeExpr::FunPtr(inner) => self
+                .analyze_func_type(file, source, inner, diagnostics)
+                .map(hir::TypeExpr::FunPtr),
+
+            ast::TypeExpr::Opaque(inner) => Ok(hir::TypeExpr::Opaque(todo!())),
+        }
+    }
+
+    fn analyze_ty_bound(
+        &mut self,
+        file: FileId,
+        source: &SourceCode,
+        bound: ast::TypeBound,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<hir::TypeBound, CheckDiagnostics> {
+        match bound {
+            // TODO: join combo bounds
+            ast::TypeBound::Combo(inner) => {
+                let lhs = self.analyze_ty_bound(file, source, inner.lhs, diagnostics);
+                let rhs = self.analyze_ty_bound(file, source, inner.rhs, diagnostics);
+                let bounds = Box::from([lhs?, rhs?]);
+                Ok(match inner.sep {
+                    Combinator::All => hir::TypeBound::Conjunction(hir::ConjunctionBound(bounds)),
+                    Combinator::Any => hir::TypeBound::Disjunction(hir::DisjunctionBound(bounds)),
+                    Combinator::One => hir::TypeBound::Selection(hir::SelectionBound(bounds)),
+                })
+            }
+
+            ast::TypeBound::Not(inner) => self
+                .analyze_ty_bound(file, source, inner.rhs, diagnostics)
+                .map(|bound| hir::TypeBound::Not(Box::new(hir::NegativeBound { bound }))),
+
+            ast::TypeBound::Exact(inner) => Ok(hir::TypeBound::Exact(hir::ExactTypeBound {
+                ty: self.analyze_type(file, source, inner.ty, diagnostics)?,
+            })),
+
+            ast::TypeBound::Has(inner) => Ok(hir::TypeBound::Has(Box::new(hir::MemberBound {
+                member: todo!(),
+                req: None,
+            }))),
+
+            ast::TypeBound::Shape(inner) => Ok(hir::TypeBound::Shape(hir::ShapeBound(
+                self.analyze_func_type(file, source, *inner, diagnostics)?,
+            ))),
+
+            ast::TypeBound::Supports(_inner) => {
+                Ok(hir::TypeBound::Supports(Box::new(hir::OverloadBound {
+                    // TODO
+                })))
+            }
+
+            ast::TypeBound::Satisfies(inner) => {
+                Ok(hir::TypeBound::Satisfies(Box::new(hir::ExprBound {
+                    name: todo!(),
+                    expr: todo!(),
+                })))
+            }
+
+            ast::TypeBound::Group(inner) => {
+                self.analyze_ty_bound(file, source, inner.inner, diagnostics)
+            }
+        }
     }
 
     fn analyze_expr(
@@ -361,7 +489,7 @@ impl ModScopeEnvironment<'_> {
                     .args
                     .into_iter()
                     .map(|arg| self.analyze_expr(file, source, arg, diagnostics))
-                    .collect_or_drop_all_errs()
+                    .collect_boxed_or_drop_all_errs()
                     .ok_or(CheckDiagnostics);
                 Ok(hir::Expr::Call(Box::new(hir::FnCall {
                     fun: fun?,
