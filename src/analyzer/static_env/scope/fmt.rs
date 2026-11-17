@@ -93,10 +93,10 @@ mod helpers {
             &mut self,
             fun: F,
             source: &SourceCode,
-            env: &ScopeEnvironment<'_>,
+            env: &ScopeEnvironment,
         ) -> &mut Self
         where
-            F: FnOnce(&SourceCode, &ScopeEnvironment<'_>, &mut fmt::Formatter<'_>) -> fmt::Result,
+            F: FnOnce(&SourceCode, &ScopeEnvironment, &mut fmt::Formatter<'_>) -> fmt::Result,
         {
             self.res = self.res.and_then(|()| {
                 if self.f.alternate() {
@@ -122,7 +122,7 @@ mod helpers {
             &mut self,
             item: &D,
             source: &SourceCode,
-            env: &ScopeEnvironment<'_>,
+            env: &ScopeEnvironment,
         ) -> &mut Self
         where
             D: ?Sized + HirDisplay,
@@ -134,7 +134,7 @@ mod helpers {
             &mut self,
             items: I,
             source: &SourceCode,
-            env: &ScopeEnvironment<'_>,
+            env: &ScopeEnvironment,
         ) -> &mut Self
         where
             D: HirDisplay,
@@ -153,7 +153,7 @@ pub trait HirDisplay {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result;
 }
@@ -162,7 +162,7 @@ impl<T: ?Sized + HirDisplay> HirDisplay for &T {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         (*self).fmt(source, env, f)
@@ -172,7 +172,7 @@ impl<T: ?Sized + HirDisplay> HirDisplay for &T {
 #[derive(Debug, Clone, Copy)]
 pub struct DisplayHir<'env, 'hir, 'src> {
     pub code: &'src SourceCode,
-    pub env: &'env ScopeEnvironment<'src>,
+    pub env: &'env ScopeEnvironment,
     pub hir: &'hir HirUnit,
 }
 
@@ -186,7 +186,7 @@ impl HirDisplay for ItemId {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         let item = env.get_decl(*self).expect("HIR IDs should be valid");
@@ -198,11 +198,11 @@ impl HirDisplay for ModId {
     fn fmt(
         &self,
         _source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         let module = env.get_module(*self).expect("HIR IDs should be valid");
-        write!(f, "{}#[{}]", module.name(), self)
+        write!(f, "{}#[{}]", module.name, self)
     }
 }
 
@@ -210,7 +210,7 @@ impl HirDisplay for ast::TypeExpr {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
@@ -228,8 +228,8 @@ impl HirDisplay for ast::TypeExpr {
 impl HirDisplay for ast::PrimitiveType {
     fn fmt(
         &self,
-        source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        _source: &SourceCode,
+        _env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         f.write_str(self.ty.as_str())
@@ -240,7 +240,7 @@ impl HirDisplay for ast::Typename {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        _env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         for part in &self.path {
@@ -254,7 +254,7 @@ impl HirDisplay for ast::TypeInstance {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.name.fmt(source, env, f)?;
@@ -274,7 +274,7 @@ impl HirDisplay for ast::FallType {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.then_ty.fmt(source, env, f)?;
@@ -287,7 +287,7 @@ impl HirDisplay for ast::RefType {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         f.write_str("@")?;
@@ -299,12 +299,12 @@ impl HirDisplay for ast::ViewType {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         f.write_str("[")?;
         self.item.fmt(source, env, f)?;
-        if let Some(count) = &self.count {
+        if let Some(_count) = &self.count {
             f.write_str("; ")?;
             todo!("expr display")
         }
@@ -316,7 +316,7 @@ impl HirDisplay for ast::AssocType {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.base.fmt(source, env, f)?;
@@ -329,7 +329,7 @@ impl HirDisplay for ast::AssocTypeSource {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
@@ -348,7 +348,7 @@ impl HirDisplay for hir::HirUnit {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         for decl in &self.decls {
@@ -363,7 +363,7 @@ impl HirDisplay for ast::FunType {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{}(", Keyword::Fun)?;
@@ -389,7 +389,7 @@ impl HirDisplay for hir::Decl {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
@@ -409,7 +409,7 @@ impl HirDisplay for hir::DeclMod {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Mod)?;
@@ -422,7 +422,7 @@ impl HirDisplay for hir::DeclRec {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Rec)?;
@@ -436,7 +436,7 @@ impl HirDisplay for hir::Field {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.id.fmt(source, env, f)?;
@@ -450,7 +450,7 @@ impl HirDisplay for hir::DeclCat {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Cat)?;
@@ -465,7 +465,7 @@ impl HirDisplay for hir::Discriminant {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.id.fmt(source, env, f)?;
@@ -477,7 +477,7 @@ impl HirDisplay for hir::DeclUni {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Uni)?;
@@ -489,7 +489,7 @@ impl HirDisplay for hir::DeclLet {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Let)?;
@@ -502,7 +502,7 @@ impl HirDisplay for hir::DeclPvt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Pvt)?;
@@ -515,7 +515,7 @@ impl HirDisplay for hir::DeclDfer {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         // TODO: param
@@ -527,7 +527,7 @@ impl HirDisplay for hir::Stmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
@@ -550,7 +550,7 @@ impl HirDisplay for hir::ExprStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.expr.fmt(source, env, f)?;
@@ -562,7 +562,7 @@ impl HirDisplay for hir::Expr {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
@@ -582,7 +582,7 @@ impl HirDisplay for hir::BlockExpr {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
@@ -598,7 +598,7 @@ impl HirDisplay for hir::Binary {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         f.write_str("(")?;
@@ -613,7 +613,7 @@ impl HirDisplay for hir::Unary {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         f.write_str("(")?;
@@ -635,7 +635,7 @@ impl HirDisplay for hir::Subscript {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.arr.fmt(source, env, f)?;
@@ -649,7 +649,7 @@ impl HirDisplay for hir::FnCall {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.fun.fmt(source, env, f)?;
@@ -670,7 +670,7 @@ impl HirDisplay for ast::Literal {
     fn fmt(
         &self,
         source: &SourceCode,
-        _env: &ScopeEnvironment<'_>,
+        _env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(
@@ -693,7 +693,7 @@ impl HirDisplay for hir::Directive {
     fn fmt(
         &self,
         _source: &SourceCode,
-        _env: &ScopeEnvironment<'_>,
+        _env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
@@ -706,7 +706,7 @@ impl HirDisplay for hir::Variable {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.id.fmt(source, env, f)
@@ -717,7 +717,7 @@ impl HirDisplay for hir::PrintStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{}(", Keyword::Prnt)?;
@@ -730,7 +730,7 @@ impl HirDisplay for hir::IfStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::If)?;
@@ -749,7 +749,7 @@ impl HirDisplay for hir::OrStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
@@ -763,7 +763,7 @@ impl HirDisplay for hir::PickExpr {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Pick)?;
@@ -775,7 +775,7 @@ impl HirDisplay for hir::PickArm {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.pat.fmt(source, env, f)?;
@@ -788,7 +788,7 @@ impl HirDisplay for hir::PickPattern {
     fn fmt(
         &self,
         _source: &SourceCode,
-        _env: &ScopeEnvironment<'_>,
+        _env: &ScopeEnvironment,
         _f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         todo!("pick pattern")
@@ -799,7 +799,7 @@ impl HirDisplay for hir::LoopStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Loop)?;
@@ -811,7 +811,7 @@ impl HirDisplay for hir::CordStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Cord)?;
@@ -823,7 +823,7 @@ impl HirDisplay for hir::RepStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::Rep)?;
@@ -836,7 +836,7 @@ impl HirDisplay for hir::BindingPattern {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         self.var.fmt(source, env, f)
@@ -847,7 +847,7 @@ impl HirDisplay for hir::ForStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{} ", Keyword::For)?;
@@ -862,7 +862,7 @@ impl HirDisplay for hir::Label {
     fn fmt(
         &self,
         source: &SourceCode,
-        _env: &ScopeEnvironment<'_>,
+        _env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, ".{}", &source[self.name])
@@ -873,7 +873,7 @@ impl HirDisplay for hir::DoneStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{}", Keyword::Done)?;
@@ -893,7 +893,7 @@ impl HirDisplay for hir::SkipStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         write!(f, "{}", Keyword::Skip)?;
@@ -909,7 +909,7 @@ impl HirDisplay for hir::BlockStmt {
     fn fmt(
         &self,
         source: &SourceCode,
-        env: &ScopeEnvironment<'_>,
+        env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         HirBlock::new(f).entries(&self.decls, source, env).finish()

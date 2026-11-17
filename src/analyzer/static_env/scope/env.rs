@@ -60,13 +60,13 @@ impl From<ast::DferParam> for Decl {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Item<'src> {
+pub struct Item {
     pub decl: Decl,
     pub parent: Option<ItemId>,
-    pub children: BTreeMap<&'src str, ItemId>,
+    pub children: BTreeMap<String, ItemId>,
 }
 
-impl Item<'_> {
+impl Item {
     pub const fn new(decl: Decl) -> Self {
         Self {
             decl,
@@ -77,60 +77,11 @@ impl Item<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SubEntry<'src> {
-    pub name: &'src str,
-    pub decl: ast::DeclMod,
-    pub def: Module<'src>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct LibEntry<'src> {
+pub struct ModEntry {
     pub name: String,
-    pub def: Module<'src>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ModEntry<'src> {
-    Submodule(SubEntry<'src>),
-    Library(LibEntry<'src>),
-}
-
-impl<'src> ModEntry<'src> {
-    pub const fn is_submodule(&self) -> bool {
-        matches!(self, Self::Submodule(_))
-    }
-
-    pub const fn is_library(&self) -> bool {
-        matches!(self, Self::Library(_))
-    }
-
-    pub const fn decl(&self) -> Option<&ast::DeclMod> {
-        match self {
-            Self::Submodule(ent) => Some(&ent.decl),
-            Self::Library(_) => None,
-        }
-    }
-
-    pub const fn name(&self) -> &str {
-        match self {
-            Self::Submodule(ent) => ent.name,
-            Self::Library(ent) => ent.name.as_str(),
-        }
-    }
-
-    pub const fn def(&self) -> &Module<'src> {
-        match self {
-            Self::Submodule(ent) => &ent.def,
-            Self::Library(ent) => &ent.def,
-        }
-    }
-
-    pub const fn def_mut(&mut self) -> &mut Module<'src> {
-        match self {
-            Self::Submodule(ent) => &mut ent.def,
-            Self::Library(ent) => &mut ent.def,
-        }
-    }
+    pub def: Module,
+    /// [`Some`] if a submodule
+    pub decl: Option<ast::DeclMod>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
@@ -169,17 +120,17 @@ pub enum CreateSubmoduleError {
 }
 
 #[derive(Debug, Default)]
-pub struct ScopeEnvironment<'src> {
+pub struct ScopeEnvironment {
     /// Indexed with [`ItemId`]
-    decls: Vec<Item<'src>>,
+    decls: Vec<Item>,
 
     /// The set of all modules in the program
     ///
     /// Indexed with [`ModId`]
-    modules: Vec<ModEntry<'src>>,
+    modules: Vec<ModEntry>,
 }
 
-impl<'src> ScopeEnvironment<'src> {
+impl ScopeEnvironment {
     pub const fn new() -> Self {
         Self {
             decls: Vec::new(),
@@ -187,22 +138,22 @@ impl<'src> ScopeEnvironment<'src> {
         }
     }
 
-    pub fn get_decl(&self, id: ItemId) -> Option<&Item<'_>> {
+    pub fn get_decl(&self, id: ItemId) -> Option<&Item> {
         self.decls.get(id.0)
     }
 
     pub fn find_library(&self, name: &str) -> Option<LibId> {
         self.modules
             .iter()
-            .position(|ent| matches!(ent, ModEntry::Library(lib) if *name == lib.name))
+            .position(|ent| ent.decl.is_none() && *name == ent.name)
             .map(ModId)
     }
 
-    pub fn get_module(&self, id: ModId) -> Option<&ModEntry<'src>> {
+    pub fn get_module(&self, id: ModId) -> Option<&ModEntry> {
         self.modules.get(id.0)
     }
 
-    pub fn get_module_mut(&mut self, id: ModId) -> Option<&mut ModEntry<'src>> {
+    pub fn get_module_mut(&mut self, id: ModId) -> Option<&mut ModEntry> {
         self.modules.get_mut(id.0)
     }
 
@@ -211,10 +162,11 @@ impl<'src> ScopeEnvironment<'src> {
             Err(DuplicateModuleError { og })
         } else {
             let id = ModId(self.modules.len());
-            self.modules.push(ModEntry::Library(LibEntry {
+            self.modules.push(ModEntry {
                 name,
                 def: Module::new(),
-            }));
+                decl: None,
+            });
             Ok(id)
         }
     }
@@ -222,66 +174,63 @@ impl<'src> ScopeEnvironment<'src> {
     pub fn decl_submodule(
         &mut self,
         parent: ModId,
-        name: &'src str,
+        name: String,
         decl: ast::DeclMod,
     ) -> Result<ModId, CreateSubmoduleError> {
         let id = ModId(self.modules.len());
         self.modules
             .get_mut(parent.0)
-            .ok_or(CreateSubmoduleError::UnknownParent(UndeclaredModuleError))
-            .and_then(|parent| {
-                parent
-                    .def_mut()
-                    .decl_submodule(name, id)
-                    .map_err(CreateSubmoduleError::DuplicateChild)
-            })?;
-        self.modules.push(ModEntry::Submodule(SubEntry {
+            .ok_or(CreateSubmoduleError::UnknownParent(UndeclaredModuleError))?
+            .def
+            .decl_submodule(name.clone(), id)
+            .map_err(CreateSubmoduleError::DuplicateChild)?;
+        self.modules.push(ModEntry {
             name,
-            decl,
             def: Module::new(),
-        }));
+            decl: Some(decl),
+        });
         Ok(id)
     }
 
     pub fn define_module(
         &mut self,
         id: ModId,
-    ) -> Result<ModScopeEnvironment<'_, 'src>, UndeclaredModuleError> {
+    ) -> Result<ModScopeEnvironment<'_>, UndeclaredModuleError> {
         self.modules
             .get_mut(id.0)
             .map(|ent| ModScopeEnvironment {
                 decls: &mut self.decls,
-                module: ent.def_mut(),
+                module: &mut ent.def,
             })
             .ok_or(UndeclaredModuleError)
     }
 }
 
 #[derive(Debug)]
-pub struct ModScopeEnvironment<'env, 'src> {
+pub struct ModScopeEnvironment<'env> {
     /// Indexed with [`ItemId`]
-    decls: &'env mut Vec<Item<'src>>,
-    module: &'env mut Module<'src>,
+    decls: &'env mut Vec<Item>,
+    module: &'env mut Module,
 }
 
-impl<'src> std::ops::Deref for ModScopeEnvironment<'_, 'src> {
-    type Target = Module<'src>;
+impl std::ops::Deref for ModScopeEnvironment<'_> {
+    type Target = Module;
 
     fn deref(&self) -> &Self::Target {
         self.module
     }
 }
 
-impl std::ops::DerefMut for ModScopeEnvironment<'_, '_> {
+impl std::ops::DerefMut for ModScopeEnvironment<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.module
     }
 }
 
-impl<'src> ModScopeEnvironment<'_, 'src> {
+impl ModScopeEnvironment<'_> {
     pub fn decl_item(
         &mut self,
-        name: &'src str,
+        name: String,
         decl: impl Into<Decl>,
     ) -> Result<ItemId, DuplicateItemError> {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
@@ -293,7 +242,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     pub fn decl_member(
         &mut self,
         parent: ItemId,
-        name: &'src str,
+        name: String,
         decl: impl Into<Decl>,
     ) -> Result<ItemId, LinkMemberError> {
         let child = ItemId(self.decls.len());
@@ -321,7 +270,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         }
     }
 
-    pub fn decl_var(&mut self, name: &'src str, decl: impl Into<Decl>) -> VarId {
+    pub fn decl_var(&mut self, name: String, decl: impl Into<Decl>) -> VarId {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_var(name, id);
         self.decls.push(Item::new(decl.into())); // now `id` refers to an item
@@ -331,16 +280,16 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
 
 /// Functions have special scope limited to only themselves and global scope
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Module<'src> {
-    submodules: BTreeMap<&'src str, ModId>,
+pub struct Module {
+    submodules: BTreeMap<String, ModId>,
     /// NOTE: this does NOT represent "the scope where all global variables belong",
     /// this is just the scope of all things outside of any function!!
     /// It is used to guarantee the stack is never empty.
-    global: Scope<'src>,
-    layers: Vec<Layer<'src>>,
+    global: Scope,
+    layers: Vec<Layer>,
 }
 
-impl<'src> Module<'src> {
+impl Module {
     pub fn new() -> Self {
         Self {
             submodules: BTreeMap::new(),
@@ -353,7 +302,7 @@ impl<'src> Module<'src> {
         self.submodules.get(name).copied()
     }
 
-    fn decl_submodule(&mut self, name: &'src str, id: ModId) -> Result<(), DuplicateModuleError> {
+    fn decl_submodule(&mut self, name: String, id: ModId) -> Result<(), DuplicateModuleError> {
         if let Some(og) = self.submodules.insert(name, id) {
             Err(DuplicateModuleError { og })
         } else {
@@ -361,7 +310,7 @@ impl<'src> Module<'src> {
         }
     }
 
-    fn decl_item(&mut self, name: &'src str, id: ItemId) -> Result<(), DuplicateItemError> {
+    fn decl_item(&mut self, name: String, id: ItemId) -> Result<(), DuplicateItemError> {
         self.layers
             .last_mut()
             .map_or(&mut self.global, |layer| {
@@ -370,7 +319,7 @@ impl<'src> Module<'src> {
             .decl_item(name, id)
     }
 
-    fn decl_var(&mut self, name: &'src str, id: VarId) {
+    fn decl_var(&mut self, name: String, id: VarId) {
         self.layers
             .last_mut()
             .map_or(&mut self.global, |layer| {
@@ -403,12 +352,12 @@ impl<'src> Module<'src> {
 
 /// Functions have special scope limited to only themselves and global scope
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Layer<'src> {
-    pub root: Scope<'src>,
-    pub scopes: Vec<Scope<'src>>,
+pub struct Layer {
+    pub root: Scope,
+    pub scopes: Vec<Scope>,
 }
 
-impl Layer<'_> {
+impl Layer {
     pub fn new() -> Self {
         Self {
             root: Scope::new(),
@@ -418,15 +367,15 @@ impl Layer<'_> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Scope<'src> {
+pub struct Scope {
     /// Functions and types; unordered and must be unique within a scope
-    items: HashMap<&'src str, ItemId>,
+    items: HashMap<String, ItemId>,
 
     /// Variables; names can be shadowed and reused within the same scope
-    vars: Vec<(&'src str, VarId)>,
+    vars: Vec<(String, VarId)>,
 }
 
-impl<'src> Scope<'src> {
+impl Scope {
     pub fn new() -> Self {
         Self {
             items: HashMap::new(),
@@ -434,7 +383,7 @@ impl<'src> Scope<'src> {
         }
     }
 
-    fn decl_item(&mut self, key: &'src str, id: ItemId) -> Result<(), DuplicateItemError> {
+    fn decl_item(&mut self, key: String, id: ItemId) -> Result<(), DuplicateItemError> {
         if let Err(e) = self.items.try_insert(key, id) {
             Err(DuplicateItemError { og: e.value })
         } else {
@@ -442,7 +391,7 @@ impl<'src> Scope<'src> {
         }
     }
 
-    fn decl_var(&mut self, key: &'src str, id: VarId) {
+    fn decl_var(&mut self, key: String, id: VarId) {
         self.vars.push((key, id));
     }
 }

@@ -3,163 +3,41 @@ use crate::{
     analyzer::static_env::{ModId, scope::env::ScopeEnvironment},
     error::{CheckDiagnostics, Diagnostic},
     parse::{ast, util::OkOrFlatten as _},
-    src_code::{code::SourceCode, map::SourceMap, span::FileId},
+    src_code::{code::SourceCode, span::FileId},
     util::OrAllErrsExt as _,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-impl<'src> ScopeEnvironment<'src> {
+impl ScopeEnvironment {
     pub fn declared_submodules(
         &mut self,
         code: &SourceCode,
+        id: ModId,
         unit: &ast::ProgramUnit,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> BTreeMap<&'src str, ModId> {
+        _diagnostics: &mut Vec<Diagnostic>,
+    ) -> BTreeMap<String, ModId> {
         let mut mapping = BTreeMap::new();
-        let Some(path) = code.loc().path() else {
-            // REPL can never contain submodules, it has no path.
-            return mapping;
-        };
-        path.file_stem()
-            .expect("should be a file")
-            .to_string_lossy();
-        let name = code.loc().path().map_or_default(|path| {
-            let name = path.file_stem().expect("must be a file");
-            name.to_str()
-                .unwrap_or_else(|| todo!("invalid characters in module name {name:?}"))
-        });
-
         for decl in &unit.decls {
-            // if let ast::Decl::Mod(submod) = decl {
-            //     let subname = &code[submod.name];
-            //     if !tree.unfound.insert(subname) {
-            //         diagnostics.push(todo!(
-            //             "error: multiple submodules within {name} have the same name ({subname})"
-            //         ));
-            //     }
-            //     if let Some(node) = forest.remove(subname) {
-            //     } else {
-            //         // may not have been encountered yet
-            //     }
-            // }
+            if let ast::Decl::Mod(decl) = *decl {
+                let subname = &code[decl.name];
+                match self.decl_submodule(id, subname.to_owned(), decl) {
+                    Ok(subid) => {
+                        if let Err(e) = mapping.try_insert(subname.to_owned(), subid) {
+                            todo!("error: duplicate module name: {e:?}");
+                        }
+                    }
+                    Err(e) => todo!("error declaring submodule: {e:?}"),
+                }
+            }
         }
-
-        todo!()
-    }
-
-    // needs to be done separately because ModScopEnvironment exclusively borrows the module tree
-    #[deprecated = "use declared_submodules instead"]
-    pub fn analyze_module_tree(
-        &mut self,
-        source: &'src SourceMap,
-        prgm: &ast::Program,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> HashMap<FileId, ModId> {
-        unimplemented!()
-        // #[derive(Debug)]
-        // struct TreeNode<'src> {
-        //     file: FileId,
-        //     unfound: HashSet<&'src str>,
-        //     found: HashMap<&'src str, (TreeNode<'src>, ast::DeclMod)>,
-        // }
-
-        // impl<'src> TreeNode<'src> {
-        //     fn new(file: FileId) -> Self {
-        //         Self {
-        //             file,
-        //             unfound: HashSet::new(),
-        //             found: HashMap::new(),
-        //         }
-        //     }
-
-        //     fn decl_children(
-        //         self,
-        //         id: ModId,
-        //         mapping: &mut HashMap<FileId, ModId>,
-        //         env: &mut ScopeEnvironment<'src>,
-        //         diagnostics: &mut Vec<Diagnostic>,
-        //     ) {
-        //         if self.unfound.is_empty() {
-        //             for (child, (node, submod)) in self.found {
-        //                 match env.decl_submodule(id, child, submod) {
-        //                     Ok(id) => {
-        //                         mapping.insert(node.file, id);
-        //                         node.decl_children(id, mapping, env, diagnostics);
-        //                     }
-        //                     Err(e) => {
-        //                         diagnostics.push(todo!("error declaring submodule {child}: {e:?}"));
-        //                     }
-        //                 }
-        //             }
-        //         } else {
-        //             diagnostics.push(todo!(
-        //                 "error: not all submodules located, missing: {:?}",
-        //                 self.unfound
-        //             ));
-        //         }
-        //     }
-        // }
-
-        // let mut forest = HashMap::<String, TreeNode>::new();
-        // // non-root nodes that have not been grouped with their parents yet
-        // for unit in prgm {
-        //     let code = source
-        //         .get(unit.file)
-        //         .expect("all program units should be valid");
-
-        //     let name = code.loc().path().map_or_default(|path| {
-        //         let name = path.file_stem().expect("must be a file");
-        //         name.to_str()
-        //             .unwrap_or_else(|| todo!("invalid characters in module name {name:?}"))
-        //     });
-
-        //     #[expect(
-        //         irrefutable_let_patterns,
-        //         reason = "only irrefutable because it's unfinished"
-        //     )]
-        //     let Ok(tree) = forest
-        //         // TODO: what if two modules have the same name on different paths?
-        //         .try_insert(name.to_string(), TreeNode::new(unit.file))
-        //         .map_err(|e| todo!("two modules with same name but different path: {e:?}"))
-        //     else {
-        //         continue;
-        //     };
-        //     // TODO: search forest recursively for unfound modules this could match
-
-        //     for decl in &unit.decls {
-        //         if let ast::Decl::Mod(submod) = decl {
-        //             let subname = &code[submod.name];
-        //             if !tree.unfound.insert(subname) {
-        //                 diagnostics.push(todo!(
-        //                     "error: multiple submodules within {name} have the same name ({subname})"
-        //                 ));
-        //             }
-        //             if let Some(node) = forest.remove(subname) {
-        //             } else {
-        //                 // may not have been encountered yet
-        //             }
-        //         }
-        //     }
-        // }
-
-        // let mut mapping = HashMap::new();
-        // for (name, node) in forest {
-        //     match self.decl_library(name) {
-        //         Ok(id) => {
-        //             mapping.insert(node.file, id);
-        //             node.decl_children(id, &mut mapping, self, diagnostics);
-        //         }
-        //         Err(e) => todo!("error declaring library: {e:?}"),
-        //     }
-        // }
-        // mapping
+        mapping
     }
 }
 
-impl<'src> ModScopeEnvironment<'_, 'src> {
+impl ModScopeEnvironment<'_> {
     pub fn analyze(
         &mut self,
-        source: &'src SourceCode,
+        source: &SourceCode,
         prgm: ast::ProgramUnit,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::HirUnit, CheckDiagnostics> {
@@ -177,7 +55,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     fn analyze_block(
         &mut self,
         file: FileId,
-        source: &'src SourceCode,
+        source: &SourceCode,
         block: ast::BlockStmt,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::BlockStmt, CheckDiagnostics> {
@@ -193,7 +71,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     fn analyze_decl(
         &mut self,
         file: FileId,
-        source: &'src SourceCode,
+        source: &SourceCode,
         decl: ast::Decl,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::Decl, CheckDiagnostics> {
@@ -212,7 +90,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
             ast::Decl::Var(inner) => {
                 let ident = inner.binding.ident;
                 let name = &source[ident];
-                let id = self.decl_var(name, inner.clone());
+                let id = self.decl_var(name.to_owned(), inner.clone());
                 let ty = inner.ty.map(|annotation| annotation.ty);
                 let init = inner
                     .assignment
@@ -252,7 +130,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                     let ident = inner.name;
                     let name = &source[ident];
                     let id = self
-                        .decl_item(name, inner.clone())
+                        .decl_item(name.to_owned(), inner.clone())
                         .map_err(|e| todo!("error declaring rec {name}: {e:?}"))?;
                     hir::Decl::Rec(hir::DeclRec {
                         id,
@@ -264,9 +142,11 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                                 let ident = field.name;
                                 let field_name = &source[ident];
                                 let ty = field.ty.ty.clone();
-                                let id = self.decl_member(id, field_name, field).map_err(|e| {
-                                    todo!("error declaring field {name}::{field_name}: {e:?}")
-                                })?;
+                                let id = self
+                                    .decl_member(id, field_name.to_owned(), field)
+                                    .map_err(|e| {
+                                        todo!("error declaring field {name}::{field_name}: {e:?}")
+                                    })?;
                                 Ok(hir::Field { id, ty })
                             })
                             .collect_or_drop_all_errs()
@@ -277,14 +157,14 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 ast::DeclType::Cat(inner) => {
                     let ident = inner.name;
                     let name = &source[ident];
-                    match self.decl_item(name, inner.clone()) {
+                    match self.decl_item(name.to_owned(), inner.clone()) {
                         Ok(id) => hir::Decl::Cat(hir::DeclCat {
                             id,
                             discriminants: inner
                                 .discriminants
                                 .items
                                 .into_iter()
-                                .map(|disc| todo!("discriminant"))
+                                .map(|_disc| todo!("discriminant"))
                                 .collect(),
                         }),
                         Err(e) => todo!("error: {e:?}"),
@@ -295,7 +175,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
             ast::Decl::Dfer(inner) => hir::Decl::Dfer(hir::DeclDfer {
                 param: inner
                     .param
-                    .map(|x| self.decl_var(&source[x.param.ident], x)),
+                    .map(|x| self.decl_var(source[x.param.ident].to_owned(), x)),
                 on_pop: self.analyze_block(file, source, inner.on_pop, diagnostics)?,
             }),
 
@@ -308,7 +188,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     fn analyze_stmt(
         &mut self,
         file: FileId,
-        source: &'src SourceCode,
+        source: &SourceCode,
         stmt: ast::Stmt,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::Stmt, CheckDiagnostics> {
@@ -352,7 +232,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     fn analyze_if_stmt(
         &mut self,
         file: FileId,
-        source: &'src SourceCode,
+        source: &SourceCode,
         stmt: ast::IfStmt,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::IfStmt, CheckDiagnostics> {
@@ -379,7 +259,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     fn analyze_loop_stmt(
         &mut self,
         file: FileId,
-        source: &'src SourceCode,
+        source: &SourceCode,
         stmt: ast::LoopBlock,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::Stmt, CheckDiagnostics> {
@@ -403,9 +283,9 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 body: block?,
             }),
 
-            ast::LoopKind::For { bind, in_kw, iter } => hir::Stmt::For(hir::ForStmt {
-                var: todo!(),
-                iter: todo!(),
+            ast::LoopKind::For { bind, iter, .. } => hir::Stmt::For(hir::ForStmt {
+                var: todo!("analyze {bind:?}"),
+                iter: self.analyze_expr(file, source, iter, diagnostics)?,
                 body: block?,
             }),
         })
@@ -414,7 +294,7 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
     fn analyze_expr(
         &mut self,
         file: FileId,
-        source: &'src SourceCode,
+        source: &SourceCode,
         expr: ast::Expr,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<hir::Expr, CheckDiagnostics> {
@@ -502,13 +382,13 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                 Ok(hir::Expr::Variable(hir::Variable { id }))
             }
 
-            ast::Expr::Member(inner) => {
+            ast::Expr::Member(_inner) => {
                 todo!("member access analysis")
             }
 
             ast::Expr::Grouping(inner) => self.analyze_expr(file, source, inner.expr, diagnostics),
 
-            ast::Expr::Type(inner) => todo!("type expr"),
+            ast::Expr::Type(_inner) => todo!("type expr"),
         }
     }
 }
