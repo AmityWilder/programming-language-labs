@@ -103,8 +103,12 @@ define_token_eq! {
         SubAssign = "-=",
         /// Arrow - Separate a function's parameter list from its return type
         Arrow = "->",
+        /// Squiggle arrow
+        SquigArrow = "~>",
         /// Dot dot - Range
         DotDot = "..",
+        /// Ellipsis - Placeholder
+        Ellipsis = "...",
         /// Divide assign - Equivalent to `lhs = lhs / rhs`
         DivAssign = "/=",
         /// Path separator - Separate namespace path items

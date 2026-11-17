@@ -633,6 +633,7 @@ impl LispDisplay for ast::TypeExpr {
             Self::View(inner) => inner.fmt(source, f),
             Self::Assoc(inner) => inner.fmt(source, f),
             Self::FunPtr(inner) => inner.fmt(source, f),
+            Self::Opaque(_inner) => todo!(),
         }
     }
 }

@@ -974,6 +974,30 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FunType {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpaqueType {
+    /// `:`
+    pub colon: RelSpan,
+    pub bound: TypeBound,
+}
+
+impl AstNode for OpaqueType {
+    fn span_start(&self) -> uspan {
+        self.colon.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.bound.span_end()
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for OpaqueType {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.colon, Syntax::Keyword);
+        self.bound.visit_spans(brack_depth, visit);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, AstNodeEnum, VisitSpansEnum)]
 pub enum TypeExpr {
     Primitive(PrimitiveType),
@@ -983,6 +1007,7 @@ pub enum TypeExpr {
     View(ViewType),
     Assoc(Box<AssocType>),
     FunPtr(FunType),
+    Opaque(OpaqueType),
 }
 
 impl Expectable for TypeExpr {
