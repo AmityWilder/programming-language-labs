@@ -44,6 +44,7 @@ pub trait OrAllErrsExt<T, E>: Sized + IntoIterator<Item = Result<T, E>> {
         iter.ok_or_all_errs(|x| buf.extend_one(x)).map(|()| buf)
     }
 
+    // TODO: can this be specialized for ExactSizeIterator?
     fn collect_boxed_or_all_errs(self) -> Result<Box<[T]>, ErrorIter<Self::IntoIter, E>> {
         self.collect_or_all_errs().map(Vec::into_boxed_slice)
     }

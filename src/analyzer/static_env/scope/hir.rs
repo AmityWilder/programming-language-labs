@@ -112,21 +112,17 @@ pub struct SelectionBound(pub Box<[TypeBound]>);
 
 /// Not
 #[derive(Debug, Clone, PartialEq)]
-pub struct NegativeBound {
-    pub bound: TypeBound,
-}
+pub struct NegativeBound(pub TypeBound);
 
 /// Only
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExactTypeBound {
-    pub ty: TypeExpr,
-}
+pub struct ExactTypeBound(pub TypeExpr);
 
 /// Has
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemberBound {
     /// Identifier
-    pub member: ItemId,
+    pub member: RelSpan,
     pub req: Option<TypeBound>,
 }
 
@@ -144,7 +140,7 @@ pub struct OverloadBound {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExprBound {
     // TBD: should this be a special ID since it never actually appears in the program?
-    pub name: VarId,
+    pub param: VarId,
     pub expr: Expr,
 }
 
@@ -203,7 +199,13 @@ pub struct DeclMod {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct IffClause(pub Box<[TypeBound]>);
+pub struct TypeBoundClause {
+    pub target: TypeExpr,
+    pub bound: TypeBound,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IffClause(pub Box<[TypeBoundClause]>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclOn {
@@ -311,9 +313,7 @@ pub enum Directive {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Variable {
-    pub id: VarId,
-}
+pub struct Variable(pub VarId);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockExpr {
@@ -355,6 +355,8 @@ pub enum Stmt {
     Cord(CordStmt),
     Rep(RepStmt),
     For(ForStmt),
+    Give(GiveStmt),
+    Fail(FailStmt),
     Done(DoneStmt),
     Skip(SkipStmt),
     Block(BlockStmt),
@@ -396,6 +398,7 @@ pub struct PickArm {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Label {
+    // TODO: create label IDs
     pub name: RelSpan,
 }
 
@@ -425,6 +428,16 @@ pub struct ForStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct GiveStmt {
+    pub expr: Option<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FailStmt {
+    pub expr: Option<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DoneStmt {
     pub label: Option<Label>,
     pub expr: Option<Expr>,
@@ -436,6 +449,4 @@ pub struct SkipStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BlockStmt {
-    pub decls: Box<[Decl]>,
-}
+pub struct BlockStmt(pub Box<[Decl]>);

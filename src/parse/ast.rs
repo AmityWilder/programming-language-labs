@@ -13,13 +13,19 @@ pub trait Expectable {
     const EXPECTED: ExpectedToken;
 }
 
+/// MUST implement either [`Self::span`] or BOTH [`Self::span_start`] and [`Self::span_end`]
 pub trait AstNode {
-    /// If [`Self::span_end`] is [`Some`], this should be too.
-    fn span_start(&self) -> uspan;
+    #[inline]
+    fn span_start(&self) -> uspan {
+        self.span().start
+    }
 
-    /// If [`Self::span_start`] is [`Some`], this should be too.
-    fn span_end(&self) -> uspan;
+    #[inline]
+    fn span_end(&self) -> uspan {
+        self.span().end
+    }
 
+    #[inline]
     fn span(&self) -> RelSpan {
         let start = self.span_start();
         let end = self.span_end();
@@ -38,14 +44,6 @@ pub trait VisitSpans<F: FnMut(RelSpan, Syntax)> {
 }
 
 impl AstNode for RelSpan {
-    fn span_start(&self) -> uspan {
-        self.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.end
-    }
-
     fn span(&self) -> RelSpan {
         *self
     }
@@ -663,14 +661,6 @@ pub struct PrimitiveType {
 }
 
 impl AstNode for PrimitiveType {
-    fn span_start(&self) -> uspan {
-        self.span.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.span.end
-    }
-
     fn span(&self) -> RelSpan {
         self.span
     }
@@ -1320,14 +1310,6 @@ pub struct Literal {
 }
 
 impl AstNode for Literal {
-    fn span_start(&self) -> uspan {
-        self.span.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.span.end
-    }
-
     fn span(&self) -> RelSpan {
         self.span
     }
@@ -1409,14 +1391,6 @@ pub struct Directive {
 }
 
 impl AstNode for Directive {
-    fn span_start(&self) -> uspan {
-        self.kw_span.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.kw_span.end
-    }
-
     fn span(&self) -> RelSpan {
         self.kw_span
     }
@@ -1460,14 +1434,6 @@ pub struct Member {
 }
 
 impl AstNode for Member {
-    fn span_start(&self) -> uspan {
-        self.ident.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.ident.end
-    }
-
     fn span(&self) -> RelSpan {
         self.ident
     }
@@ -2310,6 +2276,24 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnParam {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelfParam {
+    /// `me`
+    pub span: RelSpan,
+}
+
+impl AstNode for SelfParam {
+    fn span(&self) -> RelSpan {
+        self.span
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for SelfParam {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
+        visit(self.span, Syntax::LanguageVariable);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnSignature {
     /// `fun`
@@ -2319,8 +2303,7 @@ pub struct FnSignature {
     pub generics: Option<GenericGroup>,
     /// `(`
     pub open: RelSpan,
-    /// `me`
-    pub self_param: Option<RelSpan>,
+    pub self_param: Option<SelfParam>,
     /// Comma-separated (commas are not stored)
     pub params: Vec<FnParam>,
     /// `)`
@@ -2355,7 +2338,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnSignature {
         visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         if let Some(self_param) = &self.self_param {
-            visit(*self_param, Syntax::LanguageVariable);
+            self_param.visit_spans(brack_depth, visit);
         }
         for param in &self.params {
             param.visit_spans(inner_depth, visit);
@@ -2430,14 +2413,6 @@ pub struct BindingPattern {
 }
 
 impl AstNode for BindingPattern {
-    fn span_start(&self) -> uspan {
-        self.ident.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.ident.end
-    }
-
     fn span(&self) -> RelSpan {
         self.ident
     }
