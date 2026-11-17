@@ -4,7 +4,7 @@ use crate::{
         Binary, BlockExpr, BlockStmt, DeclVar, Declaration, Directive, Expr, Grouping, IfStmt,
         Literal, LoopBlock, LoopKind, OrBody, OrStmt, Statement, Unary, Variable,
     },
-    highlight::{style::StyleWrapper, syntax::Syntax, write_highlight},
+    highlight::{style::StyleWrapper as _, syntax::Syntax, write_highlight},
 };
 
 /// Means of displaying content with lisp style

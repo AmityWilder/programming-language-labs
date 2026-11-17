@@ -237,19 +237,19 @@ where
     T: AstNode<'src>,
 {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.as_ref().and_then(|x| x.get_range_start(source))
+        self.as_ref()?.get_range_start(source)
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.as_ref().and_then(|x| x.get_range_end(source))
+        self.as_ref()?.get_range_end(source)
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {
-        self.as_ref().and_then(|x| x.get_range(source))
+        self.as_ref()?.get_range(source)
     }
 
     fn expansion(&self, source: &'src str) -> Option<ExpansionData<'src>> {
-        self.as_ref().and_then(|x| x.expansion(source))
+        self.as_ref()?.expansion(source)
     }
 }
 
@@ -258,11 +258,11 @@ where
     T: AstNode<'src>,
 {
     fn get_range_start(&self, source: &'src str) -> Option<usize> {
-        self.first().and_then(|x| x.get_range_start(source))
+        self.first()?.get_range_start(source)
     }
 
     fn get_range_end(&self, source: &'src str) -> Option<usize> {
-        self.last().and_then(|x| x.get_range_end(source))
+        self.last()?.get_range_end(source)
     }
 
     fn get_range(&self, source: &'src str) -> Option<Range<usize>> {

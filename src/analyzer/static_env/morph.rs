@@ -2,7 +2,7 @@ use crate::analyzer::{
     static_env::ItemId,
     types::{
         AbstractType,
-        bounds::{Satisfaction, TypeBound, TypeSatisfaction, error::UnsatisfiedBoundError},
+        bounds::{Satisfaction, TypeBound, TypeSatisfaction as _, error::UnsatisfiedBoundError},
     },
 };
 use std::collections::HashMap;

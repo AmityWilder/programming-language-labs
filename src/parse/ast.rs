@@ -142,6 +142,7 @@ pub enum ExprPrecedence {
     Exponent,
     Conversion,
     UnaryPost,
+    MemberAccess,
     Primary,
 }
 
@@ -258,7 +259,6 @@ impl Unary {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Subscript {
-    /// Primary expression
     pub arr: Expr,
     /// `[`
     pub open: RelSpan,
@@ -294,7 +294,6 @@ impl Subscript {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnCall {
-    /// Primary expression
     pub fun: Expr,
     /// `(`
     pub open: RelSpan,
@@ -1472,11 +1471,38 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ModPathPart {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Member {
+    /// Identifier
+    pub ident: RelSpan,
+}
+
+impl AstNode for Member {
+    fn span_start(&self) -> uspan {
+        self.ident.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.ident.end
+    }
+
+    fn span(&self) -> RelSpan {
+        self.ident
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Member {
+    fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
+        visit(self.ident, Syntax::Variable); // TODO: it depends; a member could be a function
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
     // TODO: what about type-associated methods?
     pub path: Vec<ModPathPart>,
-    /// Identifier
+    /// Identifier or `me`
     pub ident: RelSpan,
+    pub is_me: bool,
 }
 
 impl AstNode for Variable {
@@ -1496,7 +1522,14 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Variable {
         for part in &self.path {
             part.visit_spans(brack_depth, visit);
         }
-        visit(self.ident, Syntax::Variable);
+        visit(
+            self.ident,
+            if self.is_me {
+                Syntax::LanguageVariable
+            } else {
+                Syntax::Variable
+            },
+        );
     }
 }
 
@@ -1517,6 +1550,7 @@ pub enum Expr {
     Call(Box<FnCall>),
     Literal(Literal),
     Directive(Directive),
+    Member(Member),
     Variable(Variable),
     Grouping(Box<Grouping>),
     Type(Box<TypeExpr>),
@@ -2156,6 +2190,7 @@ impl<'prgm> IntoIterator for &'prgm mut ProgramUnit {
 #[derive(Debug, Clone, PartialEq, AstNodeEnum, VisitSpansEnum)]
 pub enum Decl {
     Mod(DeclMod),
+    On(DeclOn),
     Var(DeclVar),
     Fun(DeclFun),
     Type(DeclType),
@@ -2193,6 +2228,40 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclMod {
         visit(self.kw, Syntax::Keyword);
         visit(self.name, Syntax::Modname);
         visit(self.semi, Syntax::Normal)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclOn {
+    /// `on`
+    pub kw: RelSpan,
+    pub params: Option<GenericGroup>,
+    pub ty: TypeExpr,
+    pub iff: Option<IffClause>,
+    pub body: BlockStmt,
+}
+
+impl AstNode for DeclOn {
+    fn span_start(&self) -> uspan {
+        self.kw.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.body.span_end()
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclOn {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.kw, Syntax::Keyword);
+        if let Some(params) = &self.params {
+            params.visit_spans(brack_depth, visit);
+        }
+        self.ty.visit_spans(brack_depth, visit);
+        if let Some(iff) = &self.iff {
+            iff.visit_spans(brack_depth, visit);
+        }
+        self.body.visit_spans(brack_depth, visit)
     }
 }
 
@@ -2267,6 +2336,8 @@ pub struct FnSignature {
     pub generics: Option<GenericGroup>,
     /// `(`
     pub open: RelSpan,
+    /// `me`
+    pub self_param: Option<RelSpan>,
     /// Comma-separated (commas are not stored)
     pub params: Vec<FnParam>,
     /// `)`
@@ -2300,6 +2371,9 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnSignature {
         }
         visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
+        if let Some(self_param) = &self.self_param {
+            visit(*self_param, Syntax::LanguageVariable);
+        }
         for param in &self.params {
             param.visit_spans(inner_depth, visit);
         }
@@ -2419,6 +2493,10 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for TypeAnnotation {
         visit(self.colon, Syntax::Normal);
         self.ty.visit_spans(brack_depth, visit)
     }
+}
+
+impl Expectable for TypeAnnotation {
+    const EXPECTED: ExpectedToken = ExpectedToken::TypeAnnotation;
 }
 
 #[derive(Debug, Clone, PartialEq)]

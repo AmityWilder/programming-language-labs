@@ -5,7 +5,7 @@ use crate::{
     analyzer::{
         AnalysisBlockStmt, AnalysisFnDef, GetType,
         static_env::{ConstantValue, ItemId},
-        types::{AbstractType, FunShape, TypeCompatible, TypeSize, TypeSizeError},
+        types::{AbstractType, FunShape, TypeCompatible, TypeSize as _, TypeSizeError},
     },
     grammar::ast::AstNodeFinal,
     lex::token::Operator,
@@ -370,7 +370,7 @@ impl<'src> StaticEnvironment<'src> {
     /// Remember to destruct local items when you call this!
     #[must_use = "items need to be dropped"]
     pub fn pop_scope(&mut self) -> Option<Scope<'src>> {
-        self.curr_layer_mut().and_then(|layer| layer.scopes.pop())
+        self.curr_layer_mut()?.scopes.pop()
     }
 
     fn decl_item(

@@ -299,27 +299,26 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
         let child = ItemId(self.decls.len());
         self.decls.push(Item::new(decl.into()));
         // TODO: duplicate name check on parent
-        self.decls
+        let [parent_item, child_item] = self
+            .decls
             .get_disjoint_mut([parent.0, child.0])
-            .map_err(LinkMemberError::Access)
-            .and_then(|[parent_item, child_item]| {
-                // if there is already a parent, we don't want to add this as a child
-                if let Some(existing) = child_item.parent {
-                    return Err(if existing == child {
-                        LinkMemberError::AlreadyLinked
-                    } else {
-                        LinkMemberError::ReParent { existing }
-                    });
-                }
-                child_item.parent = Some(parent);
+            .map_err(LinkMemberError::Access)?;
+        // if there is already a parent, we don't want to add this as a child
+        if let Some(existing) = child_item.parent {
+            return Err(if existing == child {
+                LinkMemberError::AlreadyLinked
+            } else {
+                LinkMemberError::ReParent { existing }
+            });
+        }
+        child_item.parent = Some(parent);
 
-                // if the child is already a member, then nothing structurally changes
-                if let Some(og) = parent_item.children.insert(name, child) {
-                    Err(LinkMemberError::DuplicateChild(DuplicateItemError { og }))
-                } else {
-                    Ok(child)
-                }
-            })
+        // if the child is already a member, then nothing structurally changes
+        if let Some(og) = parent_item.children.insert(name, child) {
+            Err(LinkMemberError::DuplicateChild(DuplicateItemError { og }))
+        } else {
+            Ok(child)
+        }
     }
 
     pub fn decl_var(&mut self, name: &'src str, decl: impl Into<Decl>) -> VarId {

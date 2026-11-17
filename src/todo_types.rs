@@ -1,4 +1,4 @@
-#![allow(clippy::disallowed_types, reason = "definition")]
+#![expect(clippy::disallowed_types, reason = "definition")]
 
 /// Indicates unfinished code.
 ///

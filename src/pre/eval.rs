@@ -3,9 +3,9 @@ use crate::{
     error::{Diagnostic, DiagnosticKind},
     lex::token::{Operator, TokenKind, punc::OpSide},
     pre::{StreamSpan, ast},
-    spec_ops::{BitRotate, BitShift},
+    spec_ops::{BitRotate as _, BitShift as _},
     src_code::{map::SourceMap, span::FileId},
-    types::{byte, fail, flpt, nevr, none, sint, text, uint},
+    types::{byte, flpt, nevr, none, sint, text, uint},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -289,14 +289,14 @@ impl<'src> PreExpr<'src> {
 
                     // TBD: should this even be handled by eval?
                     Operator::MacroStringify => PreVal::Text(match operand {
-                        PreVal::Bool(x) => (if x { "true" } else { "fals" }).to_string(),
+                        PreVal::Bool(x) => (if x { "true" } else { "fals" }).to_owned(),
                         PreVal::Byte(x) => x.to_string(),
                         PreVal::Uint(x) => x.to_string(),
                         PreVal::Sint(x) => x.to_string(),
                         PreVal::Char(x) => x.to_string(),
                         PreVal::Text(x) => x,
                         PreVal::Typename(x) => x.to_string(),
-                        PreVal::Macro(x) => x.to_string(),
+                        PreVal::Macro(x) => x.to_owned(),
                     }),
 
                     Operator::MacroConst => unimplemented!("should be handled by expansion"),

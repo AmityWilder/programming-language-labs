@@ -1,4 +1,5 @@
 disallowed-types = [
-    { path = "programming_language_labs::Todo", reason = "`Todo` should not be present in production code" },
-    { path = "programming_language_labs::Dummy", reason = "`Dummy` should not be present in production code" },
+    { path = "programming_language_labs::todo_types::Todo", reason = "`Todo` should not be present in production code" },
+    { path = "programming_language_labs::todo_types::Dummy", reason = "`Dummy` should not be present in production code" },
 ]
+too-many-lines-threshold = 256

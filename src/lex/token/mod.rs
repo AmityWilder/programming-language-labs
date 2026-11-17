@@ -524,7 +524,7 @@ macro_rules! define_operators {
 
         impl Operator {
             pub const fn from_token_eq(value: $Base) -> Option<Self> {
-                $(#[allow(unused_imports)] use $BaseVariant::$Variant;)*
+                $(#[expect(unused_imports)] use $BaseVariant::$Variant;)*
                 Some(match value {
                     $($Base::$BaseVariant($BaseVariant::$Variant) => Self::$Variant,)*
                     _ => return None,
@@ -600,6 +600,7 @@ pub enum Operator : TokenEq {
 
     Punctuation::Coalesce,
     Punctuation::Ref,
+    Punctuation::Dot,
 
     Punctuation::Convert,
     Punctuation::Transmute,
@@ -678,6 +679,7 @@ impl Operator {
             Self::Lt | Self::Gt | Self::Le | Self::Ge => ExprPrecedence::Comparison,
             Self::Ne | Self::Eq => ExprPrecedence::Equality,
             Self::Convert | Self::Transmute => ExprPrecedence::Conversion,
+            Self::Dot => ExprPrecedence::MemberAccess,
 
             // TBD
             Self::MacroConcat | Self::MacroStringify | Self::MacroConst => todo!(),

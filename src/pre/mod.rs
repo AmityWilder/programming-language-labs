@@ -8,7 +8,7 @@ use crate::{
             punc::{BadBracketCombo, Bracket, Punctuation},
         },
     },
-    parse::util::MapInner,
+    parse::util::MapInner as _,
     src_code::{
         code::{CreateSourceCodeError, ExpansionData, ExpansionField, SourceCode, SourceLoc},
         map::SourceMap,
@@ -32,8 +32,8 @@ pub fn preprocess(
     let loc = match code.loc() {
         SourceLoc::Repl | SourceLoc::PreprocRepl(_) => SourceLoc::PreprocRepl(id),
 
-        SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => {
-            SourceLoc::PreprocFile(id, path.clone())
+        SourceLoc::File(path, name) | SourceLoc::PreprocFile(_, path, name) => {
+            SourceLoc::PreprocFile(id, path.clone(), name.clone())
         }
     };
     let file_len = usize_to_uspan(code.content().len());

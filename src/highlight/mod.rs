@@ -5,7 +5,7 @@
 use crate::{
     highlight::{
         style::StyleWrapper,
-        syntax::{GetSyntax, Syntax, SyntaxStyle},
+        syntax::{GetSyntax as _, Syntax, SyntaxStyle},
     },
     lex::{
         symbols::{
@@ -444,7 +444,7 @@ where
     T: StyleWrapper,
     A: AsRef<[T]>,
 {
-    use std::fmt::Display;
+    use std::fmt::Display as _;
     for (lexeme, syntax) in highlight(iter) {
         syntax_style[syntax].style(lexeme).fmt(f)?;
     }

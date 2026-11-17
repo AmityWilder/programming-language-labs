@@ -2,7 +2,7 @@ use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::{static_env::old::StaticEnvironment, types::AbstractType},
     grammar::ast::{self},
-    highlight::{style::StyleWrapper, write_highlight},
+    highlight::{style::StyleWrapper as _, write_highlight},
     lex::token::Operator,
     parse::ast::ExprPrecedence,
     scanner::tokenize,

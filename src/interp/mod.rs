@@ -108,11 +108,16 @@ impl Literal {
 }
 
 trait Inpt: Sized {
-    fn input<R: std::io::BufRead>(stream: R) -> Result<Self, Failure>;
+    fn input<R>(stream: R) -> Result<Self, Failure>
+    where
+        R: std::io::BufRead;
 }
 
 impl Inpt for text {
-    fn input<R: std::io::BufRead>(mut stream: R) -> Result<Self, Failure> {
+    fn input<R>(mut stream: R) -> Result<Self, Failure>
+    where
+        R: std::io::BufRead,
+    {
         let mut buf = String::new();
         // TODO: what if we want to receive just a character instead of an entire line?
         // TODO: handle error
@@ -164,7 +169,10 @@ const fn utf8_char_width(first: u8) -> Option<NonZero<usize>> {
 }
 
 impl Inpt for char {
-    fn input<R: std::io::BufRead>(mut stream: R) -> Result<Self, Failure> {
+    fn input<R>(mut stream: R) -> Result<Self, Failure>
+    where
+        R: std::io::BufRead,
+    {
         let mut buf = [0u8; char::MAX_LEN_UTF8];
 
         // SAFETY: buf is not empty
@@ -198,7 +206,10 @@ impl Inpt for char {
 }
 
 impl Inpt for byte {
-    fn input<R: std::io::BufRead>(mut stream: R) -> Result<Self, Failure> {
+    fn input<R>(mut stream: R) -> Result<Self, Failure>
+    where
+        R: std::io::BufRead,
+    {
         let mut buf = b'\0';
         if stream.read_exact(std::slice::from_mut(&mut buf)).is_ok() {
             Ok(buf)
@@ -471,8 +482,8 @@ impl<'src> InterpDferNode<'src> {
                     inner_res
                 {
                     // TBD: what to do with the inner result? is discarding it the most logical plan?
-                    debug_warn!(
-                        "if `{0}` yeilds a result, then the result of the rest of the scope is consumed! \
+                    println!(
+                        "WARNING: if `{0}` yeilds a result, then the result of the rest of the scope is consumed! \
                         give the `{0}` a parameter to pass the result into the dfer block.",
                         Keyword::Dfer
                     );

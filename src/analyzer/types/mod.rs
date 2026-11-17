@@ -3,7 +3,7 @@ use crate::{
     analyzer::{static_env::ConstantValue, types::bounds::error::CheckedType},
     error::fail::Failure,
     grammar::ast,
-    highlight::style::StyleWrapper,
+    highlight::style::StyleWrapper as _,
     old_error::{ContextError, ErrorType},
 };
 use std::{
@@ -15,7 +15,7 @@ use std::{
 // TODO: pre vs post monomorphization types
 
 pub mod bounds;
-use bounds::{TypeBound, TypeSatisfaction};
+use bounds::{TypeBound, TypeSatisfaction as _};
 
 /// The context in which a type must be statically sized
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
@@ -79,7 +79,7 @@ pub trait TypeCompatible<'src>: Display {
     // TODO: equivalence between a parameter and a non-parameter
     fn is_type_eq(&self, other: &AbstractType<'_>) -> bool;
 
-    fn expect_type<T: ast::AstNodeFinal<'src>>(
+    fn expect_type<T>(
         &self,
         expect: &AbstractType<'src>,
         source: &'src str,
@@ -87,6 +87,7 @@ pub trait TypeCompatible<'src>: Display {
     ) -> Result<(), ContextError<'src>>
     where
         Self: std::fmt::Debug,
+        T: ast::AstNodeFinal<'src>,
     {
         if self.is_type_eq(expect) {
             Ok(())

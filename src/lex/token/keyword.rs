@@ -8,8 +8,9 @@ define_token_eq! {
         // Builtin values
         // ----------------------------
 
-        /// The value a method is being called on
-        SelfKw = "self",
+        /// The "self" parameter
+        Me = "me",
+        // TODO: booleans are currently bespoke
 
         // ----------------------------
         // Builtin types

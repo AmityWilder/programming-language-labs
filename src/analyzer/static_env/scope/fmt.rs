@@ -29,10 +29,13 @@ mod helpers {
     impl<'buf> Indented<'buf> {
         const INDENT: &str = "  ";
 
-        fn wrap<'slot, 'fmt: 'buf + 'slot>(
+        fn wrap<'slot, 'fmt>(
             f: &'fmt mut fmt::Formatter<'_>,
             slot: &'slot mut Option<Self>,
-        ) -> fmt::Formatter<'slot> {
+        ) -> fmt::Formatter<'slot>
+        where
+            'fmt: 'buf + 'slot,
+        {
             fmt::FormattingOptions::new()
                 .alternate(f.alternate()) // <- the only option that's important in this situation
                 .create_formatter(slot.insert(Self {
@@ -82,7 +85,8 @@ mod helpers {
         }
 
         pub fn finish(&mut self) -> fmt::Result {
-            self.res.and_then(|()| self.f.write_str("}"))
+            self.res?;
+            self.f.write_str("}")
         }
 
         pub fn entry_with<F>(

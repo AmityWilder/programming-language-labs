@@ -1,4 +1,4 @@
-use std::str::pattern::{Pattern, ReverseSearcher, SearchStep, Searcher};
+use std::str::pattern::{Pattern, ReverseSearcher, SearchStep, Searcher as _};
 
 #[must_use]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -138,8 +138,8 @@ impl<'a> FauxRegex<'a> {
         G: FnOnce(&mut Self) -> Option<&mut Self>,
     {
         let mut inner = self.clone();
-        if let Some(Self { matched_len, .. }) = group_pat(&mut inner) {
-            self.matched_len = *matched_len;
+        if let Some(x) = group_pat(&mut inner) {
+            self.matched_len = x.matched_len;
         }
         self
     }

@@ -13,7 +13,7 @@ use crate::{
         },
     },
     error::fail::Failure,
-    grammar::ast::{self, AstNode, AstNodeFinal, VarKeyword},
+    grammar::ast::{self, AstNode, AstNodeFinal as _, VarKeyword},
     interp::{
         env::{InterpEnvironment, InterpVar},
         value::{InterpBinaryOpFn, InterpLabel, InterpOp, InterpUnaryOpFn, InterpVal},
@@ -357,9 +357,7 @@ impl<'src> GetType<'src> for AnalysisVar<'src> {
         'src: 'ty;
 
     fn get_type<'ty>(&'ty self, env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        env.lookup(self.ident)
-            .next()
-            .and_then(|(_, x)| x.val.get_type(env))
+        env.lookup(self.ident).next()?.1.val.get_type(env)
     }
 }
 
@@ -643,7 +641,7 @@ impl<'src> Analyze<'src> for ast::BlockExpr<'src> {
     ) -> Result<'src, Self::Ouptut> {
         match self {
             ast::BlockExpr::If(stmt) => stmt.analyze(source, env, ret).map(BlockExpr::If),
-            ast::BlockExpr::Loop(stmt) => stmt.analyze(source, env, ret).and_then(|x| match x {
+            ast::BlockExpr::Loop(stmt) => match stmt.analyze(source, env, ret)? {
                 Statement::Loop(expr) => Ok(BlockExpr::Loop(expr)),
                 Statement::Cord(expr) => Ok(BlockExpr::Cord(expr)),
 
@@ -660,7 +658,7 @@ impl<'src> Analyze<'src> for ast::BlockExpr<'src> {
                 | Statement::Skip(_)
                 | Statement::Block(_)
                 | Statement::Dfer(_) => unreachable!("analysis came from a LoopBlock"),
-            }),
+            },
             ast::BlockExpr::Block(stmt) => stmt.analyze(source, env, ret).map(BlockExpr::Block),
         }
     }
@@ -811,84 +809,79 @@ impl<'src> Analyze<'src> for ast::Unary<'src> {
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
-        self.operand.analyze(source, env, None).and_then(|operand| {
-            let Some(ty) = operand.get_type(env).map(|t| t.to_abstract()) else {
+        let operand = self.operand.analyze(source, env, None)?;
+        let Some(ty) = operand.get_type(env).map(|t| t.to_abstract()) else {
+            return Err(vec![ContextError::node_error(
+                source,
+                &self.operand,
+                ErrorType::TypeAmbiguity,
+            )]);
+        };
+        let overload = find_unary_overload(self.op.val, self.side, &ty, env, ret);
+        if let Some(overload) = overload {
+            let interp_def = match overload.def {
+                FnDef::LangOpU(interp_def) => interp_def,
+                FnDef::LangOpB(_) | FnDef::UserDef(_) => unimplemented!(),
+            };
+            let fun = overload.fun.clone();
+            Ok(match self.side {
+                OpSide::Prefix => AnalysisOp::UnaryPre((fun, interp_def), operand),
+                OpSide::Postfix => AnalysisOp::UnaryPost((fun, interp_def), operand),
+            })
+        }
+        // HACK: `Exists` should be generic
+        else if let OpSide::Prefix = self.side
+            && matches!(self.op.val, Operator::Exists)
+        {
+            let Some(ty) = operand.get_type(env) else {
                 return Err(vec![ContextError::node_error(
                     source,
                     &self.operand,
                     ErrorType::TypeAmbiguity,
                 )]);
             };
-            let overload = find_unary_overload(self.op.val, self.side, &ty, env, ret);
-            if let Some(overload) = overload {
-                let interp_def = match overload.def {
-                    FnDef::LangOpU(interp_def) => interp_def,
-                    FnDef::LangOpB(_) | FnDef::UserDef(_) => unimplemented!(),
-                };
-                let fun = overload.fun.clone();
-                Ok(match self.side {
-                    OpSide::Prefix => AnalysisOp::UnaryPre((fun, interp_def), operand),
-                    OpSide::Postfix => AnalysisOp::UnaryPost((fun, interp_def), operand),
-                })
-            }
-            // HACK: `Exists` should be generic
-            else if let OpSide::Prefix = self.side
-                && matches!(self.op.val, Operator::Exists)
-            {
-                let Some(ty) = operand.get_type(env) else {
-                    return Err(vec![ContextError::node_error(
-                        source,
-                        &self.operand,
-                        ErrorType::TypeAmbiguity,
-                    )]);
-                };
 
-                let ty = match ty {
-                    ExprType::AbstractRef(ty) | ExprType::Variable(VarType::Abstract(ty)) => {
-                        ty.clone()
-                    }
-                    ExprType::Literal(ty) => AbstractType::Concrete(StaticType::Primitive(ty)),
-                    _ => todo!("generic `exists`"),
-                };
-                Ok(AnalysisOp::UnaryPost(
-                    (
-                        FunShape {
-                            params: vec![ty],
-                            ret: AbstractType::Bool,
-                        },
-                        builtin_ops::interp_exists_def,
-                    ),
-                    operand,
-                ))
-            } else {
-                let e = ContextError::node_error(
-                    source,
-                    &self.op,
-                    ErrorType::Unsupported {
-                        op: self.op.val.to_token_eq(),
-                        side: self.side,
-                        ty,
-                        range: self.operand.range(source),
-                        candidates: env
-                            .lookup(&self.op.val)
-                            .filter_map(|(_, item)| match &item.val {
-                                EnvItem::Op(overload) => match (&overload.operands, self.side) {
-                                    (OperandTypes::UnaryPost(t), OpSide::Postfix)
-                                    | (OperandTypes::UnaryPre(t), OpSide::Prefix) => {
-                                        Some(((t.clone(),), overload.output.clone()))
-                                    }
-                                    _ => None,
-                                },
-                                _ => unreachable!(
-                                    "only operators should be stored with operator keys"
-                                ),
-                            })
-                            .collect(),
+            let ty = match ty {
+                ExprType::AbstractRef(ty) | ExprType::Variable(VarType::Abstract(ty)) => ty.clone(),
+                ExprType::Literal(ty) => AbstractType::Concrete(StaticType::Primitive(ty)),
+                _ => todo!("generic `exists`"),
+            };
+            Ok(AnalysisOp::UnaryPost(
+                (
+                    FunShape {
+                        params: vec![ty],
+                        ret: AbstractType::Bool,
                     },
-                );
-                Err(vec![e])
-            }
-        })
+                    builtin_ops::interp_exists_def,
+                ),
+                operand,
+            ))
+        } else {
+            let e = ContextError::node_error(
+                source,
+                &self.op,
+                ErrorType::Unsupported {
+                    op: self.op.val.to_token_eq(),
+                    side: self.side,
+                    ty,
+                    range: self.operand.range(source),
+                    candidates: env
+                        .lookup(&self.op.val)
+                        .filter_map(|(_, item)| match &item.val {
+                            EnvItem::Op(overload) => match (&overload.operands, self.side) {
+                                (OperandTypes::UnaryPost(t), OpSide::Postfix)
+                                | (OperandTypes::UnaryPre(t), OpSide::Prefix) => {
+                                    Some(((t.clone(),), overload.output.clone()))
+                                }
+                                _ => None,
+                            },
+                            _ => unreachable!("only operators should be stored with operator keys"),
+                        })
+                        .collect(),
+                },
+            );
+            Err(vec![e])
+        }
     }
 }
 
@@ -1176,23 +1169,22 @@ impl<'src> Analyze<'src> for ast::ExprStmt<'src> {
         env: &mut StaticEnvironment<'src>,
         ret: Option<&AbstractType<'src>>,
     ) -> Result<'src, Self::Ouptut> {
-        self.expr.analyze(source, env, ret).and_then(|expr| {
-            if let Some(ty) = expr.get_type(env) {
-                // TBD: can this be a "must_use" lint instead?
-                const REQUIRE_NONE: bool = false;
-                if REQUIRE_NONE {
-                    ty.expect_type(&AbstractType::None, source, &self.expr)
-                        .map_err(|e| vec![e])?;
-                }
-                Ok(ExprStmt { expr })
-            } else {
-                Err(vec![ContextError::node_error(
-                    source,
-                    &self.expr,
-                    ErrorType::TypeAmbiguity,
-                )])
+        let expr = self.expr.analyze(source, env, ret)?;
+        if let Some(ty) = expr.get_type(env) {
+            // TBD: can this be a "must_use" lint instead?
+            const REQUIRE_NONE: bool = false;
+            if REQUIRE_NONE {
+                ty.expect_type(&AbstractType::None, source, &self.expr)
+                    .map_err(|e| vec![e])?;
             }
-        })
+            Ok(ExprStmt { expr })
+        } else {
+            Err(vec![ContextError::node_error(
+                source,
+                &self.expr,
+                ErrorType::TypeAmbiguity,
+            )])
+        }
     }
 }
 
@@ -1230,22 +1222,21 @@ impl<'src> Analyze<'src> for ast::PrintStmt<'src> {
     ) -> Result<'src, Self::Ouptut> {
         const EXPR_TY: &AbstractType = &AbstractType::Text;
         // TBD: should there be a "display" operator that can be overloaded?
-        self.group
+        let expr = self
+            .group
             .expr
-            .analyze(source, env, Some(&AbstractType::Text)) // TODO: this shouldn't be opaque (opaque is for returns), but it should be generic
-            .and_then(|expr| {
-                if let Some(ty) = expr.get_type(env) {
-                    ty.expect_type(EXPR_TY, source, &self.group.expr)
-                        .map_err(|e| vec![e])
-                        .map(|()| PrintStmt { expr })
-                } else {
-                    Err(vec![ContextError::node_error(
-                        source,
-                        &self.group.expr,
-                        ErrorType::TypeAmbiguity,
-                    )])
-                }
-            })
+            .analyze(source, env, Some(&AbstractType::Text))?;
+        if let Some(ty) = expr.get_type(env) {
+            ty.expect_type(EXPR_TY, source, &self.group.expr)
+                .map_err(|e| vec![e])
+                .map(|()| PrintStmt { expr })
+        } else {
+            Err(vec![ContextError::node_error(
+                source,
+                &self.group.expr,
+                ErrorType::TypeAmbiguity,
+            )])
+        }
     }
 }
 
@@ -1360,19 +1351,17 @@ impl<'src> Analyze<'src> for ast::IfStmt<'src> {
         let pred = self.pred.analyze(source, env, None)?;
         if let Some(ty) = pred.get_type(env) {
             ty.expect_type(&AbstractType::Bool, source, &self.pred)
-                .map_err(|e| vec![e])
-                .and_then(|()| {
-                    Ok(IfStmt {
-                        pred,
-                        then: self.then.analyze(source, env, None)?,
-                        or: self
-                            .or
-                            .as_ref()
-                            .map(|x| x.body.analyze(source, env, None))
-                            .transpose()?
-                            .map(Box::new),
-                    })
-                })
+                .map_err(|e| vec![e])?;
+            Ok(IfStmt {
+                pred,
+                then: self.then.analyze(source, env, None)?,
+                or: self
+                    .or
+                    .as_ref()
+                    .map(|x| x.body.analyze(source, env, None))
+                    .transpose()?
+                    .map(Box::new),
+            })
         } else {
             Err(vec![ContextError::node_error(
                 source,
@@ -1722,7 +1711,7 @@ impl<'src> GetType<'src> for AnalysisBlockStmt<'src> {
     }
 }
 
-fn analyze_dfers<'ast, 'src: 'ast, I>(
+fn analyze_dfers<'ast, 'src, I>(
     iter: I,
     source: &'src str,
     env: &mut StaticEnvironment<'src>,
@@ -1730,6 +1719,7 @@ fn analyze_dfers<'ast, 'src: 'ast, I>(
 ) -> Result<'src, AnalysisBlockStmt<'src>>
 where
     I: IntoIterator<Item = &'ast ast::Declaration<'src>>,
+    'src: 'ast,
 {
     let mut iter = iter.into_iter();
     let (lo, hi) = iter.size_hint();
@@ -1965,10 +1955,9 @@ impl<'src> Analyze<'src> for ast::DeclVar<'src> {
             .as_ref()
             .map(|x| x.expr.analyze(source, env, annotated_type.as_ref()))
             .transpose()?;
-        let ty = annotated_type.clone().or_else(|| {
-            expr.as_ref()
-                .and_then(|x| x.get_type(env).map(|t| t.to_abstract()))
-        });
+        let ty = annotated_type
+            .clone()
+            .or_else(|| expr.as_ref()?.get_type(env).map(|t| t.to_abstract()));
 
         #[cfg(debug_assertions)]
         {
@@ -2129,11 +2118,12 @@ where
         env.decl_op(op, def, None);
     }
     env.push_layer(); // HACK: remove this when functions are implemented
-    prgm.decls
+    let stmts = prgm
+        .decls
         .iter()
         .filter_map(|decl| decl.analyze(source, &mut env, None).transpose())
-        .collect::<Result<'src, Vec<_>>>()
-        .and_then(|stmts| f(env, stmts))
+        .collect::<Result<'src, Vec<_>>>()?;
+    f(env, stmts)
 }
 
 pub fn analyze_interp<'src>(

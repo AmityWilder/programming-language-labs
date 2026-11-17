@@ -258,29 +258,24 @@ impl<'src> LexValue<'src> {
             .expect("character literal tokens should include delimiters (`'`)");
         if let Some((len, res)) = escape_char(src) {
             // escape sequence
-            res.map_err(|()| ErrorType::InvalidEscape(src))
-                .and_then(|ch| {
-                    (len == src.len())
-                        .then_some(Self::CharLiteral(CharLiteral {
-                            ch,
-                            is_escaped: true,
-                        }))
-                        .ok_or(ErrorType::MultiCharLiteral)
-                })
+            let ch = res.map_err(|()| ErrorType::InvalidEscape(src))?;
+            (len == src.len())
+                .then_some(Self::CharLiteral(CharLiteral {
+                    ch,
+                    is_escaped: true,
+                }))
+                .ok_or(ErrorType::MultiCharLiteral)
         } else {
             // normal character
             let mut iter = src.chars();
+            let ch = iter.next().ok_or(ErrorType::EmptyCharLiteral)?;
             iter.next()
-                .ok_or(ErrorType::EmptyCharLiteral)
-                .and_then(|ch| {
-                    iter.next()
-                        .is_none()
-                        .then_some(Self::CharLiteral(CharLiteral {
-                            ch,
-                            is_escaped: false,
-                        }))
-                        .ok_or(ErrorType::MultiCharLiteral)
-                })
+                .is_none()
+                .then_some(Self::CharLiteral(CharLiteral {
+                    ch,
+                    is_escaped: false,
+                }))
+                .ok_or(ErrorType::MultiCharLiteral)
         }
     }
 

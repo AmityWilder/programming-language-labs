@@ -332,18 +332,15 @@ fn escape_seq(src: &str, i: usize) -> Result<(Range<usize>, char), &str> {
     let esc_rest = src
         .get(i..)
         .expect("`i` should not be within a UTF-8 character");
-    escape_char(esc_rest)
-        .ok_or(esc_rest)
-        .and_then(|(len, res)| {
-            let esc = esc_rest.get(..len).expect(
-                "return of escape_char, starting at `i`, should not be within a UTF-8 character",
-            );
-            let range = Range::from(
-                i..i.checked_add(len)
-                    .expect("should be at most the length of a string already in memory"),
-            );
-            res.map(|ch| (range, ch)).map_err(|()| esc)
-        })
+    let (len, res) = escape_char(esc_rest).ok_or(esc_rest)?;
+    let esc = esc_rest
+        .get(..len)
+        .expect("return of escape_char, starting at `i`, should not be within a UTF-8 character");
+    let range = Range::from(
+        i..i.checked_add(len)
+            .expect("should be at most the length of a string already in memory"),
+    );
+    res.map(|ch| (range, ch)).map_err(|()| esc)
 }
 
 #[cfg(test)]

@@ -24,8 +24,10 @@ pub enum Syntax {
     TextLiteral,
     /// The escape sequence of either a character or string literal
     EscapeSeq,
-    /// A language-defined constant like true/false
+    /// A language-defined constant like `true`/`fals`
     LanguageDefined,
+    /// A language-defined variable like `me`
+    LanguageVariable,
     /// A jump label
     Label,
     /// A local variable
@@ -80,6 +82,8 @@ pub struct SyntaxStyle<T, A> {
     pub escape_seq: T,
     /// Style for [`Syntax::LanguageDefined`]
     pub language_defined: T,
+    /// Style for [`Syntax::LanguageVariable`]
+    pub language_variable: T,
     /// Style for [`Syntax::Label`]
     pub label: T,
     /// Style for [`Syntax::Variable`]
@@ -131,6 +135,7 @@ where
             Syntax::TextLiteral => &self.string_literal,
             Syntax::EscapeSeq => &self.escape_seq,
             Syntax::LanguageDefined => &self.language_defined,
+            Syntax::LanguageVariable => &self.language_variable,
             Syntax::Label => &self.label,
             Syntax::Variable => &self.variable,
             Syntax::Field => &self.field,
@@ -172,6 +177,7 @@ impl<const N: usize> SyntaxStyle<Style, [Style; N]> {
             string_literal: Style::new(),
             escape_seq: Style::new(),
             language_defined: Style::new(),
+            language_variable: Style::new(),
             label: Style::new(),
             variable: Style::new(),
             field: Style::new(),
@@ -204,6 +210,7 @@ impl SyntaxStyle<Style, &[Style]> {
             string_literal: Style::new(),
             escape_seq: Style::new(),
             language_defined: Style::new(),
+            language_variable: Style::new(),
             label: Style::new(),
             variable: Style::new(),
             field: Style::new(),

@@ -1,17 +1,16 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     highlight::{
-        style::{Color, Style, StyleWrapper},
+        style::{Color, Style, StyleWrapper as _},
         write_highlight,
     },
-    lex::token::TokenKind,
     src_code::{
         code::{LineContentSpans, SourceCode},
         map::SourceMap,
         span::{RelSpan, Span, usize_to_uspan},
     },
 };
-use std::{collections::VecDeque, fmt::Write, range::Range};
+use std::{collections::VecDeque, fmt::Write as _, range::Range};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct MessageStyle {

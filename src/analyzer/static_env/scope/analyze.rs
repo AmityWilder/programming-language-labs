@@ -2,52 +2,49 @@ use super::{env::ModScopeEnvironment, hir};
 use crate::{
     analyzer::static_env::{ModId, scope::env::ScopeEnvironment},
     error::{CheckDiagnostics, Diagnostic},
-    parse::{ast, util::OkOrFlatten},
+    parse::{ast, util::OkOrFlatten as _},
     src_code::{code::SourceCode, map::SourceMap, span::FileId},
-    util::OrAllErrsExt,
+    util::OrAllErrsExt as _,
 };
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::{BTreeMap, HashMap};
 
 impl<'src> ScopeEnvironment<'src> {
     pub fn declared_submodules(
         &mut self,
-        code: &'src SourceCode,
+        code: &SourceCode,
         unit: &ast::ProgramUnit,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> HashMap<&'src str, ModId> {
+    ) -> BTreeMap<&'src str, ModId> {
+        let mut mapping = BTreeMap::new();
+        let Some(path) = code.loc().path() else {
+            // REPL can never contain submodules, it has no path.
+            return mapping;
+        };
+        path.file_stem()
+            .expect("should be a file")
+            .to_string_lossy();
         let name = code.loc().path().map_or_default(|path| {
             let name = path.file_stem().expect("must be a file");
             name.to_str()
                 .unwrap_or_else(|| todo!("invalid characters in module name {name:?}"))
         });
 
-        #[expect(
-            irrefutable_let_patterns,
-            reason = "only irrefutable because it's unfinished"
-        )]
-        let tree = forest
-            // TODO: what if two modules have the same name on different paths?
-            .try_insert(name.to_string(), TreeNode::new(unit.file))
-            .map_err(|e| todo!("two modules with same name but different path: {e:?}"))?;
-        // TODO: search forest recursively for unfound modules this could match
-
         for decl in &unit.decls {
-            if let ast::Decl::Mod(submod) = decl {
-                let subname = &code[submod.name];
-                if !tree.unfound.insert(subname) {
-                    diagnostics.push(todo!(
-                        "error: multiple submodules within {name} have the same name ({subname})"
-                    ));
-                }
-                if let Some(node) = forest.remove(subname) {
-                } else {
-                    // may not have been encountered yet
-                }
-            }
+            // if let ast::Decl::Mod(submod) = decl {
+            //     let subname = &code[submod.name];
+            //     if !tree.unfound.insert(subname) {
+            //         diagnostics.push(todo!(
+            //             "error: multiple submodules within {name} have the same name ({subname})"
+            //         ));
+            //     }
+            //     if let Some(node) = forest.remove(subname) {
+            //     } else {
+            //         // may not have been encountered yet
+            //     }
+            // }
         }
+
+        todo!()
     }
 
     // needs to be done separately because ModScopEnvironment exclusively borrows the module tree
@@ -58,103 +55,104 @@ impl<'src> ScopeEnvironment<'src> {
         prgm: &ast::Program,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> HashMap<FileId, ModId> {
-        #[derive(Debug)]
-        struct TreeNode<'src> {
-            file: FileId,
-            unfound: HashSet<&'src str>,
-            found: HashMap<&'src str, (TreeNode<'src>, ast::DeclMod)>,
-        }
+        unimplemented!()
+        // #[derive(Debug)]
+        // struct TreeNode<'src> {
+        //     file: FileId,
+        //     unfound: HashSet<&'src str>,
+        //     found: HashMap<&'src str, (TreeNode<'src>, ast::DeclMod)>,
+        // }
 
-        impl<'src> TreeNode<'src> {
-            fn new(file: FileId) -> Self {
-                Self {
-                    file,
-                    unfound: HashSet::new(),
-                    found: HashMap::new(),
-                }
-            }
+        // impl<'src> TreeNode<'src> {
+        //     fn new(file: FileId) -> Self {
+        //         Self {
+        //             file,
+        //             unfound: HashSet::new(),
+        //             found: HashMap::new(),
+        //         }
+        //     }
 
-            fn decl_children(
-                self,
-                id: ModId,
-                mapping: &mut HashMap<FileId, ModId>,
-                env: &mut ScopeEnvironment<'src>,
-                diagnostics: &mut Vec<Diagnostic>,
-            ) {
-                if self.unfound.is_empty() {
-                    for (child, (node, submod)) in self.found {
-                        match env.decl_submodule(id, child, submod) {
-                            Ok(id) => {
-                                mapping.insert(node.file, id);
-                                node.decl_children(id, mapping, env, diagnostics);
-                            }
-                            Err(e) => {
-                                diagnostics.push(todo!("error declaring submodule {child}: {e:?}"));
-                            }
-                        }
-                    }
-                } else {
-                    diagnostics.push(todo!(
-                        "error: not all submodules located, missing: {:?}",
-                        self.unfound
-                    ));
-                }
-            }
-        }
+        //     fn decl_children(
+        //         self,
+        //         id: ModId,
+        //         mapping: &mut HashMap<FileId, ModId>,
+        //         env: &mut ScopeEnvironment<'src>,
+        //         diagnostics: &mut Vec<Diagnostic>,
+        //     ) {
+        //         if self.unfound.is_empty() {
+        //             for (child, (node, submod)) in self.found {
+        //                 match env.decl_submodule(id, child, submod) {
+        //                     Ok(id) => {
+        //                         mapping.insert(node.file, id);
+        //                         node.decl_children(id, mapping, env, diagnostics);
+        //                     }
+        //                     Err(e) => {
+        //                         diagnostics.push(todo!("error declaring submodule {child}: {e:?}"));
+        //                     }
+        //                 }
+        //             }
+        //         } else {
+        //             diagnostics.push(todo!(
+        //                 "error: not all submodules located, missing: {:?}",
+        //                 self.unfound
+        //             ));
+        //         }
+        //     }
+        // }
 
-        let mut forest = HashMap::<String, TreeNode>::new();
-        // non-root nodes that have not been grouped with their parents yet
-        for unit in prgm {
-            let code = source
-                .get(unit.file)
-                .expect("all program units should be valid");
+        // let mut forest = HashMap::<String, TreeNode>::new();
+        // // non-root nodes that have not been grouped with their parents yet
+        // for unit in prgm {
+        //     let code = source
+        //         .get(unit.file)
+        //         .expect("all program units should be valid");
 
-            let name = code.loc().path().map_or_default(|path| {
-                let name = path.file_stem().expect("must be a file");
-                name.to_str()
-                    .unwrap_or_else(|| todo!("invalid characters in module name {name:?}"))
-            });
+        //     let name = code.loc().path().map_or_default(|path| {
+        //         let name = path.file_stem().expect("must be a file");
+        //         name.to_str()
+        //             .unwrap_or_else(|| todo!("invalid characters in module name {name:?}"))
+        //     });
 
-            #[expect(
-                irrefutable_let_patterns,
-                reason = "only irrefutable because it's unfinished"
-            )]
-            let Ok(tree) = forest
-                // TODO: what if two modules have the same name on different paths?
-                .try_insert(name.to_string(), TreeNode::new(unit.file))
-                .map_err(|e| todo!("two modules with same name but different path: {e:?}"))
-            else {
-                continue;
-            };
-            // TODO: search forest recursively for unfound modules this could match
+        //     #[expect(
+        //         irrefutable_let_patterns,
+        //         reason = "only irrefutable because it's unfinished"
+        //     )]
+        //     let Ok(tree) = forest
+        //         // TODO: what if two modules have the same name on different paths?
+        //         .try_insert(name.to_string(), TreeNode::new(unit.file))
+        //         .map_err(|e| todo!("two modules with same name but different path: {e:?}"))
+        //     else {
+        //         continue;
+        //     };
+        //     // TODO: search forest recursively for unfound modules this could match
 
-            for decl in &unit.decls {
-                if let ast::Decl::Mod(submod) = decl {
-                    let subname = &code[submod.name];
-                    if !tree.unfound.insert(subname) {
-                        diagnostics.push(todo!(
-                            "error: multiple submodules within {name} have the same name ({subname})"
-                        ));
-                    }
-                    if let Some(node) = forest.remove(subname) {
-                    } else {
-                        // may not have been encountered yet
-                    }
-                }
-            }
-        }
+        //     for decl in &unit.decls {
+        //         if let ast::Decl::Mod(submod) = decl {
+        //             let subname = &code[submod.name];
+        //             if !tree.unfound.insert(subname) {
+        //                 diagnostics.push(todo!(
+        //                     "error: multiple submodules within {name} have the same name ({subname})"
+        //                 ));
+        //             }
+        //             if let Some(node) = forest.remove(subname) {
+        //             } else {
+        //                 // may not have been encountered yet
+        //             }
+        //         }
+        //     }
+        // }
 
-        let mut mapping = HashMap::new();
-        for (name, node) in forest {
-            match self.decl_library(name) {
-                Ok(id) => {
-                    mapping.insert(node.file, id);
-                    node.decl_children(id, &mut mapping, self, diagnostics);
-                }
-                Err(e) => todo!("error declaring library: {e:?}"),
-            }
-        }
-        mapping
+        // let mut mapping = HashMap::new();
+        // for (name, node) in forest {
+        //     match self.decl_library(name) {
+        //         Ok(id) => {
+        //             mapping.insert(node.file, id);
+        //             node.decl_children(id, &mut mapping, self, diagnostics);
+        //         }
+        //         Err(e) => todo!("error declaring library: {e:?}"),
+        //     }
+        // }
+        // mapping
     }
 }
 
@@ -205,6 +203,10 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                     .find_submodule(&source[inner.name])
                     .expect("should be handled in pre-scan");
                 hir::Decl::Mod(hir::DeclMod { id })
+            }
+
+            ast::Decl::On(_inner) => {
+                todo!("`on` block analysis")
             }
 
             ast::Decl::Var(inner) => {
@@ -498,6 +500,10 @@ impl<'src> ModScopeEnvironment<'_, 'src> {
                     .lookup_var(&source[inner.ident])
                     .ok_or_else(|| todo!("error: unknown variable"))?;
                 Ok(hir::Expr::Variable(hir::Variable { id }))
+            }
+
+            ast::Expr::Member(inner) => {
+                todo!("member access analysis")
             }
 
             ast::Expr::Grouping(inner) => self.analyze_expr(file, source, inner.expr, diagnostics),
