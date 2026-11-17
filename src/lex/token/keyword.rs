@@ -28,7 +28,7 @@ define_token_eq! {
         Bool = "bool",
         /// Unsigned integer type (represented as `usize` (`size_t`))
         Uint = "uint",
-        /// Signed integer type (represented as `isize` (`isize_t`))
+        /// Signed integer type (represented as `isize` (`ssize_t`))
         Sint = "sint",
         /// Floating point type (represented as `fsize` (float or double depending on hardware))
         Flpt = "flpt",
