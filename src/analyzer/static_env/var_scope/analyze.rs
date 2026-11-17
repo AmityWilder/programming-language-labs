@@ -1,7 +1,7 @@
 use crate::{
     analyzer::static_env::var_scope::env::ScopeEnvironment,
     error::Diagnostic,
-    parse::ast::{self, AstNode},
+    parse::ast::{self, AstNode as _},
     src_code::{code::SourceCode, span::FileId},
 };
 
@@ -25,15 +25,19 @@ impl<'src> ScopeEnvironment<'src> {
         diagnostics: &mut Vec<Diagnostic>,
     ) {
         match decl {
-            ast::Decl::Mod(mdl) => {
+            ast::Decl::Mod(_mdl) => {
                 todo!("module declaration scope analysis")
             }
 
-            ast::Decl::Type(ty) => {
+            ast::Decl::On(_on) => {
+                todo!("`on` declaration scope analysis")
+            }
+
+            ast::Decl::Type(_ty) => {
                 todo!("type declaration scope analysis")
             }
 
-            ast::Decl::Fun(ty) => {
+            ast::Decl::Fun(_ty) => {
                 todo!("function declaration scope analysis")
             }
 

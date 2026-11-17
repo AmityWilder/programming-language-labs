@@ -1,12 +1,12 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    highlight::{TokenHighlight, style::StyleWrapper, syntax::Syntax, write_highlight},
+    highlight::{TokenHighlight, style::StyleWrapper as _, syntax::Syntax, write_highlight},
     lex::token::TokenKind,
     parse::ast,
     src_code::{code::SourceCode, span::RelSpan},
 };
 use std::{
-    fmt::{self, Write},
+    fmt::{self, Write as _},
     iter::once,
 };
 
@@ -99,7 +99,8 @@ mod helpers {
         }
 
         pub fn finish(&mut self) -> fmt::Result {
-            self.res.and_then(|()| self.f.write_char(')'))
+            self.res?;
+            self.f.write_char(')')
         }
     }
 }
@@ -149,6 +150,10 @@ impl LispArgs for [ast::Decl] {
             match item {
                 ast::Decl::Mod(mdl) => {
                     f.write_arg(mdl, source);
+                }
+
+                ast::Decl::On(on) => {
+                    f.write_arg(on, source);
                 }
 
                 ast::Decl::Type(ty) => {
@@ -206,6 +211,12 @@ impl LispDisplay for ast::DeclMod {
         LispCall::new(&self.kw, source, f)
             .write_arg((self.name, Syntax::Modname), source)
             .finish()
+    }
+}
+
+impl LispDisplay for ast::DeclOn {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        todo!("format `on`")
     }
 }
 
@@ -328,6 +339,13 @@ impl LispDisplay for ast::Directive {
 
 impl LispDisplay for ast::Variable {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: path
+        (self.ident, Syntax::Variable).fmt_value(source, f)
+    }
+}
+
+impl LispDisplay for ast::Member {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         (self.ident, Syntax::Variable).fmt_value(source, f)
     }
 }
@@ -361,6 +379,7 @@ impl LispDisplay for ast::Expr {
             Self::Literal(inner) => inner.fmt(source, f),
             Self::Directive(inner) => inner.fmt(source, f),
             Self::Variable(inner) => inner.fmt(source, f),
+            Self::Member(inner) => inner.fmt(source, f),
             Self::Grouping(inner) => inner.fmt(source, f),
             Self::Type(inner) => inner.fmt(source, f),
         }

@@ -6,7 +6,7 @@ use crate::{
         AbstractType, FunShape,
         bounds::{Combinator, TypeBound},
     },
-    highlight::style::StyleWrapper,
+    highlight::style::StyleWrapper as _,
     todo_types::Todo,
 };
 use std::{
@@ -237,7 +237,10 @@ mod local_depth {
 
     /// Returns [`None`] if the name is too short to require an alias.
     /// Boolean field represents whether the name is new.
-    pub fn define<T: ?Sized + ToString>(bound: &T) -> Option<(bool, usize)> {
+    pub fn define<T>(bound: &T) -> Option<(bool, usize)>
+    where
+        T: ?Sized + ToString,
+    {
         const MAX_INLINE_BOUND_CHARS: usize = 4;
         DEFS.with_borrow_mut(|table| {
             let key = bound.to_string();
@@ -2291,7 +2294,7 @@ impl std::error::Error for UnsatisfiedBoundError<'_> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::types::{StaticType, bounds::TypeBoundDesc};
+    use crate::analyzer::types::bounds::TypeBoundDesc;
 
     #[test]
     fn test_bounds_error_display() {

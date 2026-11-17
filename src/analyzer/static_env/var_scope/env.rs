@@ -233,7 +233,7 @@ impl<'src> ScopeEnvironment<'src> {
     /// Remember to destruct local items when you call this!
     #[must_use = "items need to be dropped"]
     pub fn pop_scope(&mut self) -> Option<Scope<'src>> {
-        self.curr_layer_mut().and_then(|layer| layer.scopes.pop())
+        self.curr_layer_mut()?.scopes.pop()
     }
 
     /// Declare an item in the current scope
@@ -255,7 +255,7 @@ impl<'src> ScopeEnvironment<'src> {
 
     pub fn mark_ref(&mut self, span: Span, id: ItemId) {
         let x = self.ids.insert(span, id);
-        debug_assert_eq!(x, None);
+        debug_assert_eq!(x, None, "markings should be unique to spans");
     }
 }
 

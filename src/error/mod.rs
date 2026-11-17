@@ -6,7 +6,7 @@ use crate::{
         inline::{CodeRef, CodeReference, MessageKind, render_code_refs},
     },
     highlight::{
-        style::{Color, Style, StyleWrapper},
+        style::{Color, Style, StyleWrapper as _},
         syntax::Syntax,
     },
     lex::{
@@ -107,6 +107,7 @@ macro_rules! expected_token {
             Verbatim(TokenKind),
         $(
             $(#[$vm])*
+            #[doc = $desc]
             $Variant
         ),*}
 
@@ -125,12 +126,12 @@ expected_token! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
     pub enum ExpectedToken {
         MacroIdent = "a macro identifier (like a regular identifier, but starts with `\\`",
-        MacroParamOrRParen = "a macro parameter (like a regular identifier, but starts with `$`) or `)`",
+        MacroParamOrRParen = "a macro parameter (like a regular identifier, but starts with `$`), or `)`",
         MacroDef = "a macro definition (should be enclosed in `{...}`)",
         MacroArg = "a macro argument (should be enclosed in `{...}`)",
         MacroPred = "a macro predicate (should be enclosed in `{...}`)",
         MacroCond = "a macro condition body (should be enclosed in `{...}`)",
-        MacroCondContinuation = "a macro condition body (should be enclosed in `{...}`) or `rot`",
+        MacroCondContinuation = "a macro condition body (should be enclosed in `{...}`), or `rot`",
 
         #[deprecated = "use ExpectedToken::Verbatim"]
         Colon = "a `:`",
@@ -1066,7 +1067,7 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
                     writeln!(f, "\nthe following overloads exist:")?;
                     let mut buf = String::new();
                     for ((lhs, rhs), ret) in candidates {
-                        use std::fmt::Write;
+                        use std::fmt::Write as _;
                         buf.clear();
                         _ = buf
                             .write_fmt(core::format_args!("fun {op}({lhs}, {rhs}) -> {ret}"));

@@ -4,7 +4,7 @@
 #![allow(warnings)]
 
 use crate::{
-    grammar::{ast::AstNodeFinal, parse, token_matches},
+    grammar::{ast::AstNodeFinal as _, parse, token_matches},
     old_error::{ContextError, ErrorType},
     preproc::stream::{MacroConditional, MacroDefinition, MacroExpansion, PreprocessorStream},
     scanner::token::{ExpansionData, Token, value::LexValue},

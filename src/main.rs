@@ -5,7 +5,6 @@
 //! This project is not, and will not ever be, written with the help of any form of generative AI.
 //! I do not like generative AI. I do not support it. It is a net negative on society and harms learning.
 
-#![allow(dead_code, deprecated, reason = "UNDER CONSTRUCTION")]
 #![feature(
     try_from_int_error_kind, // used in number literal error
     deque_extend_front,
@@ -28,6 +27,7 @@
     iterator_try_reduce,
     map_try_insert,
     formatting_options,
+    default_ignorable,
 )]
 #![forbid(
     clippy::missing_safety_doc,
@@ -40,6 +40,7 @@
     unused_unsafe,
     clippy::unnecessary_safety_doc,
     clippy::unnecessary_safety_comment,
+    clippy::same_length_and_capacity,
     reason = "could cause mistakes"
 )]
 #![warn(
@@ -47,14 +48,15 @@
     clippy::missing_const_for_fn,
     // clippy::missing_docs_in_private_items,
     clippy::too_many_lines,
+    clippy::unnecessary_trailing_comma,
+    clippy::missing_panics_doc,
     reason = "yucky. clean that up."
 )]
-#![warn(clippy::todo, reason = "finish your code")]
-#![warn(
-    clippy::missing_panics_doc,
+#![warn(clippy::todo, clippy::dbg_macro, reason = "finish your code")]
+#![deny(
     clippy::unwrap_used,
     clippy::missing_assert_message,
-    reason = "avoid panics, or at least give a reason for them"
+    reason = "never panic without a reason"
 )]
 #![warn(
     clippy::suspicious,
@@ -65,27 +67,68 @@
     reason = "be careful about edge-cases"
 )]
 #![warn(clippy::disallowed_types)]
-// #![warn(
-//     clippy::expect_used,
-//     clippy::panic,
-//     reason = "avoid using `expect` or `panic` where things ought to be guaranteed \
-//         (i.e. std library promises it). prefer builtin operators since their panics \
-//         can be optimized away in release builds. use expect/panic when correctness \
-//         depends on MYSELF writing it correctly."
-// )]
-// #![warn(unsafe_code)] // not actually a problem, just be very careful
+#![deny(
+    clippy::allow_attributes,
+    clippy::as_pointer_underscore,
+    clippy::as_underscore,
+    clippy::assertions_on_result_states,
+    clippy::deref_by_slicing,
+    clippy::doc_include_without_cfg,
+    clippy::inline_trait_bounds,
+    clippy::missing_asserts_for_indexing,
+    clippy::non_zero_suggestions,
+    clippy::pub_without_shorthand,
+    clippy::precedence_bits,
+    clippy::rest_pat_in_fully_bound_structs,
+    clippy::return_and_then,
+    clippy::semicolon_inside_block,
+    clippy::separated_literal_suffix,
+    clippy::str_to_string,
+    clippy::string_lit_chars_any,
+    clippy::try_err,
+    clippy::unused_trait_names,
+    unused_imports,
+    clippy::redundant_closure,
+    clippy::redundant_closure_call,
+    clippy::redundant_closure_for_method_calls,
+    reason = "consistency or personal preference"
+)]
+#![allow(
+    clippy::struct_excessive_bools,
+    clippy::unnecessary_debug_formatting,
+    // usually, if I use `Default::default()` instead of the type name, it's because the typename is LESS readable
+    clippy::default_trait_access,
+    clippy::deprecated_attributes_without_since,
+    // if im using a glob import, it's because im using all of them (or so many that it's pointless)
+    clippy::enum_glob_use, clippy::wildcard_imports,
+    // "negations reduce the readability" the `if` case implies success and the `else` case implies fallback.
+    // negating a failure condition means the first case will be the success case, which makes the code more readable.
+    clippy::if_not_else,
+    // trying to avoid including crates
+    clippy::naive_bytecount,
+    reason = "these lints make sweeping assumptions that are often wrong"
+)]
+#![deny(
+    clippy::doc_broken_link,
+    reason = "fix this before you forget what it means!!"
+)]
+#![allow(dead_code, deprecated, reason = "UNDER CONSTRUCTION")]
+#![allow(
+    clippy::nonminimal_bool,
+    clippy::overly_complex_bool_expr,
+    reason = "expensive, only enable sometimes"
+)]
 
 use crate::{
-    analyzer::static_env::scope::fmt::DisplayHir,
     error::Diagnostic,
     highlight::{
         TokenHighlight, highlight,
         style::{Color, Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle, syntax_style},
     },
-    parse::ast::VisitSpans,
+    parse::ast::{ProgramUnit, VisitSpans as _},
     src_code::{
-        code::{SourceCode, SourceLoc},
+        code::{CreateSourceCodeError, SourceCode, SourceLoc, eq_module_name},
         map::SourceMap,
         span::RelSpan,
     },
@@ -97,34 +140,10 @@ use src_code::{
     code::ExpansionData,
     span::{FileId, usize_to_uspan},
 };
-use std::{collections::VecDeque, path::PathBuf};
-
-macro_rules! debug_info {
-    ($($args:tt)*) => {
-        #[cfg(debug_assertions)] {
-            println!("\x1b[90mINFO: {}\x1b[0m", format_args!($($args)*));
-        }
-    };
-}
-pub(crate) use debug_info;
-
-macro_rules! debug_warn {
-    ($($args:tt)*) => {
-        #[cfg(debug_assertions)] {
-            println!("\x1b[93mWARNING: {}\x1b[0m", format_args!($($args)*));
-        }
-    };
-}
-pub(crate) use debug_warn;
-
-macro_rules! debug_unsafe {
-    ($($args:tt)*) => {
-        #[cfg(debug_assertions)] {
-            println!("\x1b[95mUNSAFE: {}\x1b[0m", format_args!($($args)*));
-        }
-    };
-}
-pub(crate) use debug_unsafe;
+use std::{
+    collections::VecDeque,
+    path::{Path, PathBuf},
+};
 
 mod analyzer;
 mod arrayvec;
@@ -174,6 +193,10 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
     },
     language_defined: {
         foreground: Rgb(0x56, 0x9c, 0xd6)
+    },
+    language_variable: {
+        foreground: Rgb(0x56, 0x9c, 0xd6),
+        underline: true
     },
     label: {
         foreground: Rgb(0x56, 0x9c, 0xd6)
@@ -267,7 +290,7 @@ fn print_highlighted<'src, I, T, A>(
     T: StyleWrapper,
     A: AsRef<[T]>,
 {
-    use std::fmt::Write;
+    use std::fmt::Write as _;
     let mut buf = String::new();
     let tokens: Vec<_> = tokens.into_iter().map(|x| x.get_syntax()).collect();
     for (lexeme, syntax) in highlight(tokens.iter().copied()) {
@@ -340,6 +363,7 @@ fn print_highlighted<'src, I, T, A>(
             println!(); // breathing room
         }
     }
+    print!("\x1b[0m");
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -541,7 +565,7 @@ impl Cli {
     }
 }
 
-pub trait ContainsError {
+trait ContainsError {
     fn contains_err(&self) -> bool;
 
     #[inline]
@@ -565,23 +589,24 @@ fn comp_file(
     source: &mut SourceMap,
     id: FileId,
     diagnostics: &mut Vec<Diagnostic>,
-    scope_env: &mut ScopeEnvironment,
-) -> Result<Dummy, CheckDiagnostics> {
+) -> Result<ProgramUnit, CheckDiagnostics> {
     // scanner
     println!("scanning...");
-    let file = &mut source[id];
-    file.set_tokens(lex::lex(id, file.content(), diagnostics));
+    {
+        let code = &mut source[id];
+        code.set_tokens(lex::lex(id, code.content(), diagnostics));
+    }
+
+    let code = &source[id];
 
     // syntax highlighted
     if config.scanner_highlight {
-        println!("\n\x1b[0m{}:", source[id].loc());
+        println!("\n\x1b[0m{}:", code.loc());
         print_highlighted(
             source,
-            file,
-            file.tokens()
-                .iter()
-                .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
-            file.expansions(),
+            code,
+            code.tokens().iter().map(|(rel, kind)| (&code[rel], kind)),
+            code.expansions(),
             &SYNTAX_STYLE_ANSI,
         );
         println!();
@@ -594,12 +619,13 @@ fn comp_file(
 
     // preprocessing
     println!("preprocessing...");
-    let preprocessed = pre::preprocess(id, file, source, diagnostics);
+    let preprocessed = pre::preprocess(id, code, source, diagnostics);
 
     if let Some(pp) = preprocessed {
-        let &(SourceLoc::PreprocRepl(og_id) | SourceLoc::PreprocFile(og_id, _)) = pp.loc() else {
-            unimplemented!("preprocessor should only output preprocessed files")
-        };
+        let og_id = pp
+            .loc()
+            .original()
+            .expect("preprocessor should only output preprocessed files");
         let pp_id = source.push(pp);
         source
             .get_mut(og_id)
@@ -608,14 +634,13 @@ fn comp_file(
 
         // preprocessor syntax highlighted
         if config.preproc_highlight {
-            println!("\n\x1b[0m{}:", source[id].loc());
+            let code = &source[pp_id];
+            println!("\n\x1b[0m{}:", code.loc());
             print_highlighted(
                 source,
-                file,
-                file.tokens()
-                    .iter()
-                    .map(|(rel, kind)| (source.span_str(rel.within_file(id)), kind)),
-                file.expansions(),
+                code,
+                code.tokens().iter().map(|(rel, kind)| (&code[rel], kind)),
+                code.expansions(),
                 &SYNTAX_STYLE_ANSI,
             );
             println!();
@@ -631,35 +656,31 @@ fn comp_file(
     // parse
     println!("parsing...");
     let code = &source[id];
-    let unit = match parse::parse_unit(
+    let Ok(unit) = parse::parse_unit(
         id,
         usize_to_uspan(code.content().len()),
         code.tokens().iter(),
         diagnostics,
-    ) {
-        Ok(x) => x,
-
-        Err(CheckDiagnostics) => {
-            debug_assert!(
-                diagnostics.contains_err(),
-                "should have an error on failure"
-            );
-            return Err(CheckDiagnostics);
-        }
+    ) else {
+        debug_assert!(
+            diagnostics.contains_err(),
+            "should have an error on failure"
+        );
+        return Err(CheckDiagnostics);
     };
 
     // parse errors
     diagnostics.ok_or_err()?;
 
-    // lisp debug
-    println!(
-        "lisp for {}:\n{:#}",
-        code.loc(),
-        parse::fmt::Lisp {
-            source: code,
-            node: &unit
-        }
-    );
+    // // lisp debug
+    // println!(
+    //     "lisp for {}:\n{:#}",
+    //     code.loc(),
+    //     parse::fmt::Lisp {
+    //         source: code,
+    //         node: &unit
+    //     }
+    // );
 
     // semantic highlighted
     if config.scanner_highlight {
@@ -706,60 +727,86 @@ fn comp_file(
         println!();
     }
 
-    println!("generating module tree...");
-    let mapping = scope_env.analyze_module_tree(source, &prgm, diagnostics);
-
-    todo!()
+    Ok(unit)
 }
 
 fn compile(
-    source: &mut SourceMap,
     config: &Cli,
+    source: &mut SourceMap,
     diagnostics: &mut Vec<Diagnostic>,
     scope_env: &mut ScopeEnvironment,
 ) -> Result<Dummy, CheckDiagnostics> {
-    todo!("per-file compilation");
+    let mut ids = source.iter().map(|(id, _)| id).collect::<VecDeque<_>>();
+    let mut units = Vec::new();
+    while let Some(id) = ids.pop_front() {
+        if let Ok(unit) = comp_file(config, source, id, diagnostics) {
+            let unit = units.push_mut(unit);
+            let code = &source[unit.file];
+            let submods = scope_env.declared_submodules(code, unit, diagnostics);
+            if !submods.is_empty() {
+                if let Some(parent) = code.loc().path() {
+                    let dir = parent.with_extension("");
+                    for (name, _id) in submods {
+                        match load_module(dir.as_path(), name) {
+                            Ok(submod) => {
+                                source.push(submod);
+                            }
+
+                            Err(e) => todo!("error loading module: {e}"),
+                        }
+                    }
+                } else {
+                    todo!("error: REPL cannot have modules");
+                }
+            }
+        } else {
+            // accumulate errors in other units
+        }
+    }
+    diagnostics.ok_or_err()?;
 
     // scope analysis
     println!("generating module tree...");
-    let mapping = scope_env.analyze_module_tree(source, &prgm, diagnostics);
+    // let mapping = scope_env.analyze_module_tree(source, &prgm, diagnostics);
 
-    // module tree errors
-    diagnostics.ok_or_err()?;
-    println!();
+    // // module tree errors
+    // diagnostics.ok_or_err()?;
+    // println!();
 
-    println!("analyzing scope...");
-    for unit in prgm {
-        let &id = mapping
-            .get(&unit.file)
-            .expect("should have been defined by `analyze_module_tree`");
-        println!("analyzing {:?}", unit.file);
-        let code = source
-            .get(unit.file)
-            .expect("all program units should be valid");
-        let mut env = scope_env
-            .define_module(id)
-            .expect("should have been defined by `analyze_module_tree`");
-        if let Ok(hir) = env.analyze(&source[unit.file], unit, diagnostics) {
-            println!(
-                "hir:\n{:#}",
-                DisplayHir {
-                    code,
-                    env: &scope_env,
-                    hir: &hir
-                }
-            );
-            // TODO
-        } else {
-            debug_assert!(
-                diagnostics.iter().any(|e| e.kind.severity().is_err()),
-                "should have an error if analysis failed"
-            );
-        }
-    }
+    // println!("analyzing scope...");
+    // for unit in prgm {
+    //     let &id = mapping
+    //         .get(&unit.file)
+    //         .expect("should have been defined by `analyze_module_tree`");
+    //     println!("analyzing {:?}", unit.file);
+    //     let code = source
+    //         .get(unit.file)
+    //         .expect("all program units should be valid");
+    //     let mut env = scope_env
+    //         .define_module(id)
+    //         .expect("should have been defined by `analyze_module_tree`");
+    //     if let Ok(hir) = env.analyze(&source[unit.file], unit, diagnostics) {
+    //         println!(
+    //             "hir:\n{:#}",
+    //             DisplayHir {
+    //                 code,
+    //                 env: &scope_env,
+    //                 hir: &hir
+    //             }
+    //         );
+    //         // TODO
+    //     } else {
+    //         debug_assert!(
+    //             diagnostics.iter().any(|e| e.kind.severity().is_err()),
+    //             "should have an error if analysis failed"
+    //         );
+    //     }
+    // }
 
-    // scope errors
-    diagnostics.ok_or_err()?;
+    // // scope errors
+    // diagnostics.ok_or_err()?;
+
+    // -------------------------------------------------------------------------
 
     // let (program, env) = match analyze(source, &prgm) {
     //     Ok(prgm) => prgm,
@@ -826,6 +873,93 @@ fn pop_trailing_newline(s: &mut String) {
     }
 }
 
+fn compile_and_run(source_map: &mut SourceMap, config: &Cli, diagnostics: &mut Vec<Diagnostic>) {
+    let mut scope_env = ScopeEnvironment::new();
+    let res = compile(config, source_map, diagnostics, &mut scope_env);
+
+    for e in diagnostics.iter() {
+        println!("{}\n", e.contextualize(source_map));
+    }
+    diagnostics.clear();
+
+    if let Ok(prgm) = res {
+        println!();
+        if let Err(e) = run_program(&prgm) {
+            eprintln!("runtime error: {e}");
+        }
+    }
+}
+
+#[derive(Debug)]
+enum LoadFileError {
+    InvalidModName,
+    CreateCode(CreateSourceCodeError),
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for LoadFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidModName => write!(
+                f,
+                "invalid module name: must be a valid identifier after sanitizing"
+            ),
+            Self::CreateCode(e) => write!(f, "failed to read source code: {e}"),
+            Self::Io(e) => write!(f, "failed to read source code file: {e}"),
+        }
+    }
+}
+
+fn load_file(path: PathBuf) -> Result<SourceCode, LoadFileError> {
+    let mut source = std::fs::read_to_string(&path).map_err(LoadFileError::Io)?;
+    let loc = SourceLoc::from_file(path).ok_or(LoadFileError::InvalidModName)?;
+    pop_trailing_newline(&mut source);
+    SourceCode::new(loc, source).map_err(LoadFileError::CreateCode)
+}
+
+#[derive(Debug)]
+enum LoadModError<'name> {
+    NoMatch(&'name str),
+    MultipleMatches(&'name str, [PathBuf; 2]),
+    Fs(LoadFileError),
+}
+
+impl std::fmt::Display for LoadModError<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoMatch(name) => write!(f, "no file matching the name {name:?} exists"),
+            Self::MultipleMatches(name, [a, b]) => write!(
+                f,
+                "multiple files matching the name {name:?} exist, including {} and {}",
+                a.display(),
+                b.display()
+            ),
+            Self::Fs(e) => e.fmt(f),
+        }
+    }
+}
+
+fn load_module<'name>(dir: &Path, name: &'name str) -> Result<SourceCode, LoadModError<'name>> {
+    debug_assert!(dir.is_dir(), "dir should be a directory");
+    let dir = dir
+        .read_dir()
+        .map_err(LoadFileError::Io)
+        .map_err(LoadModError::Fs)?;
+    let mut it = dir
+        .flatten()
+        .map(|ent| ent.path())
+        .filter(|path| eq_module_name(path, name))
+        .inspect(|path| {
+            debug_assert!(path.is_file(), "expected file_stem to ensure only files");
+            debug_assert!(path.exists(), "expected read_dir to ensure only existing");
+        });
+    let path = it.next().ok_or(LoadModError::NoMatch(name))?;
+    if let Some(dupe) = it.next() {
+        return Err(LoadModError::MultipleMatches(name, [path, dupe]));
+    }
+    load_file(path).map_err(LoadModError::Fs)
+}
+
 fn main() {
     let config = match Cli::parse_from_env() {
         Ok(config) => config,
@@ -835,17 +969,20 @@ fn main() {
         }
     };
     let mut source_map = SourceMap::new();
+    // TODO: what if `builtin` is an actual directory?
     source_map.push(
         SourceCode::new(
-            SourceLoc::File(PathBuf::from("builtin").join("std").with_extension("bats")),
-            include_str!("batstd/std.bats").to_string(),
-            true,
+            SourceLoc::from_file(PathBuf::from("builtin").join("std").with_extension("bats"))
+                .expect("'std' should be a valid module name"),
+            include_str!("batstd/std.bats").to_owned(),
         )
         .expect("standard library should not be valid"),
     );
-    loop {
-        if config.source_paths.is_empty() {
-            // interactive
+
+    let mut diagnostics = Vec::new();
+    if config.source_paths.is_empty() {
+        // interactive
+        loop {
             let mut input = String::new();
             std::io::stdin()
                 .read_line(&mut input)
@@ -854,85 +991,26 @@ fn main() {
             if matches!(input.trim(), "exit" | "quit") {
                 break; // finish
             }
-            match SourceCode::new(SourceLoc::Repl, input, true) {
+            match SourceCode::new(SourceLoc::Repl, input) {
+                Ok(code) => {
+                    source_map.push(code);
+                }
                 Err(e) => eprintln!("failed to read source code: {e}"),
-
-                Ok(code) => _ = source_map.push(code),
             }
-        } else {
-            // from file
-            let mut files = Vec::with_capacity(config.source_paths.len());
-            for source_path in &config.source_paths {
-                files.push((source_path.clone(), true));
-                let mut dirs = VecDeque::from([source_path.with_extension("")]);
-                while let Some(dir) = dirs.pop_front() {
-                    if !dir.exists() {
-                        continue; // not a problem, module just has no submodules.
-                    }
-                    let dir = match std::fs::read_dir(dir) {
-                        Ok(dir) => dir,
-                        Err(e) => {
-                            eprintln!("failed to read module directory: {e}");
-                            continue;
-                        }
-                    };
-                    let mut dir_file_count = 0usize;
-                    for ent in dir {
-                        let ent = match ent {
-                            Ok(ent) => ent,
-                            Err(e) => {
-                                eprintln!("failed to read module directory entry: {e}");
-                                continue;
-                            }
-                        };
-                        let path = ent.path();
-                        if path.extension().is_some_and(|ext| ext == "bats") {
-                            dir_file_count = dir_file_count.strict_add(1);
-                            files.push((path, false));
-                        }
-                    }
-                    dirs.extend(
-                        files
-                            .iter()
-                            .rev()
-                            .take(dir_file_count)
-                            .map(|(path, _)| path.with_extension("")),
-                    );
+
+            compile_and_run(&mut source_map, &config, &mut diagnostics);
+        }
+    } else {
+        // from file
+        for source_path in &config.source_paths {
+            match load_file(source_path.clone()) {
+                Ok(code) => {
+                    source_map.push(code);
                 }
-            }
-            for (path, is_root) in files {
-                let mut source = match std::fs::read_to_string(&path) {
-                    Ok(source) => source,
-                    Err(e) => {
-                        eprintln!("failed to read source code file: {e}");
-                        continue;
-                    }
-                };
-                pop_trailing_newline(&mut source);
-                match SourceCode::new(SourceLoc::File(path), source, is_root) {
-                    Ok(code) => _ = source_map.push(code),
-                    Err(e) => eprintln!("failed to read source code file: {e}"),
-                }
+                Err(e) => eprintln!("error: {e}"),
             }
         }
 
-        let mut diagnostics = Vec::new();
-        let mut scope_env = ScopeEnvironment::new();
-        let res = compile(&mut source_map, &config, &mut diagnostics, &mut scope_env);
-
-        for e in diagnostics {
-            println!("{}\n", e.contextualize(&source_map));
-        }
-
-        if let Ok(prgm) = res {
-            println!();
-            if let Err(e) = run_program(&prgm) {
-                eprintln!("runtime error: {e}");
-            }
-        }
-
-        if !config.source_paths.is_empty() {
-            break;
-        }
+        compile_and_run(&mut source_map, &config, &mut diagnostics);
     }
 }

@@ -10,7 +10,7 @@ use crate::{
         code::SourceCode,
         span::{FileId, RelSpan, usize_to_uspan, uspan},
     },
-    util::OrAllErrsExt,
+    util::OrAllErrsExt as _,
 };
 use ast::{Expectable, ExpectableExt};
 
@@ -68,7 +68,7 @@ pub mod util {
     impl<T> InspectAlways for Option<T> {}
     impl<T, E> InspectAlways for Result<T, E> {}
 }
-use util::{InspectAlways, MapInner, OkOrFlatten};
+use util::{InspectAlways as _, MapInner as _, OkOrFlatten as _};
 
 pub type Result<T> = std::result::Result<T, CheckDiagnostics>;
 
@@ -568,6 +568,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .or_else(|| self.cat_declaration().map_inner(ast::DeclType::Cat))
             .map_inner(ast::Decl::Type)
             .or_else(|| self.mod_declaration().map_inner(ast::Decl::Mod))
+            .or_else(|| self.on_declaration().map_inner(ast::Decl::On))
             .or_else(|| self.var_declaration().map_inner(ast::Decl::Var))
             .or_else(|| self.fun_declaration().map_inner(ast::Decl::Fun))
             .or_else(|| self.dfer_declaration().map_inner(ast::Decl::Dfer))
@@ -624,15 +625,14 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         push_parse_call!(self, "fun_declaration");
         self.fun_signature()
             .map(|head| {
-                head.and_then(|head| {
-                    if let Some(semi) = self.pull_if_eq(Punctuation::Semi) {
-                        Ok(ast::DeclFun::Declare(ast::AnnounceFun { head, semi }))
-                    } else if let Some(body) = self.block_statement() {
-                        body.map(|body| ast::DeclFun::Define(ast::DefFun { head, body }))
-                    } else {
-                        Err(self.error(ExpectedToken::SemiOrBody))
-                    }
-                })
+                let head = head?;
+                if let Some(semi) = self.pull_if_eq(Punctuation::Semi) {
+                    Ok(ast::DeclFun::Declare(ast::AnnounceFun { head, semi }))
+                } else if let Some(body) = self.block_statement() {
+                    body.map(|body| ast::DeclFun::Define(ast::DefFun { head, body }))
+                } else {
+                    Err(self.error(ExpectedToken::SemiOrBody))
+                }
             })
             .inspect_always(|x| pop_parse_call!(self, "fun_declaration", x))
     }
@@ -646,9 +646,14 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .map(|kw| {
                 let name = self.try_pull_eq(TokenKind::Ident)?;
                 let generics = self.generic_group().transpose()?;
-                let (open, params, close) = self
-                    .pull_if_delim(Bracket::Paren, |parser| {
-                        parser.pull_terminated(Punctuation::Comma, |parser| parser.fun_param())
+                let (open, (self_param, params), close) = self
+                    .pull_if_delim(Bracket::Paren, |p| {
+                        let kw = p.pull_if_eq(Keyword::Me);
+                        if kw.is_some() && p.pull_if_eq(Punctuation::Comma).is_none() {
+                            return Ok((kw, Vec::new()));
+                        }
+                        p.pull_terminated(Punctuation::Comma, Self::fun_param)
+                            .map(|x| (kw, x))
                     })
                     .ok_or_else_flat(|| {
                         self.error(ExpectedToken::Verbatim(TokenKind::Punc(
@@ -660,6 +665,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                     name,
                     generics,
                     open,
+                    self_param,
                     params,
                     close,
                     ret: self.fun_ret().transpose()?,
@@ -677,13 +683,27 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 .and_then(|name| {
                     Ok(ast::FnParam {
                         name,
-                        ty: self
-                            .type_annotation()
-                            .ok_or_else_flat(|| self.error(ExpectedToken::TypeAnnotation))?,
+                        ty: self.type_annotation().ok_or_unexpected(self)?,
                     })
                 })
                 .inspect_always(|x| pop_parse_call!(self, "fun_param", x)),
         )
+    }
+
+    /// `on_declaration -> "on" ( generic_group )? type_expression ( iff_clause )? block_statement`
+    pub fn on_declaration(&mut self) -> Option<Result<ast::DeclOn>> {
+        push_parse_call!(self, "on_declaration");
+        self.pull_if_eq(Keyword::On)
+            .map(|kw| {
+                Ok(ast::DeclOn {
+                    kw,
+                    params: self.generic_group().transpose()?,
+                    ty: self.type_expression()?,
+                    iff: self.iff_clause().transpose()?,
+                    body: self.block_statement().ok_or_unexpected(self)?,
+                })
+            })
+            .inspect_always(|x| pop_parse_call!(self, "on_declaration", x))
     }
 
     /// `rec_declaration -> "rec" IDENT ( generic_group )? field_set`
@@ -1028,16 +1048,15 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 })
             })
             .map(|res| {
-                res.and_then(|(kw, kind)| {
-                    self.block_statement()
-                        .ok_or_unexpected(self)
-                        .map(|block| ast::LoopBlock {
-                            label: None,
-                            kw,
-                            kind,
-                            block,
-                        })
-                })
+                let (kw, kind) = res?;
+                self.block_statement()
+                    .ok_or_unexpected(self)
+                    .map(|block| ast::LoopBlock {
+                        label: None,
+                        kw,
+                        kind,
+                        block,
+                    })
             })
             .inspect_always(|x| pop_parse_call!(self, "loop_block1", x))
     }
@@ -1449,10 +1468,10 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "conversion", x))
     }
 
-    /// `unary_postfix -> postfix_bracketed ( "?" | "++" | "--" | subscript | fn_call )*`
+    /// `unary_postfix -> postfix_bracketed ( "?" | "++" | "--" | member_access )*`
     fn unary_postfix(&mut self) -> Result<ast::Expr> {
         push_parse_call!(self, "unary_postfix");
-        self.postfix_bracketed()
+        self.member_access()
             .map(|mut expr| {
                 while let Some((op_span, op)) = self.pull_into_if(|kind| {
                     matches!(kind, Operator::Coalesce | Operator::Incr | Operator::Decr)
@@ -1469,40 +1488,54 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "unary_postfix", x))
     }
 
-    /// `postfix_bracketed -> primary ( "[" expression "]" | "(" ( expression ( "," expression )* ( "," )? )? ")" )`
-    fn postfix_bracketed(&mut self) -> Result<ast::Expr> {
-        push_parse_call!(self, "postfix_bracketed");
+    /// `member_access -> primary ( "." IDENT | "[" expression "]" | "(" ( expression ( "," expression )* ( "," )? )? ")" )*`
+    fn member_access(&mut self) -> Result<ast::Expr> {
+        push_parse_call!(self, "member_access");
         self.primary()
-            .and_then(|expr| {
-                if let Some((open, index, close)) = self
-                    .pull_if_delim(Bracket::Brack, Self::expression)
-                    .transpose()?
-                {
-                    Ok(ast::Expr::Index(Box::new(ast::Subscript {
-                        arr: expr,
-                        open,
-                        index,
-                        close,
-                    })))
-                } else if let Some((open, args, close)) = self
-                    .pull_if_delim(Bracket::Paren, |parser| {
-                        parser.pull_terminated(Punctuation::Comma, |parser| {
-                            parser.is_next_not_close().then(|| parser.expression())
+            .and_then(|mut expr| {
+                Ok(loop {
+                    expr = if let Some((op_span, op)) = self.pull_into_if(|op| *op == Operator::Dot)
+                    {
+                        ast::Expr::Binary(Box::new(ast::Binary {
+                            lhs: expr,
+                            op,
+                            op_span,
+                            rhs: ast::Expr::Variable(ast::Variable {
+                                path: Vec::new(),
+                                ident: self.try_pull_eq(TokenKind::Ident)?,
+                                is_me: false,
+                            }),
+                        }))
+                    } else if let Some((open, index, close)) = self
+                        .pull_if_delim(Bracket::Brack, Self::expression)
+                        .transpose()?
+                    {
+                        ast::Expr::Index(Box::new(ast::Subscript {
+                            arr: expr,
+                            open,
+                            index,
+                            close,
+                        }))
+                    } else if let Some((open, args, close)) = self
+                        .pull_if_delim(Bracket::Paren, |parser| {
+                            parser.pull_terminated(Punctuation::Comma, |parser| {
+                                parser.is_next_not_close().then(|| parser.expression())
+                            })
                         })
-                    })
-                    .transpose()?
-                {
-                    Ok(ast::Expr::Call(Box::new(ast::FnCall {
-                        fun: expr,
-                        open,
-                        args,
-                        close,
-                    })))
-                } else {
-                    Ok(expr)
-                }
+                        .transpose()?
+                    {
+                        ast::Expr::Call(Box::new(ast::FnCall {
+                            fun: expr,
+                            open,
+                            args,
+                            close,
+                        }))
+                    } else {
+                        break expr;
+                    };
+                })
             })
-            .inspect_always(|x| pop_parse_call!(self, "postfix_bracketed", x))
+            .inspect_always(|x| pop_parse_call!(self, "member_access", x))
     }
 
     /// `primary -> literal | group | variable | directive`
@@ -1536,14 +1569,27 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
     /// `variable -> ( IDENT "::" )* IDENT`
     fn variable(&mut self) -> Option<Result<ast::Variable>> {
         push_parse_call!(self, "variable");
-        self.pull_if_eq(TokenKind::Ident)
-            .map(|mut ident| {
-                let mut path = Vec::new();
-                while let Some(sep) = self.pull_if_eq(Punctuation::PathSep) {
-                    path.push(ast::ModPathPart { ident, sep });
-                    ident = self.try_pull_eq(TokenKind::Ident)?;
-                }
-                Ok(ast::Variable { path, ident })
+        self.pull_if_eq(Keyword::Me)
+            .map(|kw| {
+                Ok(ast::Variable {
+                    path: Vec::new(),
+                    ident: kw,
+                    is_me: true,
+                })
+            })
+            .or_else(|| {
+                self.pull_if_eq(TokenKind::Ident).map(|mut ident| {
+                    let mut path = Vec::new();
+                    while let Some(sep) = self.pull_if_eq(Punctuation::PathSep) {
+                        path.push(ast::ModPathPart { ident, sep });
+                        ident = self.try_pull_eq(TokenKind::Ident)?;
+                    }
+                    Ok(ast::Variable {
+                        path,
+                        ident,
+                        is_me: false,
+                    })
+                })
             })
             .inspect_always(|x| pop_parse_call!(self, "variable", x))
     }

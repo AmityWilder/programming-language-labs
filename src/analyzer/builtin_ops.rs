@@ -14,7 +14,7 @@ use crate::{
         types::{Fallible, OrType},
     },
     interp::value::{InterpBinaryOpFn, InterpUnaryOpFn, InterpVal, InterpValue, PrimitiveVal},
-    spec_ops::{BitRotate, BitShift},
+    spec_ops::{BitRotate as _, BitShift as _},
     types::{byte, fail, flpt, nevr, none, sint, text, uint},
 };
 

@@ -1,6 +1,9 @@
 /// Returns `true` regardless of the element being tested.
 #[inline]
-const fn always<T: ?Sized>(_: &T) -> bool {
+const fn always<T>(_: &T) -> bool
+where
+    T: ?Sized,
+{
     true
 }
 
@@ -550,7 +553,9 @@ pub trait TryFilterParser: FilterParser + TryParser {
 /// Method name is identical to that of [`Parse`], because items should
 /// have either a fallible or infallible implementation, not both.
 pub trait ParseTrivial<T>: Sized {
-    fn parse_from<P: ?Sized + Parser<Item = T>>(parser: &mut P) -> Self;
+    fn parse_from<P>(parser: &mut P) -> Self
+    where
+        P: ?Sized + Parser<Item = T>;
 }
 
 pub trait ParseTrivialExt<T>: Parser
@@ -575,7 +580,9 @@ impl<P: Parser, T: ParseTrivial<P::Item>> ParseTrivialExt<T> for P {}
 /// Method name is identical to that of [`TryParse`], because items should
 /// have either a fallible or infallible implementation, not both.
 pub trait TryParseTrivial<T>: Sized {
-    fn try_parse_from<P: ?Sized + Parser<Item = T>>(parser: &mut P) -> Option<Self>;
+    fn try_parse_from<P>(parser: &mut P) -> Option<Self>
+    where
+        P: ?Sized + Parser<Item = T>;
 }
 
 pub trait TryParseTrivialExt<T>: Parser
@@ -600,7 +607,9 @@ impl<P: Parser, T: TryParseTrivial<P::Item>> TryParseTrivialExt<T> for P {}
 pub trait Parse<T>: Sized {
     type Error;
 
-    fn parse_from<P: ?Sized + Parser<Item = T>>(parser: &mut P) -> Result<Self, Self::Error>;
+    fn parse_from<P>(parser: &mut P) -> Result<Self, Self::Error>
+    where
+        P: ?Sized + Parser<Item = T>;
 }
 
 pub trait ParseExt<T>: Parser
@@ -629,9 +638,9 @@ impl<P: Parser, T: Parse<P::Item>> ParseExt<T> for P {}
 pub trait TryParse<T>: Sized {
     type Error;
 
-    fn try_parse_from<P: ?Sized + Parser<Item = T>>(
-        parser: &mut P,
-    ) -> Option<Result<Self, Self::Error>>;
+    fn try_parse_from<P>(parser: &mut P) -> Option<Result<Self, Self::Error>>
+    where
+        P: ?Sized + Parser<Item = T>;
 }
 
 pub trait TryParseExt<T>: Parser

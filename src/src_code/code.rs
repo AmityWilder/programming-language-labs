@@ -3,7 +3,12 @@ use crate::{
     lex::token::{TokenKind, TokenTable},
     src_code::span::{RelSpan, Span, usize_to_uspan, uspan},
 };
-use std::{num::NonZero, path::PathBuf, range::Range};
+use std::{
+    borrow::Cow,
+    num::NonZero,
+    path::{Path, PathBuf},
+    range::Range,
+};
 
 /// # Panics
 /// This method may panic in debug if `pos` is not the position of a char in `s` (i.e. within a UTF-8 character).
@@ -35,13 +40,12 @@ pub fn charnum(s: &str, pos: usize) -> Option<usize> {
 /// This method may panic in debug if `range.start` and `range.end` are not the positions of chars in `s` (i.e. within a UTF-8 character).
 pub fn charnum_range(s: &str, range: Range<usize>) -> Option<Range<usize>> {
     let mut it = s.char_indices().enumerate();
-    charnum_iter(&mut it, range.start).and_then(|start| {
-        if range.end == range.start {
-            return Some(Range { start, end: start });
-        }
-        debug_assert!(range.start < range.end, "range fields should be ordered");
-        charnum_iter(&mut it, range.end).map(|end| Range { start, end })
-    })
+    let start = charnum_iter(&mut it, range.start)?;
+    if range.end == range.start {
+        return Some(Range { start, end: start });
+    }
+    debug_assert!(range.start < range.end, "range fields should be ordered");
+    charnum_iter(&mut it, range.end).map(|end| Range { start, end })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -58,40 +62,147 @@ pub struct SourceRange {
     pub charnum: RelSpan<usize>,
 }
 
+pub fn eq_module_name(path: &Path, b: &str) -> bool {
+    path.file_stem().is_some_and(|stem| {
+        stem.as_encoded_bytes()
+            .iter()
+            .copied()
+            .zip(b.bytes())
+            .all(|(a, b)| {
+                if a.is_ascii() {
+                    (a.is_ascii_alphanumeric() || a == b'_') && a.eq_ignore_ascii_case(&b)
+                } else {
+                    // TODO: special characters in filenames
+                    false
+                }
+            })
+    })
+}
+
+/// Returns [`None`] if there is no possible module name
+pub fn module_name(path: &Path) -> Option<Cow<'_, str>> {
+    path.file_stem()
+        .and_then(|stem| {
+            let name = if let Some(name) = stem.to_str() {
+                Cow::Borrowed(name)
+            } else {
+                let mut name = String::with_capacity(stem.len());
+                let mut stem = stem.as_encoded_bytes();
+                loop {
+                    match str::from_utf8(stem) {
+                        Ok(s) => {
+                            name.push_str(s);
+                            break;
+                        }
+                        Err(e) => {
+                            let (valid, rest) = stem.split_at(e.valid_up_to());
+                            // SAFETY: `valid_up_to` returns the number of bytes for which `from_utf8` is ok
+                            let valid = unsafe { str::from_utf8_unchecked(valid) };
+                            name.push_str(valid);
+                            if let Some(err_len) = e.error_len() {
+                                stem = &rest[err_len..];
+                            } else {
+                                // early end
+                                break;
+                            }
+                        }
+                    }
+                }
+                Cow::Owned(name)
+            };
+            if name.starts_with(|ch: char| ch.is_alphabetic() || ch == '_') {
+                if name.chars().all(|ch| ch.is_alphanumeric() || ch == '_') {
+                    Some(name)
+                } else {
+                    let mut sanitized = String::with_capacity(name.len());
+                    let mut prev_end = 0;
+                    for (i, ch) in name
+                        .char_indices()
+                        .filter(|&(_, ch)| !ch.is_alphanumeric() && ch != '_')
+                    {
+                        sanitized.push_str(&name[prev_end..i]);
+                        #[expect(clippy::arithmetic_side_effects, reason = "`i` is the position of the char `ch`, so `i + ch.len()` is at most `name.len()`, which does not overflow")]
+                        (prev_end = i + ch.len_utf8());
+                        // only replace with underscore if the character would render
+                        if !ch.is_default_ignorable() {
+                            sanitized.push('_');
+                        }
+                    }
+                    sanitized.push_str(&name[prev_end..]);
+                    Some(Cow::Owned(sanitized))
+                }
+            } else {
+                None
+            }
+        })
+        .filter(|name| {
+            if cfg!(debug_assertions) {
+                debug_assert!(
+                    name.starts_with(|ch: char| ch.is_alphabetic() || ch == '_')
+                        && name.chars().all(|ch| ch.is_alphanumeric() || ch == '_'),
+                    "name should be sanitized\n name: {name:?}",
+                );
+            }
+            !name.is_empty()
+        })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SourceLoc {
     Repl,
-    File(PathBuf),
+    File(PathBuf, String),
     PreprocRepl(FileId),
-    PreprocFile(FileId, PathBuf),
+    PreprocFile(FileId, PathBuf, String),
 }
 
 impl SourceLoc {
-    pub const fn path(&self) -> Option<&PathBuf> {
+    pub fn from_file(path: PathBuf) -> Option<Self> {
+        module_name(path.as_path())
+            .map(std::borrow::Cow::into_owned)
+            .map(|name| Self::File(path, name))
+    }
+
+    pub const fn is_repl(&self) -> bool {
+        matches!(self, Self::Repl | Self::PreprocRepl(_))
+    }
+
+    pub const fn is_preprocessed(&self) -> bool {
+        matches!(self, Self::PreprocRepl(_) | Self::PreprocFile(_, _, _))
+    }
+
+    /// The un-preprocessed version of the file; [`None`] if this is not preprocessed
+    pub const fn original(&self) -> Option<FileId> {
         match self {
-            Self::File(path_buf) | Self::PreprocFile(_, path_buf) => Some(path_buf),
+            Self::Repl | Self::File(_, _) => None,
+            Self::PreprocRepl(id) | Self::PreprocFile(id, _, _) => Some(*id),
+        }
+    }
+
+    /// The file path; [`None`] if REPL
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::File(path_buf, _) | Self::PreprocFile(_, path_buf, _) => Some(path_buf),
             Self::Repl | Self::PreprocRepl(_) => None,
         }
     }
 
-    pub const fn original(&self) -> Option<&FileId> {
+    /// The file's module name; [`None`] if REPL
+    pub fn name(&self) -> Option<&str> {
         match self {
-            Self::Repl | Self::File(_) => None,
-            Self::PreprocRepl(id) | Self::PreprocFile(id, _) => Some(id),
+            Self::File(_, name) | Self::PreprocFile(_, _, name) => Some(name),
+            Self::Repl | Self::PreprocRepl(_) => None,
         }
     }
 }
 
 impl std::fmt::Display for SourceLoc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SourceLoc::Repl | SourceLoc::PreprocRepl(_) => f.write_str("repl"),
-            SourceLoc::File(path) | SourceLoc::PreprocFile(_, path) => path.display().fmt(f),
-        }?;
-        if matches!(
-            self,
-            SourceLoc::PreprocRepl(_) | SourceLoc::PreprocFile(_, _)
-        ) {
+        if let Some(path) = self.path() {
+            path.display().fmt(f)?;
+        } else {
+            f.write_str("repl")?;
+        }
+        if self.is_preprocessed() {
             f.write_str(" (preprocessed)")?;
         }
         Ok(())
@@ -407,7 +518,6 @@ impl std::iter::FusedIterator for LineContentSpans<'_> {}
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SourceCode {
     loc: SourceLoc,
-    is_root: bool,
     src: String,
     /// Macro expansion ranges
     mac: Vec<ExpansionData>,
@@ -437,21 +547,19 @@ impl std::ops::IndexMut<RelSpan> for SourceCode {
 }
 
 impl SourceCode {
-    pub fn new(loc: SourceLoc, src: String, is_root: bool) -> Result<Self, CreateSourceCodeError> {
-        Self::with_expansion(loc, src, is_root, Vec::new())
+    pub fn new(loc: SourceLoc, src: String) -> Result<Self, CreateSourceCodeError> {
+        Self::with_expansion(loc, src, Vec::new())
     }
 
     pub fn with_expansion(
         loc: SourceLoc,
         src: String,
-        is_root: bool,
         mac: Vec<ExpansionData>,
     ) -> Result<Self, CreateSourceCodeError> {
         let len = src.len();
         if uspan::try_from(len).is_ok() {
             Ok(Self {
                 loc,
-                is_root,
                 lines: src
                     .split_inclusive('\n')
                     .map(str::len)

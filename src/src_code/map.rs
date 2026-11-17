@@ -2,7 +2,7 @@ use super::span::uspan;
 use crate::{
     lex::token::TokenKind,
     src_code::{
-        code::{ExpansionData, SourceCode, SourceLoc},
+        code::{ExpansionData, SourceCode},
         span::{FileId, RelSpan, Span},
     },
 };
@@ -14,7 +14,10 @@ pub struct SourceMap {
 }
 
 impl FromIterator<SourceCode> for SourceMap {
-    fn from_iter<I: IntoIterator<Item = SourceCode>>(iter: I) -> Self {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = SourceCode>,
+    {
         Self {
             files: Vec::from_iter(iter),
         }

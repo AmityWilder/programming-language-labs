@@ -14,7 +14,7 @@ use crate::{
             },
         },
     },
-    highlight::style::StyleWrapper,
+    highlight::style::StyleWrapper as _,
     scanner::token::punc::OpSide,
 };
 use std::fmt::Display;
@@ -158,7 +158,10 @@ pub enum TypeBound<'src> {
 }
 
 impl FromIterator<Self> for TypeBound<'_> {
-    fn from_iter<I: IntoIterator<Item = Self>>(iter: I) -> Self {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = Self>,
+    {
         let mut iter = iter.into_iter();
         if let Some(mut first) = iter.next() {
             first.extend(iter);
@@ -170,7 +173,10 @@ impl FromIterator<Self> for TypeBound<'_> {
 }
 
 impl Extend<Self> for TypeBound<'_> {
-    fn extend<I: IntoIterator<Item = Self>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = Self>,
+    {
         if let Self::Combo(Combinator::All, existing) = self {
             for bound in iter {
                 if let Self::Combo(Combinator::All, additional) = bound {
@@ -201,7 +207,10 @@ impl<'a> Extend<&'a Self> for TypeBound<'_> {
         }
     }
 
-    fn extend<I: IntoIterator<Item = &'a Self>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = &'a Self>,
+    {
         if let Self::Combo(Combinator::All, existing) = self {
             for bound in iter {
                 if let Self::Combo(Combinator::All, additional) = bound {

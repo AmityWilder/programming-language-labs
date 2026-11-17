@@ -11,7 +11,7 @@ use crate::{
     grammar::ast::AstNode,
     highlight::{
         highlight,
-        style::{Color, Style, StyleWrapper},
+        style::{Color, Style, StyleWrapper as _},
         syntax::Syntax,
         write_highlight,
     },
@@ -878,7 +878,7 @@ pub enum ErrorType<'src> {
             writeln!(f, "\nthe following overloads exist:")?;
             let mut buf = String::new();
             for ((lhs, rhs), ret) in candidates {
-                use std::fmt::Write;
+                use std::fmt::Write as _;
                 buf.clear();
                 _ = write!(buf, "fun {op}({lhs}, {rhs}) -> {ret}");
                 write!(f, "  ")?;
@@ -916,7 +916,7 @@ pub enum ErrorType<'src> {
             writeln!(f, "\nthe following overloads exist:")?;
             let mut buf = String::new();
             for ((arg,), ret) in candidates {
-                use std::fmt::Write;
+                use std::fmt::Write as _;
                 buf.clear();
                 match side {
                     OpSide::Postfix => _ = write!(buf, "fun ({arg}){op} -> {ret}"),

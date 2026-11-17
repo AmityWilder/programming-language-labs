@@ -7,8 +7,8 @@ use crate::{
     analyzer::types::bounds::Combinator,
     error::ExpectedToken,
     grammar::ast::{
-        Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, DferParam, DoneStmt, ExprStmt,
-        IfStmt, OrBody, OrStmt, PrintStmt, Program, Statement, Variable,
+        Assignment, BlockExpr, BlockStmt, DeclVar, Declaration, ExprStmt, IfStmt, OrBody, OrStmt,
+        PrintStmt, Program, Statement,
     },
     lex::token::Operator,
     old_error::ContextError,
@@ -104,35 +104,34 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         use Punctuation::{Assign, Iff, Le, Lt, Shl, ShlAssign};
         const LANGLE: char = '<';
         self.pull_if_eq(LexValue::Punctuation(Lt)).or_else(|| {
-            self.tokens
+            let next = self
+                .tokens
                 .peek_mut()
-                .filter(|next| next.lex.starts_with(LANGLE))
-                .and_then(|next| {
-                    next.val = match next.val {
-                        LexValue::Punctuation(Lt) => {
-                            unreachable!("`<` should have been handled by pull_if_eq")
-                        }
-                        LexValue::Punctuation(Iff) => return None,
+                .filter(|next| next.lex.starts_with(LANGLE))?;
+            next.val = match next.val {
+                LexValue::Punctuation(Lt) => {
+                    unreachable!("`<` should have been handled by pull_if_eq")
+                }
+                LexValue::Punctuation(Iff) => return None,
 
-                        LexValue::Punctuation(Le) => LexValue::Punctuation(Assign),
-                        LexValue::Punctuation(Shl) => LexValue::Punctuation(Lt),
-                        LexValue::Punctuation(ShlAssign) => LexValue::Punctuation(Le),
+                LexValue::Punctuation(Le) => LexValue::Punctuation(Assign),
+                LexValue::Punctuation(Shl) => LexValue::Punctuation(Lt),
+                LexValue::Punctuation(ShlAssign) => LexValue::Punctuation(Le),
 
-                        x => {
-                            if cfg!(debug_assertions) {
-                                todo!("unhandled: `{x:?}` starts with `<`")
-                            } else {
-                                return None;
-                            }
-                        }
-                    };
-                    let torn;
-                    (torn, next.lex.src) = next.lex.src.split_at(LANGLE.len_utf8());
-                    Some(Lexeme {
-                        src: torn,
-                        mac: next.mac,
-                    })
-                })
+                x => {
+                    if cfg!(debug_assertions) {
+                        todo!("unhandled: `{x:?}` starts with `<`")
+                    } else {
+                        return None;
+                    }
+                }
+            };
+            let torn;
+            (torn, next.lex.src) = next.lex.src.split_at(LANGLE.len_utf8());
+            Some(Lexeme {
+                src: torn,
+                mac: next.mac,
+            })
         })
     }
 
@@ -145,34 +144,33 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
         const RANGLE: char = '>';
         self.pull_if_eq(LexValue::Punctuation(Punctuation::Gt))
             .or_else(|| {
-                self.tokens
+                let next = self
+                    .tokens
                     .peek_mut()
-                    .filter(|next| next.lex.starts_with(RANGLE))
-                    .and_then(|next| {
-                        next.val = match next.val {
-                            LexValue::Punctuation(Gt) => {
-                                unreachable!("`>` should have been handled by pull_if_eq")
-                            }
+                    .filter(|next| next.lex.starts_with(RANGLE))?;
+                next.val = match next.val {
+                    LexValue::Punctuation(Gt) => {
+                        unreachable!("`>` should have been handled by pull_if_eq")
+                    }
 
-                            LexValue::Punctuation(Ge) => LexValue::Punctuation(Assign),
-                            LexValue::Punctuation(Shr) => LexValue::Punctuation(Gt),
-                            LexValue::Punctuation(ShrAssign) => LexValue::Punctuation(Ge),
+                    LexValue::Punctuation(Ge) => LexValue::Punctuation(Assign),
+                    LexValue::Punctuation(Shr) => LexValue::Punctuation(Gt),
+                    LexValue::Punctuation(ShrAssign) => LexValue::Punctuation(Ge),
 
-                            x => {
-                                if cfg!(debug_assertions) {
-                                    todo!("unhandled: `{x:?}` starts with `>`")
-                                } else {
-                                    return None;
-                                }
-                            }
-                        };
-                        let torn;
-                        (torn, next.lex.src) = next.lex.src.split_at(RANGLE.len_utf8());
-                        Some(Lexeme {
-                            src: torn,
-                            mac: next.mac,
-                        })
-                    })
+                    x => {
+                        if cfg!(debug_assertions) {
+                            todo!("unhandled: `{x:?}` starts with `>`")
+                        } else {
+                            return None;
+                        }
+                    }
+                };
+                let torn;
+                (torn, next.lex.src) = next.lex.src.split_at(RANGLE.len_utf8());
+                Some(Lexeme {
+                    src: torn,
+                    mac: next.mac,
+                })
             })
     }
 
@@ -518,13 +516,12 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
     /// `scope_label -> label ":"`
     pub fn scope_label(&mut self) -> Option<Result<ast::ScopeLabel<'src>, ContextError<'src>>> {
         self.label().map(|label| {
-            label.and_then(|label| {
-                self.try_pull_eq(
-                    LexValue::Punctuation(Punctuation::Colon),
-                    ExpectedToken::Colon,
-                )
-                .map(|colon| ast::ScopeLabel { label, colon })
-            })
+            let label = label?;
+            self.try_pull_eq(
+                LexValue::Punctuation(Punctuation::Colon),
+                ExpectedToken::Colon,
+            )
+            .map(|colon| ast::ScopeLabel { label, colon })
         })
     }
 
@@ -587,13 +584,12 @@ impl<'src, I: Iterator<Item = Token<'src>>> Parser<'src, I> {
             self.pull_if_eq(LexValue::Punctuation(Punctuation::Semi))
                 .map_or_else(
                     || {
-                        self.expression().and_then(|value| {
-                            self.try_pull_eq(
-                                LexValue::Punctuation(Punctuation::Semi),
-                                ExpectedToken::Semi,
-                            )
-                            .map(|semi| (Some(value), semi))
-                        })
+                        let value = self.expression()?;
+                        self.try_pull_eq(
+                            LexValue::Punctuation(Punctuation::Semi),
+                            ExpectedToken::Semi,
+                        )
+                        .map(|semi| (Some(value), semi))
                     },
                     |semi| Ok((None, semi)),
                 )
