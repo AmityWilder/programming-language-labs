@@ -28,6 +28,7 @@
     map_try_insert,
     formatting_options,
     default_ignorable,
+    try_entry,
 )]
 #![forbid(
     clippy::missing_safety_doc,
@@ -141,7 +142,7 @@ use src_code::{
     span::{FileId, usize_to_uspan},
 };
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     path::{Path, PathBuf},
 };
 
@@ -239,7 +240,8 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
         foreground: Rgb(0x4e, 0xc9, 0xb0)
     },
     modname: {
-        foreground: Rgb(0x4e, 0xc9, 0xb0)
+        foreground: Rgb(0x4e, 0xc9, 0xb0),
+        underline: true
     },
     macro_name: {
         foreground: Rgb(0x56, 0x9c, 0xd6),
@@ -645,6 +647,8 @@ fn comp_file(
             );
             println!();
         }
+    } else {
+        println!("no preprocessor output");
     }
 
     // preprocesor errors
@@ -736,28 +740,48 @@ fn compile(
     diagnostics: &mut Vec<Diagnostic>,
     scope_env: &mut ScopeEnvironment,
 ) -> Result<Dummy, CheckDiagnostics> {
+    println!("--- per-file ---");
+
     let mut ids = source.iter().map(|(id, _)| id).collect::<VecDeque<_>>();
+    let mut file_mod_ids = BTreeMap::new();
     let mut units = Vec::new();
     while let Some(id) = ids.pop_front() {
+        let loc = source[id].loc();
+        println!("processing file {loc} ({})", loc.name().unwrap_or("<REPL>"));
         if let Ok(unit) = comp_file(config, source, id, diagnostics) {
-            let unit = units.push_mut(unit);
             let code = &source[unit.file];
-            let submods = scope_env.declared_submodules(code, unit, diagnostics);
-            if !submods.is_empty() {
-                if let Some(parent) = code.loc().path() {
-                    let dir = parent.with_extension("");
-                    for (name, _id) in submods {
-                        match load_module(dir.as_path(), name) {
-                            Ok(submod) => {
-                                source.push(submod);
-                            }
+            let unit = units.push_mut(unit);
+            println!("searching for dependencies...");
+            match file_mod_ids.entry(id).or_try_insert_with(|| {
+                scope_env.decl_library(
+                    code.loc()
+                        .name()
+                        .unwrap_or_else(|| todo!("REPL mode library name"))
+                        .to_owned(),
+                )
+            }) {
+                Ok(&mut mod_id) => {
+                    let submods = scope_env.declared_submodules(code, mod_id, unit, diagnostics);
+                    if !submods.is_empty() {
+                        if let Some(parent) = code.loc().path() {
+                            let dir = parent.with_extension("");
+                            for (name, _id) in submods {
+                                println!("loading submodule {name}...");
+                                match load_module(dir.as_path(), name.as_str()) {
+                                    Ok(submod) => {
+                                        ids.push_back(source.push(submod));
+                                    }
 
-                            Err(e) => todo!("error loading module: {e}"),
+                                    Err(e) => todo!("error loading module: {e}"),
+                                }
+                            }
+                        } else {
+                            todo!("error: REPL cannot have modules");
                         }
                     }
-                } else {
-                    todo!("error: REPL cannot have modules");
                 }
+
+                Err(e) => todo!("error: {e:?}"),
             }
         } else {
             // accumulate errors in other units
@@ -765,14 +789,9 @@ fn compile(
     }
     diagnostics.ok_or_err()?;
 
-    // scope analysis
-    println!("generating module tree...");
-    // let mapping = scope_env.analyze_module_tree(source, &prgm, diagnostics);
+    println!("--- linking ---");
 
-    // // module tree errors
-    // diagnostics.ok_or_err()?;
-    // println!();
-
+    // // scope analysis
     // println!("analyzing scope...");
     // for unit in prgm {
     //     let &id = mapping
@@ -857,6 +876,7 @@ fn compile(
     //     }
     // }
 
+    println!("--- compilation successful ---");
     Ok(Dummy)
 }
 
@@ -1010,7 +1030,6 @@ fn main() {
                 Err(e) => eprintln!("error: {e}"),
             }
         }
-
         compile_and_run(&mut source_map, &config, &mut diagnostics);
     }
 }
