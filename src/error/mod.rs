@@ -193,6 +193,13 @@ fn trim_article(s: &str) -> &str {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum DiagnosticKind {
+    /// TODO: remove this before release!!
+    Other {
+        severity: Severity,
+        category: DiagnosticCategory,
+        msg: String,
+    },
+
     // ----------------------------
     // lex
     // ----------------------------
@@ -447,51 +454,55 @@ impl std::fmt::Display for Severity {
 impl DiagnosticKind {
     pub const fn severity(&self) -> Severity {
         match self {
-            DiagnosticKind::UnknownToken
-            | DiagnosticKind::EndlessBlockComment
-            | DiagnosticKind::EmptyMacroName
-            | DiagnosticKind::EmptyMacroParam
-            | DiagnosticKind::EmptyCharLiteral
-            | DiagnosticKind::MultiCharLiteral
-            | DiagnosticKind::EndlessCharLiteral
-            | DiagnosticKind::EscapedCharLiteralEnd
-            | DiagnosticKind::EndlessStringLiteral
-            | DiagnosticKind::EscapedStringLiteralEnd
-            | DiagnosticKind::InvalidEscape
-            | DiagnosticKind::InvalidNumLiteral { .. }
-            | DiagnosticKind::MacroUndefined
-            | DiagnosticKind::MacroParamUndefined { .. }
-            | DiagnosticKind::RecursiveMacro { .. }
-            | DiagnosticKind::OversizePreproc { .. }
-            | DiagnosticKind::NonBoolPrePredicate { .. }
-            | DiagnosticKind::InvalidPreOperator
-            | DiagnosticKind::PreIncompatible { .. }
-            | DiagnosticKind::PreUnsupported { .. }
-            | DiagnosticKind::InvalidPreLiteral
-            | DiagnosticKind::InvalidPreType
-            | DiagnosticKind::PreOrType
-            | DiagnosticKind::IncorrectCloseBracket { .. }
-            | DiagnosticKind::ExcessCloseBracket { .. }
-            | DiagnosticKind::MissingCloseBracket { .. }
-            | DiagnosticKind::MissingToken { .. }
-            | DiagnosticKind::UnexpectedToken { .. }
-            | DiagnosticKind::DivByZero { .. }
-            | DiagnosticKind::Incompatible { .. }
-            | DiagnosticKind::Unsupported { .. }
-            | DiagnosticKind::UnsignedNeg
-            | DiagnosticKind::UnknownVar
-            | DiagnosticKind::TypeMismatch { .. }
-            | DiagnosticKind::TypeAmbiguity
-            | DiagnosticKind::AssignImmutable { .. }
-            | DiagnosticKind::FallibleBlockExpr
-            | DiagnosticKind::TypeTooBig
-            | DiagnosticKind::IllegalUnsized { .. }
-            | DiagnosticKind::Fail { .. } => Severity::Error,
+            Self::Other { severity, .. } => *severity,
+
+            Self::UnknownToken
+            | Self::EndlessBlockComment
+            | Self::EmptyMacroName
+            | Self::EmptyMacroParam
+            | Self::EmptyCharLiteral
+            | Self::MultiCharLiteral
+            | Self::EndlessCharLiteral
+            | Self::EscapedCharLiteralEnd
+            | Self::EndlessStringLiteral
+            | Self::EscapedStringLiteralEnd
+            | Self::InvalidEscape
+            | Self::InvalidNumLiteral { .. }
+            | Self::MacroUndefined
+            | Self::MacroParamUndefined { .. }
+            | Self::RecursiveMacro { .. }
+            | Self::OversizePreproc { .. }
+            | Self::NonBoolPrePredicate { .. }
+            | Self::InvalidPreOperator
+            | Self::PreIncompatible { .. }
+            | Self::PreUnsupported { .. }
+            | Self::InvalidPreLiteral
+            | Self::InvalidPreType
+            | Self::PreOrType
+            | Self::IncorrectCloseBracket { .. }
+            | Self::ExcessCloseBracket { .. }
+            | Self::MissingCloseBracket { .. }
+            | Self::MissingToken { .. }
+            | Self::UnexpectedToken { .. }
+            | Self::DivByZero { .. }
+            | Self::Incompatible { .. }
+            | Self::Unsupported { .. }
+            | Self::UnsignedNeg
+            | Self::UnknownVar
+            | Self::TypeMismatch { .. }
+            | Self::TypeAmbiguity
+            | Self::AssignImmutable { .. }
+            | Self::FallibleBlockExpr
+            | Self::TypeTooBig
+            | Self::IllegalUnsized { .. }
+            | Self::Fail { .. } => Severity::Error,
         }
     }
 
     pub const fn category(&self) -> DiagnosticCategory {
         match self {
+            Self::Other { .. } => DiagnosticCategory::StaticAnalysis,
+
             Self::UnknownToken { .. }
             | Self::EndlessBlockComment { .. }
             | Self::EmptyMacroName { .. }
@@ -543,6 +554,7 @@ impl DiagnosticKind {
         #![expect(clippy::arithmetic_side_effects, reason = "nuh uh")]
         const START: u32 = line!() + 1; // +1 because of `match` line
         (match self {
+            Self::Other { .. } => line!(),
             Self::UnknownToken { .. } => line!(),
             Self::EndlessBlockComment { .. } => line!(),
             Self::EmptyMacroName { .. } => line!(),
@@ -628,6 +640,7 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
 
     fn err(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.error.kind {
+            DiagnosticKind::Other { msg, .. } => f.write_str(msg),
             DiagnosticKind::UnknownToken => write!(f, "unknown token"),
             DiagnosticKind::EndlessBlockComment => {
                 write!(
@@ -784,6 +797,7 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
 
     fn inline(&self) -> impl fmt::Display {
         match &self.error.kind {
+            DiagnosticKind::Other { .. } => "here",
             DiagnosticKind::UnknownToken => "what is this?",
             DiagnosticKind::EndlessBlockComment
             | DiagnosticKind::EndlessCharLiteral
@@ -841,6 +855,7 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
     fn help(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let src = self.source.span_str(self.error.span);
         match &self.error.kind {
+            DiagnosticKind::Other { .. } => f.write_str("TODO"),
             DiagnosticKind::UnknownToken => {
                 write!(f, "try removing the character")
             }

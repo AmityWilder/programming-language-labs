@@ -1,129 +1,19 @@
 use crate::{
     analyzer::static_env::{ItemId, LibId, ModId, VarId},
-    parse::ast,
-    src_code::span::{RelSpan, uspan},
+    parse::ast::{self},
+    src_code::span::Span,
 };
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Decl {
-    Mod(ast::DeclMod),
-    Rec(ast::DeclRec),
-    Field(ast::Field),
-    Cat(ast::DeclCat),
-    Var(ast::DeclVar),
-    For(ast::LoopKind),
-    DferParam(ast::DferParam),
-}
-
-impl ast::AstNode for Decl {
-    fn span_start(&self) -> uspan {
-        match self {
-            Decl::Mod(inner) => inner.span_start(),
-            Decl::Rec(inner) => inner.span_start(),
-            Decl::Field(inner) => inner.span_start(),
-            Decl::Cat(inner) => inner.span_start(),
-            Decl::Var(inner) => inner.span_start(),
-            Decl::For(ast::LoopKind::For { bind, .. }) => bind.span_start(),
-            Decl::For(_) => unimplemented!("should be a for loop"),
-            Decl::DferParam(inner) => inner.span_start(),
-        }
-    }
-
-    fn span_end(&self) -> uspan {
-        match self {
-            Decl::Mod(inner) => inner.span_end(),
-            Decl::Rec(inner) => inner.span_end(),
-            Decl::Field(inner) => inner.span_end(),
-            Decl::Cat(inner) => inner.span_end(),
-            Decl::Var(inner) => inner.span_end(),
-            Decl::For(ast::LoopKind::For { iter, .. }) => iter.span_end(),
-            Decl::For(_) => unimplemented!("should be a for loop"),
-            Decl::DferParam(inner) => inner.span_end(),
-        }
-    }
-
-    fn span(&self) -> RelSpan {
-        match self {
-            Decl::Mod(inner) => inner.span(),
-            Decl::Rec(inner) => inner.span(),
-            Decl::Field(inner) => inner.span(),
-            Decl::Cat(inner) => inner.span(),
-            Decl::Var(inner) => inner.span(),
-            Decl::For(_) => RelSpan(std::range::Range {
-                start: self.span_start(),
-                end: self.span_end(),
-            }),
-            Decl::DferParam(inner) => inner.span(),
-        }
-    }
-}
-
-impl Decl {
-    pub const fn identifier(&self) -> RelSpan {
-        match self {
-            Self::Mod(inner) => inner.name,
-            Self::Rec(inner) => inner.name,
-            Self::Field(inner) => inner.name,
-            Self::Cat(inner) => inner.name,
-            Self::Var(inner) => inner.binding.ident,
-            Self::For(inner) => match &inner {
-                ast::LoopKind::For { bind, .. } => bind.ident,
-
-                ast::LoopKind::Loop => panic!("Decl::For should be a for loop; found Loop"),
-                ast::LoopKind::Cord => panic!("Decl::For should be a for loop; found Cord"),
-                ast::LoopKind::Rep { .. } => panic!("Decl::For should be a for loop; found Rep"),
-            },
-            Self::DferParam(inner) => inner.param.ident,
-        }
-    }
-}
-
-impl From<ast::DeclMod> for Decl {
-    fn from(value: ast::DeclMod) -> Self {
-        Self::Mod(value)
-    }
-}
-impl From<ast::DeclRec> for Decl {
-    fn from(value: ast::DeclRec) -> Self {
-        Self::Rec(value)
-    }
-}
-impl From<ast::Field> for Decl {
-    fn from(value: ast::Field) -> Self {
-        Self::Field(value)
-    }
-}
-impl From<ast::DeclCat> for Decl {
-    fn from(value: ast::DeclCat) -> Self {
-        Self::Cat(value)
-    }
-}
-impl From<ast::DeclVar> for Decl {
-    fn from(value: ast::DeclVar) -> Self {
-        Self::Var(value)
-    }
-}
-impl From<ast::LoopKind> for Decl {
-    fn from(value: ast::LoopKind) -> Self {
-        Self::For(value)
-    }
-}
-impl From<ast::DferParam> for Decl {
-    fn from(value: ast::DferParam) -> Self {
-        Self::DferParam(value)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Item {
-    pub decl: Decl,
+    pub decl: Span,
     pub parent: Option<ItemId>,
     pub children: BTreeMap<String, ItemId>,
 }
 
 impl Item {
-    pub const fn new(decl: Decl) -> Self {
+    pub const fn new(decl: Span) -> Self {
         Self {
             decl,
             parent: None,
@@ -284,14 +174,10 @@ impl std::ops::DerefMut for ModScopeEnvironment<'_> {
 }
 
 impl ModScopeEnvironment<'_> {
-    pub fn decl_item(
-        &mut self,
-        name: String,
-        decl: impl Into<Decl>,
-    ) -> Result<ItemId, DuplicateItemError> {
+    pub fn decl_item(&mut self, name: String, decl: Span) -> Result<ItemId, DuplicateItemError> {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_item(name, id)?;
-        self.decls.push(Item::new(decl.into())); // now `id` refers to an item
+        self.decls.push(Item::new(decl)); // now `id` refers to an item
         Ok(id)
     }
 
@@ -299,7 +185,7 @@ impl ModScopeEnvironment<'_> {
         &mut self,
         parent: ItemId,
         name: String,
-        decl: impl Into<Decl>,
+        decl: Span,
     ) -> Result<ItemId, LinkMemberError> {
         let child = ItemId(self.decls.len());
         self.decls.push(Item::new(decl.into()));
@@ -326,7 +212,7 @@ impl ModScopeEnvironment<'_> {
         }
     }
 
-    pub fn decl_var(&mut self, name: String, decl: impl Into<Decl>) -> VarId {
+    pub fn decl_var(&mut self, name: String, decl: Span) -> VarId {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_var(name, id);
         self.decls.push(Item::new(decl.into())); // now `id` refers to an item

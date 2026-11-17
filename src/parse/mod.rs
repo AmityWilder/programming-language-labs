@@ -648,7 +648,9 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 let generics = self.generic_group().transpose()?;
                 let (open, (self_param, params), close) = self
                     .pull_if_delim(Bracket::Paren, |p| {
-                        let kw = p.pull_if_eq(Keyword::Me);
+                        let kw = p
+                            .pull_if_eq(Keyword::Me)
+                            .map(|span| ast::SelfParam { span });
                         if kw.is_some() && p.pull_if_eq(Punctuation::Comma).is_none() {
                             return Ok((kw, Vec::new()));
                         }
@@ -1967,7 +1969,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         .inspect_always(|x| pop_parse_call!(self, "not_bound", x))
     }
 
-    /// `primary_bound -> exact_bound | member_bound | shape_bound | expr_bound | grouped_bound`
+    /// `primary_bound -> exact_bound | member_bound | fun_type | expr_bound | grouped_bound`
     fn primary_bound(&mut self) -> Result<ast::TypeBound> {
         push_parse_call!(self, "primary_bound");
         self.exact_bound()
@@ -1977,7 +1979,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                     .map_inner(|x| ast::TypeBound::Has(Box::new(x)))
             })
             .or_else(|| {
-                self.shape_bound()
+                self.fun_type()
                     .map_inner(|x| ast::TypeBound::Shape(Box::new(x)))
             })
             .or_else(|| {
@@ -2030,33 +2032,6 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 })
             })
             .inspect_always(|x| pop_parse_call!(self, "colon_bound", x))
-    }
-
-    /// `shape_bound -> "fun" "(" ( type_expression ( "," type_expression )* ( "," )? )? ")" ( shape_bound_ret )?`
-    fn shape_bound(&mut self) -> Option<Result<ast::ShapeBound>> {
-        push_parse_call!(self, "shape_bound");
-        self.pull_if_eq(Keyword::Fun)
-            .map(|kw| {
-                let (open, args, close) = self
-                    .pull_if_delim(Bracket::Paren, |parser| {
-                        parser.pull_terminated(Punctuation::Comma, |parser| {
-                            Some(parser.type_expression())
-                        })
-                    })
-                    .ok_or_else_flat(|| {
-                        self.error(ExpectedToken::Verbatim(TokenKind::Punc(
-                            Punctuation::LParen,
-                        )))
-                    })?;
-                Ok(ast::ShapeBound {
-                    kw,
-                    open,
-                    args,
-                    close,
-                    ret: self.shape_bound_ret().transpose()?,
-                })
-            })
-            .inspect_always(|x| pop_parse_call!(self, "shape_bound", x))
     }
 
     /// `shape_bound_ret -> "->" type_expression`

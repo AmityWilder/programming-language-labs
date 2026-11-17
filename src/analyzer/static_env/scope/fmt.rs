@@ -196,7 +196,7 @@ impl HirDisplay for ItemId {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         let item = env.get_decl(*self).expect("HIR IDs should be valid");
-        write!(f, "{}#[{}]", &source[item.decl.identifier()], self)
+        write!(f, "{}#[{}]", &source[item.decl.rel], self) // TODO: what if the decl is from a different file?
     }
 }
 
@@ -545,7 +545,7 @@ impl HirDisplay for hir::NegativeBound {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self { bound } = self;
+        let Self(bound) = self;
         f.write_str("!(")?;
         bound.fmt(source, env, f)?;
         f.write_str(")")
@@ -559,7 +559,7 @@ impl HirDisplay for hir::ExactTypeBound {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self { ty } = self;
+        let Self(ty) = self;
         write!(f, "{} ", Keyword::Only)?;
         ty.fmt(source, env, f)
     }
@@ -574,7 +574,7 @@ impl HirDisplay for hir::MemberBound {
     ) -> fmt::Result {
         let Self { member, req } = self;
         write!(f, "{} ", Keyword::Has)?;
-        member.fmt(source, env, f)?;
+        f.write_str(&source[*member])?;
         if let Some(req) = req {
             f.write_str(": ")?;
             req.fmt(source, env, f)?;
@@ -614,7 +614,7 @@ impl HirDisplay for hir::ExprBound {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self { name, expr } = self;
+        let Self { param: name, expr } = self;
         write!(f, "{} ", Keyword::For)?;
         name.fmt(source, env, f)?;
         f.write_str(": ")?;
@@ -640,6 +640,20 @@ impl HirDisplay for hir::TypeBound {
             Self::Supports(inner) => inner.fmt(source, env, f),
             Self::Satisfies(inner) => inner.fmt(source, env, f),
         }
+    }
+}
+
+impl HirDisplay for hir::TypeBoundClause {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        let Self { target, bound } = self;
+        target.fmt(source, env, f)?;
+        f.write_str(": ")?;
+        bound.fmt(source, env, f)
     }
 }
 
@@ -923,6 +937,8 @@ impl HirDisplay for hir::Stmt {
             hir::Stmt::Cord(inner) => inner.fmt(source, env, f),
             hir::Stmt::Rep(inner) => inner.fmt(source, env, f),
             hir::Stmt::For(inner) => inner.fmt(source, env, f),
+            hir::Stmt::Give(inner) => inner.fmt(source, env, f),
+            hir::Stmt::Fail(inner) => inner.fmt(source, env, f),
             hir::Stmt::Done(inner) => inner.fmt(source, env, f),
             hir::Stmt::Skip(inner) => inner.fmt(source, env, f),
             hir::Stmt::Block(inner) => inner.fmt(source, env, f),
@@ -1099,7 +1115,7 @@ impl HirDisplay for hir::Variable {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self { id } = self;
+        let Self(id) = self;
         id.fmt(source, env, f)
     }
 }
@@ -1279,6 +1295,40 @@ impl HirDisplay for hir::Label {
     }
 }
 
+impl HirDisplay for hir::GiveStmt {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        let Self { expr } = self;
+        write!(f, "{}", Keyword::Give)?;
+        if let Some(expr) = expr {
+            f.write_str(" ")?;
+            expr.fmt(source, env, f)?;
+        }
+        f.write_str(";")
+    }
+}
+
+impl HirDisplay for hir::FailStmt {
+    fn fmt(
+        &self,
+        source: &SourceCode,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        let Self { expr } = self;
+        write!(f, "{}", Keyword::Fail)?;
+        if let Some(expr) = expr {
+            f.write_str(" ")?;
+            expr.fmt(source, env, f)?;
+        }
+        f.write_str(";")
+    }
+}
+
 impl HirDisplay for hir::DoneStmt {
     fn fmt(
         &self,
@@ -1324,7 +1374,7 @@ impl HirDisplay for hir::BlockStmt {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self { decls } = self;
+        let Self(decls) = self;
         HirBlock::new(f).entries(decls, source, env).finish()
     }
 }
