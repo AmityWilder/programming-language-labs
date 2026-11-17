@@ -236,12 +236,15 @@ pub const SYNTAX_STYLE_ANSI: SyntaxStyle<Style, [Style; 3]> = syntax_style! {
     flow_keyword: {
         foreground: Rgb(0xc5, 0x86, 0xc0)
     },
-    typename: {
+    primitive: {
         foreground: Rgb(0x4e, 0xc9, 0xb0)
     },
-    modname: {
+    typename: {
         foreground: Rgb(0x4e, 0xc9, 0xb0),
         underline: true
+    },
+    modname: {
+        foreground: Rgb(0x4e, 0xc9, 0xb0)
     },
     macro_name: {
         foreground: Rgb(0x56, 0x9c, 0xd6),
