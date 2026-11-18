@@ -2,8 +2,8 @@
 
 use crate::{
     highlight::style::Style,
-    lex::token::{IdentCase, TokenKind},
-    scanner::token::{Token, punc::Punctuation, value::LexValue},
+    lex::token::{IdentCase, TokenKind, punc::Punctuation},
+    // scanner::token::{Token, value::LexValue},
 };
 
 /// Syntactic element category for highlighting
@@ -240,75 +240,6 @@ impl SyntaxStyle<Style, &[Style]> {
 
 pub trait GetSyntax {
     fn syntax(&self) -> Syntax;
-}
-
-impl GetSyntax for Token<'_> {
-    fn syntax(&self) -> Syntax {
-        match self.val {
-            LexValue::Comment => Syntax::Comment,
-
-            LexValue::Whitespace => Syntax::Dimmed,
-
-            LexValue::ByteLiteral(_)
-            | LexValue::UIntLiteral(_)
-            | LexValue::SIntLiteral(_)
-            | LexValue::FlptLiteral(_) => Syntax::NumberLiteral,
-
-            LexValue::CharLiteral(_) => Syntax::CharLiteral,
-
-            LexValue::TextLiteral(_) => Syntax::TextLiteral,
-
-            LexValue::BoolLiteral(_) => Syntax::LanguageDefined,
-
-            LexValue::Identifier => {
-                // constants are all-caps
-                if self.lex.chars().any(char::is_uppercase) {
-                    if self.lex.chars().any(char::is_lowercase) {
-                        Syntax::Typename
-                    } else {
-                        Syntax::Constant
-                    }
-                } else {
-                    Syntax::Variable
-                }
-            }
-
-            LexValue::Callable => Syntax::Callable,
-
-            LexValue::Keyword(kw) => {
-                if kw.is_flow() {
-                    Syntax::FlowKeyword
-                } else if kw.is_type() && /* TODO: differenciate type vs value in semantics */ !kw.is_value()
-                {
-                    Syntax::Typename
-                } else {
-                    Syntax::Keyword
-                }
-            }
-
-            LexValue::Macro => Syntax::MacroName,
-
-            LexValue::MacroParam => Syntax::MacroParam,
-
-            LexValue::Punctuation(
-                Punctuation::MacroConcat
-                | Punctuation::MacroStringify
-                | Punctuation::MacroConst
-                | Punctuation::Coalesce,
-            ) => Syntax::FlowKeyword,
-
-            LexValue::Punctuation(
-                Punctuation::Exists
-                | Punctuation::Convert
-                | Punctuation::Transmute
-                | Punctuation::Incr
-                | Punctuation::Decr
-                | Punctuation::Iff,
-            ) => Syntax::Keyword,
-
-            LexValue::Punctuation(_) => Syntax::Normal,
-        }
-    }
 }
 
 impl GetSyntax for (&str, TokenKind) {

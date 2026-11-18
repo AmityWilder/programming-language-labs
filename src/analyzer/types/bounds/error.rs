@@ -114,12 +114,8 @@ impl TypeBound<'_> {
                 req: None,
             }
             | TypeBound::Shape(_)
-            | TypeBound::Supports {
-                op: _,
-                operands: _,
-                ret: _,
-            }
-            | TypeBound::Satisfies { ..} => let_if_new(once((self, None)), f),
+            | TypeBound::Supports { .. }
+            | TypeBound::Satisfies { .. } => let_if_new(once((self, None)), f),
         }
     }
 

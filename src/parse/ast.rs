@@ -2,8 +2,7 @@ use crate::{
     analyzer::types::bounds::Combinator,
     error::ExpectedToken,
     highlight::syntax::Syntax,
-    lex::token::{Operator, TokenKind, punc::OpSide},
-    scanner::token::value::Keyword,
+    lex::token::{Operator, TokenKind, keyword::Keyword, punc::OpSide},
     src_code::span::{FileId, RelSpan, uspan},
 };
 
@@ -284,7 +283,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Subscript {
 }
 
 impl Subscript {
-    pub const fn precedence(&self) -> ExprPrecedence {
+    pub const fn precedence() -> ExprPrecedence {
         ExprPrecedence::UnaryPost
     }
 }
@@ -331,7 +330,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnCall {
 }
 
 impl FnCall {
-    pub const fn precedence(&self) -> ExprPrecedence {
+    pub const fn precedence() -> ExprPrecedence {
         ExprPrecedence::UnaryPost
     }
 }

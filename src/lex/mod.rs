@@ -2,9 +2,8 @@ use crate::{
     error::{Diagnostic, DiagnosticKind},
     lex::{
         symbols::{CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM},
-        token::{TokenKind, TokenTable, keyword::Keyword},
+        token::{TokenKind, TokenTable, keyword::Keyword, punc::Punctuation},
     },
-    scanner::token::punc::Punctuation,
     src_code::span::{FileId, RelSpan, usize_to_uspan, uspan},
 };
 
@@ -19,7 +18,7 @@ pub struct Lexer<'src> {
 }
 
 impl<'src> Lexer<'src> {
-    const fn new(source: &'src str) -> Self {
+    pub const fn new(source: &'src str) -> Self {
         debug_assert!(
             uspan::try_from(source.len()).is_ok(),
             "should not tokenize oversize file"

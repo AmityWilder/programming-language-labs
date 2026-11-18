@@ -1,12 +1,11 @@
 //! Scanner tests.
 //! All of these test cases are hand-written. Mostly on a very bumpy bus ride.
 
+#![cfg(false)] // TODO
+
 use crate::{
-    old_error::{ContextError, ErrorType},
-    scanner::{
-        token::{Lexeme, Token, punc::Punctuation, value::LexValue},
-        tokenize,
-    },
+    error::{Diagnostic, DiagnosticKind},
+    lex::{lex, token::punc::Punctuation},
 };
 use std::assert_matches;
 

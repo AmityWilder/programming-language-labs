@@ -1,10 +1,8 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
     analyzer::{static_env::ConstantValue, types::bounds::error::CheckedType},
-    error::fail::Failure,
-    grammar::ast,
+    error::{DiagnosticKind, fail::Failure},
     highlight::style::StyleWrapper as _,
-    old_error::{ContextError, ErrorType},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -39,7 +37,7 @@ pub enum TypeSizeError {
     IllegalUnsized(SizeReq),
 }
 
-impl From<TypeSizeError> for ErrorType<'_> {
+impl From<TypeSizeError> for DiagnosticKind {
     fn from(value: TypeSizeError) -> Self {
         match value {
             TypeSizeError::TooBig => Self::TypeTooBig,
@@ -78,27 +76,6 @@ pub trait TypeCompatible<'src>: Display {
     /// The type is exactly the same as `other`, just stored in another type
     // TODO: equivalence between a parameter and a non-parameter
     fn is_type_eq(&self, other: &AbstractType<'_>) -> bool;
-
-    fn expect_type<T>(
-        &self,
-        expect: &AbstractType<'src>,
-        source: &'src str,
-        node: &T,
-    ) -> Result<(), ContextError<'src>>
-    where
-        Self: std::fmt::Debug,
-        T: ast::AstNodeFinal<'src>,
-    {
-        if self.is_type_eq(expect) {
-            Ok(())
-        } else {
-            Err(ContextError::node_error(
-                source,
-                node,
-                ErrorType::TypeMismatch(Box::new((expect.clone(), self.to_abstract()))),
-            ))
-        }
-    }
 
     fn to_abstract(&self) -> AbstractType<'src>;
 

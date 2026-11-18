@@ -53,12 +53,6 @@ pub enum LinkMemberError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UndeclaredModuleError;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DuplicateMarkingError {
-    /// The existing reference marked on the span
-    pub og: ItemId,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateSubmoduleError {
     UnknownParent(UndeclaredModuleError),
@@ -294,6 +288,14 @@ impl Module {
             .find(|(key, _)| *key == name)
             .map(|(_, val)| *val)
     }
+
+    pub fn push_layer(&mut self) {
+        self.layers.push(Layer::new());
+    }
+
+    pub fn pop_layer(&mut self) -> Option<Layer> {
+        self.layers.pop()
+    }
 }
 
 /// Functions have special scope limited to only themselves and global scope
@@ -309,6 +311,14 @@ impl Layer {
             root: Scope::new(),
             scopes: Vec::new(),
         }
+    }
+
+    pub fn push_scope(&mut self) {
+        self.scopes.push(Scope::new());
+    }
+
+    pub fn pop_scope(&mut self) -> Option<Scope> {
+        self.scopes.pop()
     }
 }
 

@@ -1,16 +1,14 @@
 use crate::{
     analyzer::{
-        GetType,
-        static_env::old::StaticEnvironment,
-        types::{AbstractType, StaticTypeSize, TypeSize, TypeSizeError},
+        // GetType,
+        // static_env::old::StaticEnvironment,
+        types::{StaticTypeSize, TypeSize, TypeSizeError},
     },
     todo_types::Todo,
 };
 
 pub mod morph;
-pub mod old;
 pub mod scope;
-pub mod var_scope;
 
 /// A unique ID for distinguishing items that may have the same identifier.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -57,13 +55,13 @@ impl StaticTypeSize for ConstantValue {
         todo!("constants must be statically sized")
     }
 }
-impl<'src> GetType<'src> for ConstantValue {
-    type Output<'ty>
-        = &'ty AbstractType<'src>
-    where
-        'src: 'ty;
+// impl<'src> GetType<'src> for ConstantValue {
+//     type Output<'ty>
+//         = &'ty AbstractType<'src>
+//     where
+//         'src: 'ty;
 
-    fn get_type<'ty>(&self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-        todo!()
-    }
-}
+//     fn get_type<'ty>(&self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
+//         todo!()
+//     }
+// }

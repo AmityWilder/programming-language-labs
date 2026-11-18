@@ -20,8 +20,8 @@ use std::{
     range::Range,
 };
 
-mod ast;
-mod eval;
+pub mod ast;
+pub mod eval;
 
 pub fn preprocess(
     id: FileId,
@@ -107,7 +107,7 @@ struct ExpansionCluster {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
-enum StreamSpan {
+pub enum StreamSpan {
     /// Token came from the file being parsed, in its original arrangement
     Original(RelSpan),
     /// Token came from macro expansion
@@ -140,7 +140,7 @@ impl StreamSpan {
     pub fn span_str<'src>(self, source: &'src SourceMap, code: &'src SourceCode) -> &'src str {
         match self {
             Self::Original(rel) => &code[rel],
-            Self::Injected(span) => source.span_str(span),
+            Self::Injected(span) => &source[span],
         }
     }
 
@@ -474,7 +474,7 @@ impl PreProcessor<'_, '_> {
                 "expansion: from {:?} to {:?}, defined with {:?}",
                 &self.code[item.call],
                 &self.processed[<Range<usize>>::from(item.exp)],
-                self.source.span_str(item.def),
+                &self.source[item.def],
             );
         }
 
