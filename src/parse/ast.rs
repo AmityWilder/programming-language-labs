@@ -279,7 +279,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Subscript {
         self.arr.visit_spans(brack_depth, visit);
         visit(self.open, Syntax::Bracket(brack_depth));
         self.index.visit_spans(brack_depth.wrapping_add(1), visit);
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -359,7 +359,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Grouping {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.open, Syntax::Bracket(brack_depth));
         self.expr.visit_spans(brack_depth.wrapping_add(1), visit);
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -390,7 +390,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Sequence {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.open, Syntax::Bracket(brack_depth));
         self.expr.visit_spans(brack_depth.wrapping_add(1), visit);
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -565,7 +565,7 @@ impl AstNode for NamespacePathPart {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for NamespacePathPart {
     fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
         visit(self.name, Syntax::Modname);
-        visit(self.sep, Syntax::Normal)
+        visit(self.sep, Syntax::Normal);
     }
 }
 
@@ -595,7 +595,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GenericGroup {
         for item in &self.list {
             item.visit_spans(inner_depth, visit);
         }
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -696,7 +696,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Typename {
         for part in &self.path {
             part.visit_spans(brack_depth, visit);
         }
-        visit(self.name, Syntax::Typename)
+        visit(self.name, Syntax::Typename);
     }
 }
 
@@ -724,7 +724,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for TypeInstance {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         self.name.visit_spans(brack_depth, visit);
         if let Some(args) = &self.args {
-            args.visit_spans(brack_depth, visit)
+            args.visit_spans(brack_depth, visit);
         }
     }
 }
@@ -754,7 +754,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FallType {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         self.then_ty.visit_spans(brack_depth, visit);
         visit(self.pipe, Syntax::Keyword); // TBD: what syntax should this be?
-        visit(self.ty_span, Syntax::Primitive)
+        visit(self.ty_span, Syntax::Primitive);
     }
 }
 
@@ -779,7 +779,7 @@ impl AstNode for RefType {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for RefType {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.sym, Syntax::Keyword); // TBD: what syntax should this be?
-        self.ty.visit_spans(brack_depth, visit)
+        self.ty.visit_spans(brack_depth, visit);
     }
 }
 
@@ -803,7 +803,7 @@ impl AstNode for ArrCount {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ArrCount {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.semi, Syntax::Normal);
-        self.count.visit_spans(brack_depth, visit)
+        self.count.visit_spans(brack_depth, visit);
     }
 }
 
@@ -835,7 +835,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ViewType {
         if let Some(count) = &self.count {
             count.visit_spans(inner_depth, visit);
         }
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -862,7 +862,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GroupedType {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.open, Syntax::Bracket(brack_depth));
         self.inner.visit_spans(brack_depth.wrapping_add(1), visit);
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -894,7 +894,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for AssocType {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         self.base.visit_spans(brack_depth, visit);
         visit(self.sep, Syntax::Normal);
-        self.assoc.visit_spans(brack_depth, visit)
+        self.assoc.visit_spans(brack_depth, visit);
     }
 }
 
@@ -918,7 +918,7 @@ impl AstNode for FunRet {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FunRet {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.arrow, Syntax::Normal);
-        self.ty.visit_spans(brack_depth, visit)
+        self.ty.visit_spans(brack_depth, visit);
     }
 }
 
@@ -958,7 +958,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FunType {
         }
         visit(self.close, Syntax::Bracket(brack_depth));
         if let Some(ret) = self.ret.as_deref() {
-            ret.visit_spans(brack_depth, visit)
+            ret.visit_spans(brack_depth, visit);
         }
     }
 }
@@ -1025,7 +1025,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ComboBound {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         self.lhs.visit_spans(brack_depth, visit);
         visit(self.sep_span, Syntax::Normal);
-        self.rhs.visit_spans(brack_depth, visit)
+        self.rhs.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1049,7 +1049,7 @@ impl AstNode for NegativeBound {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for NegativeBound {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.not, Syntax::Normal);
-        self.rhs.visit_spans(brack_depth, visit)
+        self.rhs.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1073,7 +1073,7 @@ impl AstNode for ExactTypeBound {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ExactTypeBound {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.kw, Syntax::Keyword);
-        self.ty.visit_spans(brack_depth, visit)
+        self.ty.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1097,7 +1097,7 @@ impl AstNode for ColonBound {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ColonBound {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.colon, Syntax::Normal);
-        self.bound.visit_spans(brack_depth, visit)
+        self.bound.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1129,7 +1129,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for MemberBound {
         visit(self.kw, Syntax::Keyword);
         visit(self.member, Syntax::Param);
         if let Some(req) = &self.req {
-            req.visit_spans(brack_depth, visit)
+            req.visit_spans(brack_depth, visit);
         }
     }
 }
@@ -1154,7 +1154,7 @@ impl AstNode for ShapeBoundRet {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ShapeBoundRet {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.arrow, Syntax::Normal);
-        self.ty.visit_spans(brack_depth, visit)
+        self.ty.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1206,7 +1206,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ExprBound {
         visit(self.kw, Syntax::Keyword);
         visit(self.name, Syntax::Param);
         visit(self.colon, Syntax::Keyword);
-        self.expr.visit_spans(brack_depth, visit)
+        self.expr.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1233,7 +1233,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GroupedBound {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.open, Syntax::Bracket(brack_depth));
         self.inner.visit_spans(brack_depth.wrapping_add(1), visit);
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -1326,7 +1326,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Literal {
                 LiteralKind::Text => Syntax::TextLiteral,
                 LiteralKind::Macro => Syntax::MacroName,
             },
-        )
+        );
     }
 }
 
@@ -1398,7 +1398,7 @@ impl AstNode for Directive {
 
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Directive {
     fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
-        visit(self.kw_span, Syntax::LanguageDefined)
+        visit(self.kw_span, Syntax::LanguageDefined);
     }
 }
 
@@ -1539,7 +1539,7 @@ impl AstNode for OrStmt {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for OrStmt {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.kw, Syntax::FlowKeyword);
-        self.body.visit_spans(brack_depth, visit)
+        self.body.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1572,7 +1572,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for IfStmt {
         self.pred.visit_spans(brack_depth, visit);
         self.then.visit_spans(brack_depth, visit);
         if let Some(or) = &self.or {
-            or.visit_spans(brack_depth, visit)
+            or.visit_spans(brack_depth, visit);
         }
     }
 }
@@ -1620,7 +1620,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PickArm {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         self.pattern.visit_spans(brack_depth, visit);
         visit(self.arrow, Syntax::Normal);
-        self.then.visit_spans(brack_depth, visit)
+        self.then.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1655,7 +1655,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PickStmt {
         for arm in &self.arms {
             arm.visit_spans(inner_depth, visit);
         }
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -1682,7 +1682,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DferParam {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.open, Syntax::Bracket(brack_depth));
         self.param.visit_spans(brack_depth.wrapping_add(1), visit);
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -1710,7 +1710,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclDfer {
         if let Some(param) = &self.param {
             param.visit_spans(brack_depth, visit);
         }
-        self.on_pop.visit_spans(brack_depth, visit)
+        self.on_pop.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1781,7 +1781,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for LoopBlock {
                 iter.visit_spans(brack_depth, visit);
             }
         }
-        self.block.visit_spans(brack_depth, visit)
+        self.block.visit_spans(brack_depth, visit);
     }
 }
 
@@ -1905,7 +1905,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DoneStmt {
         if let Some(value) = &self.value {
             value.visit_spans(brack_depth, visit);
         }
-        visit(self.semi, Syntax::Normal)
+        visit(self.semi, Syntax::Normal);
     }
 }
 
@@ -1934,7 +1934,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for SkipStmt {
         if let Some(label) = &self.label {
             label.visit_spans(brack_depth, visit);
         }
-        visit(self.semi, Syntax::Normal)
+        visit(self.semi, Syntax::Normal);
     }
 }
 
@@ -1964,7 +1964,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for BlockStmt {
         for decl in &self.body {
             decl.visit_spans(inner_depth, visit);
         }
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -1992,7 +1992,7 @@ impl AstNode for ExprStmt {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ExprStmt {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         self.expr.visit_spans(brack_depth, visit);
-        visit(self.semi, Syntax::Normal)
+        visit(self.semi, Syntax::Normal);
     }
 }
 
@@ -2020,7 +2020,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PrintStmt {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.kw, Syntax::Keyword);
         self.group.visit_spans(brack_depth, visit);
-        visit(self.semi, Syntax::Normal)
+        visit(self.semi, Syntax::Normal);
     }
 }
 
@@ -2176,7 +2176,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclMod {
     fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
         visit(self.kw, Syntax::Keyword);
         visit(self.name, Syntax::Modname);
-        visit(self.semi, Syntax::Normal)
+        visit(self.semi, Syntax::Normal);
     }
 }
 
@@ -2210,7 +2210,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclOn {
         if let Some(iff) = &self.iff {
             iff.visit_spans(brack_depth, visit);
         }
-        self.body.visit_spans(brack_depth, visit)
+        self.body.visit_spans(brack_depth, visit);
     }
 }
 
@@ -2246,7 +2246,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclVar {
         if let Some(assignment) = &self.assignment {
             assignment.visit_spans(brack_depth, visit);
         }
-        visit(self.semi, Syntax::Normal)
+        visit(self.semi, Syntax::Normal);
     }
 }
 
@@ -2420,7 +2420,7 @@ impl AstNode for BindingPattern {
 
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for BindingPattern {
     fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
-        visit(self.ident, Syntax::Variable)
+        visit(self.ident, Syntax::Variable);
     }
 }
 
@@ -2449,7 +2449,7 @@ impl AstNode for TypeAnnotation {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for TypeAnnotation {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.colon, Syntax::Normal);
-        self.ty.visit_spans(brack_depth, visit)
+        self.ty.visit_spans(brack_depth, visit);
     }
 }
 
@@ -2477,7 +2477,7 @@ impl AstNode for Assignment {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Assignment {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.op, Syntax::Normal);
-        self.expr.visit_spans(brack_depth, visit)
+        self.expr.visit_spans(brack_depth, visit);
     }
 }
 
@@ -2502,7 +2502,7 @@ impl AstNode for Label {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Label {
     fn visit_spans(&self, _brack_depth: u8, visit: &mut F) {
         visit(self.dot, Syntax::Normal);
-        visit(self.name, Syntax::Label)
+        visit(self.name, Syntax::Label);
     }
 }
 
@@ -2526,7 +2526,7 @@ impl AstNode for ScopeLabel {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ScopeLabel {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         self.label.visit_spans(brack_depth, visit);
-        visit(self.colon, Syntax::Normal)
+        visit(self.colon, Syntax::Normal);
     }
 }
 
@@ -2609,7 +2609,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclRec {
         if let Some(generics) = &self.generics {
             generics.visit_spans(brack_depth, visit);
         }
-        self.body.visit_spans(brack_depth, visit)
+        self.body.visit_spans(brack_depth, visit);
     }
 }
 
@@ -2634,7 +2634,7 @@ impl AstNode for Field {
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Field {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.name, Syntax::Field);
-        self.ty.visit_spans(brack_depth, visit)
+        self.ty.visit_spans(brack_depth, visit);
     }
 }
 
@@ -2665,7 +2665,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FieldSet {
         for field in &self.fields {
             field.visit_spans(inner_depth, visit);
         }
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -2694,7 +2694,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for CatDisc {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.name, Syntax::Typename);
         if let Some(val) = &self.val {
-            val.visit_spans(brack_depth, visit)
+            val.visit_spans(brack_depth, visit);
         }
     }
 }
@@ -2726,7 +2726,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for CatDiscSet {
         for item in &self.items {
             item.visit_spans(inner_depth, visit);
         }
-        visit(self.close, Syntax::Bracket(brack_depth))
+        visit(self.close, Syntax::Bracket(brack_depth));
     }
 }
 
@@ -2753,7 +2753,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclCat {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.kw, Syntax::Keyword);
         visit(self.name, Syntax::Typename);
-        self.discriminants.visit_spans(brack_depth, visit)
+        self.discriminants.visit_spans(brack_depth, visit);
     }
 }
 

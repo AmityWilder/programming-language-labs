@@ -1,7 +1,3 @@
-fun is_valid(color: text) -> bool {
-    give color == "red" | color == "yellow" | color == "green";
-}
-
 fun foo<T>(x: T) -> : only sint + for v: v <= !0 - 5
 <=>
     T: only sint + for u: u >= 5,

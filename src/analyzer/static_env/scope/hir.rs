@@ -307,14 +307,14 @@ pub struct FnCall {
     pub args: Box<[Expr]>,
 }
 
-pub use ast::{Literal, LiteralKind};
+pub use ast::Literal;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Directive {
     Inpt,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Variable(pub VarId);
 
 #[derive(Debug, Clone, PartialEq)]

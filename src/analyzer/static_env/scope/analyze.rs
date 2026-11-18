@@ -162,7 +162,7 @@ impl ScopeAnalyze for ast::DeclMod {
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let id = env
-            .find_submodule(&source[file][self.name])
+            .find_submodule(&source[self.name.within_file(file)])
             .expect("should be handled in pre-scan");
         Ok(hir::DeclMod { id })
     }
@@ -193,8 +193,8 @@ impl ScopeAnalyze for ast::DeclVar {
 
         let kw = self.kw;
 
-        let ident = self.binding.ident;
-        let id = env.decl_var(source[file][ident].to_owned(), ident.within_file(file));
+        let ident = self.binding.ident.within_file(file);
+        let id = env.decl_var(source[ident].to_owned(), ident);
         Ok(match kw {
             ast::VarKeyword::Let => hir::Decl::Let(hir::DeclLet {
                 id,
@@ -310,12 +310,9 @@ impl ScopeAnalyze for ast::SelfParam {
         source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        debug_assert_eq!(
-            &source[file][self.span],
-            Keyword::Me.as_str(),
-            "ident should be `me`"
-        );
-        let id = env.decl_var(Keyword::Me.to_string(), self.span.within_file(file));
+        let ident = self.span.within_file(file);
+        debug_assert_eq!(&source[ident], Keyword::Me.as_str(), "ident should be `me`");
+        let id = env.decl_var(Keyword::Me.to_string(), ident);
         Ok(hir::SelfParam { id })
     }
 }
@@ -330,8 +327,8 @@ impl ScopeAnalyze for ast::FnParam {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let ident = self.name;
-        let id = env.decl_var(source[file][self.name].to_owned(), ident.within_file(file));
+        let ident = self.name.within_file(file);
+        let id = env.decl_var(source[ident].to_owned(), ident);
         let ty = self.ty.ty.analyze(env, file, source, diagnostics);
         Ok(hir::FunParam { id, ty: ty? })
     }
@@ -351,27 +348,25 @@ impl ScopeAnalyze for ast::DeclFun {
             Self::Declare(decl) => (decl.head, None),
             Self::Define(def) => (def.head, Some(def.body)),
         };
-        let ident = head.name;
-        let name = &source[file][ident];
-        let id = env
-            .decl_item(name.to_owned(), ident.within_file(file))
-            .map_err(|e| {
-                diagnostics.push(Diagnostic::new(
-                    ident.within_file(file),
-                    DiagnosticKind::Other {
-                        severity: Severity::Error,
-                        category: StaticAnalysis,
-                        msg: format!(
-                            "duplicate function `{name}`: first definition:\x1b[0m {}",
-                            env.get_decl(e.og)
-                                .expect("duplicate item error should give a valid ID")
-                                .decl
-                                .display_loc(source)
-                        ),
-                    },
-                ));
-                CheckDiagnostics
-            });
+        let ident = head.name.within_file(file);
+        let name = &source[ident];
+        let id = env.decl_item(name.to_owned(), ident).map_err(|e| {
+            diagnostics.push(Diagnostic::new(
+                ident,
+                DiagnosticKind::Other {
+                    severity: Severity::Error,
+                    category: StaticAnalysis,
+                    msg: format!(
+                        "duplicate function `{name}`: first definition:\x1b[0m {}",
+                        env.get_decl(e.og)
+                            .expect("duplicate item error should give a valid ID")
+                            .decl
+                            .display_loc(source)
+                    ),
+                },
+            ));
+            CheckDiagnostics
+        });
         let generics = head
             .generics
             .map(|x| x.analyze(env, file, source, diagnostics))
@@ -442,14 +437,14 @@ impl ScopeAnalyze for (ast::Field, ItemId) {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let (field, parent) = self;
-        let ident = field.name;
-        let field_name = &source[file][ident];
+        let ident = field.name.within_file(file);
+        let field_name = &source[ident];
         let ty = field.ty.ty.clone().analyze(env, file, source, diagnostics);
         let id = env
-            .decl_member(parent, field_name.to_owned(), ident.within_file(file))
+            .decl_member(parent, field_name.to_owned(), ident)
             .map_err(|e| {
                 diagnostics.push(Diagnostic::new(
-                    ident.within_file(file),
+                    ident,
                     DiagnosticKind::Other {
                         severity: Severity::Error,
                         category: StaticAnalysis,
@@ -473,21 +468,19 @@ impl ScopeAnalyze for ast::DeclRec {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         // TODO: generics
-        let ident = self.name;
-        let name = &source[file][ident];
-        let id = env
-            .decl_item(name.to_owned(), ident.within_file(file))
-            .map_err(|e| {
-                diagnostics.push(Diagnostic::new(
-                    ident.within_file(file),
-                    DiagnosticKind::Other {
-                        severity: Severity::Error,
-                        category: StaticAnalysis,
-                        msg: format!("could not declare rec {name}: {e:?}"),
-                    },
-                ));
-                CheckDiagnostics
-            })?;
+        let ident = self.name.within_file(file);
+        let name = &source[ident];
+        let id = env.decl_item(name.to_owned(), ident).map_err(|e| {
+            diagnostics.push(Diagnostic::new(
+                ident,
+                DiagnosticKind::Other {
+                    severity: Severity::Error,
+                    category: StaticAnalysis,
+                    msg: format!("could not declare rec {name}: {e:?}"),
+                },
+            ));
+            CheckDiagnostics
+        })?;
         let fields = self
             .body
             .fields
@@ -512,21 +505,19 @@ impl ScopeAnalyze for ast::DeclCat {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let ident = self.name;
-        let name = &source[file][ident];
-        let id = env
-            .decl_item(name.to_owned(), ident.within_file(file))
-            .map_err(|e| {
-                diagnostics.push(Diagnostic::new(
-                    ident.within_file(file),
-                    DiagnosticKind::Other {
-                        severity: Severity::Error,
-                        category: StaticAnalysis,
-                        msg: format!("{e:?}"),
-                    },
-                ));
-                CheckDiagnostics
-            });
+        let ident = self.name.within_file(file);
+        let name = &source[ident];
+        let id = env.decl_item(name.to_owned(), ident).map_err(|e| {
+            diagnostics.push(Diagnostic::new(
+                ident,
+                DiagnosticKind::Other {
+                    severity: Severity::Error,
+                    category: StaticAnalysis,
+                    msg: format!("{e:?}"),
+                },
+            ));
+            CheckDiagnostics
+        });
         let discriminants = self
             .discriminants
             .items
@@ -551,11 +542,8 @@ impl ScopeAnalyze for ast::DeclDfer {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let param = self.param.map(|x| {
-            let ident = x.param.ident;
-            env.decl_var(
-                source[file][x.param.ident].to_owned(),
-                ident.within_file(file),
-            )
+            let ident = x.param.ident.within_file(file);
+            env.decl_var(source[ident].to_owned(), ident)
         });
         let on_pop = self.on_pop.analyze(env, file, source, diagnostics);
         Ok(hir::DeclDfer {
@@ -650,9 +638,9 @@ impl ScopeAnalyze for ast::LoopBlock {
             }),
 
             ast::LoopKind::For { bind, iter, .. } => {
-                let ident = bind.ident;
-                let name = &source[file][ident];
-                let var = env.decl_var(name.to_owned(), ident.within_file(file));
+                let ident = bind.ident.within_file(file);
+                let name = &source[ident];
+                let var = env.decl_var(name.to_owned(), ident);
                 hir::Stmt::For(hir::ForStmt {
                     var: hir::BindingPattern { var },
                     iter: iter.analyze(env, file, source, diagnostics)?,
@@ -844,14 +832,17 @@ impl ScopeAnalyze for ast::Variable {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let ident = self.ident;
-        let name = &source[file][ident];
+        if !self.path.is_empty() {
+            todo!("external variable analysis")
+        }
+        let ident = self.ident.within_file(file);
+        let name = &source[ident];
+        // variables can shadow function names
         env.lookup_var(name)
+            // maybe a function
+            .or_else(|| env.lookup_item(name))
             .ok_or_else(|| {
-                diagnostics.push(Diagnostic::new(
-                    ident.within_file(file),
-                    DiagnosticKind::UnknownVar,
-                ));
+                diagnostics.push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
                 CheckDiagnostics
             })
             .map(hir::Variable)
@@ -1381,10 +1372,8 @@ impl ScopeAnalyze for ast::ExprBound {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         // TODO: scope the parameter
-        let param = env.decl_var(
-            source[file][self.name].to_owned(),
-            self.name.within_file(file),
-        );
+        let ident = self.name.within_file(file);
+        let param = env.decl_var(source[ident].to_owned(), ident);
         let expr = self.expr.analyze(env, file, source, diagnostics);
         Ok(hir::ExprBound { param, expr: expr? })
     }
