@@ -362,7 +362,7 @@ impl ScopeAnalyze for ast::DeclFun {
                         severity: Severity::Error,
                         category: StaticAnalysis,
                         msg: format!(
-                            "duplicate function `{name}`: first definition: {:?}",
+                            "duplicate function `{name}`: first definition:\x1b[0m {}",
                             env.get_decl(e.og)
                                 .expect("duplicate item error should give a valid ID")
                                 .decl

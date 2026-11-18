@@ -179,12 +179,8 @@ impl ModScopeEnvironment<'_> {
     }
 
     pub fn decl_item(&mut self, name: String, decl: Span) -> Result<ItemId, DuplicateItemError> {
-        println!("inserting item {name} declared at {decl:?}");
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
-        self.module
-            .decl_item(name, id)
-            .inspect_err(|_| println!("  failed"))?;
-        println!("  success: {id}");
+        self.module.decl_item(name, id)?;
         self.decls.push(Item::new(decl)); // now `id` refers to an item
         Ok(id)
     }
@@ -334,24 +330,9 @@ impl Scope {
     }
 
     fn decl_item(&mut self, key: String, id: ItemId) -> Result<(), DuplicateItemError> {
-        // DEBUG
-        let existing = self.items.get(&key).copied();
-        if let Some(x) = existing {
-            debug_assert_ne!(x, id, "should be impossible to have the same ID twice");
-        }
-
         self.items
             .try_insert(key, id)
-            .map_err(|e| {
-                let existing =
-                    existing.expect("should not error if this key was not present before");
-                debug_assert_eq!(
-                    e.value, existing,
-                    "error should output the PREVIOUS id, not the new one"
-                );
-                debug_assert_ne!(e.value, id, "should be impossible for these to be the same");
-                DuplicateItemError { og: e.value }
-            })
+            .map_err(|e| DuplicateItemError { og: *e.entry.get() })
             .map(|x| debug_assert_eq!(*x, id, "these should be the same, by definition"))
     }
 
