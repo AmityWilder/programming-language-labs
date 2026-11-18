@@ -8,17 +8,14 @@ use crate::{
         syntax::{GetSyntax as _, Syntax, SyntaxStyle},
     },
     lex::{
+        Lexer,
         symbols::{
             BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, LINE_COMMENT_OPEN,
             TEXT_DELIM,
         },
-        token::TokenKind,
+        token::{TokenKind, esc::Escapes},
     },
-    old_error::ContextError,
-    scanner::{
-        Scanner,
-        token::{Token, value::Escapes},
-    },
+    src_code::span::uspan_to_usize,
 };
 use std::range::Range;
 
@@ -252,18 +249,15 @@ impl<'src> Iterator for CommentCodeSegments<'src> {
 #[derive(Debug, Clone)]
 pub struct CommentCode<'src> {
     comment: &'src str,
-    scanner: std::iter::FlatMap<
-        CommentCodeSegments<'src>,
-        Scanner<'src>,
-        fn(&'src str) -> Scanner<'src>,
-    >,
+    scanner:
+        std::iter::FlatMap<CommentCodeSegments<'src>, Lexer<'src>, fn(&'src str) -> Lexer<'src>>,
 }
 
 impl<'src> CommentCode<'src> {
     fn new(comment: &'src str) -> Self {
         Self {
             comment,
-            scanner: CommentCodeSegments::new(comment).flat_map(Scanner::new),
+            scanner: CommentCodeSegments::new(comment).flat_map(Lexer::new),
         }
     }
 }
@@ -272,9 +266,17 @@ impl Iterator for CommentCode<'_> {
     type Item = (Range<usize>, Syntax);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.scanner.next().map(|s| match s {
-            Ok(x) => (x.lex_range(self.comment), x.syntax()),
-            Err(e) => (e.range, Syntax::Invalid),
+        self.scanner.next().map({
+            let mut prev_end = 0usize;
+            move |(len, kind, _)| {
+                let start = prev_end;
+                prev_end = start + uspan_to_usize(len);
+                let range = Range {
+                    start,
+                    end: prev_end,
+                };
+                (range, (&self.comment[range], kind).syntax())
+            }
         })
     }
 }
@@ -387,19 +389,6 @@ impl<'src> TokenHighlight<'src> for (&'src str, Syntax) {
 impl<'src> TokenHighlight<'src> for (&'src str, TokenKind) {
     fn get_syntax(&self) -> (&'src str, Syntax) {
         (self.0, self.syntax())
-    }
-}
-
-impl<'src> TokenHighlight<'src> for Token<'src> {
-    fn get_syntax(&self) -> (&'src str, Syntax) {
-        (self.lex.src, self.syntax())
-    }
-}
-
-impl<'src> TokenHighlight<'src> for ContextError<'src> {
-    fn get_syntax(&self) -> (&'src str, Syntax) {
-        #[expect(clippy::string_slice, reason = "range should be a range of source")]
-        (&self.source[self.range], Syntax::Invalid)
     }
 }
 

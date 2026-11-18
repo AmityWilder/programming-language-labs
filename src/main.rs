@@ -17,10 +17,8 @@
     unboxed_closures,
     pattern,
     impl_trait_in_bindings,
-    impl_trait_in_fn_trait_return,
     macro_derive,
     deref_patterns,
-    char_to_u32,
     extend_one,
     deref_pure_trait,
     const_ops,
@@ -53,8 +51,13 @@
     clippy::missing_panics_doc,
     reason = "yucky. clean that up."
 )]
-#![warn(clippy::todo, clippy::dbg_macro, reason = "finish your code")]
-#![deny(
+#![warn(
+    clippy::todo,
+    clippy::dbg_macro,
+    clippy::use_debug,
+    reason = "finish your code"
+)]
+#![forbid(
     clippy::unwrap_used,
     clippy::missing_assert_message,
     reason = "never panic without a reason"
@@ -102,18 +105,14 @@
     clippy::deprecated_attributes_without_since,
     // if im using a glob import, it's because im using all of them (or so many that it's pointless)
     clippy::enum_glob_use, clippy::wildcard_imports,
-    // "negations reduce the readability" the `if` case implies success and the `else` case implies fallback.
-    // negating a failure condition means the first case will be the success case, which makes the code more readable.
-    clippy::if_not_else,
     // trying to avoid including crates
     clippy::naive_bytecount,
     reason = "these lints make sweeping assumptions that are often wrong"
 )]
-#![deny(
+#![forbid(
     clippy::doc_broken_link,
     reason = "fix this before you forget what it means!!"
 )]
-#![allow(dead_code, deprecated, reason = "UNDER CONSTRUCTION")]
 #![allow(
     clippy::nonminimal_bool,
     clippy::overly_complex_bool_expr,
@@ -150,21 +149,15 @@ use std::{
 mod analyzer;
 mod arrayvec;
 mod error;
-mod todo_types;
-// mod exec;
-mod grammar;
 mod highlight;
-mod interp;
 mod lex;
-mod old_error;
 mod parse;
 mod parser;
 mod pre;
-mod preproc;
 mod regex;
-mod scanner;
 mod spec_ops;
 mod src_code;
+mod todo_types;
 mod types;
 mod util;
 
@@ -336,7 +329,7 @@ fn print_highlighted<'src, I, T, A>(
                     }
                 }
                 print!(" expanded from `\x1b[0m");
-                let call_code = source.source_of(x.call);
+                let call_code = &source[x.call.file];
                 for (lexeme, syntax) in highlight(
                     call_code
                         .span_tokens(x.call.rel)
@@ -350,7 +343,7 @@ fn print_highlighted<'src, I, T, A>(
                     x.call.display_loc(source)
                 );
                 print!(" {}as defined in `\x1b[0m", MSG_STYLE.begin());
-                let def_code = source.source_of(x.def);
+                let def_code = &source[x.def.file];
                 for (lexeme, syntax) in highlight(
                     def_code
                         .span_tokens(x.def.rel)

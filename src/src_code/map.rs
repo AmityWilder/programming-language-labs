@@ -102,13 +102,13 @@ impl SourceMap {
 
     #[track_caller]
     pub fn span_data(&self, span: Span) -> (&SourceCode, &str) {
-        let file = self.source_of(span);
+        let code = &self[span.file];
 
-        let s = file
+        let s = code
             .get(span.rel)
             .expect("span should be a valid range within the file it refers to");
 
-        (file, s)
+        (code, s)
     }
 
     #[deprecated = "use indexer"]
@@ -119,14 +119,13 @@ impl SourceMap {
 
     #[track_caller]
     pub fn span_tokens(&self, span: Span) -> impl Iterator<Item = (RelSpan, TokenKind)> {
-        self.source_of(span).span_tokens(span.rel)
+        self[span.file].span_tokens(span.rel)
     }
 
     pub fn lookup_macro_recursive(&self, mut span: Span) -> impl Iterator<Item = &ExpansionData> {
         std::iter::from_fn(move || {
-            self.source_of(span)
-                .expansion(span.rel)
-                .inspect(|x| span = x.call)
+            let Span { file, rel } = span;
+            self[file].expansion(rel).inspect(|x| span = x.call)
         })
     }
 }
@@ -145,9 +144,10 @@ impl RelSpan {
 
 impl Span {
     pub fn display_loc(self, source: &SourceMap) -> SpanLoc<'_> {
+        let Self { file, rel } = self;
         SpanLoc {
-            source: source.source_of(self),
-            span: self.rel,
+            source: &source[file],
+            span: rel,
         }
     }
 }

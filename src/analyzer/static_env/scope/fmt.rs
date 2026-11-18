@@ -220,7 +220,7 @@ impl HirDisplay for ItemId {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         let item = env.get_decl(*self).expect("HIR IDs should be valid");
-        write!(f, "{}\x1b[94m{{", source.span_str(item.decl))?;
+        write!(f, "{}\x1b[94m{{", &source[item.decl])?;
         if let Some(parent) = item.parent {
             f.write_str("\x1b[0m")?;
             parent.fmt(source, file, env, f)?;

@@ -218,7 +218,7 @@ struct CodeRefsGroup<'src, 'outer, T> {
 impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
     fn new(outer: &'outer mut CodeRefs<'src, T>) -> Option<Self> {
         if let Some(first) = outer.q.upcoming.front() {
-            let curr_file = outer.source.source_of(*first.span());
+            let curr_file = &outer.source[first.span().file];
             Some(Self {
                 q: &mut outer.q,
                 prev_span: None,

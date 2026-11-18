@@ -14,21 +14,119 @@ use crate::{
             BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX,
             MACRO_PREFIX, TEXT_DELIM,
         },
-        token::{Operator, TokenKind},
+        token::{
+            Operator, TokenKind,
+            esc::escape_char,
+            keyword::Keyword,
+            punc::{BadBracketCombo, Bracket, OpSide},
+        },
     },
-    old_error::{ImmutableAssignment, NumErrorKind},
-    preproc::eval::{PpType, PpValue},
-    scanner::token::{
-        escape_char,
-        punc::{BadBracketCombo, Bracket, OpSide},
-        value::Keyword,
-    },
+    pre::eval::PreVal,
     src_code::{code::CreateSourceCodeError, map::SourceMap, span::Span},
+    types::{byte, sint, uint},
 };
 use std::fmt::{self, Display, Formatter};
 
 pub mod fail;
 pub mod inline;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash, Default)]
+pub enum ImmutableAssignment {
+    #[default]
+    Expression,
+    Assignment,
+    Literal,
+    Keyword(Keyword),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub enum IntKind {
+    Byte,
+    Uint,
+    Sint,
+}
+
+impl IntKind {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Byte => "byte",
+            Self::Uint => "unsigned integer",
+            Self::Sint => "signed integer",
+        }
+    }
+
+    pub const fn max(self) -> &'static dyn std::fmt::Display {
+        match self {
+            Self::Byte => &byte::MAX,
+            Self::Uint => &uint::MAX,
+            Self::Sint => &sint::MAX,
+        }
+    }
+
+    pub const fn min(self) -> &'static dyn std::fmt::Display {
+        match self {
+            Self::Byte => &byte::MIN,
+            Self::Uint => &uint::MIN,
+            Self::Sint => &sint::MIN,
+        }
+    }
+}
+
+/// The standard library is allergic to letting me construct its error types, so I've made my own version
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub enum NumErrorKind {
+    InvalidInt,
+    InvalidFlpt,
+    PosOverflow(IntKind),
+    NegOverflow(IntKind),
+    /// Negative sign with **explicit** unsigned suffix
+    NegUnsigned,
+}
+
+impl NumErrorKind {
+    pub fn new(is_signed: bool, e: std::num::IntErrorKind) -> Self {
+        if is_signed {
+            Self::new_signed(e)
+        } else {
+            Self::new_unsigned(e)
+        }
+    }
+
+    pub fn new_signed(e: std::num::IntErrorKind) -> Self {
+        match e {
+            std::num::IntErrorKind::Empty => {
+                unreachable!("tokens can't be empty, this is the wrong error")
+            }
+            std::num::IntErrorKind::InvalidDigit => Self::InvalidInt,
+            std::num::IntErrorKind::PosOverflow => Self::PosOverflow(IntKind::Sint),
+            std::num::IntErrorKind::NegOverflow => Self::NegOverflow(IntKind::Sint),
+            _ => unimplemented!("not a real int error"),
+        }
+    }
+
+    pub fn new_unsigned(e: std::num::IntErrorKind) -> Self {
+        match e {
+            std::num::IntErrorKind::Empty => {
+                unreachable!("tokens can't be empty, this is the wrong error")
+            }
+            std::num::IntErrorKind::InvalidDigit => Self::InvalidInt,
+            std::num::IntErrorKind::PosOverflow => Self::PosOverflow(IntKind::Uint),
+            std::num::IntErrorKind::NegOverflow => Self::NegOverflow(IntKind::Uint),
+            _ => unimplemented!("not a real int error"),
+        }
+    }
+}
+
+impl std::fmt::Display for NumErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidInt | Self::InvalidFlpt => "invalid digit found in source code",
+            Self::PosOverflow(_) => "number too large to fit in target type",
+            Self::NegOverflow(_) | Self::NegUnsigned => "number too small to fit in target type",
+        }
+        .fmt(f)
+    }
+}
 
 /// Indicator that the error(s) have been output to the diagnostics vec, rather than being in the return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -133,10 +231,6 @@ expected_token! {
         MacroCond = "a macro condition body (should be enclosed in `{...}`)",
         MacroCondContinuation = "a macro condition body (should be enclosed in `{...}`), or `rot`",
 
-        #[deprecated = "use ExpectedToken::Verbatim"]
-        Colon = "a `:`",
-        #[deprecated = "use ExpectedToken::Verbatim"]
-        LParen = "a `(`",
         CommaOrRParen = "a `,` or `)`",
         Literal = "a literal",
         ParenExpr = "a parenthesized expression",
@@ -151,20 +245,12 @@ expected_token! {
         TypeBound = "a type bound",
         OrType = "an \"or-type\" (`fail`, `none`, or `nevr`)",
         FnSource = "a function name or parenthesized function object expression",
-        #[deprecated = "use ExpectedToken::Verbatim"]
-        Semi = "a `;`",
         Declaration = "a declaration or statement",
-        #[deprecated = "use ExpectedToken::Verbatim"]
-        Ident = "an identifier",
         Pattern = "a binding pattern",
         BlockStmt = "a block statement",
         BlockOrIf = "an `if` keyword or a block statement",
-        #[deprecated = "use ExpectedToken::Verbatim"]
-        InKeyword = "an `in` keyword",
         Statement = "a statement",
         LoopBlock = "a loop block after the label",
-        #[deprecated = "use ExpectedToken::Verbatim"]
-        Arrow = "a `->`",
         SemiOrBody = "a `;` or function body starting with `{`",
         RecBody = "rec body, starting with `{`",
     }
@@ -236,9 +322,6 @@ pub enum DiagnosticKind {
     /// A string/character literal contains an escape sequence (identified by a `\`) that does not exist
     InvalidEscape,
 
-    /// A number literal could not be evaluated as a number
-    InvalidNumLiteral(NumErrorKind),
-
     // ----------------------------
     // preprocessor
     // ----------------------------
@@ -257,7 +340,7 @@ pub enum DiagnosticKind {
     OversizePreproc(CreateSourceCodeError),
 
     NonBoolPrePredicate {
-        actual: PpValue,
+        actual: PreVal<String>,
     },
 
     InvalidPreOperator,
@@ -267,9 +350,9 @@ pub enum DiagnosticKind {
         /// The binary operator
         op: Operator,
         l_range: Span,
-        l_ty: PpType,
+        l_ty: PreVal<!>,
         r_range: Span,
-        r_ty: PpType,
+        r_ty: PreVal<!>,
     },
 
     /// The operand in a unary operation is of an unsupported type
@@ -278,7 +361,7 @@ pub enum DiagnosticKind {
         op: Operator,
         r_range: Span,
         /// The type of the value on the right side of the operator
-        r_ty: PpType,
+        r_ty: PreVal<!>,
     },
 
     InvalidPreLiteral,
@@ -359,6 +442,9 @@ pub enum DiagnosticKind {
 
     /// Unsigned cannot be negated
     UnsignedNeg,
+
+    /// A number literal could not be evaluated as a number
+    InvalidNumLiteral(NumErrorKind),
 
     // TODO: make this more helpful
     UnknownVar,
@@ -670,7 +756,7 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
                 write!(
                     f,
                     "unknown character escape: {:?}",
-                    self.source.span_str(self.error.span)
+                    &self.source[self.error.span]
                 )
             }
             DiagnosticKind::InvalidNumLiteral(e) => {
@@ -740,7 +826,7 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
                 write!(
                     f,
                     "expected {expect}, found `{}`",
-                    self.source.span_str(self.error.span)
+                    &self.source[self.error.span]
                 )
             }
             DiagnosticKind::DivByZero { .. } => {
@@ -853,7 +939,7 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
     }
 
     fn help(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let src = self.source.span_str(self.error.span);
+        let src = &self.source[self.error.span];
         match &self.error.kind {
             DiagnosticKind::Other { .. } => f.write_str("TODO"),
             DiagnosticKind::UnknownToken => {
@@ -991,16 +1077,25 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
             }
             DiagnosticKind::NonBoolPrePredicate { actual, .. } => {
                 match actual {
-                    PpValue::Bool|PpValue::Uint|PpValue::Sint|PpValue::Flpt|PpValue::Char|PpValue::Text => f.write_str("typenames are not values, and especially not booleans. \
-                        if you are trying to compare the size of a type with some number, \
-                        use the `szof` keyword to get the type's size, and add a comparison operator to get a boolean.\n\n\
-                        if you are trying to convert a value to a boolean, you would normally need a `-:>` or `=:>` operator;
-                        conversions/reinterpretations are not supported in the preprocessor however, so this is not possible."),
-                    PpValue::UIntLiteral(_)|PpValue::SIntLiteral(_) => f.write_str("integers do not coerce to booleans on their own. \
-                        try comparing it (`==`, `!=`, `<`, `>`, `<=`, or `>=`) with another number to get a boolean."),
-                    PpValue::Macro(_) => f.write_str("if you meant to expand this macro to an expression, remove the `~` operator. \
-                        if you are trying to test if the macro exists, add an `!!` (\"exists\") operator in front of the `~`."),
-                    PpValue::BoolLiteral(_) => {
+                    PreVal::Typename(_) => {
+                        f.write_str("typenames are not values, and especially not booleans. \
+                            if you are trying to compare the size of a type with some number, \
+                            use the `szof` keyword to get the type's size, and add a comparison operator to get a boolean.\n\n\
+                            if you are trying to convert a value to a boolean, you would normally need a `-:>` or `=:>` operator;
+                            conversions/reinterpretations are not supported in the preprocessor however, so this is not possible.")
+                    }
+                    PreVal::Byte(_) | PreVal::Uint(_) | PreVal::Sint(_) => {
+                        f.write_str("integers do not coerce to booleans. \
+                            try comparing (`==`, `!=`, `<`, `>`, `<=`, or `>=`) with another number to get a boolean.")
+                    }
+                    PreVal::Char(_) | PreVal::Text(_) => {
+                        f.write_str("text does not coerce to a boolean. try testing equality (`==`, `!=`) with another to get a boolean.")
+                    }
+                    PreVal::Macro(_) => {
+                        f.write_str("if you meant to expand this macro to an expression, remove the `~` operator. \
+                            if you are trying to test if the macro exists, add an `!!` (\"exists\") operator in front of the `~`.")
+                    }
+                    PreVal::Bool(_) => {
                         unimplemented!("should not produce this error on a boolean value");
                     },
                 }
@@ -1012,13 +1107,24 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
                 )
             }
             DiagnosticKind::PreIncompatible { op, l_ty, r_ty, .. } => {
-
-                    write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
-                    match op {
-                        Operator::And|Operator::Xor|Operator::Or|Operator::Nand|Operator::Nor|Operator::Xnor if (*l_ty == PpType::Bool) != (*r_ty == PpType::Bool) => write!(f, "\n\nit looks like you may have been trying to perform a bitwise operation, but one side resolves to a boolean. bitwise/logic operations have lower precedence than comparisons, so you may need to wrap the bitwise operation in parentheses."),
-                        _ => Ok(())
-                    }
-
+                write!(f, "try changing operators, converting types, or wrapping something in parentheses")?;
+                match op {
+                    Operator::And
+                    | Operator::Xor
+                    | Operator::Or
+                    | Operator::Nand
+                    | Operator::Nor
+                    | Operator::Xnor
+                        if matches!(l_ty, PreVal::Bool(_)) != matches!(r_ty, PreVal::Bool(_)) => {
+                            write!(
+                                f,
+                                "\n\nit looks like you may be trying to perform a bitwise operation, \
+                                but one side resolves to a boolean. bitwise/logic operations have lower precedence \
+                                than comparisons, so you may need to wrap the bitwise operation in parentheses.",
+                            )
+                        }
+                    _ => Ok(())
+                }
             }
             DiagnosticKind::PreUnsupported { .. } => {
                 write!(f, "try a different operator or convert the type")
@@ -1039,9 +1145,18 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
                 write!(f, "\"or-types\" are not legal within preprocessing.")
             }
             DiagnosticKind::IncorrectCloseBracket { failure, .. } => {
-                    let (expect, actual) = failure.decompose();
-                    write!(f, "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, or remove either the `{}` or the `{}`", expect.close(), actual.close(), actual.open(), expect.open(), expect.open(), actual.close())
-
+                let (expect, actual) = failure.decompose();
+                write!(
+                    f,
+                    "try inserting a `{}` before the `{}`, add a `{}` before it and after the `{}`, \
+                    or remove either the `{}` or the `{}`",
+                    expect.close(),
+                    actual.close(),
+                    actual.open(),
+                    expect.open(),
+                    expect.open(),
+                    actual.close(),
+                )
             }
             DiagnosticKind::ExcessCloseBracket { actual, .. } => {
                 write!(
@@ -1063,7 +1178,7 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
                 write!(f, "try inserting {expect}")
             }
             DiagnosticKind::UnexpectedToken { expected: expect, .. } => {
-                let actual = self.source.span_str(self.error.span);
+                let actual = &self.source[self.error.span];
                 write!(
                     f,
                     "try inserting {expect} before the `{actual}` or remove the `{actual}`"
@@ -1188,6 +1303,7 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
         }
     }
 
+    // TODO
     // fn info(&self) -> Vec<CodeRef<_, _>> {
     //     match &self.error.kind {
     //         ErrorKind::MacroParamUndefined { head, .. } => {

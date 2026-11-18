@@ -9,7 +9,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum PreVal<'src> {
+pub enum PreVal<M> {
     Bool(bool),
     Byte(byte),
     Uint(uint),
@@ -18,7 +18,22 @@ pub enum PreVal<'src> {
     Text(text),
 
     Typename(PrimitiveType),
-    Macro(&'src str),
+    Macro(M),
+}
+
+impl<T: std::fmt::Display> std::fmt::Display for PreVal<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Bool(x) => x.fmt(f),
+            Self::Byte(x) => x.fmt(f),
+            Self::Uint(x) => x.fmt(f),
+            Self::Sint(x) => x.fmt(f),
+            Self::Char(x) => x.fmt(f),
+            Self::Text(x) => x.fmt(f),
+            Self::Typename(x) => x.fmt(f),
+            Self::Macro(x) => x.fmt(f),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
@@ -51,11 +66,11 @@ enum PreExpr<'src> {
     Binary(Box<PreBinary<'src>>),
     Unary(Box<PreUnary<'src>>),
     Group(Box<PreGroup<'src>>),
-    Value(PreVal<'src>),
+    Value(PreVal<&'src str>),
 }
 
 impl<'src> PreExpr<'src> {
-    fn eval(self, source: &'src SourceMap) -> Result<PreVal<'src>, Diagnostic> {
+    fn eval(self, source: &'src SourceMap) -> Result<PreVal<&'src str>, Diagnostic> {
         match self {
             PreExpr::Binary(inner) => {
                 let lhs = inner.lhs.eval(source)?;

@@ -1,26 +1,20 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
-    analyzer::{
-        static_env::old::EnvKey,
-        types::{
-            AbstractType, FunShape, TypeCompatible,
-            bounds::{
-                error::{
-                    AllowedBound, AllowedBoundReason, BoundCheck, CheckedType, DeniedBound,
-                    DeniedBoundReason, RequiredBound, RequiredBoundReason, SatisfiedBound,
-                    SatisfiedBoundReason, UnsatisfiedBound, UnsatisfiedBoundReason,
-                },
-                pure::PureExpr,
-            },
+    analyzer::types::{
+        AbstractType, FunShape, TypeCompatible,
+        bounds::error::{
+            AllowedBound, AllowedBoundReason, BoundCheck, CheckedType, DeniedBound,
+            DeniedBoundReason, RequiredBound, RequiredBoundReason, SatisfiedBound,
+            SatisfiedBoundReason, UnsatisfiedBound, UnsatisfiedBoundReason,
         },
     },
     highlight::style::StyleWrapper as _,
-    scanner::token::punc::OpSide,
+    lex::token::punc::OpSide,
+    todo_types::Todo,
 };
 use std::fmt::Display;
 
 pub mod error;
-pub mod pure;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Satisfaction<T, U, E> {
@@ -139,9 +133,11 @@ pub enum TypeBound<'src> {
 
     /// An operator the type must overload
     Supports {
-        op: EnvKey<'src>,
-        operands: OpBound<'src>,
-        ret: Option<Box<TypeBound<'src>>>,
+        // TODO
+
+        // op: EnvKey<'src>,
+        // operands: OpBound<'src>,
+        // ret: Option<Box<TypeBound<'src>>>,
     },
 
     /// An expression the type must be guaranteed to satisfy at runtime, such as "x!=0", "x>=0", "6<=x<=10", "x.foo==x.bar", etc.
@@ -153,7 +149,7 @@ pub enum TypeBound<'src> {
         /// The variable representing any instance of the self type
         var: &'src str,
         /// The expression that must be true
-        pred: PureExpr<'src>,
+        pred: Todo,
     },
 }
 
@@ -1114,75 +1110,8 @@ mod tests {
             )));
             assert_eq!(bound.to_string(), "!(!only bool + only uint)");
         }
-
-        #[test]
-        fn test_satisfies() {
-            use pure::*;
-            let bound = TypeBound::Satisfies {
-                var: "x",
-                pred: PureExpr::Operation(Box::new(PureOperation::Gt(
-                    PureExpr::Operation(Box::new(PureOperation::Mul(
-                        PureExpr::Literal(PureLiteral::Sint(3)),
-                        PureExpr::Variable(PureVariable("x")),
-                    ))),
-                    PureExpr::Operation(Box::new(PureOperation::Add(
-                        PureExpr::Variable(PureVariable("x")),
-                        PureExpr::Literal(PureLiteral::Sint(5)),
-                    ))),
-                ))),
-            };
-            println!("{bound:#}");
-            assert_eq!(bound.to_string(), "for(x): 3*x > x + 5");
-        }
-
-        #[test]
-        fn test_satisfies_precedence1() {
-            use pure::*;
-            let bound = TypeBound::Satisfies {
-                var: "x",
-                pred: PureExpr::Operation(Box::new(PureOperation::Gt(
-                    PureExpr::Operation(Box::new(PureOperation::Mul(
-                        PureExpr::Literal(PureLiteral::Sint(3)),
-                        PureExpr::Variable(PureVariable("x")),
-                    ))),
-                    PureExpr::Operation(Box::new(PureOperation::Mul(
-                        PureExpr::Variable(PureVariable("x")),
-                        PureExpr::Operation(Box::new(PureOperation::Add(
-                            PureExpr::Variable(PureVariable("x")),
-                            PureExpr::Literal(PureLiteral::Sint(5)),
-                        ))),
-                    ))),
-                ))),
-            };
-            println!("{bound:#}");
-            assert_eq!(bound.to_string(), "for(x): 3*x > x*(x + 5)");
-        }
-
-        #[test]
-        fn test_satisfies_precedence2() {
-            use pure::*;
-            let bound = TypeBound::Satisfies {
-                var: "x",
-                pred: PureExpr::Operation(Box::new(PureOperation::Gt(
-                    PureExpr::Operation(Box::new(PureOperation::Mul(
-                        PureExpr::Literal(PureLiteral::Sint(3)),
-                        PureExpr::Variable(PureVariable("x")),
-                    ))),
-                    PureExpr::Operation(Box::new(PureOperation::Mul(
-                        PureExpr::Variable(PureVariable("x")),
-                        PureExpr::Operation(Box::new(PureOperation::Mul(
-                            PureExpr::Variable(PureVariable("x")),
-                            PureExpr::Literal(PureLiteral::Sint(5)),
-                        ))),
-                    ))),
-                ))),
-            };
-            println!("{bound:#}");
-            assert_eq!(bound.to_string(), "for(x): 3*x > x*x*5");
-        }
     }
 
-    // NOT PASSING
     mod checking {
         use super::*;
         use crate::analyzer::types::bounds::error::UnsatisfiedBoundError;

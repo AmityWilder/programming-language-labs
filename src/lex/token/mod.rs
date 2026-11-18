@@ -90,6 +90,7 @@ macro_rules! define_token_eq {
     };
 }
 
+pub mod esc;
 pub mod keyword;
 pub mod punc;
 
