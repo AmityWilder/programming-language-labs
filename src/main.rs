@@ -1001,7 +1001,7 @@ fn main() {
         SourceCode::new(
             SourceLoc::from_file(PathBuf::from("builtin").join("std").with_extension("bats"))
                 .expect("'std' should be a valid module name"),
-            include_str!("batstd/std.bats").to_owned(),
+            include_str!("../builtin/std.bats").to_owned(),
         )
         .expect("standard library should not be valid"),
     );
