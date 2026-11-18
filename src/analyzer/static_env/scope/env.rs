@@ -317,7 +317,7 @@ pub struct Scope {
     /// Functions and types; unordered and must be unique within a scope
     items: HashMap<String, ItemId>,
 
-    /// Variables; names can be shadowed and reused within the same scope
+    /// Variables; ordered and can be shadowed and reused within the same scope
     vars: Vec<(String, VarId)>,
 }
 

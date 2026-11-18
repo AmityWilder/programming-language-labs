@@ -633,10 +633,7 @@ fn comp_file(
             .original()
             .expect("preprocessor should only output preprocessed files");
         let pp_id = source.push(pp);
-        source
-            .get_mut(og_id)
-            .expect("preprocessor should reference legitimate, existing files")
-            .set_preproc(pp_id);
+        source[og_id].set_preproc(pp_id);
 
         // preprocessor syntax highlighted
         if config.preproc_highlight {
@@ -802,7 +799,6 @@ fn compile(
     println!("analyzing scope...");
     for unit in units {
         println!("analyzing {:?}", unit.file);
-        let code = &source[unit.file];
         let &mod_id = file_mod_ids
             .get(&unit.file)
             .expect("should have been defined by `analyze_module_tree`");
@@ -813,7 +809,7 @@ fn compile(
             println!(
                 "hir:\n{:#}",
                 DisplayHir {
-                    code,
+                    source,
                     env: scope_env,
                     hir: &hir
                 }

@@ -1,5 +1,9 @@
 mod apples;
 
+fun is_valid(color: text) -> bool {
+    give color == "red" | color == "yellow" | color == "green";
+}
+
 {
     prnt("name a fruit\n");
     cord {
@@ -9,7 +13,7 @@ mod apples;
             let color;
             cord {
                 color = inpt;
-                if apples::is_valid(color) {
+                if is_valid(color) {
                     prnt("I don't know any " + color + " apples\n");
                     skip;
                 }

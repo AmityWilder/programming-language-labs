@@ -29,22 +29,35 @@ impl std::ops::Index<FileId> for SourceMap {
 
     #[track_caller]
     fn index(&self, index: FileId) -> &Self::Output {
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "FileId promises to be a legitimate file index"
-        )]
-        &self.files[index.into_usize()]
+        let idx = index.into_usize();
+        debug_assert!(
+            idx < self.files.len(),
+            "FileId can only be obtained from a valid file"
+        );
+        #[expect(clippy::indexing_slicing)]
+        &self.files[idx]
     }
 }
 
 impl std::ops::IndexMut<FileId> for SourceMap {
     #[track_caller]
     fn index_mut(&mut self, index: FileId) -> &mut Self::Output {
-        #[expect(
-            clippy::indexing_slicing,
-            reason = "FileId promises to be a legitimate file index"
-        )]
-        &mut self.files[index.into_usize()]
+        let idx = index.into_usize();
+        debug_assert!(
+            idx < self.files.len(),
+            "FileId can only be obtained by pushing a valid file, and cannot be invalidated"
+        );
+        #[expect(clippy::indexing_slicing)]
+        &mut self.files[idx]
+    }
+}
+
+impl std::ops::Index<Span> for SourceMap {
+    type Output = str;
+
+    #[track_caller]
+    fn index(&self, index: Span) -> &Self::Output {
+        self.get(index).expect("Span.rel should be valid")
     }
 }
 
@@ -73,14 +86,13 @@ impl SourceMap {
         id
     }
 
-    pub fn get(&self, id: FileId) -> Option<&SourceCode> {
-        self.files.get(id.into_usize())
+    /// Returns [`None`] if the `rel` field of `span` does not refer to a valid range within `file`
+    pub fn get(&self, span: Span) -> Option<&str> {
+        let Span { file, rel } = span;
+        self[file].get(rel)
     }
 
-    pub fn get_mut(&mut self, id: FileId) -> Option<&mut SourceCode> {
-        self.files.get_mut(id.into_usize())
-    }
-
+    #[deprecated = "index with the span file"]
     #[track_caller]
     pub fn source_of(&self, span: Span) -> &SourceCode {
         self.files
@@ -99,6 +111,7 @@ impl SourceMap {
         (file, s)
     }
 
+    #[deprecated = "use indexer"]
     #[track_caller]
     pub fn span_str(&self, span: Span) -> &str {
         self.span_data(span).1
