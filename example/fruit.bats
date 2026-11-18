@@ -13,7 +13,7 @@ fun is_valid(color: text) -> bool {
             let color;
             cord {
                 color = inpt;
-                if is_valid(color) {
+                if !is_valid(color) {
                     prnt("I don't know any " + color + " apples\n");
                     skip;
                 }
