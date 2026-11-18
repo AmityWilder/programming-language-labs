@@ -306,12 +306,31 @@ impl<'src, 'outer, T: CodeReference> CodeRefsGroup<'src, 'outer, T> {
                     i.strict_add(1),
                     LINE_PRELUDE_STYLE.end(),
                 )?;
-                let line_tokens = self
+                // the first and last tokens might contain a newline
+                let mut line_tokens = self
                     .curr_file
                     .tokens()
                     .lines(self.curr_file)
                     .overlapping(line_span)
-                    .map(|(span, kind)| (&self.curr_file[span], kind));
+                    .map(|(span, kind)| (&self.curr_file[span], kind))
+                    .collect::<VecDeque<_>>();
+                let first = line_tokens.pop_front();
+                let last = line_tokens.pop_back();
+                let line_tokens =
+                    first
+                        .into_iter()
+                        .map(|(lex, kind)| (lex.rsplit_once('\n').map_or(lex, |(_, x)| x), kind))
+                        .chain(line_tokens)
+                        .chain(last.into_iter().map(|(lex, kind)| {
+                            (lex.split_once('\n').map_or(lex, |(x, _)| x), kind)
+                        }))
+                        .inspect(|(lex, _)| {
+                            // TODO: is '\r' a problem?
+                            debug_assert!(
+                                !lex.contains(['\n']),
+                                "should have no linebreaks\n token: {lex:?}"
+                            );
+                        });
                 write_highlight(line_tokens, f, &SYNTAX_STYLE_ANSI)?;
                 write!(
                     f,
