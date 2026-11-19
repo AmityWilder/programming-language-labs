@@ -1503,9 +1503,8 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                             op,
                             op_span,
                             rhs: ast::Expr::Variable(ast::Variable {
-                                path: Vec::new(),
+                                path: Some(Vec::new()),
                                 ident: self.try_pull_eq(TokenKind::Ident)?,
-                                is_me: false,
                             }),
                         }))
                     } else if let Some((open, index, close)) = self
@@ -1574,9 +1573,8 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         self.pull_if_eq(Keyword::Me)
             .map(|kw| {
                 Ok(ast::Variable {
-                    path: Vec::new(),
+                    path: None,
                     ident: kw,
-                    is_me: true,
                 })
             })
             .or_else(|| {
@@ -1587,9 +1585,8 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                         ident = self.try_pull_eq(TokenKind::Ident)?;
                     }
                     Ok(ast::Variable {
-                        path,
+                        path: Some(path),
                         ident,
-                        is_me: false,
                     })
                 })
             })

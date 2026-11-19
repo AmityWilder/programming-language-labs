@@ -315,13 +315,10 @@ pub enum Directive {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Variable {
-    Unknown(ast::Variable),
-    Found(VarId),
-}
+pub struct UnlinkedVar(pub ast::Variable);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PostDeclVar(pub VarId);
+pub struct LinkedVar(pub VarId);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockExpr<V> {
@@ -371,14 +368,10 @@ pub enum Stmt<V> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExprStmt<V> {
-    pub expr: Expr<V>,
-}
+pub struct ExprStmt<V>(pub Expr<V>);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PrintStmt<V> {
-    pub expr: Expr<V>,
-}
+pub struct PrintStmt<V>(pub Expr<V>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IfStmt<V> {

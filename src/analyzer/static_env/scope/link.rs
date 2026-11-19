@@ -7,7 +7,8 @@
 
 use crate::{
     analyzer::static_env::scope::{env::ModScopeEnvironment, hir},
-    error::{CheckDiagnostics, Diagnostic},
+    error::{CheckDiagnostics, Diagnostic, DiagnosticKind},
+    parse::ast::{self, AstNode as _},
     src_code::{map::SourceMap, span::FileId},
     util::OrAllErrsExt as _,
 };
@@ -17,10 +18,10 @@ use crate::{
 impl ModScopeEnvironment<'_> {
     pub fn link(
         &mut self,
-        unit: hir::HirUnit<hir::PostDeclVar>,
+        unit: hir::HirUnit<hir::UnlinkedVar>,
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::HirUnit<hir::PostDeclVar>, CheckDiagnostics> {
+    ) -> Result<hir::HirUnit<hir::LinkedVar>, CheckDiagnostics> {
         unit.decls
             .into_iter()
             .map(|decl| decl.link(self, unit.file, source, diagnostics))
@@ -45,8 +46,9 @@ trait LinkAnalyze {
     ) -> Result<Self::Output, CheckDiagnostics>;
 }
 
-impl LinkAnalyze for hir::BlockStmt<hir::Variable> {
-    type Output = hir::BlockStmt<hir::PostDeclVar>;
+// ! THE IMPORTANT ONE !
+impl LinkAnalyze for hir::UnlinkedVar {
+    type Output = hir::LinkedVar;
 
     fn link(
         self,
@@ -55,7 +57,39 @@ impl LinkAnalyze for hir::BlockStmt<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        self.body
+        let Self(var) = self;
+        let full_span = var.span().within_file(file);
+        let ast::Variable { path, ident } = var;
+        // non-empty
+        if let Some(path @ [_, ..]) = path {
+            _ = path;
+            Ok(todo!("external variable linking"))
+        } else {
+            let ident = ident.within_file(file);
+            let name = &source[ident];
+            env.lookup_var(name)
+                // variables can shadow function names
+                .or_else(|| env.lookup_item(name))
+                .map(hir::LinkedVar)
+                .ok_or_else(|| {
+                    diagnostics.push(Diagnostic::new(full_span, DiagnosticKind::UnknownVar));
+                    CheckDiagnostics
+                })
+        }
+    }
+}
+
+impl LinkAnalyze for hir::BlockStmt<hir::UnlinkedVar> {
+    type Output = hir::BlockStmt<hir::LinkedVar>;
+
+    fn link(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        self.0
             .into_iter()
             .map(|decl| decl.link(env, file, source, diagnostics))
             .collect_boxed_or_drop_all_errs()
@@ -64,8 +98,8 @@ impl LinkAnalyze for hir::BlockStmt<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::Decl<hir::Variable> {
-    type Output = hir::Decl<hir::PostDeclVar>;
+impl LinkAnalyze for hir::Decl<hir::UnlinkedVar> {
+    type Output = hir::Decl<hir::LinkedVar>;
 
     fn link(
         self,
@@ -75,69 +109,65 @@ impl LinkAnalyze for hir::Decl<hir::Variable> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
-            Self::Mod(decl_mod) => inner
+            Self::Mod(inner) => inner
                 .link(env, file, source, diagnostics)
                 .map(hir::Decl::Mod),
 
-            Self::On(decl_on) => inner
+            Self::On(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Decl::Mod),
+                .map(hir::Decl::On),
 
-            Self::Fun(decl_fun) => inner
+            Self::Fun(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Decl::Mod),
+                .map(hir::Decl::Fun),
 
-            Self::Rec(decl_rec) => inner
+            Self::Rec(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Decl::Mod),
+                .map(hir::Decl::Rec),
 
-            Self::Cat(decl_cat) => inner
+            Self::Cat(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Decl::Mod),
+                .map(hir::Decl::Cat),
 
-            Self::Uni(decl_uni) => inner
+            Self::Uni(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Decl::Mod),
+                .map(hir::Decl::Uni),
 
-            Self::Let(decl_let) => inner
+            Self::Let(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Decl::Mod),
+                .map(hir::Decl::Let),
 
-            Self::Pvt(decl_pvt) => inner
+            Self::Pvt(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Decl::Mod),
+                .map(hir::Decl::Pvt),
 
-            Self::Dfer(decl_dfer) => inner
+            Self::Dfer(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Decl::Mod),
+                .map(hir::Decl::Dfer),
 
-            Self::Stmt(stmt) => inner
+            Self::Stmt(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Decl::Mod),
-
+                .map(hir::Decl::Stmt),
         }
     }
 }
 
-impl LinkAnalyze for hir::DeclMod<hir::Variable> {
+impl LinkAnalyze for hir::DeclMod {
     type Output = hir::DeclMod;
 
     fn link(
         self,
-        env: &mut ModScopeEnvironment<'_>,
-        file: FileId,
-        source: &SourceMap,
+        _env: &mut ModScopeEnvironment<'_>,
+        _file: FileId,
+        _source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let id = env
-            .find_submodule(&source[self.name.within_file(file)])
-            .expect("should be handled in pre-scan");
-        Ok(hir::DeclMod { id })
+        Ok(self)
     }
 }
 
-impl LinkAnalyze for hir::DeclVar<hir::Variable> {
-    type Output = hir::Decl<hir::PostDeclVar>;
+impl LinkAnalyze for hir::DeclLet<hir::UnlinkedVar> {
+    type Output = hir::DeclLet<hir::LinkedVar>;
 
     fn link(
         self,
@@ -146,60 +176,23 @@ impl LinkAnalyze for hir::DeclVar<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        // definition should be BEFORE binding
-        let init = self
-            .assignment
-            .clone()
-            .map(|x| x.expr.link(env, file, source, diagnostics))
+        let Self { id, ty, init } = self;
+        let ty = ty
+            .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
-
-        let ty = self
-            .ty
-            .clone()
-            .map(|annotation| annotation.ty.link(env, file, source, diagnostics))
+        let init = init
+            .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
-
-        let kw = self.kw;
-
-        let ident = self.binding.ident.within_file(file);
-        let id = env.decl_var(source[ident].to_owned(), ident);
-        Ok(match kw {
-            ast::VarKeyword::Let => hir::Decl::Let(hir::DeclLet {
-                id,
-                ty: ty?,
-                init: init?,
-            }),
-
-            ast::VarKeyword::Uni => hir::Decl::Uni(hir::DeclUni {
-                id,
-                ty: ty?,
-                init: init?,
-            }),
-
-            ast::VarKeyword::Pvt => {
-                let init = init.transpose().ok_or_else_flat(|| {
-                    diagnostics.push(Diagnostic::new(
-                        ident.within_file(file),
-                        DiagnosticKind::Other {
-                            severity: Severity::Error,
-                            category: StaticAnalysis,
-                            msg: "pivots must have an initializer".to_owned(),
-                        },
-                    ));
-                    CheckDiagnostics
-                });
-                hir::Decl::Pvt(hir::DeclPvt {
-                    id,
-                    ty: ty?,
-                    init: init?,
-                })
-            }
+        Ok(hir::DeclLet {
+            id,
+            ty: ty?,
+            init: init?,
         })
     }
 }
 
-impl LinkAnalyze for hir::DeclOn<hir::Variable> {
-    type Output = hir::DeclOn<hir::PostDeclVar>;
+impl LinkAnalyze for hir::DeclUni<hir::UnlinkedVar> {
+    type Output = hir::DeclUni<hir::LinkedVar>;
 
     fn link(
         self,
@@ -208,19 +201,72 @@ impl LinkAnalyze for hir::DeclOn<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let generics = self
-            .params
+        let Self { id, ty, init } = self;
+        let ty = ty
             .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
-        let target = self.ty.link(env, file, source, diagnostics);
-        let iff = self
-            .iff
+        let init = init
             .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
-        let members = self
-            .body
-            .link(env, file, source, diagnostics)
-            .map(|x| x.0);
+        Ok(hir::DeclUni {
+            id,
+            ty: ty?,
+            init: init?,
+        })
+    }
+}
+
+impl LinkAnalyze for hir::DeclPvt<hir::UnlinkedVar> {
+    type Output = hir::DeclPvt<hir::LinkedVar>;
+
+    fn link(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        let Self { id, ty, init } = self;
+        let ty = ty
+            .map(|x| x.link(env, file, source, diagnostics))
+            .transpose();
+        let init = init.link(env, file, source, diagnostics);
+        Ok(hir::DeclPvt {
+            id,
+            ty: ty?,
+            init: init?,
+        })
+    }
+}
+
+impl LinkAnalyze for hir::DeclOn<hir::UnlinkedVar> {
+    type Output = hir::DeclOn<hir::LinkedVar>;
+
+    fn link(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        let Self {
+            generics,
+            target,
+            iff,
+            members,
+        } = self;
+        let generics = generics
+            .map(|x| x.link(env, file, source, diagnostics))
+            .transpose();
+        let target = target.link(env, file, source, diagnostics);
+        let iff = iff
+            .map(|x| x.link(env, file, source, diagnostics))
+            .transpose();
+        let members = members
+            .into_iter()
+            .map(|x| x.link(env, file, source, diagnostics))
+            .collect_boxed_or_drop_all_errs()
+            .ok_or(CheckDiagnostics);
         Ok(hir::DeclOn {
             generics: generics?,
             target: target?,
@@ -230,8 +276,8 @@ impl LinkAnalyze for hir::DeclOn<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::TypeBoundClause<hir::Variable> {
-    type Output = hir::TypeBoundClause<hir::PostDeclVar>;
+impl LinkAnalyze for hir::TypeBoundClause<hir::UnlinkedVar> {
+    type Output = hir::TypeBoundClause<hir::LinkedVar>;
 
     fn link(
         self,
@@ -240,8 +286,9 @@ impl LinkAnalyze for hir::TypeBoundClause<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let target = self.ty.link(env, file, source, diagnostics);
-        let bound = self.bound.link(env, file, source, diagnostics);
+        let Self { target, bound } = self;
+        let target = target.link(env, file, source, diagnostics);
+        let bound = bound.link(env, file, source, diagnostics);
         Ok(hir::TypeBoundClause {
             target: target?,
             bound: bound?,
@@ -249,8 +296,8 @@ impl LinkAnalyze for hir::TypeBoundClause<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::IffClause<hir::Variable> {
-    type Output = hir::IffClause<hir::PostDeclVar>;
+impl LinkAnalyze for hir::IffClause<hir::UnlinkedVar> {
+    type Output = hir::IffClause<hir::LinkedVar>;
 
     fn link(
         self,
@@ -259,7 +306,7 @@ impl LinkAnalyze for hir::IffClause<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        self.bounds
+        self.0
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
             .collect_boxed_or_drop_all_errs()
@@ -268,25 +315,22 @@ impl LinkAnalyze for hir::IffClause<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::SelfParam<hir::Variable> {
+impl LinkAnalyze for hir::SelfParam {
     type Output = hir::SelfParam;
 
     fn link(
         self,
-        env: &mut ModScopeEnvironment<'_>,
-        file: FileId,
-        source: &SourceMap,
+        _env: &mut ModScopeEnvironment<'_>,
+        _file: FileId,
+        _source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let ident = self.span.within_file(file);
-        debug_assert_eq!(&source[ident], Keyword::Me.as_str(), "ident should be `me`");
-        let id = env.decl_var(Keyword::Me.to_string(), ident);
-        Ok(hir::SelfParam { id })
+        Ok(self)
     }
 }
 
-impl LinkAnalyze for hir::FnParam<hir::Variable> {
-    type Output = hir::FunParam<hir::PostDeclVar>;
+impl LinkAnalyze for hir::FunParam<hir::UnlinkedVar> {
+    type Output = hir::FunParam<hir::LinkedVar>;
 
     fn link(
         self,
@@ -295,15 +339,14 @@ impl LinkAnalyze for hir::FnParam<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let ident = self.name.within_file(file);
-        let id = env.decl_var(source[ident].to_owned(), ident);
-        let ty = self.ty.ty.link(env, file, source, diagnostics);
+        let Self { id, ty } = self;
+        let ty = ty.link(env, file, source, diagnostics);
         Ok(hir::FunParam { id, ty: ty? })
     }
 }
 
-impl LinkAnalyze for hir::DeclFun<hir::Variable> {
-    type Output = hir::DeclFun<hir::PostDeclVar>;
+impl LinkAnalyze for hir::DeclFun<hir::UnlinkedVar> {
+    type Output = hir::DeclFun<hir::LinkedVar>;
 
     fn link(
         self,
@@ -312,56 +355,37 @@ impl LinkAnalyze for hir::DeclFun<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let (head, body) = match self {
-            Self::Declare(decl) => (decl.head, None),
-            Self::Define(def) => (def.head, Some(def.body)),
-        };
-        let ident = head.name.within_file(file);
-        let name = &source[ident];
-        let id = env.decl_item(name.to_owned(), ident).map_err(|e| {
-            diagnostics.push(Diagnostic::new(
-                ident,
-                DiagnosticKind::Other {
-                    severity: Severity::Error,
-                    category: StaticAnalysis,
-                    msg: format!(
-                        "duplicate function `{name}`: first definition:\x1b[0m {}",
-                        env.get_decl(e.og)
-                            .expect("duplicate item error should give a valid ID")
-                            .decl
-                            .display_loc(source)
-                    ),
-                },
-            ));
-            CheckDiagnostics
-        });
-        let generics = head
-            .generics
+        let Self {
+            id,
+            generics,
+            self_param,
+            params,
+            ret,
+            iff,
+            body,
+        } = self;
+        let generics = generics
             .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
-        let self_param = head
-            .self_param
+        let self_param = self_param
             .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
-        let params = head
-            .params
+        let params = params
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
             .collect_boxed_or_drop_all_errs()
             .ok_or(CheckDiagnostics);
-        let ret = head
-            .ret
-            .map(|x| x.ty.link(env, file, source, diagnostics))
+        let ret = ret
+            .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
-        let iff = head
-            .iff
+        let iff = iff
             .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
         let body = body
             .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
         Ok(hir::DeclFun {
-            id: id?,
+            id,
             generics: generics?,
             self_param: self_param?,
             params: params?,
@@ -372,8 +396,8 @@ impl LinkAnalyze for hir::DeclFun<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::DeclType<hir::Variable> {
-    type Output = hir::Decl<hir::PostDeclVar>;
+impl LinkAnalyze for hir::Field<hir::UnlinkedVar> {
+    type Output = hir::Field<hir::LinkedVar>;
 
     fn link(
         self,
@@ -382,51 +406,14 @@ impl LinkAnalyze for hir::DeclType<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        match self {
-            ast::DeclType::Rec(inner) => inner
-                .link(env, file, source, diagnostics)
-                .map(hir::Decl::Rec),
-
-            ast::DeclType::Cat(inner) => inner
-                .link(env, file, source, diagnostics)
-                .map(hir::Decl::Cat),
-        }
+        let Self { id, ty } = self;
+        let ty = ty.link(env, file, source, diagnostics);
+        Ok(hir::Field { id, ty: ty? })
     }
 }
 
-impl LinkAnalyze for (ast::Field, ItemId)<hir::Variable> {
-    type Output = hir::Field<hir::PostDeclVar>;
-
-    fn link(
-        self,
-        env: &mut ModScopeEnvironment<'_>,
-        file: FileId,
-        source: &SourceMap,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<Self::Output, CheckDiagnostics> {
-        let (field, parent) = self;
-        let ident = field.name.within_file(file);
-        let field_name = &source[ident];
-        let ty = field.ty.ty.clone().link(env, file, source, diagnostics);
-        let id = env
-            .decl_member(parent, field_name.to_owned(), ident)
-            .map_err(|e| {
-                diagnostics.push(Diagnostic::new(
-                    ident,
-                    DiagnosticKind::Other {
-                        severity: Severity::Error,
-                        category: StaticAnalysis,
-                        msg: format!("could not declare field {parent}::{field_name}: {e:?}"),
-                    },
-                ));
-                CheckDiagnostics
-            });
-        Ok(hir::Field { id: id?, ty: ty? })
-    }
-}
-
-impl LinkAnalyze for hir::DeclRec<hir::Variable> {
-    type Output = hir::DeclRec<hir::PostDeclVar>;
+impl LinkAnalyze for hir::DeclRec<hir::UnlinkedVar> {
+    type Output = hir::DeclRec<hir::LinkedVar>;
 
     fn link(
         self,
@@ -436,24 +423,10 @@ impl LinkAnalyze for hir::DeclRec<hir::Variable> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         // TODO: generics
-        let ident = self.name.within_file(file);
-        let name = &source[ident];
-        let id = env.decl_item(name.to_owned(), ident).map_err(|e| {
-            diagnostics.push(Diagnostic::new(
-                ident,
-                DiagnosticKind::Other {
-                    severity: Severity::Error,
-                    category: StaticAnalysis,
-                    msg: format!("could not declare rec {name}: {e:?}"),
-                },
-            ));
-            CheckDiagnostics
-        })?;
-        let fields = self
-            .body
-            .fields
+        let Self { id, fields } = self;
+        let fields = fields
             .into_iter()
-            .map(|x| (x, id).link(env, file, source, diagnostics))
+            .map(|x| x.link(env, file, source, diagnostics))
             .collect_boxed_or_drop_all_errs()
             .ok_or(CheckDiagnostics);
         Ok(hir::DeclRec {
@@ -463,44 +436,27 @@ impl LinkAnalyze for hir::DeclRec<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::DeclCat<hir::Variable> {
-    type Output = hir::DeclCat<hir::PostDeclVar>;
+impl LinkAnalyze for hir::DeclCat<hir::UnlinkedVar> {
+    type Output = hir::DeclCat<hir::LinkedVar>;
 
     fn link(
         self,
-        env: &mut ModScopeEnvironment<'_>,
-        file: FileId,
-        source: &SourceMap,
-        diagnostics: &mut Vec<Diagnostic>,
+        _env: &mut ModScopeEnvironment<'_>,
+        _file: FileId,
+        _source: &SourceMap,
+        _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let ident = self.name.within_file(file);
-        let name = &source[ident];
-        let id = env.decl_item(name.to_owned(), ident).map_err(|e| {
-            diagnostics.push(Diagnostic::new(
-                ident,
-                DiagnosticKind::Other {
-                    severity: Severity::Error,
-                    category: StaticAnalysis,
-                    msg: format!("{e:?}"),
-                },
-            ));
-            CheckDiagnostics
-        });
-        let discriminants = self
-            .discriminants
-            .items
+        let Self { id, discriminants } = self;
+        let discriminants = discriminants
             .into_iter()
             .map(|_disc| todo!("cat discriminant analysis"))
             .collect();
-        Ok(hir::DeclCat {
-            id: id?,
-            discriminants,
-        })
+        Ok(hir::DeclCat { id, discriminants })
     }
 }
 
-impl LinkAnalyze for hir::DeclDfer<hir::Variable> {
-    type Output = hir::DeclDfer<hir::PostDeclVar>;
+impl LinkAnalyze for hir::DeclDfer<hir::UnlinkedVar> {
+    type Output = hir::DeclDfer<hir::LinkedVar>;
 
     fn link(
         self,
@@ -509,11 +465,8 @@ impl LinkAnalyze for hir::DeclDfer<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let param = self.param.map(|x| {
-            let ident = x.param.ident.within_file(file);
-            env.decl_var(source[ident].to_owned(), ident)
-        });
-        let on_pop = self.on_pop.link(env, file, source, diagnostics);
+        let Self { param, on_pop } = self;
+        let on_pop = on_pop.link(env, file, source, diagnostics);
         Ok(hir::DeclDfer {
             param,
             on_pop: on_pop?,
@@ -521,8 +474,8 @@ impl LinkAnalyze for hir::DeclDfer<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::Stmt<hir::Variable> {
-    type Output = hir::Stmt<hir::PostDeclVar>;
+impl LinkAnalyze for hir::Stmt<hir::UnlinkedVar> {
+    type Output = hir::Stmt<hir::LinkedVar>;
 
     fn link(
         self,
@@ -532,51 +485,61 @@ impl LinkAnalyze for hir::Stmt<hir::Variable> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
-            ast::Stmt::Expr(inner) => inner
-                .expr
+            Self::Expr(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(|expr| hir::Stmt::Expr(hir::ExprStmt { expr })),
+                .map(hir::Stmt::Expr),
 
-            ast::Stmt::Print(inner) => inner
-                .group
-                .expr
+            Self::Print(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(|expr| hir::Stmt::Print(hir::PrintStmt { expr })),
+                .map(hir::Stmt::Print),
 
-            ast::Stmt::If(inner) => inner
+            Self::If(inner) => inner
                 .link(env, file, source, diagnostics)
                 .map(hir::Stmt::If),
 
-            ast::Stmt::Loop(inner) => inner.link(env, file, source, diagnostics),
+            Self::Pick(_inner) => todo!("pick statement linking"),
 
-            ast::Stmt::Fail(inner) => inner
+            Self::Loop(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(hir::Stmt::Fail),
+                .map(hir::Stmt::Loop),
 
-            ast::Stmt::Give(inner) => inner
+            Self::Cord(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::Stmt::Cord),
+
+            Self::Rep(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::Stmt::Rep),
+
+            Self::For(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::Stmt::For),
+
+            Self::Give(inner) => inner
                 .link(env, file, source, diagnostics)
                 .map(hir::Stmt::Give),
 
-            // not sure if this is a good language feature
-            ast::Stmt::Emit(_inner) => todo!("emit analysis"),
+            Self::Fail(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::Stmt::Fail),
 
-            ast::Stmt::Done(inner) => inner
+            Self::Done(inner) => inner
                 .link(env, file, source, diagnostics)
                 .map(hir::Stmt::Done),
 
-            ast::Stmt::Skip(inner) => Ok(hir::Stmt::Skip(hir::SkipStmt {
-                label: inner.label.map(|lbl| hir::Label { name: lbl.name }),
-            })),
+            Self::Skip(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::Stmt::Skip),
 
-            ast::Stmt::Block(inner) => inner
+            Self::Block(inner) => inner
                 .link(env, file, source, diagnostics)
                 .map(hir::Stmt::Block),
         }
     }
 }
 
-impl LinkAnalyze for hir::LoopBlock<hir::Variable> {
-    type Output = hir::Stmt<hir::PostDeclVar>;
+impl LinkAnalyze for hir::LoopStmt<hir::UnlinkedVar> {
+    type Output = hir::LoopStmt<hir::LinkedVar>;
 
     fn link(
         self,
@@ -585,42 +548,14 @@ impl LinkAnalyze for hir::LoopBlock<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let label = self.label.map(|name| hir::Label {
-            name: name.label.name,
-        });
-        let block = self.block.link(env, file, source, diagnostics);
-        Ok(match self.kind {
-            ast::LoopKind::Loop => hir::Stmt::Loop(hir::LoopStmt {
-                label,
-                body: block?,
-            }),
-
-            ast::LoopKind::Cord => hir::Stmt::Cord(hir::CordStmt {
-                label,
-                body: block?,
-            }),
-
-            ast::LoopKind::Rep { pred } => hir::Stmt::Rep(hir::RepStmt {
-                pred: pred.link(env, file, source, diagnostics)?,
-                body: block?,
-            }),
-
-            ast::LoopKind::For { bind, iter, .. } => {
-                let ident = bind.ident.within_file(file);
-                let name = &source[ident];
-                let var = env.decl_var(name.to_owned(), ident);
-                hir::Stmt::For(hir::ForStmt {
-                    var: hir::BindingPattern { var },
-                    iter: iter.link(env, file, source, diagnostics)?,
-                    body: block?,
-                })
-            }
-        })
+        let Self { label, body } = self;
+        let body = body.link(env, file, source, diagnostics);
+        Ok(hir::LoopStmt { label, body: body? })
     }
 }
 
-impl LinkAnalyze for hir::PrintStmt<hir::Variable> {
-    type Output = hir::PrintStmt<hir::PostDeclVar>;
+impl LinkAnalyze for hir::CordStmt<hir::UnlinkedVar> {
+    type Output = hir::CordStmt<hir::LinkedVar>;
 
     fn link(
         self,
@@ -629,15 +564,58 @@ impl LinkAnalyze for hir::PrintStmt<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        self.group
-            .expr
+        let Self { label, body } = self;
+        let body = body.link(env, file, source, diagnostics);
+        Ok(hir::CordStmt { label, body: body? })
+    }
+}
+
+impl LinkAnalyze for hir::RepStmt<hir::UnlinkedVar> {
+    type Output = hir::RepStmt<hir::LinkedVar>;
+
+    fn link(
+        self,
+        _env: &mut ModScopeEnvironment<'_>,
+        _file: FileId,
+        _source: &SourceMap,
+        _diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        todo!()
+    }
+}
+
+impl LinkAnalyze for hir::ForStmt<hir::UnlinkedVar> {
+    type Output = hir::ForStmt<hir::LinkedVar>;
+
+    fn link(
+        self,
+        _env: &mut ModScopeEnvironment<'_>,
+        _file: FileId,
+        _source: &SourceMap,
+        _diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        todo!()
+    }
+}
+
+impl LinkAnalyze for hir::ExprStmt<hir::UnlinkedVar> {
+    type Output = hir::ExprStmt<hir::LinkedVar>;
+
+    fn link(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        self.0
             .link(env, file, source, diagnostics)
-            .map(|expr| hir::PrintStmt { expr })
+            .map(hir::ExprStmt)
     }
 }
 
-impl LinkAnalyze for hir::GiveStmt<hir::Variable> {
-    type Output = hir::GiveStmt<hir::PostDeclVar>;
+impl LinkAnalyze for hir::PrintStmt<hir::UnlinkedVar> {
+    type Output = hir::PrintStmt<hir::LinkedVar>;
 
     fn link(
         self,
@@ -646,15 +624,31 @@ impl LinkAnalyze for hir::GiveStmt<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        self.value
+        self.0
+            .link(env, file, source, diagnostics)
+            .map(hir::PrintStmt)
+    }
+}
+
+impl LinkAnalyze for hir::GiveStmt<hir::UnlinkedVar> {
+    type Output = hir::GiveStmt<hir::LinkedVar>;
+
+    fn link(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        self.expr
             .map(|expr| expr.link(env, file, source, diagnostics))
             .transpose()
             .map(|expr| hir::GiveStmt { expr })
     }
 }
 
-impl LinkAnalyze for hir::FailStmt<hir::Variable> {
-    type Output = hir::FailStmt<hir::PostDeclVar>;
+impl LinkAnalyze for hir::FailStmt<hir::UnlinkedVar> {
+    type Output = hir::FailStmt<hir::LinkedVar>;
 
     fn link(
         self,
@@ -663,15 +657,15 @@ impl LinkAnalyze for hir::FailStmt<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        self.value
+        self.expr
             .map(|expr| expr.link(env, file, source, diagnostics))
             .transpose()
             .map(|expr| hir::FailStmt { expr })
     }
 }
 
-impl LinkAnalyze for hir::DoneStmt<hir::Variable> {
-    type Output = hir::DoneStmt<hir::PostDeclVar>;
+impl LinkAnalyze for hir::DoneStmt<hir::UnlinkedVar> {
+    type Output = hir::DoneStmt<hir::LinkedVar>;
 
     fn link(
         self,
@@ -680,17 +674,30 @@ impl LinkAnalyze for hir::DoneStmt<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let label = self.label.map(|lbl| hir::Label { name: lbl.name });
-        let expr = self
-            .value
+        let Self { label, expr } = self;
+        let expr = expr
             .map(|expr| expr.link(env, file, source, diagnostics))
             .transpose();
         Ok(hir::DoneStmt { label, expr: expr? })
     }
 }
 
-impl LinkAnalyze for hir::Expr<hir::Variable> {
-    type Output = hir::Expr<hir::PostDeclVar>;
+impl LinkAnalyze for hir::SkipStmt {
+    type Output = hir::SkipStmt;
+
+    fn link(
+        self,
+        _env: &mut ModScopeEnvironment<'_>,
+        _file: FileId,
+        _source: &SourceMap,
+        _diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        Ok(self)
+    }
+}
+
+impl LinkAnalyze for hir::Expr<hir::UnlinkedVar> {
+    type Output = hir::Expr<hir::LinkedVar>;
 
     fn link(
         self,
@@ -726,21 +733,15 @@ impl LinkAnalyze for hir::Expr<hir::Variable> {
                 .link(env, file, source, diagnostics)
                 .map(hir::Expr::Directive),
 
-            Self::Member(_inner) => todo!("member access analysis"),
-
             Self::Variable(inner) => inner
                 .link(env, file, source, diagnostics)
                 .map(hir::Expr::Variable),
-
-            Self::Grouping(inner) => inner.expr.link(env, file, source, diagnostics),
-
-            Self::Type(_inner) => todo!("expr type expr analysis"),
         }
     }
 }
 
-impl LinkAnalyze for hir::BlockExpr<hir::Variable> {
-    type Output = hir::BlockExpr<hir::PostDeclVar>;
+impl LinkAnalyze for hir::BlockExpr<hir::UnlinkedVar> {
+    type Output = hir::BlockExpr<hir::LinkedVar>;
 
     fn link(
         self,
@@ -756,16 +757,11 @@ impl LinkAnalyze for hir::BlockExpr<hir::Variable> {
 
             Self::Loop(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(|x| match x {
-                    hir::Stmt::Loop(stmt) => hir::BlockExpr::Loop(Box::new(stmt)),
-                    hir::Stmt::Cord(stmt) => hir::BlockExpr::Cord(Box::new(stmt)),
+                .map(|x| hir::BlockExpr::Loop(Box::new(x))),
 
-                    hir::Stmt::Rep(_) | hir::Stmt::For(_) => {
-                        unimplemented!("ast::BlockExpr should not be Rep or For; found: {x:?}")
-                    }
-
-                    _ => unreachable!("loop analysis should only produce a loop"),
-                }),
+            Self::Cord(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(|x| hir::BlockExpr::Cord(Box::new(x))),
 
             Self::Block(inner) => inner
                 .link(env, file, source, diagnostics)
@@ -774,7 +770,7 @@ impl LinkAnalyze for hir::BlockExpr<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::Directive<hir::Variable> {
+impl LinkAnalyze for hir::Directive {
     type Output = hir::Directive;
 
     fn link(
@@ -784,40 +780,12 @@ impl LinkAnalyze for hir::Directive<hir::Variable> {
         _source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        Ok(match self.kw {
-            ast::DirectiveKw::Inpt => hir::Directive::Inpt,
-        })
+        Ok(self)
     }
 }
 
-impl LinkAnalyze for hir::Variable<hir::Variable> {
-    type Output = hir::Variable;
-
-    fn link(
-        self,
-        env: &mut ModScopeEnvironment<'_>,
-        file: FileId,
-        source: &SourceMap,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<Self::Output, CheckDiagnostics> {
-        if self.path.is_empty() {
-            let ident = self.ident.within_file(file);
-            let name = &source[ident];
-            // variables can shadow function names
-            let id = env
-                .lookup_var(name)
-                // maybe a function
-                .or_else(|| env.lookup_item(name));
-            if let Some(id) = id {
-                return Ok(hir::Variable::Found(id));
-            }
-        }
-        Ok(hir::Variable::Unknown(self))
-    }
-}
-
-impl LinkAnalyze for hir::IfStmt<hir::Variable> {
-    type Output = hir::IfStmt<hir::PostDeclVar>;
+impl LinkAnalyze for hir::IfStmt<hir::UnlinkedVar> {
+    type Output = hir::IfStmt<hir::LinkedVar>;
 
     fn link(
         self,
@@ -830,18 +798,7 @@ impl LinkAnalyze for hir::IfStmt<hir::Variable> {
         let then = self.then.link(env, file, source, diagnostics);
         let or = self
             .or
-            .map(|or| {
-                match or.body {
-                    ast::OrBody::More(stmt) => stmt
-                        .link(env, file, source, diagnostics)
-                        .map(hir::OrStmt::More),
-
-                    ast::OrBody::Last(block) => block
-                        .link(env, file, source, diagnostics)
-                        .map(hir::OrStmt::Last),
-                }
-                .map(Box::new)
-            })
+            .map(|or| or.link(env, file, source, diagnostics).map(Box::new))
             .transpose();
         Ok(hir::IfStmt {
             pred: pred?,
@@ -851,8 +808,8 @@ impl LinkAnalyze for hir::IfStmt<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::TypeExpr<hir::Variable> {
-    type Output = hir::TypeExpr<hir::PostDeclVar>;
+impl LinkAnalyze for hir::OrStmt<hir::UnlinkedVar> {
+    type Output = hir::OrStmt<hir::LinkedVar>;
 
     fn link(
         self,
@@ -862,53 +819,19 @@ impl LinkAnalyze for hir::TypeExpr<hir::Variable> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
-            // TODO: hmm...
-            ast::TypeExpr::Primitive(inner) => Ok(hir::TypeExpr::Primitive(match inner.ty {
-                ast::TypenameKeyword::None => hir::PrimitiveType::None,
-                ast::TypenameKeyword::Nevr => hir::PrimitiveType::Nevr,
-                ast::TypenameKeyword::Fail => hir::PrimitiveType::Fail,
-                ast::TypenameKeyword::Bool => hir::PrimitiveType::Bool,
-                ast::TypenameKeyword::Byte => hir::PrimitiveType::Byte,
-                ast::TypenameKeyword::Uint => hir::PrimitiveType::Uint,
-                ast::TypenameKeyword::Sint => hir::PrimitiveType::Sint,
-                ast::TypenameKeyword::Flpt => hir::PrimitiveType::Flpt,
-                ast::TypenameKeyword::Char => hir::PrimitiveType::Char,
-                ast::TypenameKeyword::Text => hir::PrimitiveType::Text,
-            })),
-
-            ast::TypeExpr::Instance(inner) => inner
+            Self::More(stmt) => stmt
                 .link(env, file, source, diagnostics)
-                .map(hir::TypeExpr::Instance),
+                .map(hir::OrStmt::More),
 
-            ast::TypeExpr::Fallible(inner) => inner
+            Self::Last(block) => block
                 .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeExpr::Fallible(Box::new(x))),
-
-            ast::TypeExpr::Ref(inner) => inner
-                .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeExpr::Ref(Box::new(x))),
-
-            ast::TypeExpr::View(inner) => inner
-                .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeExpr::View(Box::new(x))),
-
-            ast::TypeExpr::Assoc(inner) => inner
-                .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeExpr::Assoc(Box::new(x))),
-
-            ast::TypeExpr::FunPtr(inner) => inner
-                .link(env, file, source, diagnostics)
-                .map(hir::TypeExpr::FunPtr),
-
-            ast::TypeExpr::Opaque(inner) => inner
-                .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeExpr::Opaque(Box::new(x))),
+                .map(hir::OrStmt::Last),
         }
     }
 }
 
-impl LinkAnalyze for hir::FallType<hir::Variable> {
-    type Output = hir::FallType<hir::PostDeclVar>;
+impl LinkAnalyze for hir::TypeExpr<hir::UnlinkedVar> {
+    type Output = hir::TypeExpr<hir::LinkedVar>;
 
     fn link(
         self,
@@ -917,12 +840,52 @@ impl LinkAnalyze for hir::FallType<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let then_ty = self.then_ty.link(env, file, source, diagnostics);
-        let ty = match self.ty {
-            ast::OrTypeKeyword::None => hir::OrType::None,
-            ast::OrTypeKeyword::Nevr => hir::OrType::Nevr,
-            ast::OrTypeKeyword::Fail => hir::OrType::Fail,
-        };
+        match self {
+            Self::Primitive(x) => Ok(hir::TypeExpr::Primitive(x)),
+
+            Self::Instance(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::TypeExpr::Instance),
+
+            Self::Fallible(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(|x| hir::TypeExpr::Fallible(Box::new(x))),
+
+            Self::Ref(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(|x| hir::TypeExpr::Ref(Box::new(x))),
+
+            Self::View(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(|x| hir::TypeExpr::View(Box::new(x))),
+
+            Self::Assoc(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(|x| hir::TypeExpr::Assoc(Box::new(x))),
+
+            Self::FunPtr(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::TypeExpr::FunPtr),
+
+            Self::Opaque(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(|x| hir::TypeExpr::Opaque(Box::new(x))),
+        }
+    }
+}
+
+impl LinkAnalyze for hir::FallType<hir::UnlinkedVar> {
+    type Output = hir::FallType<hir::LinkedVar>;
+
+    fn link(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        let Self { then_ty, ty } = self;
+        let then_ty = then_ty.link(env, file, source, diagnostics);
         Ok(hir::FallType {
             then_ty: then_ty?,
             ty,
@@ -930,8 +893,8 @@ impl LinkAnalyze for hir::FallType<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::ViewType<hir::Variable> {
-    type Output = hir::ViewType<hir::PostDeclVar>;
+impl LinkAnalyze for hir::ViewType<hir::UnlinkedVar> {
+    type Output = hir::ViewType<hir::LinkedVar>;
 
     fn link(
         self,
@@ -940,10 +903,10 @@ impl LinkAnalyze for hir::ViewType<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let item = self.item.link(env, file, source, diagnostics);
-        let count = self
-            .count
-            .map(|x| x.count.link(env, file, source, diagnostics))
+        let Self { item, count } = self;
+        let item = item.link(env, file, source, diagnostics);
+        let count = count
+            .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
         Ok(hir::ViewType {
             item: item?,
@@ -952,8 +915,8 @@ impl LinkAnalyze for hir::ViewType<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::AssocType<hir::Variable> {
-    type Output = hir::AssocType<hir::PostDeclVar>;
+impl LinkAnalyze for hir::AssocType<hir::UnlinkedVar> {
+    type Output = hir::AssocType<hir::LinkedVar>;
 
     fn link(
         self,
@@ -971,8 +934,8 @@ impl LinkAnalyze for hir::AssocType<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::AssocTypeSource<hir::Variable> {
-    type Output = hir::AssocTypeSource<hir::PostDeclVar>;
+impl LinkAnalyze for hir::AssocTypeSource<hir::UnlinkedVar> {
+    type Output = hir::AssocTypeSource<hir::LinkedVar>;
 
     fn link(
         self,
@@ -985,16 +948,16 @@ impl LinkAnalyze for hir::AssocTypeSource<hir::Variable> {
             Self::Simple(inner) => inner
                 .link(env, file, source, diagnostics)
                 .map(hir::AssocTypeSource::Simple),
+
             Self::Grouped(inner) => inner
-                .inner
                 .link(env, file, source, diagnostics)
                 .map(hir::AssocTypeSource::Grouped),
         }
     }
 }
 
-impl LinkAnalyze for hir::OpaqueType<hir::Variable> {
-    type Output = hir::OpaqueType<hir::PostDeclVar>;
+impl LinkAnalyze for hir::OpaqueType<hir::UnlinkedVar> {
+    type Output = hir::OpaqueType<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1003,13 +966,13 @@ impl LinkAnalyze for hir::OpaqueType<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        self.bound
+        self.0
             .link(env, file, source, diagnostics)
             .map(hir::OpaqueType)
     }
 }
 
-impl LinkAnalyze for hir::Typename<hir::Variable> {
+impl LinkAnalyze for hir::Typename {
     type Output = hir::Typename;
 
     fn link(
@@ -1031,8 +994,8 @@ impl LinkAnalyze for hir::Typename<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::FunType<hir::Variable> {
-    type Output = hir::FunType<hir::PostDeclVar>;
+impl LinkAnalyze for hir::FunType<hir::UnlinkedVar> {
+    type Output = hir::FunType<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1049,7 +1012,7 @@ impl LinkAnalyze for hir::FunType<hir::Variable> {
             .ok_or(CheckDiagnostics);
         let ret = self
             .ret
-            .map(|x| x.ty.link(env, file, source, diagnostics).map(Box::new))
+            .map(|x| x.link(env, file, source, diagnostics).map(Box::new))
             .transpose();
         Ok(hir::FunType {
             params: params?,
@@ -1058,8 +1021,8 @@ impl LinkAnalyze for hir::FunType<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::RefType<hir::Variable> {
-    type Output = hir::RefType<hir::PostDeclVar>;
+impl LinkAnalyze for hir::RefType<hir::UnlinkedVar> {
+    type Output = hir::RefType<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1074,8 +1037,8 @@ impl LinkAnalyze for hir::RefType<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::TypeInstance<hir::Variable> {
-    type Output = hir::TypeInstance<hir::PostDeclVar>;
+impl LinkAnalyze for hir::TypeInstance<hir::UnlinkedVar> {
+    type Output = hir::TypeInstance<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1096,8 +1059,8 @@ impl LinkAnalyze for hir::TypeInstance<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::Binary<hir::Variable> {
-    type Output = hir::Binary<hir::PostDeclVar>;
+impl LinkAnalyze for hir::Binary<hir::UnlinkedVar> {
+    type Output = hir::Binary<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1116,8 +1079,8 @@ impl LinkAnalyze for hir::Binary<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::Unary<hir::Variable> {
-    type Output = hir::Unary<hir::PostDeclVar>;
+impl LinkAnalyze for hir::Unary<hir::UnlinkedVar> {
+    type Output = hir::Unary<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1135,8 +1098,8 @@ impl LinkAnalyze for hir::Unary<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::Subscript<hir::Variable> {
-    type Output = hir::Subscript<hir::PostDeclVar>;
+impl LinkAnalyze for hir::Subscript<hir::UnlinkedVar> {
+    type Output = hir::Subscript<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1145,8 +1108,9 @@ impl LinkAnalyze for hir::Subscript<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let arr = self.arr.link(env, file, source, diagnostics);
-        let idx = self.index.link(env, file, source, diagnostics);
+        let Self { arr, idx } = self;
+        let arr = arr.link(env, file, source, diagnostics);
+        let idx = idx.link(env, file, source, diagnostics);
         Ok(hir::Subscript {
             arr: arr?,
             idx: idx?,
@@ -1154,8 +1118,8 @@ impl LinkAnalyze for hir::Subscript<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::FnCall<hir::Variable> {
-    type Output = hir::FnCall<hir::PostDeclVar>;
+impl LinkAnalyze for hir::FnCall<hir::UnlinkedVar> {
+    type Output = hir::FnCall<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1178,8 +1142,8 @@ impl LinkAnalyze for hir::FnCall<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::GenericGroup<hir::Variable> {
-    type Output = hir::GenericGroup<hir::PostDeclVar>;
+impl LinkAnalyze for hir::GenericGroup<hir::UnlinkedVar> {
+    type Output = hir::GenericGroup<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1188,7 +1152,7 @@ impl LinkAnalyze for hir::GenericGroup<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        self.list
+        self.0
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
             .collect_boxed_or_drop_all_errs()
@@ -1197,8 +1161,8 @@ impl LinkAnalyze for hir::GenericGroup<hir::Variable> {
     }
 }
 
-impl LinkAnalyze for hir::TypeBound<hir::Variable> {
-    type Output = hir::TypeBound<hir::PostDeclVar>;
+impl LinkAnalyze for hir::TypeBound<hir::UnlinkedVar> {
+    type Output = hir::TypeBound<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1208,15 +1172,22 @@ impl LinkAnalyze for hir::TypeBound<hir::Variable> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         match self {
-            Self::Conjunction(inner) => inner.link(env, file, source, diagnostics),
+            Self::Conjunction(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::TypeBound::Conjunction),
 
-            Self::Disjunction(inner) => inner.link(env, file, source, diagnostics),
+            Self::Disjunction(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::TypeBound::Disjunction),
 
-            Self::Selection(inner) => inner.link(env, file, source, diagnostics),
+            Self::Selection(inner) => inner
+                .link(env, file, source, diagnostics)
+                .map(hir::TypeBound::Selection),
 
             Self::Not(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeBound::Not(Box::new(x))),
+                .map(Box::new)
+                .map(hir::TypeBound::Not),
 
             Self::Exact(inner) => inner
                 .link(env, file, source, diagnostics)
@@ -1224,26 +1195,28 @@ impl LinkAnalyze for hir::TypeBound<hir::Variable> {
 
             Self::Has(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeBound::Has(Box::new(x))),
+                .map(Box::new)
+                .map(hir::TypeBound::Has),
 
             Self::Shape(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeBound::Shape(hir::ShapeBound(x))),
+                .map(hir::TypeBound::Shape),
 
             Self::Supports(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeBound::Supports(Box::new(x))),
+                .map(Box::new)
+                .map(hir::TypeBound::Supports),
 
             Self::Satisfies(inner) => inner
                 .link(env, file, source, diagnostics)
-                .map(|x| hir::TypeBound::Satisfies(Box::new(x))),
-
+                .map(Box::new)
+                .map(hir::TypeBound::Satisfies),
         }
     }
 }
 
-impl LinkAnalyze for hir::ComboBound<hir::Variable> {
-    type Output = hir::TypeBound<hir::PostDeclVar>;
+impl LinkAnalyze for hir::ConjunctionBound<hir::UnlinkedVar> {
+    type Output = hir::ConjunctionBound<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1252,19 +1225,17 @@ impl LinkAnalyze for hir::ComboBound<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let lhs = self.lhs.link(env, file, source, diagnostics);
-        let rhs = self.rhs.link(env, file, source, diagnostics);
-        let bounds = Box::from([lhs?, rhs?]);
-        Ok(match self.sep {
-            Combinator::All => hir::TypeBound::Conjunction(hir::ConjunctionBound(bounds)),
-            Combinator::Any => hir::TypeBound::Disjunction(hir::DisjunctionBound(bounds)),
-            Combinator::One => hir::TypeBound::Selection(hir::SelectionBound(bounds)),
-        })
+        self.0
+            .into_iter()
+            .map(|x| x.link(env, file, source, diagnostics))
+            .collect_boxed_or_drop_all_errs()
+            .map(hir::ConjunctionBound)
+            .ok_or(CheckDiagnostics)
     }
 }
 
-impl LinkAnalyze for hir::NegativeBound<hir::Variable> {
-    type Output = hir::NegativeBound<hir::PostDeclVar>;
+impl LinkAnalyze for hir::DisjunctionBound<hir::UnlinkedVar> {
+    type Output = hir::DisjunctionBound<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1273,14 +1244,52 @@ impl LinkAnalyze for hir::NegativeBound<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        self.rhs
+        self.0
+            .into_iter()
+            .map(|x| x.link(env, file, source, diagnostics))
+            .collect_boxed_or_drop_all_errs()
+            .map(hir::DisjunctionBound)
+            .ok_or(CheckDiagnostics)
+    }
+}
+
+impl LinkAnalyze for hir::SelectionBound<hir::UnlinkedVar> {
+    type Output = hir::SelectionBound<hir::LinkedVar>;
+
+    fn link(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        self.0
+            .into_iter()
+            .map(|x| x.link(env, file, source, diagnostics))
+            .collect_boxed_or_drop_all_errs()
+            .map(hir::SelectionBound)
+            .ok_or(CheckDiagnostics)
+    }
+}
+
+impl LinkAnalyze for hir::NegativeBound<hir::UnlinkedVar> {
+    type Output = hir::NegativeBound<hir::LinkedVar>;
+
+    fn link(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        self.0
             .link(env, file, source, diagnostics)
             .map(hir::NegativeBound)
     }
 }
 
-impl LinkAnalyze for hir::ExactTypeBound<hir::Variable> {
-    type Output = hir::ExactTypeBound<hir::PostDeclVar>;
+impl LinkAnalyze for hir::ExactTypeBound<hir::UnlinkedVar> {
+    type Output = hir::ExactTypeBound<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1289,14 +1298,14 @@ impl LinkAnalyze for hir::ExactTypeBound<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        self.ty
+        self.0
             .link(env, file, source, diagnostics)
             .map(hir::ExactTypeBound)
     }
 }
 
-impl LinkAnalyze for hir::MemberBound<hir::Variable> {
-    type Output = hir::MemberBound<hir::PostDeclVar>;
+impl LinkAnalyze for hir::MemberBound<hir::UnlinkedVar> {
+    type Output = hir::MemberBound<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1305,18 +1314,31 @@ impl LinkAnalyze for hir::MemberBound<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        let req = self
-            .req
-            .map(|x| x.bound.link(env, file, source, diagnostics))
+        let Self { member, req } = self;
+        let req = req
+            .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
-        Ok(hir::MemberBound {
-            member: self.member,
-            req: req?,
-        })
+        Ok(hir::MemberBound { member, req: req? })
     }
 }
 
-impl LinkAnalyze for hir::OverloadBound<hir::Variable> {
+impl LinkAnalyze for hir::ShapeBound<hir::UnlinkedVar> {
+    type Output = hir::ShapeBound<hir::LinkedVar>;
+
+    fn link(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        self.0
+            .link(env, file, source, diagnostics)
+            .map(hir::ShapeBound)
+    }
+}
+
+impl LinkAnalyze for hir::OverloadBound {
     type Output = hir::OverloadBound;
 
     fn link(
@@ -1326,14 +1348,12 @@ impl LinkAnalyze for hir::OverloadBound<hir::Variable> {
         _source: &SourceMap,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        Ok(hir::OverloadBound {
-            // TODO
-        })
+        Ok(self)
     }
 }
 
-impl LinkAnalyze for hir::ExprBound<hir::Variable> {
-    type Output = hir::ExprBound<hir::PostDeclVar>;
+impl LinkAnalyze for hir::ExprBound<hir::UnlinkedVar> {
+    type Output = hir::ExprBound<hir::LinkedVar>;
 
     fn link(
         self,
@@ -1342,10 +1362,8 @@ impl LinkAnalyze for hir::ExprBound<hir::Variable> {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        // TODO: scope the parameter
-        let ident = self.name.within_file(file);
-        let param = env.decl_var(source[ident].to_owned(), ident);
-        let expr = self.expr.link(env, file, source, diagnostics);
+        let Self { param, expr } = self;
+        let expr = expr.link(env, file, source, diagnostics);
         Ok(hir::ExprBound { param, expr: expr? })
     }
 }

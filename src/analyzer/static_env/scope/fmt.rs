@@ -14,6 +14,7 @@ use crate::{
         },
     },
     lex::token::{
+        Operator,
         keyword::Keyword,
         punc::{OpSide, Punctuation},
     },
@@ -783,14 +784,28 @@ impl<V: HirDisplay> HirDisplay for hir::DeclOn<V> {
             iff,
             members,
         } = self;
-        write!(f, "{}", Keyword::On)?;
+        write!(f, "{} ", Keyword::On)?;
         if let Some(generics) = generics {
             generics.fmt(source, file, env, f)?;
         }
         target.fmt(source, file, env, f)?;
-        _ = iff;
-        _ = members;
-        todo!("`on` display")
+        if let Some(iff) = iff {
+            write!(f, "{}", Punctuation::Iff)?;
+            let mut has_prev = false;
+            for clause in &iff.0 {
+                if has_prev {
+                    // TODO: multiline
+                    f.write_str(", ")?;
+                } else {
+                    has_prev = true;
+                }
+                clause.fmt(source, file, env, f)?;
+            }
+        }
+        f.write_str(" ")?;
+        HirBlock::new(f)
+            .entries(members, source, file, env)
+            .finish()
     }
 }
 
@@ -816,10 +831,10 @@ impl<V: HirDisplay> HirDisplay for hir::DeclFun<V> {
         if let Some(generics) = generics {
             generics.fmt(source, file, env, f)?;
         }
+        f.write_str("(")?;
         if let Some(self_param) = self_param {
             self_param.fmt(source, file, env, f)?;
         }
-        f.write_str("(")?;
         let mut has_prev = false;
         for param in params {
             if has_prev {
@@ -887,6 +902,7 @@ impl<V: HirDisplay> HirDisplay for hir::DeclCat<V> {
         let Self { id, discriminants } = self;
         write!(f, "{} ", Keyword::Cat)?;
         id.fmt(source, file, env, f)?;
+        f.write_str(" ")?;
         HirBlock::new(f)
             .entries(discriminants, source, file, env)
             .finish()
@@ -1027,7 +1043,7 @@ impl<V: HirDisplay> HirDisplay for hir::ExprStmt<V> {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self { expr } = self;
+        let Self(expr) = self;
         expr.fmt(source, file, env, f)?;
         f.write_str(";")
     }
@@ -1082,7 +1098,8 @@ impl<V: HirDisplay> HirDisplay for hir::Binary<V> {
         let Self { op, lhs, rhs } = self;
         f.write_str("(")?;
         lhs.fmt(source, file, env, f)?;
-        write!(f, " {op} ")?;
+        let is_unspaced = matches!(op, Operator::Dot);
+        write!(f, "{0}{op}{0}", if is_unspaced { "" } else { " " })?;
         rhs.fmt(source, file, env, f)?;
         f.write_str(")")
     }
@@ -1178,32 +1195,26 @@ impl HirDisplay for hir::Directive {
     }
 }
 
-impl HirDisplay for hir::Variable {
+impl HirDisplay for hir::UnlinkedVar {
     fn fmt(
         &self,
         source: &SourceMap,
         file: FileId,
-        env: &ScopeEnvironment,
+        _env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        match self {
-            hir::Variable::Unknown(var) => {
-                let crate::parse::ast::Variable {
-                    path,
-                    ident,
-                    is_me: _,
-                } = var;
-                for part in path {
-                    write!(f, "{}::", &source[file][part.ident])?;
-                }
-                write!(f, "{}", &source[file][*ident])
+        let Self(var) = self;
+        let crate::parse::ast::Variable { path, ident } = var;
+        if let Some(path) = path {
+            for part in path {
+                write!(f, "{}::", &source[file][part.ident])?;
             }
-            hir::Variable::Found(id) => id.fmt(source, file, env, f),
         }
+        write!(f, "{}", &source[file][*ident])
     }
 }
 
-impl HirDisplay for hir::PostDeclVar {
+impl HirDisplay for hir::LinkedVar {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1224,7 +1235,7 @@ impl<V: HirDisplay> HirDisplay for hir::PrintStmt<V> {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self { expr } = self;
+        let Self(expr) = self;
         write!(f, "{}(", Keyword::Prnt)?;
         expr.fmt(source, file, env, f)?;
         f.write_str(");")

@@ -311,10 +311,12 @@ impl AstNode for FnCall {
 
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnCall {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        // HACK: using special case for determining callable syntax
         if let Expr::Variable(fun) = &self.fun {
-            // HACK: super special case
-            for part in &fun.path {
-                part.visit_spans(brack_depth, visit);
+            if let Some(path) = &fun.path {
+                for part in path {
+                    part.visit_spans(brack_depth, visit);
+                }
             }
             visit(fun.ident, Syntax::Callable);
         } else {
@@ -1449,17 +1451,23 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Member {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variable {
-    // TODO: what about type-associated methods?
-    pub path: Vec<ModPathPart>,
+    /// [`None`] if `me`, otherwise not a `me` variable
+    pub path: Option<Vec<ModPathPart>>,
     /// Identifier or `me`
     pub ident: RelSpan,
-    pub is_me: bool,
+}
+
+impl Variable {
+    pub const fn is_me(&self) -> bool {
+        self.path.is_none()
+    }
 }
 
 impl AstNode for Variable {
     fn span_start(&self) -> uspan {
         self.path
-            .first()
+            .as_ref()
+            .and_then(|x| x.first())
             .map_or(self.ident.start, ModPathPart::span_start)
     }
 
@@ -1470,12 +1478,14 @@ impl AstNode for Variable {
 
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Variable {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
-        for part in &self.path {
-            part.visit_spans(brack_depth, visit);
+        if let Some(path) = &self.path {
+            for part in path {
+                part.visit_spans(brack_depth, visit);
+            }
         }
         visit(
             self.ident,
-            if self.is_me {
+            if self.is_me() {
                 Syntax::LanguageVariable
             } else {
                 Syntax::Variable

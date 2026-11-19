@@ -1,7 +1,7 @@
 use crate::{
     analyzer::{
         static_env::{
-            ItemId, ModId, VarId,
+            ItemId, ModId,
             scope::{
                 env::{ModScopeEnvironment, ScopeEnvironment},
                 hir,
@@ -12,7 +12,6 @@ use crate::{
     error::{
         CheckDiagnostics, Diagnostic, DiagnosticCategory::StaticAnalysis, DiagnosticKind, Severity,
     },
-    lex::token::keyword::Keyword,
     parse::{
         ast::{self, AstNode as _},
         util::OkOrFlatten as _,
@@ -70,7 +69,7 @@ impl ModScopeEnvironment<'_> {
         unit: ast::ProgramUnit,
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::HirUnit<hir::Variable>, CheckDiagnostics> {
+    ) -> Result<hir::HirUnit<hir::UnlinkedVar>, CheckDiagnostics> {
         unit.decls
             .into_iter()
             .map(|decl| decl.analyze(self, unit.file, source, diagnostics))
@@ -80,48 +79,6 @@ impl ModScopeEnvironment<'_> {
                 decls,
             })
             .ok_or(CheckDiagnostics)
-    }
-}
-
-pub trait VariableRef: Sized + std::fmt::Debug {
-    fn try_from_id(
-        id: Option<VarId>,
-        file: FileId,
-        ast: ast::Variable,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<Self, CheckDiagnostics>;
-}
-
-impl VariableRef for hir::Variable {
-    fn try_from_id(
-        id: Option<VarId>,
-        _file: FileId,
-        ast: ast::Variable,
-        _diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<Self, CheckDiagnostics> {
-        let var = if let Some(id) = id {
-            Self::Found(id)
-        } else {
-            Self::Unknown(ast)
-        };
-        Ok(var)
-    }
-}
-
-impl VariableRef for hir::PostDeclVar {
-    fn try_from_id(
-        id: Option<VarId>,
-        file: FileId,
-        ast: ast::Variable,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<Self, CheckDiagnostics> {
-        id.map(Self).ok_or_else(|| {
-            diagnostics.push(Diagnostic::new(
-                ast.span().within_file(file),
-                DiagnosticKind::UnknownVar,
-            ));
-            CheckDiagnostics
-        })
     }
 }
 
@@ -138,7 +95,7 @@ trait DeclAnalyze {
 }
 
 impl DeclAnalyze for ast::BlockStmt {
-    type Output = hir::BlockStmt<hir::Variable>;
+    type Output = hir::BlockStmt<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -157,7 +114,7 @@ impl DeclAnalyze for ast::BlockStmt {
 }
 
 impl DeclAnalyze for ast::Decl {
-    type Output = hir::Decl<hir::Variable>;
+    type Output = hir::Decl<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -212,7 +169,7 @@ impl DeclAnalyze for ast::DeclMod {
 }
 
 impl DeclAnalyze for ast::DeclVar {
-    type Output = hir::Decl<hir::Variable>;
+    type Output = hir::Decl<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -221,22 +178,27 @@ impl DeclAnalyze for ast::DeclVar {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        // definition should be BEFORE binding
-        let init = self
-            .assignment
+        let Self {
+            kw,
+            kw_span: _,
+            binding,
+            ty,
+            assignment,
+            semi: _,
+        } = self;
+
+        // assignment needs to be handled be BEFORE the binding, so that the previous definition can be used
+        let init = assignment
             .clone()
             .map(|x| x.expr.analyze(env, file, source, diagnostics))
             .transpose();
 
-        let ty = self
-            .ty
+        let ty = ty
             .clone()
             .map(|annotation| annotation.ty.analyze(env, file, source, diagnostics))
             .transpose();
 
-        let kw = self.kw;
-
-        let ident = self.binding.ident.within_file(file);
+        let ident = binding.ident.within_file(file);
         let id = env.decl_var(source[ident].to_owned(), ident);
         Ok(match kw {
             ast::VarKeyword::Let => hir::Decl::Let(hir::DeclLet {
@@ -274,7 +236,7 @@ impl DeclAnalyze for ast::DeclVar {
 }
 
 impl DeclAnalyze for ast::DeclOn {
-    type Output = hir::DeclOn<hir::Variable>;
+    type Output = hir::DeclOn<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -292,10 +254,12 @@ impl DeclAnalyze for ast::DeclOn {
             .iff
             .map(|x| x.analyze(env, file, source, diagnostics))
             .transpose();
+        env.push_layer();
         let members = self
             .body
             .analyze(env, file, source, diagnostics)
             .map(|x| x.0);
+        env.pop_layer();
         Ok(hir::DeclOn {
             generics: generics?,
             target: target?,
@@ -306,7 +270,7 @@ impl DeclAnalyze for ast::DeclOn {
 }
 
 impl DeclAnalyze for ast::TypeBoundClause {
-    type Output = hir::TypeBoundClause<hir::Variable>;
+    type Output = hir::TypeBoundClause<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -325,7 +289,7 @@ impl DeclAnalyze for ast::TypeBoundClause {
 }
 
 impl DeclAnalyze for ast::IffClause {
-    type Output = hir::IffClause<hir::Variable>;
+    type Output = hir::IffClause<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -354,14 +318,13 @@ impl DeclAnalyze for ast::SelfParam {
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
         let ident = self.span.within_file(file);
-        debug_assert_eq!(&source[ident], Keyword::Me.as_str(), "ident should be `me`");
-        let id = env.decl_var(Keyword::Me.to_string(), ident);
+        let id = env.decl_var(source[ident].to_owned(), ident);
         Ok(hir::SelfParam { id })
     }
 }
 
 impl DeclAnalyze for ast::FnParam {
-    type Output = hir::FunParam<hir::Variable>;
+    type Output = hir::FunParam<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -378,7 +341,7 @@ impl DeclAnalyze for ast::FnParam {
 }
 
 impl DeclAnalyze for ast::DeclFun {
-    type Output = hir::DeclFun<hir::Variable>;
+    type Output = hir::DeclFun<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -448,7 +411,7 @@ impl DeclAnalyze for ast::DeclFun {
 }
 
 impl DeclAnalyze for ast::DeclType {
-    type Output = hir::Decl<hir::Variable>;
+    type Output = hir::Decl<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -470,7 +433,7 @@ impl DeclAnalyze for ast::DeclType {
 }
 
 impl DeclAnalyze for (ast::Field, ItemId) {
-    type Output = hir::Field<hir::Variable>;
+    type Output = hir::Field<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -501,7 +464,7 @@ impl DeclAnalyze for (ast::Field, ItemId) {
 }
 
 impl DeclAnalyze for ast::DeclRec {
-    type Output = hir::DeclRec<hir::Variable>;
+    type Output = hir::DeclRec<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -539,7 +502,7 @@ impl DeclAnalyze for ast::DeclRec {
 }
 
 impl DeclAnalyze for ast::DeclCat {
-    type Output = hir::DeclCat<hir::Variable>;
+    type Output = hir::DeclCat<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -575,7 +538,7 @@ impl DeclAnalyze for ast::DeclCat {
 }
 
 impl DeclAnalyze for ast::DeclDfer {
-    type Output = hir::DeclDfer<hir::Variable>;
+    type Output = hir::DeclDfer<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -597,7 +560,7 @@ impl DeclAnalyze for ast::DeclDfer {
 }
 
 impl DeclAnalyze for ast::Stmt {
-    type Output = hir::Stmt<hir::Variable>;
+    type Output = hir::Stmt<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -610,13 +573,13 @@ impl DeclAnalyze for ast::Stmt {
             ast::Stmt::Expr(inner) => inner
                 .expr
                 .analyze(env, file, source, diagnostics)
-                .map(|expr| hir::Stmt::Expr(hir::ExprStmt { expr })),
+                .map(|expr| hir::Stmt::Expr(hir::ExprStmt(expr))),
 
             ast::Stmt::Print(inner) => inner
                 .group
                 .expr
                 .analyze(env, file, source, diagnostics)
-                .map(|expr| hir::Stmt::Print(hir::PrintStmt { expr })),
+                .map(|expr| hir::Stmt::Print(hir::PrintStmt(expr))),
 
             ast::Stmt::If(inner) => inner
                 .analyze(env, file, source, diagnostics)
@@ -651,7 +614,7 @@ impl DeclAnalyze for ast::Stmt {
 }
 
 impl DeclAnalyze for ast::LoopBlock {
-    type Output = hir::Stmt<hir::Variable>;
+    type Output = hir::Stmt<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -695,7 +658,7 @@ impl DeclAnalyze for ast::LoopBlock {
 }
 
 impl DeclAnalyze for ast::PrintStmt {
-    type Output = hir::PrintStmt<hir::Variable>;
+    type Output = hir::PrintStmt<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -707,12 +670,12 @@ impl DeclAnalyze for ast::PrintStmt {
         self.group
             .expr
             .analyze(env, file, source, diagnostics)
-            .map(|expr| hir::PrintStmt { expr })
+            .map(hir::PrintStmt)
     }
 }
 
 impl DeclAnalyze for ast::GiveStmt {
-    type Output = hir::GiveStmt<hir::Variable>;
+    type Output = hir::GiveStmt<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -729,7 +692,7 @@ impl DeclAnalyze for ast::GiveStmt {
 }
 
 impl DeclAnalyze for ast::FailStmt {
-    type Output = hir::FailStmt<hir::Variable>;
+    type Output = hir::FailStmt<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -746,7 +709,7 @@ impl DeclAnalyze for ast::FailStmt {
 }
 
 impl DeclAnalyze for ast::DoneStmt {
-    type Output = hir::DoneStmt<hir::Variable>;
+    type Output = hir::DoneStmt<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -765,7 +728,7 @@ impl DeclAnalyze for ast::DoneStmt {
 }
 
 impl DeclAnalyze for ast::Expr {
-    type Output = hir::Expr<hir::Variable>;
+    type Output = hir::Expr<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -815,7 +778,7 @@ impl DeclAnalyze for ast::Expr {
 }
 
 impl DeclAnalyze for ast::BlockExpr {
-    type Output = hir::BlockExpr<hir::Variable>;
+    type Output = hir::BlockExpr<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -866,33 +829,21 @@ impl DeclAnalyze for ast::Directive {
 }
 
 impl DeclAnalyze for ast::Variable {
-    type Output = hir::Variable;
+    type Output = hir::UnlinkedVar;
 
     fn analyze(
         self,
-        env: &mut ModScopeEnvironment<'_>,
-        file: FileId,
-        source: &SourceMap,
-        diagnostics: &mut Vec<Diagnostic>,
+        _env: &mut ModScopeEnvironment<'_>,
+        _file: FileId,
+        _source: &SourceMap,
+        _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        if self.path.is_empty() {
-            let ident = self.ident.within_file(file);
-            let name = &source[ident];
-            // variables can shadow function names
-            let id = env
-                .lookup_var(name)
-                // maybe a function
-                .or_else(|| env.lookup_item(name));
-            if let Some(id) = id {
-                return Ok(hir::Variable::Found(id));
-            }
-        }
-        Ok(hir::Variable::Unknown(self))
+        Ok(hir::UnlinkedVar(self))
     }
 }
 
 impl DeclAnalyze for ast::IfStmt {
-    type Output = hir::IfStmt<hir::Variable>;
+    type Output = hir::IfStmt<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -905,18 +856,7 @@ impl DeclAnalyze for ast::IfStmt {
         let then = self.then.analyze(env, file, source, diagnostics);
         let or = self
             .or
-            .map(|or| {
-                match or.body {
-                    ast::OrBody::More(stmt) => stmt
-                        .analyze(env, file, source, diagnostics)
-                        .map(hir::OrStmt::More),
-
-                    ast::OrBody::Last(block) => block
-                        .analyze(env, file, source, diagnostics)
-                        .map(hir::OrStmt::Last),
-                }
-                .map(Box::new)
-            })
+            .map(|or| or.analyze(env, file, source, diagnostics).map(Box::new))
             .transpose();
         Ok(hir::IfStmt {
             pred: pred?,
@@ -926,8 +866,30 @@ impl DeclAnalyze for ast::IfStmt {
     }
 }
 
+impl DeclAnalyze for ast::OrStmt {
+    type Output = hir::OrStmt<hir::UnlinkedVar>;
+
+    fn analyze(
+        self,
+        env: &mut ModScopeEnvironment<'_>,
+        file: FileId,
+        source: &SourceMap,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self::Output, CheckDiagnostics> {
+        match self.body {
+            ast::OrBody::More(stmt) => stmt
+                .analyze(env, file, source, diagnostics)
+                .map(hir::OrStmt::More),
+
+            ast::OrBody::Last(block) => block
+                .analyze(env, file, source, diagnostics)
+                .map(hir::OrStmt::Last),
+        }
+    }
+}
+
 impl DeclAnalyze for ast::TypeExpr {
-    type Output = hir::TypeExpr<hir::Variable>;
+    type Output = hir::TypeExpr<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -983,7 +945,7 @@ impl DeclAnalyze for ast::TypeExpr {
 }
 
 impl DeclAnalyze for ast::FallType {
-    type Output = hir::FallType<hir::Variable>;
+    type Output = hir::FallType<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1006,7 +968,7 @@ impl DeclAnalyze for ast::FallType {
 }
 
 impl DeclAnalyze for ast::ViewType {
-    type Output = hir::ViewType<hir::Variable>;
+    type Output = hir::ViewType<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1028,7 +990,7 @@ impl DeclAnalyze for ast::ViewType {
 }
 
 impl DeclAnalyze for ast::AssocType {
-    type Output = hir::AssocType<hir::Variable>;
+    type Output = hir::AssocType<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1047,7 +1009,7 @@ impl DeclAnalyze for ast::AssocType {
 }
 
 impl DeclAnalyze for ast::AssocTypeSource {
-    type Output = hir::AssocTypeSource<hir::Variable>;
+    type Output = hir::AssocTypeSource<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1069,7 +1031,7 @@ impl DeclAnalyze for ast::AssocTypeSource {
 }
 
 impl DeclAnalyze for ast::OpaqueType {
-    type Output = hir::OpaqueType<hir::Variable>;
+    type Output = hir::OpaqueType<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1107,7 +1069,7 @@ impl DeclAnalyze for ast::Typename {
 }
 
 impl DeclAnalyze for ast::FunType {
-    type Output = hir::FunType<hir::Variable>;
+    type Output = hir::FunType<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1134,7 +1096,7 @@ impl DeclAnalyze for ast::FunType {
 }
 
 impl DeclAnalyze for ast::RefType {
-    type Output = hir::RefType<hir::Variable>;
+    type Output = hir::RefType<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1150,7 +1112,7 @@ impl DeclAnalyze for ast::RefType {
 }
 
 impl DeclAnalyze for ast::TypeInstance {
-    type Output = hir::TypeInstance<hir::Variable>;
+    type Output = hir::TypeInstance<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1172,7 +1134,7 @@ impl DeclAnalyze for ast::TypeInstance {
 }
 
 impl DeclAnalyze for ast::Binary {
-    type Output = hir::Binary<hir::Variable>;
+    type Output = hir::Binary<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1192,7 +1154,7 @@ impl DeclAnalyze for ast::Binary {
 }
 
 impl DeclAnalyze for ast::Unary {
-    type Output = hir::Unary<hir::Variable>;
+    type Output = hir::Unary<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1211,7 +1173,7 @@ impl DeclAnalyze for ast::Unary {
 }
 
 impl DeclAnalyze for ast::Subscript {
-    type Output = hir::Subscript<hir::Variable>;
+    type Output = hir::Subscript<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1230,7 +1192,7 @@ impl DeclAnalyze for ast::Subscript {
 }
 
 impl DeclAnalyze for ast::FnCall {
-    type Output = hir::FnCall<hir::Variable>;
+    type Output = hir::FnCall<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1254,7 +1216,7 @@ impl DeclAnalyze for ast::FnCall {
 }
 
 impl DeclAnalyze for ast::GenericGroup {
-    type Output = hir::GenericGroup<hir::Variable>;
+    type Output = hir::GenericGroup<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1273,7 +1235,7 @@ impl DeclAnalyze for ast::GenericGroup {
 }
 
 impl DeclAnalyze for ast::TypeBound {
-    type Output = hir::TypeBound<hir::Variable>;
+    type Output = hir::TypeBound<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1315,7 +1277,7 @@ impl DeclAnalyze for ast::TypeBound {
 }
 
 impl DeclAnalyze for ast::ComboBound {
-    type Output = hir::TypeBound<hir::Variable>;
+    type Output = hir::TypeBound<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1336,7 +1298,7 @@ impl DeclAnalyze for ast::ComboBound {
 }
 
 impl DeclAnalyze for ast::NegativeBound {
-    type Output = hir::NegativeBound<hir::Variable>;
+    type Output = hir::NegativeBound<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1352,7 +1314,7 @@ impl DeclAnalyze for ast::NegativeBound {
 }
 
 impl DeclAnalyze for ast::ExactTypeBound {
-    type Output = hir::ExactTypeBound<hir::Variable>;
+    type Output = hir::ExactTypeBound<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1368,7 +1330,7 @@ impl DeclAnalyze for ast::ExactTypeBound {
 }
 
 impl DeclAnalyze for ast::MemberBound {
-    type Output = hir::MemberBound<hir::Variable>;
+    type Output = hir::MemberBound<hir::UnlinkedVar>;
 
     fn analyze(
         self,
@@ -1405,7 +1367,7 @@ impl DeclAnalyze for ast::OverloadBound {
 }
 
 impl DeclAnalyze for ast::ExprBound {
-    type Output = hir::ExprBound<hir::Variable>;
+    type Output = hir::ExprBound<hir::UnlinkedVar>;
 
     fn analyze(
         self,
