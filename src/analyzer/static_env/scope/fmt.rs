@@ -195,13 +195,13 @@ impl<T: ?Sized + HirDisplay> HirDisplay for &T {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct DisplayHir<'env, 'hir, 'src, V> {
+pub struct DisplayHir<'env, 'hir, 'src, M, D, V> {
     pub source: &'src SourceMap,
     pub env: &'env ScopeEnvironment,
-    pub hir: &'hir HirUnit<V>,
+    pub hir: &'hir HirUnit<M, D, V>,
 }
 
-impl<V: HirDisplay> fmt::Display for DisplayHir<'_, '_, '_, V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> fmt::Display for DisplayHir<'_, '_, '_, M, D, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.hir.fmt(self.source, self.hir.file, self.env, f)
     }
@@ -244,7 +244,7 @@ impl HirDisplay for ModId {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::TypeExpr<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::TypeExpr<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -304,7 +304,7 @@ impl HirDisplay for hir::Typename {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::GenericGroup<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::GenericGroup<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -327,7 +327,7 @@ impl<V: HirDisplay> HirDisplay for hir::GenericGroup<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::TypeInstance<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::TypeInstance<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -344,7 +344,7 @@ impl<V: HirDisplay> HirDisplay for hir::TypeInstance<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::FallType<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::FallType<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -363,7 +363,7 @@ impl<V: HirDisplay> HirDisplay for hir::FallType<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::RefType<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::RefType<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -377,7 +377,7 @@ impl<V: HirDisplay> HirDisplay for hir::RefType<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::ViewType<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::ViewType<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -396,7 +396,7 @@ impl<V: HirDisplay> HirDisplay for hir::ViewType<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::AssocType<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::AssocType<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -411,7 +411,7 @@ impl<V: HirDisplay> HirDisplay for hir::AssocType<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::AssocTypeSource<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::AssocTypeSource<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -431,7 +431,7 @@ impl<V: HirDisplay> HirDisplay for hir::AssocTypeSource<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::HirUnit<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::HirUnit<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -448,7 +448,7 @@ impl<V: HirDisplay> HirDisplay for hir::HirUnit<V> {
     }
 }
 
-impl HirDisplay for hir::SelfParam {
+impl<D: HirDisplay> HirDisplay for hir::SelfParam<D> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -461,7 +461,7 @@ impl HirDisplay for hir::SelfParam {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::FunParam<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::FunParam<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -476,7 +476,7 @@ impl<V: HirDisplay> HirDisplay for hir::FunParam<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::FunType<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::FunType<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -504,7 +504,7 @@ impl<V: HirDisplay> HirDisplay for hir::FunType<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::OpaqueType<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::OpaqueType<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -519,7 +519,7 @@ impl<V: HirDisplay> HirDisplay for hir::OpaqueType<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::ConjunctionBound<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::ConjunctionBound<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -542,7 +542,7 @@ impl<V: HirDisplay> HirDisplay for hir::ConjunctionBound<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DisjunctionBound<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DisjunctionBound<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -565,7 +565,7 @@ impl<V: HirDisplay> HirDisplay for hir::DisjunctionBound<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::SelectionBound<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::SelectionBound<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -588,7 +588,7 @@ impl<V: HirDisplay> HirDisplay for hir::SelectionBound<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::NegativeBound<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::NegativeBound<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -603,7 +603,7 @@ impl<V: HirDisplay> HirDisplay for hir::NegativeBound<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::ExactTypeBound<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::ExactTypeBound<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -617,7 +617,7 @@ impl<V: HirDisplay> HirDisplay for hir::ExactTypeBound<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::MemberBound<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::MemberBound<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -636,7 +636,7 @@ impl<V: HirDisplay> HirDisplay for hir::MemberBound<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::ShapeBound<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::ShapeBound<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -662,7 +662,7 @@ impl HirDisplay for hir::OverloadBound {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::ExprBound<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::ExprBound<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -678,7 +678,7 @@ impl<V: HirDisplay> HirDisplay for hir::ExprBound<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::TypeBound<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::TypeBound<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -700,7 +700,7 @@ impl<V: HirDisplay> HirDisplay for hir::TypeBound<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::TypeBoundClause<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::TypeBoundClause<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -715,7 +715,7 @@ impl<V: HirDisplay> HirDisplay for hir::TypeBoundClause<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::IffClause<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::IffClause<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -732,7 +732,7 @@ impl<V: HirDisplay> HirDisplay for hir::IffClause<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::Decl<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::Decl<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -755,7 +755,7 @@ impl<V: HirDisplay> HirDisplay for hir::Decl<V> {
     }
 }
 
-impl HirDisplay for hir::DeclMod {
+impl<M: HirDisplay> HirDisplay for hir::DeclMod<M> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -770,7 +770,7 @@ impl HirDisplay for hir::DeclMod {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DeclOn<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DeclOn<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -809,7 +809,7 @@ impl<V: HirDisplay> HirDisplay for hir::DeclOn<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DeclFun<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DeclFun<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -859,7 +859,7 @@ impl<V: HirDisplay> HirDisplay for hir::DeclFun<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DeclRec<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DeclRec<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -875,7 +875,7 @@ impl<V: HirDisplay> HirDisplay for hir::DeclRec<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::Field<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::Field<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -891,7 +891,7 @@ impl<V: HirDisplay> HirDisplay for hir::Field<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DeclCat<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DeclCat<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -909,7 +909,7 @@ impl<V: HirDisplay> HirDisplay for hir::DeclCat<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::Discriminant<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::Discriminant<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -923,7 +923,7 @@ impl<V: HirDisplay> HirDisplay for hir::Discriminant<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DeclUni<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DeclUni<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -945,7 +945,7 @@ impl<V: HirDisplay> HirDisplay for hir::DeclUni<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DeclLet<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DeclLet<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -968,7 +968,7 @@ impl<V: HirDisplay> HirDisplay for hir::DeclLet<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DeclPvt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DeclPvt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -989,7 +989,7 @@ impl<V: HirDisplay> HirDisplay for hir::DeclPvt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DeclDfer<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DeclDfer<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1009,7 +1009,7 @@ impl<V: HirDisplay> HirDisplay for hir::DeclDfer<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::Stmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::Stmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1035,7 +1035,7 @@ impl<V: HirDisplay> HirDisplay for hir::Stmt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::ExprStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::ExprStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1049,7 +1049,7 @@ impl<V: HirDisplay> HirDisplay for hir::ExprStmt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::Expr<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::Expr<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1070,7 +1070,7 @@ impl<V: HirDisplay> HirDisplay for hir::Expr<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::BlockExpr<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::BlockExpr<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1087,7 +1087,7 @@ impl<V: HirDisplay> HirDisplay for hir::BlockExpr<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::Binary<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::Binary<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1105,7 +1105,7 @@ impl<V: HirDisplay> HirDisplay for hir::Binary<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::Unary<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::Unary<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1129,7 +1129,7 @@ impl<V: HirDisplay> HirDisplay for hir::Unary<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::Subscript<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::Subscript<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1145,7 +1145,7 @@ impl<V: HirDisplay> HirDisplay for hir::Subscript<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::FnCall<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::FnCall<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1227,7 +1227,7 @@ impl HirDisplay for hir::LinkedVar {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::PrintStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::PrintStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1242,7 +1242,7 @@ impl<V: HirDisplay> HirDisplay for hir::PrintStmt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::IfStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::IfStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1263,7 +1263,7 @@ impl<V: HirDisplay> HirDisplay for hir::IfStmt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::OrStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::OrStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1278,7 +1278,7 @@ impl<V: HirDisplay> HirDisplay for hir::OrStmt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::PickExpr<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::PickExpr<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1292,7 +1292,7 @@ impl<V: HirDisplay> HirDisplay for hir::PickExpr<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::PickArm<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::PickArm<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1320,7 +1320,7 @@ impl HirDisplay for hir::PickPattern {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::LoopStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::LoopStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1338,7 +1338,7 @@ impl<V: HirDisplay> HirDisplay for hir::LoopStmt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::CordStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::CordStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1356,7 +1356,7 @@ impl<V: HirDisplay> HirDisplay for hir::CordStmt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::RepStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::RepStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1371,7 +1371,7 @@ impl<V: HirDisplay> HirDisplay for hir::RepStmt<V> {
     }
 }
 
-impl HirDisplay for hir::BindingPattern {
+impl<D: HirDisplay> HirDisplay for hir::BindingPattern<D> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1384,7 +1384,7 @@ impl HirDisplay for hir::BindingPattern {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::ForStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::ForStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1414,7 +1414,7 @@ impl HirDisplay for hir::Label {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::GiveStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::GiveStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1432,7 +1432,7 @@ impl<V: HirDisplay> HirDisplay for hir::GiveStmt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::FailStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::FailStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1450,7 +1450,7 @@ impl<V: HirDisplay> HirDisplay for hir::FailStmt<V> {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::DoneStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::DoneStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,
@@ -1490,7 +1490,7 @@ impl HirDisplay for hir::SkipStmt {
     }
 }
 
-impl<V: HirDisplay> HirDisplay for hir::BlockStmt<V> {
+impl<M: HirDisplay, D: HirDisplay, V: HirDisplay> HirDisplay for hir::BlockStmt<M, D, V> {
     fn fmt(
         &self,
         source: &SourceMap,

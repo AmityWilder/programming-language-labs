@@ -1138,30 +1138,6 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for MemberBound {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ShapeBoundRet {
-    /// `->`
-    pub arrow: RelSpan,
-    pub ty: TypeExpr,
-}
-
-impl AstNode for ShapeBoundRet {
-    fn span_start(&self) -> uspan {
-        self.arrow.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.ty.span_end()
-    }
-}
-
-impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ShapeBoundRet {
-    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
-        visit(self.arrow, Syntax::Normal);
-        self.ty.visit_spans(brack_depth, visit);
-    }
-}
-
 /// UNDER CONSTRUCTION
 #[derive(Debug, Clone, PartialEq)]
 pub struct OverloadBound {
@@ -1615,7 +1591,7 @@ pub struct PickArm {
     pub pattern: PickPattern,
     /// `=>`
     pub arrow: RelSpan,
-    pub then: Expr,
+    pub then: BlockExpr,
 }
 
 impl AstNode for PickArm {

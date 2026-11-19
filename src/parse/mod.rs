@@ -2031,19 +2031,6 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "colon_bound", x))
     }
 
-    /// `shape_bound_ret -> "->" type_expression`
-    fn shape_bound_ret(&mut self) -> Option<Result<ast::ShapeBoundRet>> {
-        push_parse_call!(self, "shape_bound_ret");
-        self.pull_if_eq(Punctuation::Arrow)
-            .map(|arrow| {
-                Ok(ast::ShapeBoundRet {
-                    arrow,
-                    ty: self.type_expression()?,
-                })
-            })
-            .inspect_always(|x| pop_parse_call!(self, "shape_bound_ret", x))
-    }
-
     /// `expr_bound -> "for" IDENTIFIER ":" expression`
     fn satisfies_bound(&mut self) -> Option<Result<ast::ExprBound>> {
         push_parse_call!(self, "satisfies_bound");

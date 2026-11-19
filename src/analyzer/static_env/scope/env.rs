@@ -290,12 +290,24 @@ impl Module {
             .map(|(_, val)| *val)
     }
 
-    pub fn push_layer(&mut self) {
-        self.layers.push(Layer::new());
+    pub fn push_layer(&mut self) -> &mut Layer {
+        self.layers.push_mut(Layer::new())
     }
 
+    #[must_use = "indicates success"]
     pub fn pop_layer(&mut self) -> Option<Layer> {
         self.layers.pop()
+    }
+
+    /// Returns [`None`] if not currently in a layer
+    #[must_use = "indicates success"]
+    pub fn push_scope(&mut self) -> Option<&mut Scope> {
+        self.layers.last_mut().map(Layer::push_scope)
+    }
+
+    #[must_use = "indicates success"]
+    pub fn pop_scope(&mut self) -> Option<Scope> {
+        self.layers.last_mut()?.pop_scope()
     }
 }
 
@@ -314,8 +326,8 @@ impl Layer {
         }
     }
 
-    pub fn push_scope(&mut self) {
-        self.scopes.push(Scope::new());
+    pub fn push_scope(&mut self) -> &mut Scope {
+        self.scopes.push_mut(Scope::new())
     }
 
     pub fn pop_scope(&mut self) -> Option<Scope> {
