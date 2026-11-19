@@ -54,7 +54,7 @@
 #![warn(
     clippy::todo,
     clippy::dbg_macro,
-    clippy::use_debug,
+    // clippy::use_debug,
     reason = "finish your code"
 )]
 #![forbid(
@@ -78,7 +78,6 @@
     clippy::assertions_on_result_states,
     clippy::deref_by_slicing,
     clippy::doc_include_without_cfg,
-    clippy::inline_trait_bounds,
     clippy::missing_asserts_for_indexing,
     clippy::non_zero_suggestions,
     clippy::pub_without_shorthand,
@@ -134,6 +133,7 @@ use crate::{
         span::RelSpan,
     },
     todo_types::Dummy,
+    util::OrAllErrsExt as _,
 };
 use analyzer::static_env::scope::env::ScopeEnvironment;
 use error::{CheckDiagnostics, fail::Failure};
@@ -788,36 +788,78 @@ fn compile(
 
     println!("--- linking ---");
 
-    // scope analysis
-    println!("analyzing scope...");
-    for unit in units {
-        println!("analyzing {:?}", unit.file);
-        let &mod_id = file_mod_ids
-            .get(&unit.file)
-            .expect("should have been defined by `analyze_module_tree`");
-        let mut env = scope_env
-            .define_module(mod_id)
-            .expect("should have been defined by `analyze_module_tree`");
-        if let Ok(hir) = env.analyze(unit, source, diagnostics) {
-            println!(
-                "hir:\n{:#}",
-                DisplayHir {
-                    source,
-                    env: scope_env,
-                    hir: &hir
-                }
-            );
-            // TODO
-        } else {
-            debug_assert!(
-                diagnostics.iter().any(|e| e.kind.severity().is_err()),
-                "should have an error if analysis failed"
-            );
-        }
-    }
+    // declaration analysis
+    println!("analyzing declarations...");
+    let units = units
+        .into_iter()
+        .map(|unit| {
+            println!("analyzing {:?}", unit.file);
+            let &mod_id = file_mod_ids
+                .get(&unit.file)
+                .expect("should have been defined by `analyze_module_tree`");
+            let mut env = scope_env
+                .define_module(mod_id)
+                .expect("should have been defined by `analyze_module_tree`");
+            let res = env.analyze(unit, source, diagnostics);
+            if let Ok(hir) = &res {
+                println!(
+                    "hir:\n{:#}",
+                    DisplayHir {
+                        source,
+                        env: scope_env,
+                        hir,
+                    }
+                );
+            } else {
+                debug_assert!(
+                    diagnostics.contains_err(),
+                    "should have an error if analysis failed"
+                );
+            }
+            res
+        })
+        .collect_or_drop_all_errs::<Vec<_>>();
 
-    // // scope errors
-    // diagnostics.ok_or_err()?;
+    // declaration errors
+    diagnostics.ok_or_err()?;
+
+    let units = units.expect("should have an output if there are no errors");
+
+    println!("analyzing scope...");
+    let units = units
+        .into_iter()
+        .map(|hir| {
+            println!("linking {:?}", hir.file);
+            let &mod_id = file_mod_ids
+                .get(&hir.file)
+                .expect("should have been defined by `analyze_module_tree`");
+            let mut env = scope_env
+                .define_module(mod_id)
+                .expect("should have been defined by `analyze_module_tree`");
+            let res = env.link(hir, source, diagnostics);
+            if let Ok(hir) = &res {
+                println!(
+                    "linked hir:\n{:#}",
+                    DisplayHir {
+                        source,
+                        env: scope_env,
+                        hir,
+                    }
+                );
+            } else {
+                debug_assert!(
+                    diagnostics.contains_err(),
+                    "should have an error if analysis failed"
+                );
+            }
+            res
+        })
+        .collect_or_drop_all_errs::<Vec<_>>();
+
+    // link errors
+    diagnostics.ok_or_err()?;
+
+    let units = units.expect("should have an output if there are no errors");
 
     // -------------------------------------------------------------------------
 

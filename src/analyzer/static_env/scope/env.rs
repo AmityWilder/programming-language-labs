@@ -132,6 +132,7 @@ impl ScopeEnvironment {
         Ok(id)
     }
 
+    /// Can be called more than once on the same module
     pub fn define_module(
         &mut self,
         id: ModId,

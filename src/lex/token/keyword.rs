@@ -26,6 +26,8 @@ define_token_eq! {
         Nevr = "nevr",
         /// Boolean type
         Bool = "bool",
+        /// Byte type
+        Byte = "byte",
         /// Unsigned integer type (represented as `usize` (`size_t`))
         Uint = "uint",
         /// Signed integer type (represented as `isize` (`ssize_t`))

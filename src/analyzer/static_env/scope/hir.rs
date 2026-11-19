@@ -8,9 +8,9 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct HirUnit {
+pub struct HirUnit<V> {
     pub file: FileId,
-    pub decls: Vec<Decl>,
+    pub decls: Vec<Decl<V>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -42,12 +42,12 @@ pub struct Typename {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GenericGroup(pub Box<[TypeExpr]>);
+pub struct GenericGroup<V>(pub Box<[TypeExpr<V>]>);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TypeInstance {
+pub struct TypeInstance<V> {
     pub name: Typename,
-    pub args: Option<GenericGroup>,
+    pub args: Option<GenericGroup<V>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -60,75 +60,75 @@ pub enum OrType {
 
 /// Fallible Type
 #[derive(Debug, Clone, PartialEq)]
-pub struct FallType {
-    pub then_ty: TypeExpr,
+pub struct FallType<V> {
+    pub then_ty: TypeExpr<V>,
     pub ty: OrType,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RefType {
+pub struct RefType<V> {
     // TBD: reference mutability?
-    pub ty: TypeExpr,
+    pub ty: TypeExpr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ViewType {
-    pub item: TypeExpr,
-    pub count: Option<Expr>,
+pub struct ViewType<V> {
+    pub item: TypeExpr<V>,
+    pub count: Option<Expr<V>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum AssocTypeSource {
+pub enum AssocTypeSource<V> {
     Simple(Typename),
-    Grouped(TypeExpr),
+    Grouped(TypeExpr<V>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct AssocType {
-    pub base: AssocTypeSource,
-    pub assoc: TypeInstance,
+pub struct AssocType<V> {
+    pub base: AssocTypeSource<V>,
+    pub assoc: TypeInstance<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunType {
-    pub params: Box<[TypeExpr]>,
-    pub ret: Option<Box<TypeExpr>>,
+pub struct FunType<V> {
+    pub params: Box<[TypeExpr<V>]>,
+    pub ret: Option<Box<TypeExpr<V>>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct OpaqueType(pub TypeBound);
+pub struct OpaqueType<V>(pub TypeBound<V>);
 
 /// All
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConjunctionBound(pub Box<[TypeBound]>);
+pub struct ConjunctionBound<V>(pub Box<[TypeBound<V>]>);
 
 /// Any
 #[derive(Debug, Clone, PartialEq)]
-pub struct DisjunctionBound(pub Box<[TypeBound]>);
+pub struct DisjunctionBound<V>(pub Box<[TypeBound<V>]>);
 
 /// One
 #[derive(Debug, Clone, PartialEq)]
-pub struct SelectionBound(pub Box<[TypeBound]>);
+pub struct SelectionBound<V>(pub Box<[TypeBound<V>]>);
 
 /// Not
 #[derive(Debug, Clone, PartialEq)]
-pub struct NegativeBound(pub TypeBound);
+pub struct NegativeBound<V>(pub TypeBound<V>);
 
 /// Only
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExactTypeBound(pub TypeExpr);
+pub struct ExactTypeBound<V>(pub TypeExpr<V>);
 
 /// Has
 #[derive(Debug, Clone, PartialEq)]
-pub struct MemberBound {
+pub struct MemberBound<V> {
     /// Identifier
     pub member: RelSpan,
-    pub req: Option<TypeBound>,
+    pub req: Option<TypeBound<V>>,
 }
 
 /// Shape
 #[derive(Debug, Clone, PartialEq)]
-pub struct ShapeBound(pub FunType);
+pub struct ShapeBound<V>(pub FunType<V>);
 
 /// Supports
 #[derive(Debug, Clone, PartialEq)]
@@ -138,35 +138,35 @@ pub struct OverloadBound {
 
 /// Satisfies
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExprBound {
+pub struct ExprBound<V> {
     // TBD: should this be a special ID since it never actually appears in the program?
     pub param: VarId,
-    pub expr: Expr,
+    pub expr: Expr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TypeBound {
-    Conjunction(ConjunctionBound),
-    Disjunction(DisjunctionBound),
-    Selection(SelectionBound),
-    Not(Box<NegativeBound>),
-    Exact(ExactTypeBound),
-    Has(Box<MemberBound>),
-    Shape(ShapeBound),
+pub enum TypeBound<V> {
+    Conjunction(ConjunctionBound<V>),
+    Disjunction(DisjunctionBound<V>),
+    Selection(SelectionBound<V>),
+    Not(Box<NegativeBound<V>>),
+    Exact(ExactTypeBound<V>),
+    Has(Box<MemberBound<V>>),
+    Shape(ShapeBound<V>),
     Supports(Box<OverloadBound>),
-    Satisfies(Box<ExprBound>),
+    Satisfies(Box<ExprBound<V>>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TypeExpr {
+pub enum TypeExpr<V> {
     Primitive(PrimitiveType),
-    Instance(TypeInstance),
-    Fallible(Box<FallType>),
-    Ref(Box<RefType>),
-    View(Box<ViewType>),
-    Assoc(Box<AssocType>),
-    FunPtr(FunType),
-    Opaque(Box<OpaqueType>),
+    Instance(TypeInstance<V>),
+    Fallible(Box<FallType<V>>),
+    Ref(Box<RefType<V>>),
+    View(Box<ViewType<V>>),
+    Assoc(Box<AssocType<V>>),
+    FunPtr(FunType<V>),
+    Opaque(Box<OpaqueType<V>>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -180,17 +180,17 @@ pub struct PickPattern {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Decl {
+pub enum Decl<V> {
     Mod(DeclMod),
-    On(DeclOn),
-    Fun(DeclFun),
-    Rec(DeclRec),
-    Cat(DeclCat),
-    Uni(DeclUni),
-    Let(DeclLet),
-    Pvt(DeclPvt),
-    Dfer(DeclDfer),
-    Stmt(Stmt),
+    On(DeclOn<V>),
+    Fun(DeclFun<V>),
+    Rec(DeclRec<V>),
+    Cat(DeclCat<V>),
+    Uni(DeclUni<V>),
+    Let(DeclLet<V>),
+    Pvt(DeclPvt<V>),
+    Dfer(DeclDfer<V>),
+    Stmt(Stmt<V>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,20 +199,20 @@ pub struct DeclMod {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TypeBoundClause {
-    pub target: TypeExpr,
-    pub bound: TypeBound,
+pub struct TypeBoundClause<V> {
+    pub target: TypeExpr<V>,
+    pub bound: TypeBound<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct IffClause(pub Box<[TypeBoundClause]>);
+pub struct IffClause<V>(pub Box<[TypeBoundClause<V>]>);
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclOn {
-    pub generics: Option<GenericGroup>,
-    pub target: TypeExpr,
-    pub iff: Option<IffClause>,
-    pub members: Box<[Decl]>,
+pub struct DeclOn<V> {
+    pub generics: Option<GenericGroup<V>>,
+    pub target: TypeExpr<V>,
+    pub iff: Option<IffClause<V>>,
+    pub members: Box<[Decl<V>]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -221,90 +221,90 @@ pub struct SelfParam {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclFun {
+pub struct DeclFun<V> {
     pub id: FuncId,
-    pub generics: Option<GenericGroup>,
+    pub generics: Option<GenericGroup<V>>,
     pub self_param: Option<SelfParam>,
-    pub params: Box<[FunParam]>,
-    pub ret: Option<TypeExpr>,
-    pub iff: Option<IffClause>,
-    pub body: Option<BlockStmt>,
+    pub params: Box<[FunParam<V>]>,
+    pub ret: Option<TypeExpr<V>>,
+    pub iff: Option<IffClause<V>>,
+    pub body: Option<BlockStmt<V>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunParam {
+pub struct FunParam<V> {
     /// Treated as a member of the function
     pub id: VarId,
-    pub ty: TypeExpr,
+    pub ty: TypeExpr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclRec {
+pub struct DeclRec<V> {
     pub id: TypeId,
-    pub fields: Box<[Field]>,
+    pub fields: Box<[Field<V>]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Field {
+pub struct Field<V> {
     pub id: ItemId, // TODO: these should be treated like unique items
-    pub ty: TypeExpr,
+    pub ty: TypeExpr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclCat {
+pub struct DeclCat<V> {
     pub id: TypeId, // TODO: these should be treated like unique items
-    pub discriminants: Box<[Discriminant]>,
+    pub discriminants: Box<[Discriminant<V>]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Discriminant {
+pub struct Discriminant<V> {
     pub id: ItemId,
-    pub val: Expr,
+    pub val: Expr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclUni {
+pub struct DeclUni<V> {
     pub id: VarId,
-    pub ty: Option<TypeExpr>,
-    pub init: Option<Expr>,
+    pub ty: Option<TypeExpr<V>>,
+    pub init: Option<Expr<V>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expr {
-    Block(BlockExpr),
-    Binary(Box<Binary>),
-    Unary(Box<Unary>),
-    Index(Box<Subscript>),
-    Call(Box<FnCall>),
+pub enum Expr<V> {
+    Block(BlockExpr<V>),
+    Binary(Box<Binary<V>>),
+    Unary(Box<Unary<V>>),
+    Index(Box<Subscript<V>>),
+    Call(Box<FnCall<V>>),
     Literal(ast::Literal),
     Directive(Directive),
-    Variable(Variable),
+    Variable(V),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Binary {
+pub struct Binary<V> {
     pub op: Operator,
-    pub lhs: Expr,
-    pub rhs: Expr,
+    pub lhs: Expr<V>,
+    pub rhs: Expr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Unary {
+pub struct Unary<V> {
     pub op: Operator,
-    pub operand: Expr,
+    pub operand: Expr<V>,
     pub side: OpSide,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Subscript {
-    pub arr: Expr,
-    pub idx: Expr,
+pub struct Subscript<V> {
+    pub arr: Expr<V>,
+    pub idx: Expr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FnCall {
-    pub fun: Expr,
-    pub args: Box<[Expr]>,
+pub struct FnCall<V> {
+    pub fun: Expr<V>,
+    pub args: Box<[Expr<V>]>,
 }
 
 pub use ast::Literal;
@@ -314,88 +314,94 @@ pub enum Directive {
     Inpt,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Variable(pub VarId);
+#[derive(Debug, Clone, PartialEq)]
+pub enum Variable {
+    Unknown(ast::Variable),
+    Found(VarId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PostDeclVar(pub VarId);
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum BlockExpr {
-    If(Box<IfStmt>),
-    Loop(Box<LoopStmt>),
-    Cord(Box<CordStmt>),
-    Block(BlockStmt),
+pub enum BlockExpr<V> {
+    If(Box<IfStmt<V>>),
+    Loop(Box<LoopStmt<V>>),
+    Cord(Box<CordStmt<V>>),
+    Block(BlockStmt<V>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclPvt {
+pub struct DeclPvt<V> {
     pub id: VarId,
-    pub ty: Option<TypeExpr>,
-    pub init: Expr,
+    pub ty: Option<TypeExpr<V>>,
+    pub init: Expr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclLet {
+pub struct DeclLet<V> {
     // TODO: complex bindings
     pub id: VarId,
-    pub ty: Option<TypeExpr>,
-    pub init: Option<Expr>,
+    pub ty: Option<TypeExpr<V>>,
+    pub init: Option<Expr<V>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeclDfer {
+pub struct DeclDfer<V> {
     pub param: Option<VarId>,
-    pub on_pop: BlockStmt,
+    pub on_pop: BlockStmt<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Stmt {
-    Expr(ExprStmt),
+pub enum Stmt<V> {
+    Expr(ExprStmt<V>),
     // TODO: im not too fond of the print keyword
-    Print(PrintStmt),
-    If(IfStmt),
-    Pick(PickExpr),
-    Loop(LoopStmt),
-    Cord(CordStmt),
-    Rep(RepStmt),
-    For(ForStmt),
-    Give(GiveStmt),
-    Fail(FailStmt),
-    Done(DoneStmt),
+    Print(PrintStmt<V>),
+    If(IfStmt<V>),
+    Pick(PickExpr<V>),
+    Loop(LoopStmt<V>),
+    Cord(CordStmt<V>),
+    Rep(RepStmt<V>),
+    For(ForStmt<V>),
+    Give(GiveStmt<V>),
+    Fail(FailStmt<V>),
+    Done(DoneStmt<V>),
     Skip(SkipStmt),
-    Block(BlockStmt),
+    Block(BlockStmt<V>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExprStmt {
-    pub expr: Expr,
+pub struct ExprStmt<V> {
+    pub expr: Expr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PrintStmt {
-    pub expr: Expr,
+pub struct PrintStmt<V> {
+    pub expr: Expr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct IfStmt {
-    pub pred: Expr,
-    pub then: BlockStmt,
-    pub or: Option<Box<OrStmt>>,
+pub struct IfStmt<V> {
+    pub pred: Expr<V>,
+    pub then: BlockStmt<V>,
+    pub or: Option<Box<OrStmt<V>>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum OrStmt {
-    More(IfStmt),
-    Last(BlockStmt),
+pub enum OrStmt<V> {
+    More(IfStmt<V>),
+    Last(BlockStmt<V>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PickExpr {
-    pub arms: Box<[PickArm]>,
+pub struct PickExpr<V> {
+    pub arms: Box<[PickArm<V>]>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PickArm {
+pub struct PickArm<V> {
     pub pat: PickPattern,
-    pub expr: BlockExpr,
+    pub expr: BlockExpr<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -405,44 +411,44 @@ pub struct Label {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LoopStmt {
+pub struct LoopStmt<V> {
     pub label: Option<Label>,
-    pub body: BlockStmt,
+    pub body: BlockStmt<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CordStmt {
+pub struct CordStmt<V> {
     pub label: Option<Label>,
-    pub body: BlockStmt,
+    pub body: BlockStmt<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct RepStmt {
-    pub pred: Expr,
-    pub body: BlockStmt,
+pub struct RepStmt<V> {
+    pub pred: Expr<V>,
+    pub body: BlockStmt<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ForStmt {
+pub struct ForStmt<V> {
     pub var: BindingPattern,
-    pub iter: Expr,
-    pub body: BlockStmt,
+    pub iter: Expr<V>,
+    pub body: BlockStmt<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GiveStmt {
-    pub expr: Option<Expr>,
+pub struct GiveStmt<V> {
+    pub expr: Option<Expr<V>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FailStmt {
-    pub expr: Option<Expr>,
+pub struct FailStmt<V> {
+    pub expr: Option<Expr<V>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DoneStmt {
+pub struct DoneStmt<V> {
     pub label: Option<Label>,
-    pub expr: Option<Expr>,
+    pub expr: Option<Expr<V>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -451,4 +457,4 @@ pub struct SkipStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BlockStmt(pub Box<[Decl]>);
+pub struct BlockStmt<V>(pub Box<[Decl<V>]>);

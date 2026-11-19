@@ -1,7 +1,7 @@
 use crate::{
     analyzer::{
         static_env::{
-            ItemId, ModId,
+            ItemId, ModId, VarId,
             scope::{
                 env::{ModScopeEnvironment, ScopeEnvironment},
                 hir,
@@ -63,26 +63,69 @@ impl ScopeEnvironment {
         mapping
     }
 }
+
 impl ModScopeEnvironment<'_> {
     pub fn analyze(
         &mut self,
-        prgm: ast::ProgramUnit,
+        unit: ast::ProgramUnit,
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<hir::HirUnit, CheckDiagnostics> {
-        prgm.decls
+    ) -> Result<hir::HirUnit<hir::Variable>, CheckDiagnostics> {
+        unit.decls
             .into_iter()
-            .map(|decl| decl.analyze(self, prgm.file, source, diagnostics))
+            .map(|decl| decl.analyze(self, unit.file, source, diagnostics))
             .collect_or_drop_all_errs()
             .map(|decls| hir::HirUnit {
-                file: prgm.file,
+                file: unit.file,
                 decls,
             })
             .ok_or(CheckDiagnostics)
     }
 }
 
-trait ScopeAnalyze {
+pub trait VariableRef: Sized + std::fmt::Debug {
+    fn try_from_id(
+        id: Option<VarId>,
+        file: FileId,
+        ast: ast::Variable,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self, CheckDiagnostics>;
+}
+
+impl VariableRef for hir::Variable {
+    fn try_from_id(
+        id: Option<VarId>,
+        _file: FileId,
+        ast: ast::Variable,
+        _diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self, CheckDiagnostics> {
+        let var = if let Some(id) = id {
+            Self::Found(id)
+        } else {
+            Self::Unknown(ast)
+        };
+        Ok(var)
+    }
+}
+
+impl VariableRef for hir::PostDeclVar {
+    fn try_from_id(
+        id: Option<VarId>,
+        file: FileId,
+        ast: ast::Variable,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<Self, CheckDiagnostics> {
+        id.map(Self).ok_or_else(|| {
+            diagnostics.push(Diagnostic::new(
+                ast.span().within_file(file),
+                DiagnosticKind::UnknownVar,
+            ));
+            CheckDiagnostics
+        })
+    }
+}
+
+trait DeclAnalyze {
     type Output;
 
     fn analyze(
@@ -94,8 +137,8 @@ trait ScopeAnalyze {
     ) -> Result<Self::Output, CheckDiagnostics>;
 }
 
-impl ScopeAnalyze for ast::BlockStmt {
-    type Output = hir::BlockStmt;
+impl DeclAnalyze for ast::BlockStmt {
+    type Output = hir::BlockStmt<hir::Variable>;
 
     fn analyze(
         self,
@@ -113,8 +156,8 @@ impl ScopeAnalyze for ast::BlockStmt {
     }
 }
 
-impl ScopeAnalyze for ast::Decl {
-    type Output = hir::Decl;
+impl DeclAnalyze for ast::Decl {
+    type Output = hir::Decl<hir::Variable>;
 
     fn analyze(
         self,
@@ -151,7 +194,7 @@ impl ScopeAnalyze for ast::Decl {
     }
 }
 
-impl ScopeAnalyze for ast::DeclMod {
+impl DeclAnalyze for ast::DeclMod {
     type Output = hir::DeclMod;
 
     fn analyze(
@@ -168,8 +211,8 @@ impl ScopeAnalyze for ast::DeclMod {
     }
 }
 
-impl ScopeAnalyze for ast::DeclVar {
-    type Output = hir::Decl;
+impl DeclAnalyze for ast::DeclVar {
+    type Output = hir::Decl<hir::Variable>;
 
     fn analyze(
         self,
@@ -230,8 +273,8 @@ impl ScopeAnalyze for ast::DeclVar {
     }
 }
 
-impl ScopeAnalyze for ast::DeclOn {
-    type Output = hir::DeclOn;
+impl DeclAnalyze for ast::DeclOn {
+    type Output = hir::DeclOn<hir::Variable>;
 
     fn analyze(
         self,
@@ -262,8 +305,8 @@ impl ScopeAnalyze for ast::DeclOn {
     }
 }
 
-impl ScopeAnalyze for ast::TypeBoundClause {
-    type Output = hir::TypeBoundClause;
+impl DeclAnalyze for ast::TypeBoundClause {
+    type Output = hir::TypeBoundClause<hir::Variable>;
 
     fn analyze(
         self,
@@ -281,8 +324,8 @@ impl ScopeAnalyze for ast::TypeBoundClause {
     }
 }
 
-impl ScopeAnalyze for ast::IffClause {
-    type Output = hir::IffClause;
+impl DeclAnalyze for ast::IffClause {
+    type Output = hir::IffClause<hir::Variable>;
 
     fn analyze(
         self,
@@ -300,7 +343,7 @@ impl ScopeAnalyze for ast::IffClause {
     }
 }
 
-impl ScopeAnalyze for ast::SelfParam {
+impl DeclAnalyze for ast::SelfParam {
     type Output = hir::SelfParam;
 
     fn analyze(
@@ -317,8 +360,8 @@ impl ScopeAnalyze for ast::SelfParam {
     }
 }
 
-impl ScopeAnalyze for ast::FnParam {
-    type Output = hir::FunParam;
+impl DeclAnalyze for ast::FnParam {
+    type Output = hir::FunParam<hir::Variable>;
 
     fn analyze(
         self,
@@ -334,8 +377,8 @@ impl ScopeAnalyze for ast::FnParam {
     }
 }
 
-impl ScopeAnalyze for ast::DeclFun {
-    type Output = hir::DeclFun;
+impl DeclAnalyze for ast::DeclFun {
+    type Output = hir::DeclFun<hir::Variable>;
 
     fn analyze(
         self,
@@ -404,8 +447,8 @@ impl ScopeAnalyze for ast::DeclFun {
     }
 }
 
-impl ScopeAnalyze for ast::DeclType {
-    type Output = hir::Decl;
+impl DeclAnalyze for ast::DeclType {
+    type Output = hir::Decl<hir::Variable>;
 
     fn analyze(
         self,
@@ -426,8 +469,8 @@ impl ScopeAnalyze for ast::DeclType {
     }
 }
 
-impl ScopeAnalyze for (ast::Field, ItemId) {
-    type Output = hir::Field;
+impl DeclAnalyze for (ast::Field, ItemId) {
+    type Output = hir::Field<hir::Variable>;
 
     fn analyze(
         self,
@@ -457,8 +500,8 @@ impl ScopeAnalyze for (ast::Field, ItemId) {
     }
 }
 
-impl ScopeAnalyze for ast::DeclRec {
-    type Output = hir::DeclRec;
+impl DeclAnalyze for ast::DeclRec {
+    type Output = hir::DeclRec<hir::Variable>;
 
     fn analyze(
         self,
@@ -495,8 +538,8 @@ impl ScopeAnalyze for ast::DeclRec {
     }
 }
 
-impl ScopeAnalyze for ast::DeclCat {
-    type Output = hir::DeclCat;
+impl DeclAnalyze for ast::DeclCat {
+    type Output = hir::DeclCat<hir::Variable>;
 
     fn analyze(
         self,
@@ -531,8 +574,8 @@ impl ScopeAnalyze for ast::DeclCat {
     }
 }
 
-impl ScopeAnalyze for ast::DeclDfer {
-    type Output = hir::DeclDfer;
+impl DeclAnalyze for ast::DeclDfer {
+    type Output = hir::DeclDfer<hir::Variable>;
 
     fn analyze(
         self,
@@ -553,8 +596,8 @@ impl ScopeAnalyze for ast::DeclDfer {
     }
 }
 
-impl ScopeAnalyze for ast::Stmt {
-    type Output = hir::Stmt;
+impl DeclAnalyze for ast::Stmt {
+    type Output = hir::Stmt<hir::Variable>;
 
     fn analyze(
         self,
@@ -607,8 +650,8 @@ impl ScopeAnalyze for ast::Stmt {
     }
 }
 
-impl ScopeAnalyze for ast::LoopBlock {
-    type Output = hir::Stmt;
+impl DeclAnalyze for ast::LoopBlock {
+    type Output = hir::Stmt<hir::Variable>;
 
     fn analyze(
         self,
@@ -651,8 +694,8 @@ impl ScopeAnalyze for ast::LoopBlock {
     }
 }
 
-impl ScopeAnalyze for ast::PrintStmt {
-    type Output = hir::PrintStmt;
+impl DeclAnalyze for ast::PrintStmt {
+    type Output = hir::PrintStmt<hir::Variable>;
 
     fn analyze(
         self,
@@ -668,8 +711,8 @@ impl ScopeAnalyze for ast::PrintStmt {
     }
 }
 
-impl ScopeAnalyze for ast::GiveStmt {
-    type Output = hir::GiveStmt;
+impl DeclAnalyze for ast::GiveStmt {
+    type Output = hir::GiveStmt<hir::Variable>;
 
     fn analyze(
         self,
@@ -685,8 +728,8 @@ impl ScopeAnalyze for ast::GiveStmt {
     }
 }
 
-impl ScopeAnalyze for ast::FailStmt {
-    type Output = hir::FailStmt;
+impl DeclAnalyze for ast::FailStmt {
+    type Output = hir::FailStmt<hir::Variable>;
 
     fn analyze(
         self,
@@ -702,8 +745,8 @@ impl ScopeAnalyze for ast::FailStmt {
     }
 }
 
-impl ScopeAnalyze for ast::DoneStmt {
-    type Output = hir::DoneStmt;
+impl DeclAnalyze for ast::DoneStmt {
+    type Output = hir::DoneStmt<hir::Variable>;
 
     fn analyze(
         self,
@@ -721,8 +764,8 @@ impl ScopeAnalyze for ast::DoneStmt {
     }
 }
 
-impl ScopeAnalyze for ast::Expr {
-    type Output = hir::Expr;
+impl DeclAnalyze for ast::Expr {
+    type Output = hir::Expr<hir::Variable>;
 
     fn analyze(
         self,
@@ -771,8 +814,8 @@ impl ScopeAnalyze for ast::Expr {
     }
 }
 
-impl ScopeAnalyze for ast::BlockExpr {
-    type Output = hir::BlockExpr;
+impl DeclAnalyze for ast::BlockExpr {
+    type Output = hir::BlockExpr<hir::Variable>;
 
     fn analyze(
         self,
@@ -806,7 +849,7 @@ impl ScopeAnalyze for ast::BlockExpr {
     }
 }
 
-impl ScopeAnalyze for ast::Directive {
+impl DeclAnalyze for ast::Directive {
     type Output = hir::Directive;
 
     fn analyze(
@@ -822,7 +865,7 @@ impl ScopeAnalyze for ast::Directive {
     }
 }
 
-impl ScopeAnalyze for ast::Variable {
+impl DeclAnalyze for ast::Variable {
     type Output = hir::Variable;
 
     fn analyze(
@@ -832,25 +875,24 @@ impl ScopeAnalyze for ast::Variable {
         source: &SourceMap,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Self::Output, CheckDiagnostics> {
-        if !self.path.is_empty() {
-            todo!("external variable analysis")
+        if self.path.is_empty() {
+            let ident = self.ident.within_file(file);
+            let name = &source[ident];
+            // variables can shadow function names
+            let id = env
+                .lookup_var(name)
+                // maybe a function
+                .or_else(|| env.lookup_item(name));
+            if let Some(id) = id {
+                return Ok(hir::Variable::Found(id));
+            }
         }
-        let ident = self.ident.within_file(file);
-        let name = &source[ident];
-        // variables can shadow function names
-        env.lookup_var(name)
-            // maybe a function
-            .or_else(|| env.lookup_item(name))
-            .ok_or_else(|| {
-                diagnostics.push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
-                CheckDiagnostics
-            })
-            .map(hir::Variable)
+        Ok(hir::Variable::Unknown(self))
     }
 }
 
-impl ScopeAnalyze for ast::IfStmt {
-    type Output = hir::IfStmt;
+impl DeclAnalyze for ast::IfStmt {
+    type Output = hir::IfStmt<hir::Variable>;
 
     fn analyze(
         self,
@@ -884,8 +926,8 @@ impl ScopeAnalyze for ast::IfStmt {
     }
 }
 
-impl ScopeAnalyze for ast::TypeExpr {
-    type Output = hir::TypeExpr;
+impl DeclAnalyze for ast::TypeExpr {
+    type Output = hir::TypeExpr<hir::Variable>;
 
     fn analyze(
         self,
@@ -901,6 +943,7 @@ impl ScopeAnalyze for ast::TypeExpr {
                 ast::TypenameKeyword::Nevr => hir::PrimitiveType::Nevr,
                 ast::TypenameKeyword::Fail => hir::PrimitiveType::Fail,
                 ast::TypenameKeyword::Bool => hir::PrimitiveType::Bool,
+                ast::TypenameKeyword::Byte => hir::PrimitiveType::Byte,
                 ast::TypenameKeyword::Uint => hir::PrimitiveType::Uint,
                 ast::TypenameKeyword::Sint => hir::PrimitiveType::Sint,
                 ast::TypenameKeyword::Flpt => hir::PrimitiveType::Flpt,
@@ -939,8 +982,8 @@ impl ScopeAnalyze for ast::TypeExpr {
     }
 }
 
-impl ScopeAnalyze for ast::FallType {
-    type Output = hir::FallType;
+impl DeclAnalyze for ast::FallType {
+    type Output = hir::FallType<hir::Variable>;
 
     fn analyze(
         self,
@@ -962,8 +1005,8 @@ impl ScopeAnalyze for ast::FallType {
     }
 }
 
-impl ScopeAnalyze for ast::ViewType {
-    type Output = hir::ViewType;
+impl DeclAnalyze for ast::ViewType {
+    type Output = hir::ViewType<hir::Variable>;
 
     fn analyze(
         self,
@@ -984,8 +1027,8 @@ impl ScopeAnalyze for ast::ViewType {
     }
 }
 
-impl ScopeAnalyze for ast::AssocType {
-    type Output = hir::AssocType;
+impl DeclAnalyze for ast::AssocType {
+    type Output = hir::AssocType<hir::Variable>;
 
     fn analyze(
         self,
@@ -1003,8 +1046,8 @@ impl ScopeAnalyze for ast::AssocType {
     }
 }
 
-impl ScopeAnalyze for ast::AssocTypeSource {
-    type Output = hir::AssocTypeSource;
+impl DeclAnalyze for ast::AssocTypeSource {
+    type Output = hir::AssocTypeSource<hir::Variable>;
 
     fn analyze(
         self,
@@ -1025,8 +1068,8 @@ impl ScopeAnalyze for ast::AssocTypeSource {
     }
 }
 
-impl ScopeAnalyze for ast::OpaqueType {
-    type Output = hir::OpaqueType;
+impl DeclAnalyze for ast::OpaqueType {
+    type Output = hir::OpaqueType<hir::Variable>;
 
     fn analyze(
         self,
@@ -1041,7 +1084,7 @@ impl ScopeAnalyze for ast::OpaqueType {
     }
 }
 
-impl ScopeAnalyze for ast::Typename {
+impl DeclAnalyze for ast::Typename {
     type Output = hir::Typename;
 
     fn analyze(
@@ -1063,8 +1106,8 @@ impl ScopeAnalyze for ast::Typename {
     }
 }
 
-impl ScopeAnalyze for ast::FunType {
-    type Output = hir::FunType;
+impl DeclAnalyze for ast::FunType {
+    type Output = hir::FunType<hir::Variable>;
 
     fn analyze(
         self,
@@ -1090,8 +1133,8 @@ impl ScopeAnalyze for ast::FunType {
     }
 }
 
-impl ScopeAnalyze for ast::RefType {
-    type Output = hir::RefType;
+impl DeclAnalyze for ast::RefType {
+    type Output = hir::RefType<hir::Variable>;
 
     fn analyze(
         self,
@@ -1106,8 +1149,8 @@ impl ScopeAnalyze for ast::RefType {
     }
 }
 
-impl ScopeAnalyze for ast::TypeInstance {
-    type Output = hir::TypeInstance;
+impl DeclAnalyze for ast::TypeInstance {
+    type Output = hir::TypeInstance<hir::Variable>;
 
     fn analyze(
         self,
@@ -1128,8 +1171,8 @@ impl ScopeAnalyze for ast::TypeInstance {
     }
 }
 
-impl ScopeAnalyze for ast::Binary {
-    type Output = hir::Binary;
+impl DeclAnalyze for ast::Binary {
+    type Output = hir::Binary<hir::Variable>;
 
     fn analyze(
         self,
@@ -1148,8 +1191,8 @@ impl ScopeAnalyze for ast::Binary {
     }
 }
 
-impl ScopeAnalyze for ast::Unary {
-    type Output = hir::Unary;
+impl DeclAnalyze for ast::Unary {
+    type Output = hir::Unary<hir::Variable>;
 
     fn analyze(
         self,
@@ -1167,8 +1210,8 @@ impl ScopeAnalyze for ast::Unary {
     }
 }
 
-impl ScopeAnalyze for ast::Subscript {
-    type Output = hir::Subscript;
+impl DeclAnalyze for ast::Subscript {
+    type Output = hir::Subscript<hir::Variable>;
 
     fn analyze(
         self,
@@ -1186,8 +1229,8 @@ impl ScopeAnalyze for ast::Subscript {
     }
 }
 
-impl ScopeAnalyze for ast::FnCall {
-    type Output = hir::FnCall;
+impl DeclAnalyze for ast::FnCall {
+    type Output = hir::FnCall<hir::Variable>;
 
     fn analyze(
         self,
@@ -1210,8 +1253,8 @@ impl ScopeAnalyze for ast::FnCall {
     }
 }
 
-impl ScopeAnalyze for ast::GenericGroup {
-    type Output = hir::GenericGroup;
+impl DeclAnalyze for ast::GenericGroup {
+    type Output = hir::GenericGroup<hir::Variable>;
 
     fn analyze(
         self,
@@ -1229,8 +1272,8 @@ impl ScopeAnalyze for ast::GenericGroup {
     }
 }
 
-impl ScopeAnalyze for ast::TypeBound {
-    type Output = hir::TypeBound;
+impl DeclAnalyze for ast::TypeBound {
+    type Output = hir::TypeBound<hir::Variable>;
 
     fn analyze(
         self,
@@ -1271,8 +1314,8 @@ impl ScopeAnalyze for ast::TypeBound {
     }
 }
 
-impl ScopeAnalyze for ast::ComboBound {
-    type Output = hir::TypeBound;
+impl DeclAnalyze for ast::ComboBound {
+    type Output = hir::TypeBound<hir::Variable>;
 
     fn analyze(
         self,
@@ -1292,8 +1335,8 @@ impl ScopeAnalyze for ast::ComboBound {
     }
 }
 
-impl ScopeAnalyze for ast::NegativeBound {
-    type Output = hir::NegativeBound;
+impl DeclAnalyze for ast::NegativeBound {
+    type Output = hir::NegativeBound<hir::Variable>;
 
     fn analyze(
         self,
@@ -1308,8 +1351,8 @@ impl ScopeAnalyze for ast::NegativeBound {
     }
 }
 
-impl ScopeAnalyze for ast::ExactTypeBound {
-    type Output = hir::ExactTypeBound;
+impl DeclAnalyze for ast::ExactTypeBound {
+    type Output = hir::ExactTypeBound<hir::Variable>;
 
     fn analyze(
         self,
@@ -1324,8 +1367,8 @@ impl ScopeAnalyze for ast::ExactTypeBound {
     }
 }
 
-impl ScopeAnalyze for ast::MemberBound {
-    type Output = hir::MemberBound;
+impl DeclAnalyze for ast::MemberBound {
+    type Output = hir::MemberBound<hir::Variable>;
 
     fn analyze(
         self,
@@ -1345,7 +1388,7 @@ impl ScopeAnalyze for ast::MemberBound {
     }
 }
 
-impl ScopeAnalyze for ast::OverloadBound {
+impl DeclAnalyze for ast::OverloadBound {
     type Output = hir::OverloadBound;
 
     fn analyze(
@@ -1361,8 +1404,8 @@ impl ScopeAnalyze for ast::OverloadBound {
     }
 }
 
-impl ScopeAnalyze for ast::ExprBound {
-    type Output = hir::ExprBound;
+impl DeclAnalyze for ast::ExprBound {
+    type Output = hir::ExprBound<hir::Variable>;
 
     fn analyze(
         self,
