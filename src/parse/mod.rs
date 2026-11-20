@@ -120,9 +120,8 @@ where
                 diagnostics,
             )
         })
-        .collect_or_drop_all_errs()
+        .collect_or_acc_errs()
         .map(|units| ast::Program { units })
-        .ok_or(CheckDiagnostics)
 }
 
 pub fn parse_unit<I>(
@@ -550,12 +549,11 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 .is_some()
                 .then(|| self.declaration().inspect_err(|_| self.sync()))
         })
-        .collect_or_drop_all_errs()
+        .collect_or_acc_errs()
         .map(|decls| ast::ProgramUnit {
             file: self.file,
             decls,
         })
-        .ok_or(CheckDiagnostics)
         .inspect_always(|x| pop_parse_call!(self, "program", x))
     }
 

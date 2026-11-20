@@ -74,12 +74,11 @@ impl ModScopeEnvironment<'_> {
         unit.decls
             .into_iter()
             .map(|decl| decl.analyze(self, unit.file, source, diagnostics))
-            .collect_or_drop_all_errs()
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
             .map(|decls| hir::HirUnit {
                 file: unit.file,
                 decls,
             })
-            .ok_or(CheckDiagnostics)
     }
 }
 
@@ -119,9 +118,9 @@ impl DeclAnalyze for ast::BlockStmt {
         self.body
             .into_iter()
             .map(|decl| decl.analyze(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice)
             .map(hir::BlockStmt)
-            .ok_or(CheckDiagnostics)
             .inspect_always(|_| _ = env.pop_scope().expect("should be balanced"))
     }
 }
@@ -314,8 +313,8 @@ impl DeclAnalyze for ast::IffClause {
         self.bounds
             .into_iter()
             .map(|x| x.analyze(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics)
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice)
             .map(hir::IffClause)
     }
 }
@@ -398,8 +397,8 @@ impl DeclAnalyze for ast::DeclFun {
             .params
             .into_iter()
             .map(|x| x.analyze(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics);
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice);
         let ret = head
             .ret
             .map(|x| x.ty.analyze(env, file, source, diagnostics))
@@ -508,8 +507,8 @@ impl DeclAnalyze for ast::DeclRec {
             .fields
             .into_iter()
             .map(|x| (x, id).analyze(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics);
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice);
         env.pop_layer().expect("should be balanced");
         Ok(hir::DeclRec {
             id,
@@ -1103,8 +1102,8 @@ impl DeclAnalyze for ast::FunType {
             .params
             .into_iter()
             .map(|x| x.analyze(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics);
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice);
         let ret = self
             .ret
             .map(|x| x.ty.analyze(env, file, source, diagnostics).map(Box::new))
@@ -1227,8 +1226,8 @@ impl DeclAnalyze for ast::FnCall {
             .args
             .into_iter()
             .map(|x| x.analyze(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics);
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice);
         Ok(hir::FnCall {
             fun: fun?,
             args: args?,
@@ -1249,8 +1248,8 @@ impl DeclAnalyze for ast::GenericGroup {
         self.list
             .into_iter()
             .map(|x| x.analyze(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics)
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice)
             .map(hir::GenericGroup)
     }
 }

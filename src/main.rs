@@ -133,7 +133,7 @@ use crate::{
         span::RelSpan,
     },
     todo_types::Dummy,
-    util::OrAllErrsExt as _,
+    util::{DropAll, OrAllErrsExt},
 };
 use analyzer::static_env::scope::env::ScopeEnvironment;
 use error::{CheckDiagnostics, fail::Failure};
@@ -818,7 +818,8 @@ fn compile(
             }
             res
         })
-        .collect_or_drop_all_errs::<Vec<_>>();
+        .collect_or_acc_errs::<Vec<_>, DropAll>()
+        .ok();
 
     // declaration errors
     diagnostics.ok_or_err()?;
@@ -854,7 +855,7 @@ fn compile(
             }
             res
         })
-        .collect_or_drop_all_errs::<Vec<_>>();
+        .collect_or_acc_errs::<Vec<_>, DropAll>();
 
     // link errors
     diagnostics.ok_or_err()?;

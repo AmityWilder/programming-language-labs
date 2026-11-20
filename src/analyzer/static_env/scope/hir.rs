@@ -12,10 +12,12 @@ use crate::{
         static_env::{ItemId, ModId, TypeId, VarId},
         types::bounds::Combinator,
     },
+    error::CheckDiagnostics,
     lex::token::{Operator, punc::OpSide},
     parse::ast,
     src_code::span::{FileId, RelSpan},
     todo_types::Todo,
+    util::{DropAll, OrAllErrsExt},
 };
 
 fn convert_iter<U, A: IntoIterator<Item: Into<U>>, B: FromIterator<U>>(vec: A) -> B {
@@ -39,7 +41,243 @@ impl From<ast::ProgramUnit>
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[inline]
+pub const fn no_change<T>(x: T) -> Option<T> {
+    Some(x)
+}
+
+pub trait TreeMap<M1, D1, V1, T1, L1> {
+    type Output<M2, D2, V2, T2, L2>;
+
+    ///
+    /// Tip: use [`std::convert::identity`] if the method shouldnt do any
+    fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+        self,
+        ctx: &mut Ctx,
+        fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+        fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+        fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+        ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+        fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+    ) -> Option<Self::Output<M2, D2, V2, T2, L2>>;
+}
+
+macro_rules! impl_tree_map {
+    (for $Type:ident ($self:ident, $ctx:ident, $fm:ident, $fd:ident, $fv:ident, $ft:ident, $fl:ident) $def:expr) => {
+        impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for $Type<M1, D1, V1, T1, L1> {
+            type Output<M2, D2, V2, T2, L2> = $Type<M2, D2, V2, T2, L2>;
+
+            fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+                self,
+                $ctx: &mut Ctx,
+                $fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+                $fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+                $fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+                $ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+                $fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+            ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+                let $self = self;
+                $def
+            }
+        }
+    };
+}
+
+/// Passthrough
+macro_rules! TreeMapPass {
+    derive() {
+        $(#[$m:meta])*
+        $vis:vis struct $Type:ident<$M:ident, $D:ident, $V:ident, $T:ident, $L:ident>(
+            $(#[$fm:meta])*
+            $fvis:vis $Field:ty $(,)?
+        );
+    } => {
+        impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for $Type<M1, D1, V1, T1, L1> {
+            type Output<M2, D2, V2, T2, L2> = $Type<M2, D2, V2, T2, L2>;
+
+            fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+                self,
+                ctx: &mut Ctx,
+                fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+                fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+                fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+                ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+                fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+            ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+                self.0.tree_map(ctx, fm, fd, fv, ft, fl).map($Type)
+            }
+        }
+    };
+
+    derive() {
+        $(#[$m:meta])*
+        $vis:vis struct $Type:ident<$M:ident, $D:ident, $V:ident, $T:ident, $L:ident> {$(
+            $(#[$fm:meta])*
+            $fvis:vis $field:ident: $Field:ty
+        ),* $(,)?}
+    } => {
+        impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for $Type<M1, D1, V1, T1, L1> {
+            type Output<M2, D2, V2, T2, L2> = $Type<M2, D2, V2, T2, L2>;
+
+            fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+                self,
+                ctx: &mut Ctx,
+                fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+                fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+                fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+                ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+                fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+            ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+                let Self { $($field),* } = self;
+                $(let $field = $field.tree_map(ctx, fm, fd, fv, ft, fl);)*
+                Some($Type { $($field: $field?),* })
+            }
+        }
+    };
+
+    derive() {
+        $(#[$m:meta])*
+        $vis:vis enum $Type:ident<$M:ident, $D:ident, $V:ident, $T:ident, $L:ident> {$(
+            $(#[$vm:meta])*
+            $Variant:ident(
+                $(#[$fm:meta])*
+                $Field:ty $(,)?
+            )
+        ),* $(,)?}
+    } => {
+        impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for $Type<M1, D1, V1, T1, L1> {
+            type Output<M2, D2, V2, T2, L2> = $Type<M2, D2, V2, T2, L2>;
+
+            fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+                self,
+                ctx: &mut Ctx,
+                fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+                fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+                fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+                ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+                fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+            ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+                match self {
+                    $(Self::$Variant(x) => x.tree_map(ctx, fm, fd, fv, ft, fl).map($Type::$Variant),)*
+                }
+            }
+        }
+    };
+
+    ($Type:ident) => {
+        impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for $Type {
+            type Output<M2, D2, V2, T2, L2> = Self;
+
+            fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+                self,
+                _: &mut Ctx,
+                _: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+                _: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+                _: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+                _: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+                _: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+            ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+                Some(self)
+            }
+        }
+    };
+
+    derive() {
+        $(#[$m:meta])*
+        $vis:vis struct $Type:ident($($body:tt)*);
+    } => {
+        TreeMapPass! { $Type }
+    };
+
+    derive() {
+        $(#[$m:meta])*
+        $vis:vis struct $Type:ident { $($body:tt)* }
+    } => {
+        TreeMapPass! { $Type }
+    };
+
+    derive() {
+        $(#[$m:meta])*
+        $vis:vis enum $Type:ident { $($body:tt)* }
+    } => {
+        TreeMapPass! { $Type }
+    };
+}
+
+impl<M1, D1, V1, T1, L1, T: TreeMap<M1, D1, V1, T1, L1>> TreeMap<M1, D1, V1, T1, L1> for Option<T> {
+    type Output<M2, D2, V2, T2, L2> = Option<T::Output<M2, D2, V2, T2, L2>>;
+
+    fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+        self,
+        ctx: &mut Ctx,
+        fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+        fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+        fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+        ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+        fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+    ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+        self.map(|x| x.tree_map(ctx, fm, fd, fv, ft, fl))
+    }
+}
+
+impl<M1, D1, V1, T1, L1, T: TreeMap<M1, D1, V1, T1, L1>> TreeMap<M1, D1, V1, T1, L1> for Box<[T]> {
+    type Output<M2, D2, V2, T2, L2> = Box<[T::Output<M2, D2, V2, T2, L2>]>;
+
+    fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+        self,
+        ctx: &mut Ctx,
+        fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+        fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+        fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+        ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+        fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+    ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+        self.into_iter()
+            .map(|x| x.tree_map(ctx, fm, fd, fv, ft, fl).ok_or(()))
+            .collect_or_acc_errs::<_, DropAll>()
+            .map(Vec::into_boxed_slice)
+            .ok()
+    }
+}
+
+impl<M1, D1, V1, T1, L1, T: TreeMap<M1, D1, V1, T1, L1>> TreeMap<M1, D1, V1, T1, L1> for Box<T> {
+    type Output<M2, D2, V2, T2, L2> = Box<T::Output<M2, D2, V2, T2, L2>>;
+
+    fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+        self,
+        ctx: &mut Ctx,
+        fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+        fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+        fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+        ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+        fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+    ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+        (*self).tree_map(ctx, fm, fd, fv, ft, fl).map(Box::new)
+    }
+}
+
+impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for HirUnit<M1, D1, V1, T1, L1> {
+    type Output<M2, D2, V2, T2, L2> = HirUnit<M2, D2, V2, T2, L2>;
+
+    fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+        self,
+        ctx: &mut Ctx,
+        fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+        fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+        fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+        ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+        fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+    ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+        let Self { file, decls } = self;
+        let decls = decls.tree_map(ctx, fm, fd, fv, ft, fl);
+        Some(HirUnit {
+            file,
+            decls: decls?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, TreeMapPass)]
 pub enum PrimitiveType {
     #[default]
     None,
@@ -101,7 +339,7 @@ impl From<ast::Typename> for UnlinkedTypename {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkedTypename(pub TypeId);
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct GenericGroup<M, D, V, T, L>(pub Box<[TypeExpr<M, D, V, T, L>]>);
 
 impl From<ast::GenericGroup>
@@ -126,6 +364,28 @@ impl From<ast::TypeInstance>
             name: name.into(),
             args: args.map(Into::into),
         }
+    }
+}
+
+impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for TypeInstance<M1, D1, V1, T1, L1> {
+    type Output<M2, D2, V2, T2, L2> = TypeInstance<M2, D2, V2, T2, L2>;
+
+    fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+        self,
+        ctx: &mut Ctx,
+        fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+        fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+        fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+        ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+        fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+    ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+        let Self { name, args } = self;
+        let name = ft(name, ctx);
+        let args = args.tree_map(ctx, fm, fd, fv, ft, fl);
+        Some(TypeInstance {
+            name: name?,
+            args: args?,
+        })
     }
 }
 
@@ -172,7 +432,28 @@ impl From<ast::FallType>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for FallType<M1, D1, V1, T1, L1> {
+    type Output<M2, D2, V2, T2, L2> = FallType<M2, D2, V2, T2, L2>;
+
+    fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+        self,
+        ctx: &mut Ctx,
+        fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+        fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+        fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+        ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+        fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+    ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+        let Self { then_ty, ty } = self;
+        let then_ty = then_ty.tree_map(ctx, fm, fd, fv, ft, fl);
+        Some(FallType {
+            then_ty: then_ty?,
+            ty,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct RefType<M, D, V, T, L> {
     // TBD: reference mutability?
     pub ty: TypeExpr<M, D, V, T, L>,
@@ -186,7 +467,7 @@ impl From<ast::RefType>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct ViewType<M, D, V, T, L> {
     pub item: TypeExpr<M, D, V, T, L>,
     pub count: Option<Expr<M, D, V, T, L>>,
@@ -227,7 +508,28 @@ impl From<ast::AssocTypeSource>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for AssocTypeSource<M1, D1, V1, T1, L1> {
+    type Output<M2, D2, V2, T2, L2> = AssocTypeSource<M2, D2, V2, T2, L2>;
+
+    fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+        self,
+        ctx: &mut Ctx,
+        fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+        fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+        fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+        ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+        fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+    ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+        match self {
+            Self::Simple(x) => ft(x, ctx).map(AssocTypeSource::Simple),
+            Self::Grouped(x) => x
+                .tree_map(ctx, fm, fd, fv, ft, fl)
+                .map(AssocTypeSource::Grouped),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct AssocType<M, D, V, T, L> {
     pub base: AssocTypeSource<M, D, V, T, L>,
     pub assoc: TypeInstance<M, D, V, T, L>,
@@ -250,7 +552,7 @@ impl From<ast::AssocType>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct FunType<M, D, V, T, L> {
     pub params: Box<[TypeExpr<M, D, V, T, L>]>,
     pub ret: Option<Box<TypeExpr<M, D, V, T, L>>>,
@@ -275,7 +577,7 @@ impl From<ast::FunType>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct OpaqueType<M, D, V, T, L>(pub TypeBound<M, D, V, T, L>);
 
 impl From<ast::OpaqueType>
@@ -313,7 +615,7 @@ impl From<ast::ComboBound>
 }
 
 /// Not
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct NegativeBound<M, D, V, T, L>(pub TypeBound<M, D, V, T, L>);
 
 impl From<ast::NegativeBound>
@@ -325,7 +627,7 @@ impl From<ast::NegativeBound>
 }
 
 /// Only
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct ExactTypeBound<M, D, V, T, L>(pub TypeExpr<M, D, V, T, L>);
 
 impl From<ast::ExactTypeBound>
@@ -337,7 +639,7 @@ impl From<ast::ExactTypeBound>
 }
 
 /// Has
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct MemberBound<M, D, V, T, L> {
     /// Identifier
     // TBD: should this be an ID at any point?
@@ -357,7 +659,7 @@ impl From<ast::MemberBound>
 }
 
 /// Shape
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct ShapeBound<M, D, V, T, L>(pub FunType<M, D, V, T, L>);
 
 impl From<ast::FunType>
@@ -369,7 +671,7 @@ impl From<ast::FunType>
 }
 
 /// Supports
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct OverloadBound {
     // TODO
 }
@@ -406,7 +708,7 @@ impl From<ast::ExprBound>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub enum TypeBound<M, D, V, T, L> {
     Combo(ComboBound<M, D, V, T, L>),
     Not(Box<NegativeBound<M, D, V, T, L>>),
@@ -438,7 +740,7 @@ impl From<ast::TypeBound>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub enum TypeExpr<M, D, V, T, L> {
     Primitive(PrimitiveType),
     Instance(TypeInstance<M, D, V, T, L>),
@@ -486,7 +788,7 @@ impl From<ast::BindingPattern> for BindingPattern<UnlinkedDecl> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct PickPattern {
     // TODO
 }
@@ -497,7 +799,7 @@ impl From<ast::PickPattern> for PickPattern {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub enum Decl<M, D, V, T, L> {
     Mod(DeclMod<M>),
     On(DeclOn<M, D, V, T, L>),
@@ -567,7 +869,25 @@ impl From<ast::DeclMod> for DeclMod<UnlinkedMod> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl<M1, D1, V1, T1, L1> TreeMap<M1, D1, V1, T1, L1> for DeclMod<M1> {
+    type Output<M2, D2, V2, T2, L2> = DeclMod<M2>;
+
+    fn tree_map<Ctx, M2, D2, V2, T2, L2>(
+        self,
+        ctx: &mut Ctx,
+        fm: &mut impl FnMut(M1, &mut Ctx) -> Option<M2>,
+        fd: &mut impl FnMut(D1, &mut Ctx) -> Option<D2>,
+        fv: &mut impl FnMut(V1, &mut Ctx) -> Option<V2>,
+        ft: &mut impl FnMut(T1, &mut Ctx) -> Option<T2>,
+        fl: &mut impl FnMut(L1, &mut Ctx) -> Option<L2>,
+    ) -> Option<Self::Output<M2, D2, V2, T2, L2>> {
+        let Self { id } = self;
+        let id = fm(self.id, ctx);
+        Ok(DeclMod { id: id? })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct TypeBoundClause<M, D, V, T, L> {
     pub target: TypeExpr<M, D, V, T, L>,
     pub bound: TypeBound<M, D, V, T, L>,
@@ -590,7 +910,7 @@ impl From<ast::TypeBoundClause>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct IffClause<M, D, V, T, L>(pub Box<[TypeBoundClause<M, D, V, T, L>]>);
 
 impl From<ast::IffClause>
@@ -601,7 +921,7 @@ impl From<ast::IffClause>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct DeclOn<M, D, V, T, L> {
     pub generics: Option<GenericGroup<M, D, V, T, L>>,
     pub target: TypeExpr<M, D, V, T, L>,
@@ -914,7 +1234,7 @@ impl From<ast::Unary>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct Subscript<M, D, V, T, L> {
     pub arr: Expr<M, D, V, T, L>,
     pub idx: Expr<M, D, V, T, L>,
@@ -938,7 +1258,7 @@ impl From<ast::Subscript>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct FnCall<M, D, V, T, L> {
     pub fun: Expr<M, D, V, T, L>,
     pub args: Box<[Expr<M, D, V, T, L>]>,
@@ -974,7 +1294,7 @@ impl From<ast::Literal> for UnlinkedLiteral {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinkedLiteral(pub Todo);
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub enum Directive {
     Inpt,
 }
@@ -1023,7 +1343,7 @@ impl From<ast::Variable> for UnlinkedVar {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkedVar(pub VarId);
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub enum BlockExpr<M, D, V, T, L> {
     If(Box<IfStmt<M, D, V, T, L>>),
     Loop(Box<LoopStmt<M, D, V, T, L>>),
@@ -1071,7 +1391,7 @@ pub struct DeclLet<M, D, V, T, L> {
     pub init: Option<Expr<M, D, V, T, L>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct DeclDfer<M, D, V, T, L> {
     pub param: Option<BindingPattern<D>>,
     pub on_pop: BlockStmt<M, D, V, T, L>,
@@ -1100,10 +1420,9 @@ impl From<ast::DeclDfer>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub enum Stmt<M, D, V, T, L> {
     Expr(ExprStmt<M, D, V, T, L>),
-    // TODO: im not too fond of the print keyword
     Print(PrintStmt<M, D, V, T, L>),
     If(IfStmt<M, D, V, T, L>),
     Pick(PickExpr<M, D, V, T, L>),
@@ -1164,7 +1483,7 @@ impl From<ast::Stmt>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct ExprStmt<M, D, V, T, L>(pub Expr<M, D, V, T, L>);
 
 impl From<ast::ExprStmt>
@@ -1175,7 +1494,7 @@ impl From<ast::ExprStmt>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct PrintStmt<M, D, V, T, L>(pub Expr<M, D, V, T, L>);
 
 impl From<ast::PrintStmt>
@@ -1192,7 +1511,7 @@ impl From<ast::PrintStmt>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct IfStmt<M, D, V, T, L> {
     pub pred: Expr<M, D, V, T, L>,
     pub then: BlockStmt<M, D, V, T, L>,
@@ -1218,7 +1537,7 @@ impl From<ast::IfStmt>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub enum OrStmt<M, D, V, T, L> {
     More(IfStmt<M, D, V, T, L>),
     Last(BlockStmt<M, D, V, T, L>),
@@ -1243,7 +1562,7 @@ impl From<ast::OrStmt>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct PickExpr<M, D, V, T, L> {
     pub expr: Expr<M, D, V, T, L>,
     pub arms: Box<[PickArm<M, D, V, T, L>]>,
@@ -1268,10 +1587,10 @@ impl From<ast::PickStmt>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct PickArm<M, D, V, T, L> {
     pub pat: PickPattern,
-    pub expr: BlockExpr<M, D, V, T, L>,
+    pub expr: Expr<M, D, V, T, L>,
 }
 
 impl From<ast::PickArm>
@@ -1357,7 +1676,7 @@ impl From<ast::GiveStmt>
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct FailStmt<M, D, V, T, L> {
     pub expr: Option<Expr<M, D, V, T, L>>,
 }
@@ -1421,7 +1740,7 @@ impl From<ast::SkipStmt> for SkipStmt<UnlinkedLabel> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, TreeMapPass)]
 pub struct BlockStmt<M, D, V, T, L>(pub Box<[Decl<M, D, V, T, L>]>);
 
 impl From<ast::BlockStmt>

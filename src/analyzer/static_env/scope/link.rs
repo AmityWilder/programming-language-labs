@@ -25,12 +25,11 @@ impl ModScopeEnvironment<'_> {
         unit.decls
             .into_iter()
             .map(|decl| decl.link(self, unit.file, source, diagnostics))
-            .collect_or_drop_all_errs()
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
             .map(|decls| hir::HirUnit {
                 file: unit.file,
                 decls,
             })
-            .ok_or(CheckDiagnostics)
     }
 }
 
@@ -92,9 +91,9 @@ impl LinkAnalyze for hir::BlockStmt<hir::UnlinkedVar> {
         self.0
             .into_iter()
             .map(|decl| decl.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice)
             .map(hir::BlockStmt)
-            .ok_or(CheckDiagnostics)
     }
 }
 
@@ -265,8 +264,8 @@ impl LinkAnalyze for hir::DeclOn<hir::UnlinkedVar> {
         let members = members
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics);
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice);
         Ok(hir::DeclOn {
             generics: generics?,
             target: target?,
@@ -309,8 +308,8 @@ impl LinkAnalyze for hir::IffClause<hir::UnlinkedVar> {
         self.0
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics)
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice)
             .map(hir::IffClause)
     }
 }
@@ -373,8 +372,8 @@ impl LinkAnalyze for hir::DeclFun<hir::UnlinkedVar> {
         let params = params
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics);
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice);
         let ret = ret
             .map(|x| x.link(env, file, source, diagnostics))
             .transpose();
@@ -427,8 +426,8 @@ impl LinkAnalyze for hir::DeclRec<hir::UnlinkedVar> {
         let fields = fields
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics);
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice);
         Ok(hir::DeclRec {
             id,
             fields: fields?,
@@ -1008,8 +1007,8 @@ impl LinkAnalyze for hir::FunType<hir::UnlinkedVar> {
             .params
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics);
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice);
         let ret = self
             .ret
             .map(|x| x.link(env, file, source, diagnostics).map(Box::new))
@@ -1133,8 +1132,8 @@ impl LinkAnalyze for hir::FnCall<hir::UnlinkedVar> {
             .args
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics);
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice);
         Ok(hir::FnCall {
             fun: fun?,
             args: args?,
@@ -1155,8 +1154,8 @@ impl LinkAnalyze for hir::GenericGroup<hir::UnlinkedVar> {
         self.0
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
-            .ok_or(CheckDiagnostics)
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice)
             .map(hir::GenericGroup)
     }
 }
@@ -1228,9 +1227,9 @@ impl LinkAnalyze for hir::ConjunctionBound<hir::UnlinkedVar> {
         self.0
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice)
             .map(hir::ConjunctionBound)
-            .ok_or(CheckDiagnostics)
     }
 }
 
@@ -1247,9 +1246,9 @@ impl LinkAnalyze for hir::DisjunctionBound<hir::UnlinkedVar> {
         self.0
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice)
             .map(hir::DisjunctionBound)
-            .ok_or(CheckDiagnostics)
     }
 }
 
@@ -1266,9 +1265,9 @@ impl LinkAnalyze for hir::SelectionBound<hir::UnlinkedVar> {
         self.0
             .into_iter()
             .map(|x| x.link(env, file, source, diagnostics))
-            .collect_boxed_or_drop_all_errs()
+            .collect_or_acc_errs::<_, CheckDiagnostics>()
+            .map(Vec::into_boxed_slice)
             .map(hir::SelectionBound)
-            .ok_or(CheckDiagnostics)
     }
 }
 

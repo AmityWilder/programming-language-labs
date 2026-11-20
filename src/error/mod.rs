@@ -24,6 +24,7 @@ use crate::{
     pre::eval::PreVal,
     src_code::{code::CreateSourceCodeError, map::SourceMap, span::Span},
     types::{byte, sint, uint},
+    util::drop_all,
 };
 use std::fmt::{self, Display, Formatter};
 
@@ -131,6 +132,13 @@ impl std::fmt::Display for NumErrorKind {
 /// Indicator that the error(s) have been output to the diagnostics vec, rather than being in the return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct CheckDiagnostics;
+
+impl FromIterator<Self> for CheckDiagnostics {
+    fn from_iter<I: IntoIterator<Item = Self>>(iter: I) -> Self {
+        drop_all(iter.into_iter());
+        Self
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum NumberBase {

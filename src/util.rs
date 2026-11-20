@@ -3,11 +3,23 @@ type ResErr<I, E> = fn(<I as Iterator>::Item) -> Option<E>;
 pub type ErrorIter<I, E> =
     std::iter::Chain<std::iter::Once<E>, std::iter::FilterMap<I, ResErr<I, E>>>;
 
-pub fn drop_all(iter: impl Iterator) {
-    iter.for_each(drop);
+#[inline]
+pub fn drop_all(iter: impl IntoIterator) {
+    iter.into_iter().for_each(drop);
+}
+
+pub struct DropAll;
+
+impl<E> FromIterator<E> for DropAll {
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = E>>(iter: I) -> Self {
+        drop_all(iter);
+        Self
+    }
 }
 
 pub trait OrAllErrsExt<T, E>: Sized + IntoIterator<Item = Result<T, E>> {
+    #[inline]
     fn ok_or_all_errs<F>(self, mut visit_ok: F) -> Result<(), ErrorIter<Self::IntoIter, E>>
     where
         F: FnMut(T),
@@ -25,14 +37,16 @@ pub trait OrAllErrsExt<T, E>: Sized + IntoIterator<Item = Result<T, E>> {
         Ok(())
     }
 
-    /// Returns true if there were no errors
-    fn ok_or_drop_all_errs<F>(self, visit_ok: F) -> bool
+    #[inline]
+    fn ok_or_acc_errs<F, B>(self, visit_ok: F) -> Result<(), B>
     where
         F: FnMut(T),
+        B: FromIterator<E>,
     {
-        self.ok_or_all_errs(visit_ok).map_err(drop_all).is_ok()
+        self.ok_or_all_errs(visit_ok).map_err(B::from_iter)
     }
 
+    #[inline]
     fn collect_or_all_errs<A>(self) -> Result<A, ErrorIter<Self::IntoIter, E>>
     where
         A: Default + Extend<T>,
@@ -44,20 +58,13 @@ pub trait OrAllErrsExt<T, E>: Sized + IntoIterator<Item = Result<T, E>> {
         iter.ok_or_all_errs(|x| buf.extend_one(x)).map(|()| buf)
     }
 
-    // TODO: can this be specialized for ExactSizeIterator?
-    fn collect_boxed_or_all_errs(self) -> Result<Box<[T]>, ErrorIter<Self::IntoIter, E>> {
-        self.collect_or_all_errs().map(Vec::into_boxed_slice)
-    }
-
-    fn collect_or_drop_all_errs<A>(self) -> Option<A>
+    #[inline]
+    fn collect_or_acc_errs<A, B>(self) -> Result<A, B>
     where
         A: Default + Extend<T>,
+        B: FromIterator<E>,
     {
-        self.collect_or_all_errs().map_err(drop_all).ok()
-    }
-
-    fn collect_boxed_or_drop_all_errs(self) -> Option<Box<[T]>> {
-        self.collect_boxed_or_all_errs().map_err(drop_all).ok()
+        self.collect_or_all_errs().map_err(B::from_iter)
     }
 }
 
