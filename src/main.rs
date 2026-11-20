@@ -570,7 +570,7 @@ trait ContainsError {
     #[inline]
     fn ok_or_err(&self) -> Result<(), CheckDiagnostics> {
         if self.contains_err() {
-            Err(CheckDiagnostics)
+            Err(stics)
         } else {
             Ok(())
         }

@@ -8,6 +8,7 @@ pub fn drop_all(iter: impl IntoIterator) {
     iter.into_iter().for_each(drop);
 }
 
+#[derive(Default)]
 pub struct DropAll;
 
 impl<E> FromIterator<E> for DropAll {
@@ -15,6 +16,12 @@ impl<E> FromIterator<E> for DropAll {
     fn from_iter<I: IntoIterator<Item = E>>(iter: I) -> Self {
         drop_all(iter);
         Self
+    }
+}
+
+impl Extend<Self> for DropAll {
+    fn extend<I: IntoIterator<Item = Self>>(&mut self, iter: I) {
+        drop_all(iter.into_iter());
     }
 }
 

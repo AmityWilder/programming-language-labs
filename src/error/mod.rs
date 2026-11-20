@@ -140,6 +140,12 @@ impl FromIterator<Self> for CheckDiagnostics {
     }
 }
 
+impl Extend<Self> for CheckDiagnostics {
+    fn extend<I: IntoIterator<Item = Self>>(&mut self, iter: I) {
+        drop_all(iter.into_iter());
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum NumberBase {
     Bin,

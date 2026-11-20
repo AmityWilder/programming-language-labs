@@ -1,4 +1,3 @@
-pub mod base;
 pub mod decls;
 pub mod env;
 pub mod fmt;
