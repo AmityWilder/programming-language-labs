@@ -98,6 +98,17 @@ pub enum Combinator {
     One,
 }
 
+impl std::fmt::Display for Combinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::All => "+",
+            Self::Any => "|",
+            Self::One => "/",
+        }
+        .fmt(f)
+    }
+}
+
 /// A single [`TypeBound`] can include multiple bounds through [`Self::Combo`],
 /// so prefer [`Box<TypeBound>`] over [`Vec<TypeBound>`]
 #[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
