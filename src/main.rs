@@ -119,21 +119,26 @@
 )]
 
 use crate::{
-    analyzer::static_env::scope::fmt::DisplayHir,
+    analyzer::static_env::{
+        ModId,
+        scope::{
+            hir::{self, TreeWalk as _},
+            passes::{DeclModVisitor, PostDeclModPass},
+        },
+    },
     error::Diagnostic,
     highlight::{
         TokenHighlight, highlight,
         style::{Color, Style, StyleWrapper},
         syntax::{Syntax, SyntaxStyle, syntax_style},
     },
-    parse::ast::{ProgramUnit, VisitSpans as _},
+    parse::ast::VisitSpans as _,
     src_code::{
         code::{CreateSourceCodeError, SourceCode, SourceLoc, eq_module_name},
         map::SourceMap,
         span::RelSpan,
     },
     todo_types::Dummy,
-    util::{DropAll, OrAllErrsExt},
 };
 use analyzer::static_env::scope::env::ScopeEnvironment;
 use error::{CheckDiagnostics, fail::Failure};
@@ -570,7 +575,7 @@ trait ContainsError {
     #[inline]
     fn ok_or_err(&self) -> Result<(), CheckDiagnostics> {
         if self.contains_err() {
-            Err(stics)
+            Err(CheckDiagnostics)
         } else {
             Ok(())
         }
@@ -587,8 +592,11 @@ fn comp_file(
     config: &Cli,
     source: &mut SourceMap,
     id: FileId,
+    queue: &mut VecDeque<FileId>,
+    file_mod_ids: &mut BTreeMap<FileId, ModId>,
+    scope_env: &mut ScopeEnvironment,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<ProgramUnit, CheckDiagnostics> {
+) -> Result<hir::HirUnit<PostDeclModPass>, CheckDiagnostics> {
     // scanner
     println!("scanning...");
     {
@@ -725,7 +733,43 @@ fn comp_file(
         println!();
     }
 
-    Ok(unit)
+    let unit: hir::HirUnit<hir::UnlinkedPass> = unit.into();
+
+    println!("searching for dependencies...");
+    match file_mod_ids.entry(id).or_try_insert_with(|| {
+        scope_env.decl_library(
+            code.loc()
+                .name()
+                .unwrap_or_else(|| todo!("REPL mode library name"))
+                .to_owned(),
+        )
+    }) {
+        Ok(&mut mod_id) => {
+            let mut visitor = DeclModVisitor::new(source, scope_env, diagnostics, id, mod_id);
+            let unit = unit.walk(&mut visitor)?;
+            let submods = visitor.mapping();
+            if submods.is_empty() {
+                println!("no submodules declared");
+            } else if let Some(parent) = code.loc().path() {
+                let dir = parent.with_extension("");
+                for name in submods.into_keys() {
+                    println!("loading submodule {name}...");
+                    match load_module(dir.as_path(), name.as_str()) {
+                        Ok(submod) => {
+                            queue.push_back(source.push(submod));
+                        }
+
+                        Err(e) => todo!("error loading module: {e}"),
+                    }
+                }
+            } else {
+                todo!("error: REPL cannot have modules");
+            }
+            Ok(unit)
+        }
+
+        Err(e) => todo!("error: {e:?}"),
+    }
 }
 
 fn compile(
@@ -745,122 +789,101 @@ fn compile(
             "processing file {loc} (mod {})",
             loc.name().unwrap_or("<REPL>")
         );
-        if let Ok(unit) = comp_file(config, source, id, diagnostics) {
-            let code = &source[unit.file];
-            let unit = units.push_mut(unit);
-            println!("searching for dependencies...");
-            match file_mod_ids.entry(id).or_try_insert_with(|| {
-                scope_env.decl_library(
-                    code.loc()
-                        .name()
-                        .unwrap_or_else(|| todo!("REPL mode library name"))
-                        .to_owned(),
-                )
-            }) {
-                Ok(&mut mod_id) => {
-                    let submods = scope_env.declared_submodules(code, mod_id, unit, diagnostics);
-                    if !submods.is_empty() {
-                        if let Some(parent) = code.loc().path() {
-                            let dir = parent.with_extension("");
-                            for (name, _id) in submods {
-                                println!("loading submodule {name}...");
-                                match load_module(dir.as_path(), name.as_str()) {
-                                    Ok(submod) => {
-                                        ids.push_back(source.push(submod));
-                                    }
-
-                                    Err(e) => todo!("error loading module: {e}"),
-                                }
-                            }
-                        } else {
-                            todo!("error: REPL cannot have modules");
-                        }
-                    }
-                }
-
-                Err(e) => todo!("error: {e:?}"),
-            }
+        if let Ok(unit) = comp_file(
+            config,
+            source,
+            id,
+            &mut ids,
+            &mut file_mod_ids,
+            scope_env,
+            diagnostics,
+        ) {
+            units.push(unit);
         } else {
             // accumulate errors in other units
         }
     }
     diagnostics.ok_or_err()?;
 
+    println!();
+    println!("all modules located and parsed");
     println!("--- linking ---");
 
-    // declaration analysis
-    println!("analyzing declarations...");
-    let units = units
-        .into_iter()
-        .map(|unit| {
-            println!("analyzing {:?}", unit.file);
-            let &mod_id = file_mod_ids
-                .get(&unit.file)
-                .expect("should have been defined by `analyze_module_tree`");
-            let mut env = scope_env
-                .define_module(mod_id)
-                .expect("should have been defined by `analyze_module_tree`");
-            let res = env.analyze(unit, source, diagnostics);
-            if let Ok(hir) = &res {
-                println!(
-                    "hir:\n{:#}",
-                    DisplayHir {
-                        source,
-                        env: scope_env,
-                        hir,
-                    }
-                );
-            } else {
-                debug_assert!(
-                    diagnostics.contains_err(),
-                    "should have an error if analysis failed"
-                );
-            }
-            res
-        })
-        .collect_or_acc_errs::<Vec<_>, DropAll>()
-        .ok();
+    // TODO
 
-    // declaration errors
-    diagnostics.ok_or_err()?;
+    // // declaration analysis
+    // println!("analyzing declarations...");
+    // let units = units
+    //     .into_iter()
+    //     .map(|unit| {
+    //         println!("analyzing {:?}", unit.file);
+    //         let &mod_id = file_mod_ids
+    //             .get(&unit.file)
+    //             .expect("should have been defined by `analyze_module_tree`");
+    //         let mut env = scope_env
+    //             .define_module(mod_id)
+    //             .expect("should have been defined by `analyze_module_tree`");
+    //         let res = env.analyze(unit, source, diagnostics);
+    //         if let Ok(hir) = &res {
+    //             println!(
+    //                 "hir:\n{:#}",
+    //                 DisplayHir {
+    //                     source,
+    //                     env: scope_env,
+    //                     hir,
+    //                 }
+    //             );
+    //         } else {
+    //             debug_assert!(
+    //                 diagnostics.contains_err(),
+    //                 "should have an error if analysis failed"
+    //             );
+    //         }
+    //         res
+    //     })
+    //     .collect_or_acc_errs::<Vec<_>, DropAll>()
+    //     .ok();
 
-    let units = units.expect("should have an output if there are no errors");
+    // // declaration errors
+    // diagnostics.ok_or_err()?;
 
-    println!("analyzing scope...");
-    let units = units
-        .into_iter()
-        .map(|hir| {
-            println!("linking {:?}", hir.file);
-            let &mod_id = file_mod_ids
-                .get(&hir.file)
-                .expect("should have been defined by `analyze_module_tree`");
-            let mut env = scope_env
-                .define_module(mod_id)
-                .expect("should have been defined by `analyze_module_tree`");
-            let res = env.link(hir, source, diagnostics);
-            if let Ok(hir) = &res {
-                println!(
-                    "linked hir:\n{:#}",
-                    DisplayHir {
-                        source,
-                        env: scope_env,
-                        hir,
-                    }
-                );
-            } else {
-                debug_assert!(
-                    diagnostics.contains_err(),
-                    "should have an error if analysis failed"
-                );
-            }
-            res
-        })
-        .collect_or_acc_errs::<Vec<_>, DropAll>();
+    // let units = units.expect("should have an output if there are no errors");
 
-    // link errors
-    diagnostics.ok_or_err()?;
+    // println!("analyzing scope...");
+    // let units = units
+    //     .into_iter()
+    //     .map(|hir| {
+    //         println!("linking {:?}", hir.file);
+    //         let &mod_id = file_mod_ids
+    //             .get(&hir.file)
+    //             .expect("should have been defined by `analyze_module_tree`");
+    //         let mut env = scope_env
+    //             .define_module(mod_id)
+    //             .expect("should have been defined by `analyze_module_tree`");
+    //         let res = env.link(hir, source, diagnostics);
+    //         if let Ok(hir) = &res {
+    //             println!(
+    //                 "linked hir:\n{:#}",
+    //                 DisplayHir {
+    //                     source,
+    //                     env: scope_env,
+    //                     hir,
+    //                 }
+    //             );
+    //         } else {
+    //             debug_assert!(
+    //                 diagnostics.contains_err(),
+    //                 "should have an error if analysis failed"
+    //             );
+    //         }
+    //         res
+    //     })
+    //     .collect_or_acc_errs::<Vec<_>, DropAll>();
 
-    let units = units.expect("should have an output if there are no errors");
+    // // link errors
+    // diagnostics.ok_or_err()?;
+
+    // let units = units.expect("should have an output if there are no errors");
 
     // -------------------------------------------------------------------------
 

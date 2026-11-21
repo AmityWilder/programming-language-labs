@@ -243,7 +243,7 @@ impl Module {
         self.submodules.get(name).copied()
     }
 
-    fn decl_submodule(&mut self, name: String, id: ModId) -> Result<(), DuplicateModuleError> {
+    pub fn decl_submodule(&mut self, name: String, id: ModId) -> Result<(), DuplicateModuleError> {
         if let Some(og) = self.submodules.insert(name, id) {
             Err(DuplicateModuleError { og })
         } else {
@@ -251,7 +251,7 @@ impl Module {
         }
     }
 
-    fn decl_item(&mut self, name: String, id: ItemId) -> Result<(), DuplicateItemError> {
+    pub fn decl_item(&mut self, name: String, id: ItemId) -> Result<(), DuplicateItemError> {
         self.layers
             .last_mut()
             .map_or(&mut self.global, |layer| {
@@ -260,7 +260,7 @@ impl Module {
             .decl_item(name, id)
     }
 
-    fn decl_var(&mut self, name: String, id: VarId) {
+    pub fn decl_var(&mut self, name: String, id: VarId) {
         self.layers
             .last_mut()
             .map_or(&mut self.global, |layer| {

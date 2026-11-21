@@ -1,169 +1,201 @@
 use crate::{
-    analyzer::{
-        static_env::{
-            ItemId, ModId,
-            scope::{
-                env::{ModScopeEnvironment, ScopeEnvironment},
-                hir::{self, HirStage},
-            },
+    analyzer::static_env::{
+        ModId,
+        scope::{
+            env::ScopeEnvironment,
+            hir::{self, HirPass, UnlinkedPass},
         },
-        types::bounds::Combinator,
     },
     error::{
         CheckDiagnostics, Diagnostic, DiagnosticCategory::StaticAnalysis, DiagnosticKind, Severity,
     },
-    parse::{
-        ast::{self, AstNode as _},
-        util::{InspectAlways as _, OkOrFlatten as _},
-    },
-    src_code::{code::SourceCode, map::SourceMap, span::FileId},
-    util::OrAllErrsExt as _,
+    parse::ast::AstNode as _,
+    src_code::{map::SourceMap, span::FileId},
 };
 use std::collections::BTreeMap;
 
-pub struct PostDeclStage;
+pub struct PostDeclModPass;
 
-impl HirStage for PostDeclStage {
+impl HirPass for PostDeclModPass {
     type ModDcl = hir::LinkedMod;
-    type ModRef = hir::UnlinkedMod;
+    type ModRef = <hir::UnlinkedPass as HirPass>::ModRef;
 
-    type ItemDcl = hir::LinkedDecl;
-    type ItemRef = hir::UnlinkedVar; // TODO: distinguish from var
+    type ItemDcl = <hir::UnlinkedPass as HirPass>::ItemDcl;
+    type ItemRef = <hir::UnlinkedPass as HirPass>::ItemRef; // TODO: distinguish from var
 
-    type VarDcl = hir::LinkedDecl; // TODO: distinguish from item
-    type VarRef = hir::UnlinkedVar;
+    type VarDcl = <hir::UnlinkedPass as HirPass>::VarDcl; // TODO: distinguish from item
+    type VarRef = <hir::UnlinkedPass as HirPass>::VarRef;
 
-    type TypeRef = hir::LinkedTypename;
+    type TypeRef = <hir::UnlinkedPass as HirPass>::TypeRef;
 
-    type LabelDcl = hir::LinkedLabel; // TODO: actually implement this
-    type LabelRef = hir::UnlinkedLabel;
+    type LabelDcl = <hir::UnlinkedPass as HirPass>::LabelDcl; // TODO: actually implement this
+    type LabelRef = <hir::UnlinkedPass as HirPass>::LabelRef;
 
-    type Literal = hir::UnlinkedLiteral;
+    type Literal = <hir::UnlinkedPass as HirPass>::Literal;
 }
 
-pub struct DeclVisitor<'env, 'm_env, 'src> {
+pub struct DeclModVisitor<'env, 'src, 'err> {
     source: &'src SourceMap,
-    env: &'m_env mut ModScopeEnvironment<'env>,
+    env: &'env mut ScopeEnvironment,
+    diagnostics: &'err mut Vec<Diagnostic>,
     file: FileId,
     id: ModId,
+    mapping: BTreeMap<String, ModId>,
 }
 
-impl<'env, 'm_env, 'src> hir::Visitor<hir::UnlinkedStage> for DeclVisitor<'env, 'm_env, 'src> {
+impl<'env, 'src, 'err> DeclModVisitor<'env, 'src, 'err> {
+    pub const fn new(
+        source: &'src SourceMap,
+        env: &'env mut ScopeEnvironment,
+        diagnostics: &'err mut Vec<Diagnostic>,
+        file: FileId,
+        id: ModId,
+    ) -> Self {
+        Self {
+            source,
+            env,
+            diagnostics,
+            file,
+            id,
+            mapping: BTreeMap::new(),
+        }
+    }
+
+    pub fn mapping(self) -> BTreeMap<String, ModId> {
+        self.mapping
+    }
+}
+
+impl hir::ModDclVisitor<hir::UnlinkedMod> for DeclModVisitor<'_, '_, '_> {
+    type Value = hir::LinkedMod;
+
+    fn visit_mod_dcl(&mut self, x: hir::UnlinkedMod) -> Result<Self::Value, CheckDiagnostics> {
+        let hir::UnlinkedMod(decl) = x;
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "AST spans should be valid and file ID should match the AST"
+        )]
+        let subname = &self.source[self.file][decl.name];
+        match self.env.decl_submodule(self.id, subname.to_owned(), decl) {
+            Ok(subid) => {
+                let existing = self.mapping.insert(subname.to_owned(), subid);
+                assert_eq!(
+                    existing, None,
+                    "mapping should be a subset of env submodules, error should have been produced by decl_submodule"
+                );
+                return Ok(hir::LinkedMod(subid));
+            }
+            Err(e) => self.diagnostics.push(Diagnostic::new(
+                decl.span().within_file(self.file),
+                DiagnosticKind::Other {
+                    severity: Severity::Error,
+                    category: StaticAnalysis,
+                    msg: format!("failed to declare submodule: {e:?}"),
+                },
+            )),
+        }
+        Err(CheckDiagnostics)
+    }
+}
+
+impl hir::Visitor<UnlinkedPass> for DeclModVisitor<'_, '_, '_> {
+    type Output = PostDeclModPass;
+}
+
+impl hir::IgnoreModRef<<UnlinkedPass as HirPass>::ModRef> for DeclModVisitor<'_, '_, '_> {}
+impl hir::IgnoreItemDcl<<UnlinkedPass as HirPass>::ItemDcl> for DeclModVisitor<'_, '_, '_> {}
+impl hir::IgnoreItemRef<<UnlinkedPass as HirPass>::ItemRef> for DeclModVisitor<'_, '_, '_> {}
+impl hir::IgnoreVarDcl<<UnlinkedPass as HirPass>::VarDcl> for DeclModVisitor<'_, '_, '_> {}
+impl hir::IgnoreVarRef<<UnlinkedPass as HirPass>::VarRef> for DeclModVisitor<'_, '_, '_> {}
+impl hir::IgnoreTypeRef<<UnlinkedPass as HirPass>::TypeRef> for DeclModVisitor<'_, '_, '_> {}
+impl hir::IgnoreLabelDcl<<UnlinkedPass as HirPass>::LabelDcl> for DeclModVisitor<'_, '_, '_> {}
+impl hir::IgnoreLabelRef<<UnlinkedPass as HirPass>::LabelRef> for DeclModVisitor<'_, '_, '_> {}
+impl hir::IgnoreLiteral<<UnlinkedPass as HirPass>::Literal> for DeclModVisitor<'_, '_, '_> {}
+
+#[cfg(false)]
+impl hir::Visitor<hir::UnlinkedPass> for DeclModVisitor<'_, '_, '_> {
     type Error = CheckDiagnostics;
-    type Output = PostDeclStage;
+    type Output = PostDeclModPass;
 
     fn visit_mod_dcl(
         &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::ModDcl,
-    ) -> Result<<Self::Output as HirStage>::ModDcl, Self::Error> {
+        x: <hir::UnlinkedPass as HirPass>::ModDcl,
+    ) -> Result<<Self::Value as HirPass>::ModDcl, Self::Error> {
+        let hir::UnlinkedMod(name) = x;
         let id = self
             .env
-            .find_submodule(&self.source[x.0.within_file(self.file)])
+            .find_submodule(&self.source[name.within_file(self.file)])
             .expect("should be handled in pre-scan");
-        id
-    }
-
-    fn visit_mod_ref(
-        &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::ModRef,
-    ) -> Result<<Self::Output as HirStage>::ModRef, Self::Error> {
-        todo!()
+        Ok(hir::LinkedMod(id))
     }
 
     fn visit_item_dcl(
         &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::ItemDcl,
-    ) -> Result<<Self::Output as HirStage>::ItemDcl, Self::Error> {
-        todo!()
-    }
-
-    fn visit_item_ref(
-        &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::ItemRef,
-    ) -> Result<<Self::Output as HirStage>::ItemRef, Self::Error> {
-        todo!()
+        x: <hir::UnlinkedPass as HirPass>::ItemDcl,
+    ) -> Result<<Self::Value as HirPass>::ItemDcl, Self::Error> {
+        let hir::UnlinkedDecl(name) = x;
+        let ident = name.within_file(self.file);
+        let id = self.env.decl_var(self.source[ident].to_owned(), ident);
+        Ok(hir::LinkedDecl(id))
     }
 
     fn visit_var_dcl(
         &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::VarDcl,
-    ) -> Result<<Self::Output as HirStage>::VarDcl, Self::Error> {
-        todo!()
-    }
-
-    fn visit_var_ref(
-        &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::VarRef,
-    ) -> Result<<Self::Output as HirStage>::VarRef, Self::Error> {
-        todo!()
-    }
-
-    fn visit_type_ref(
-        &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::TypeRef,
-    ) -> Result<<Self::Output as HirStage>::TypeRef, Self::Error> {
-        todo!()
+        x: <hir::UnlinkedPass as HirPass>::VarDcl,
+    ) -> Result<<Self::Value as HirPass>::VarDcl, Self::Error> {
+        let hir::UnlinkedDecl(name) = x;
+        let ident = name.within_file(self.file);
+        let id = self.env.decl_var(self.source[ident].to_owned(), ident);
+        Ok(hir::LinkedDecl(id))
     }
 
     fn visit_label_dcl(
         &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::LabelDcl,
-    ) -> Result<<Self::Output as HirStage>::LabelDcl, Self::Error> {
-        todo!()
+        x: <hir::UnlinkedPass as HirPass>::LabelDcl,
+    ) -> Result<<Self::Value as HirPass>::LabelDcl, Self::Error> {
+        Ok(x)
+    }
+
+    fn visit_mod_ref(
+        &mut self,
+        x: <hir::UnlinkedPass as HirPass>::ModRef,
+    ) -> Result<<Self::Value as HirPass>::ModRef, Self::Error> {
+        Ok(x)
+    }
+
+    fn visit_item_ref(
+        &mut self,
+        x: <hir::UnlinkedPass as HirPass>::ItemRef,
+    ) -> Result<<Self::Value as HirPass>::ItemRef, Self::Error> {
+        Ok(x)
+    }
+
+    fn visit_var_ref(
+        &mut self,
+        x: <hir::UnlinkedPass as HirPass>::VarRef,
+    ) -> Result<<Self::Value as HirPass>::VarRef, Self::Error> {
+        Ok(x)
+    }
+
+    fn visit_type_ref(
+        &mut self,
+        x: <hir::UnlinkedPass as HirPass>::TypeRef,
+    ) -> Result<<Self::Value as HirPass>::TypeRef, Self::Error> {
+        Ok(x)
     }
 
     fn visit_label_ref(
         &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::LabelRef,
-    ) -> Result<<Self::Output as HirStage>::LabelRef, Self::Error> {
-        todo!()
+        x: <hir::UnlinkedPass as HirPass>::LabelRef,
+    ) -> Result<<Self::Value as HirPass>::LabelRef, Self::Error> {
+        Ok(x)
     }
 
     fn visit_literal(
         &mut self,
-        x: <hir::UnlinkedStage as hir::HirStage>::Literal,
-    ) -> Result<<Self::Output as HirStage>::Literal, Self::Error> {
-        todo!()
-    }
-}
-
-impl ScopeEnvironment {
-    pub fn declared_submodules(
-        &mut self,
-        code: &SourceCode,
-        id: ModId,
-        unit: &ast::ProgramUnit,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> BTreeMap<String, ModId> {
-        let mut mapping = BTreeMap::new();
-        for decl in &unit.decls {
-            if let ast::Decl::Mod(decl) = *decl {
-                let subname = &code[decl.name];
-                match self.decl_submodule(id, subname.to_owned(), decl) {
-                    Ok(subid) => {
-                        if let Err(e) = mapping.try_insert(subname.to_owned(), subid) {
-                            diagnostics.push(Diagnostic::new(
-                                decl.span().within_file(unit.file),
-                                DiagnosticKind::Other {
-                                    severity: Severity::Error,
-                                    category: StaticAnalysis,
-                                    msg: format!("duplicate module name: {e:?}"),
-                                },
-                            ));
-                        }
-                    }
-                    Err(e) => diagnostics.push(Diagnostic::new(
-                        decl.span().within_file(unit.file),
-                        DiagnosticKind::Other {
-                            severity: Severity::Error,
-                            category: StaticAnalysis,
-                            msg: format!("failed to declare submodule: {e:?}"),
-                        },
-                    )),
-                }
-            }
-        }
-        mapping
+        x: <hir::UnlinkedPass as HirPass>::Literal,
+    ) -> Result<<Self::Value as HirPass>::Literal, Self::Error> {
+        Ok(x)
     }
 }
 

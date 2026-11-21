@@ -12,43 +12,44 @@ use crate::{
         static_env::{ItemId, ModId, TypeId, VarId},
         types::bounds::Combinator,
     },
+    error::CheckDiagnostics,
     lex::token::{Operator, punc::OpSide},
     parse::ast,
     src_code::span::{FileId, RelSpan},
     todo_types::Todo,
-    util::OrAllErrsExt,
+    util::OrAllErrsExt as _,
 };
 
 fn convert_iter<U, A: IntoIterator<Item: Into<U>>, B: FromIterator<U>>(vec: A) -> B {
     vec.into_iter().map(Into::into).collect::<B>()
 }
 
-pub trait HirStage {
-    type ModDcl;
-    type ModRef;
+pub trait HirPass {
+    type ModDcl: super::fmt::HirDisplay;
+    type ModRef: super::fmt::HirDisplay;
 
-    type ItemDcl;
-    type ItemRef;
+    type ItemDcl: super::fmt::HirDisplay;
+    type ItemRef: super::fmt::HirDisplay;
 
-    type VarDcl;
-    type VarRef;
+    type VarDcl: super::fmt::HirDisplay;
+    type VarRef: super::fmt::HirDisplay;
 
-    type TypeRef;
+    type TypeRef: super::fmt::HirDisplay;
 
-    type LabelDcl;
-    type LabelRef;
+    type LabelDcl: super::fmt::HirDisplay;
+    type LabelRef: super::fmt::HirDisplay;
 
-    type Literal;
+    type Literal: super::fmt::HirDisplay;
 }
 
-pub struct UnlinkedStage;
+pub struct UnlinkedPass;
 
-impl HirStage for UnlinkedStage {
+impl HirPass for UnlinkedPass {
     type ModDcl = UnlinkedMod;
     type ModRef = UnlinkedMod;
 
     type ItemDcl = UnlinkedDecl;
-    type ItemRef = UnlinkedDecl;
+    type ItemRef = UnlinkedVar;
 
     type VarDcl = UnlinkedDecl;
     type VarRef = UnlinkedVar;
@@ -61,117 +62,258 @@ impl HirStage for UnlinkedStage {
     type Literal = UnlinkedLiteral;
 }
 
-pub trait Visitor<S: HirStage> {
-    type Error;
-    type Output: HirStage;
+pub trait ModDclVisitor<T> {
+    type Value;
 
-    fn visit_mod_dcl(
-        &mut self,
-        x: S::ModDcl,
-    ) -> Result<<Self::Output as HirStage>::ModDcl, Self::Error>;
+    fn visit_mod_dcl(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
 
-    fn visit_mod_ref(
-        &mut self,
-        x: S::ModRef,
-    ) -> Result<<Self::Output as HirStage>::ModRef, Self::Error>;
+/// Marker trait
+pub trait IgnoreModDcl<T> {}
 
-    fn visit_item_dcl(
-        &mut self,
-        x: S::ItemDcl,
-    ) -> Result<<Self::Output as HirStage>::ItemDcl, Self::Error>;
+impl<T: IgnoreModDcl<U>, U> ModDclVisitor<U> for T {
+    type Value = U;
 
-    fn visit_item_ref(
-        &mut self,
-        x: S::ItemRef,
-    ) -> Result<<Self::Output as HirStage>::ItemRef, Self::Error>;
+    fn visit_mod_dcl(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
 
-    fn visit_var_dcl(
-        &mut self,
-        x: S::VarDcl,
-    ) -> Result<<Self::Output as HirStage>::VarDcl, Self::Error>;
+pub trait ModRefVisitor<T> {
+    type Value;
 
-    fn visit_var_ref(
-        &mut self,
-        x: S::VarRef,
-    ) -> Result<<Self::Output as HirStage>::VarRef, Self::Error>;
+    fn visit_mod_ref(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
 
-    fn visit_type_ref(
-        &mut self,
-        x: S::TypeRef,
-    ) -> Result<<Self::Output as HirStage>::TypeRef, Self::Error>;
+/// Marker trait
+pub trait IgnoreModRef<T> {}
 
-    fn visit_label_dcl(
-        &mut self,
-        x: S::LabelDcl,
-    ) -> Result<<Self::Output as HirStage>::LabelDcl, Self::Error>;
+impl<T: IgnoreModRef<U>, U> ModRefVisitor<U> for T {
+    type Value = U;
 
-    fn visit_label_ref(
-        &mut self,
-        x: S::LabelRef,
-    ) -> Result<<Self::Output as HirStage>::LabelRef, Self::Error>;
+    fn visit_mod_ref(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
 
-    fn visit_literal(
-        &mut self,
-        x: S::Literal,
-    ) -> Result<<Self::Output as HirStage>::Literal, Self::Error>;
+pub trait ItemDclVisitor<T> {
+    type Value;
+
+    fn visit_item_dcl(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
+
+/// Marker trait
+pub trait IgnoreItemDcl<T> {}
+
+impl<T: IgnoreItemDcl<U>, U> ItemDclVisitor<U> for T {
+    type Value = U;
+
+    fn visit_item_dcl(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+pub trait ItemRefVisitor<T> {
+    type Value;
+
+    fn visit_item_ref(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
+
+/// Marker trait
+pub trait IgnoreItemRef<T> {}
+
+impl<T: IgnoreItemRef<U>, U> ItemRefVisitor<U> for T {
+    type Value = U;
+
+    fn visit_item_ref(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+pub trait VarDclVisitor<T> {
+    type Value;
+
+    fn visit_var_dcl(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
+
+/// Marker trait
+pub trait IgnoreVarDcl<T> {}
+
+impl<T: IgnoreVarDcl<U>, U> VarDclVisitor<U> for T {
+    type Value = U;
+
+    fn visit_var_dcl(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+pub trait VarRefVisitor<T> {
+    type Value;
+
+    fn visit_var_ref(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
+
+/// Marker trait
+pub trait IgnoreVarRef<T> {}
+
+impl<T: IgnoreVarRef<U>, U> VarRefVisitor<U> for T {
+    type Value = U;
+
+    fn visit_var_ref(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+pub trait TypeRefVisitor<T> {
+    type Value;
+
+    fn visit_type_ref(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
+
+/// Marker trait
+pub trait IgnoreTypeRef<T> {}
+
+impl<T: IgnoreTypeRef<U>, U> TypeRefVisitor<U> for T {
+    type Value = U;
+
+    fn visit_type_ref(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+pub trait LabelDclVisitor<T> {
+    type Value;
+
+    fn visit_label_dcl(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
+
+/// Marker trait
+pub trait IgnoreLabelDcl<T> {}
+
+impl<T: IgnoreLabelDcl<U>, U> LabelDclVisitor<U> for T {
+    type Value = U;
+
+    fn visit_label_dcl(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+pub trait LabelRefVisitor<T> {
+    type Value;
+
+    fn visit_label_ref(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
+
+/// Marker trait
+pub trait IgnoreLabelRef<T> {}
+
+impl<T: IgnoreLabelRef<U>, U> LabelRefVisitor<U> for T {
+    type Value = U;
+
+    fn visit_label_ref(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+pub trait LiteralVisitor<T> {
+    type Value;
+
+    fn visit_literal(&mut self, x: T) -> Result<Self::Value, CheckDiagnostics>;
+}
+
+/// Marker trait
+pub trait IgnoreLiteral<T> {}
+
+impl<T: IgnoreLiteral<U>, U> LiteralVisitor<U> for T {
+    type Value = U;
+
+    fn visit_literal(&mut self, x: U) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+pub trait Visitor<S: HirPass>:
+    ModDclVisitor<S::ModDcl>
+    + ModRefVisitor<S::ModRef>
+    + ItemDclVisitor<S::ItemDcl>
+    + ItemRefVisitor<S::ItemRef>
+    + VarDclVisitor<S::VarDcl>
+    + VarRefVisitor<S::VarRef>
+    + TypeRefVisitor<S::TypeRef>
+    + LabelDclVisitor<S::LabelDcl>
+    + LabelRefVisitor<S::LabelRef>
+    + LiteralVisitor<S::Literal>
+{
+    type Output: HirPass<
+            ModDcl = <Self as ModDclVisitor<S::ModDcl>>::Value,
+            ModRef = <Self as ModRefVisitor<S::ModRef>>::Value,
+            ItemDcl = <Self as ItemDclVisitor<S::ItemDcl>>::Value,
+            ItemRef = <Self as ItemRefVisitor<S::ItemRef>>::Value,
+            VarDcl = <Self as VarDclVisitor<S::VarDcl>>::Value,
+            VarRef = <Self as VarRefVisitor<S::VarRef>>::Value,
+            TypeRef = <Self as TypeRefVisitor<S::TypeRef>>::Value,
+            LabelDcl = <Self as LabelDclVisitor<S::LabelDcl>>::Value,
+            LabelRef = <Self as LabelRefVisitor<S::LabelRef>>::Value,
+            Literal = <Self as LiteralVisitor<S::Literal>>::Value,
+        >;
 }
 
 pub trait TreeWalk<V, S>
 where
-    S: HirStage,
+    S: HirPass,
     V: Visitor<S>,
 {
     type Output;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error>;
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics>;
 }
 
-impl<V, S: HirStage, T> TreeWalk<V, S> for Box<T>
+impl<V, S: HirPass, T> TreeWalk<V, S> for Box<T>
 where
     V: Visitor<S>,
     T: TreeWalk<V, S>,
 {
     type Output = Box<T::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         (*self).walk(visitor).map(Box::new)
     }
 }
 
-impl<V, S: HirStage, T> TreeWalk<V, S> for Option<T>
+impl<V, S: HirPass, T> TreeWalk<V, S> for Option<T>
 where
     V: Visitor<S>,
     T: TreeWalk<V, S>,
 {
     type Output = Option<T::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         self.map(|x| x.walk(visitor)).transpose()
     }
 }
 
-impl<V, S: HirStage, T> TreeWalk<V, S> for Vec<T>
+impl<V, S: HirPass, T> TreeWalk<V, S> for Vec<T>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
     T: TreeWalk<V, S>,
 {
     type Output = Vec<T::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         self.into_iter()
             .map(|x| x.walk(visitor))
             .collect_or_acc_errs()
     }
 }
 
-impl<V, S: HirStage, T> TreeWalk<V, S> for Box<[T]>
+impl<V, S: HirPass, T> TreeWalk<V, S> for Box<[T]>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
     T: TreeWalk<V, S>,
 {
     type Output = Box<[T::Output]>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         self.into_iter()
             .map(|x| x.walk(visitor))
             .collect_or_acc_errs()
@@ -182,18 +324,18 @@ where
 macro_rules! Walkable {
     derive() {
         $(#[$m:meta])*
-        $vis:vis struct $Type:ident<$S:ident: HirStage>(
+        $vis:vis struct $Type:ident<$S:ident: HirPass>(
             $(#[$fm:meta])*
             $fvis:vis $Field:ty
         $(,)?);
     } => {
-        impl<V, S: HirStage> TreeWalk<V, S> for $Type<S>
+        impl<V, S: HirPass> TreeWalk<V, S> for $Type<S>
         where
-            V: Visitor<S, Error: FromIterator<V::Error>>,
+            V: Visitor<S>,
         {
             type Output = $Type<V::Output>;
 
-            fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+            fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
                 self.0.walk(visitor).map($Type)
             }
         }
@@ -201,18 +343,18 @@ macro_rules! Walkable {
 
     derive() {
         $(#[$m:meta])*
-        $vis:vis struct $Type:ident<$S:ident: HirStage> {$(
+        $vis:vis struct $Type:ident<$S:ident: HirPass> {$(
             $(#[$fm:meta])*
             $fvis:vis $field:ident: $Field:ty
         ),* $(,)?}
     } => {
-        impl<V, S: HirStage> TreeWalk<V, S> for $Type<S>
+        impl<V, S: HirPass> TreeWalk<V, S> for $Type<S>
         where
-            V: Visitor<S, Error: FromIterator<V::Error>>,
+            V: Visitor<S>,
         {
             type Output = $Type<V::Output>;
 
-            fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+            fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
                 let Self { $($field),* } = self;
                 $(let $field = $field.walk(visitor);)*
                 Ok($Type { $($field: $field?),* })
@@ -222,7 +364,7 @@ macro_rules! Walkable {
 
     derive() {
         $(#[$m:meta])*
-        $vis:vis enum $Type:ident<$S:ident: HirStage> {$(
+        $vis:vis enum $Type:ident<$S:ident: HirPass> {$(
             $(#[$vm:meta])*
             $Variant:ident(
                 $(#[$fm:meta])*
@@ -230,13 +372,13 @@ macro_rules! Walkable {
             $(,)?)
         ),* $(,)?}
     }=> {
-        impl<V, S: HirStage> TreeWalk<V, S> for $Type<S>
+        impl<V, S: HirPass> TreeWalk<V, S> for $Type<S>
         where
-            V: Visitor<S, Error: FromIterator<V::Error>>,
+            V: Visitor<S>,
         {
             type Output = $Type<V::Output>;
 
-            fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+            fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
                 match self {
                     $(Self::$Variant(x) => x.walk(visitor).map($Type::$Variant)),*
                 }
@@ -248,13 +390,13 @@ macro_rules! Walkable {
         $(#[$m:meta])*
         $vis:vis struct $Type:ident($($rest:tt)*);
     } => {
-        impl<V, S: HirStage> TreeWalk<V, S> for $Type
+        impl<V, S: HirPass> TreeWalk<V, S> for $Type
         where
-            V: Visitor<S, Error: FromIterator<V::Error>>,
+            V: Visitor<S>,
         {
             type Output = Self;
 
-            fn walk(self, _: &mut V) -> Result<Self::Output, V::Error> {
+            fn walk(self, _: &mut V) -> Result<Self::Output, CheckDiagnostics> {
                 Ok(self)
             }
         }
@@ -264,13 +406,13 @@ macro_rules! Walkable {
         $(#[$m:meta])*
         $vis:vis struct $Type:ident {$($rest:tt)*}
     } => {
-        impl<V, S: HirStage> TreeWalk<V, S> for $Type
+        impl<V, S: HirPass> TreeWalk<V, S> for $Type
         where
-            V: Visitor<S, Error: FromIterator<V::Error>>,
+            V: Visitor<S>,
         {
             type Output = Self;
 
-            fn walk(self, _: &mut V) -> Result<Self::Output, V::Error> {
+            fn walk(self, _: &mut V) -> Result<Self::Output, CheckDiagnostics> {
                 Ok(self)
             }
         }
@@ -280,31 +422,31 @@ macro_rules! Walkable {
         $(#[$m:meta])*
         $vis:vis enum $Type:ident {$($rest:tt)*}
     } => {
-        impl<V, S: HirStage> TreeWalk<V, S> for $Type
+        impl<V, S: HirPass> TreeWalk<V, S> for $Type
         where
-            V: Visitor<S, Error: FromIterator<V::Error>>,
+            V: Visitor<S>,
         {
             type Output = Self;
 
-            fn walk(self, _: &mut V) -> Result<Self::Output, V::Error> {
+            fn walk(self, _: &mut V) -> Result<Self::Output, CheckDiagnostics> {
                 Ok(self)
             }
         }
     };
 }
 
-pub struct HirUnit<S: HirStage> {
+pub struct HirUnit<S: HirPass> {
     pub file: FileId,
     pub decls: Box<[Decl<S>]>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for HirUnit<S>
+impl<V, S: HirPass> TreeWalk<V, S> for HirUnit<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = HirUnit<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { file, decls } = self;
         let decls = decls.walk(visitor);
         Ok(HirUnit {
@@ -314,7 +456,7 @@ where
     }
 }
 
-impl From<ast::ProgramUnit> for HirUnit<UnlinkedStage> {
+impl From<ast::ProgramUnit> for HirUnit<UnlinkedPass> {
     fn from(ast::ProgramUnit { file, decls }: ast::ProgramUnit) -> Self {
         Self {
             file,
@@ -385,26 +527,26 @@ impl From<ast::Typename> for UnlinkedTypename {
 pub struct LinkedTypename(pub TypeId);
 
 #[derive(Walkable)]
-pub struct GenericGroup<S: HirStage>(pub Box<[TypeExpr<S>]>);
+pub struct GenericGroup<S: HirPass>(pub Box<[TypeExpr<S>]>);
 
-impl From<ast::GenericGroup> for GenericGroup<UnlinkedStage> {
+impl From<ast::GenericGroup> for GenericGroup<UnlinkedPass> {
     fn from(value: ast::GenericGroup) -> Self {
         Self(convert_iter(value.list))
     }
 }
 
-pub struct TypeInstance<S: HirStage> {
+pub struct TypeInstance<S: HirPass> {
     pub name: S::TypeRef,
     pub args: Option<GenericGroup<S>>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for TypeInstance<S>
+impl<V, S: HirPass> TreeWalk<V, S> for TypeInstance<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = TypeInstance<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { name, args } = self;
         let name = visitor.visit_type_ref(name);
         let args = args.walk(visitor);
@@ -415,7 +557,7 @@ where
     }
 }
 
-impl From<ast::TypeInstance> for TypeInstance<UnlinkedStage> {
+impl From<ast::TypeInstance> for TypeInstance<UnlinkedPass> {
     fn from(ast::TypeInstance { name, args }: ast::TypeInstance) -> Self {
         Self {
             name: name.into(),
@@ -444,12 +586,12 @@ impl From<ast::OrTypeKeyword> for OrType {
 
 /// Fallible Type
 #[derive(Walkable)]
-pub struct FallType<S: HirStage> {
+pub struct FallType<S: HirPass> {
     pub then_ty: TypeExpr<S>,
     pub ty: OrType,
 }
 
-impl From<ast::FallType> for FallType<UnlinkedStage> {
+impl From<ast::FallType> for FallType<UnlinkedPass> {
     fn from(
         ast::FallType {
             then_ty,
@@ -466,24 +608,24 @@ impl From<ast::FallType> for FallType<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct RefType<S: HirStage> {
+pub struct RefType<S: HirPass> {
     // TBD: reference mutability?
     pub ty: TypeExpr<S>,
 }
 
-impl From<ast::RefType> for RefType<UnlinkedStage> {
+impl From<ast::RefType> for RefType<UnlinkedPass> {
     fn from(ast::RefType { sym: _, ty }: ast::RefType) -> Self {
         Self { ty: (*ty).into() }
     }
 }
 
 #[derive(Walkable)]
-pub struct ViewType<S: HirStage> {
+pub struct ViewType<S: HirPass> {
     pub item: TypeExpr<S>,
     pub count: Option<Expr<S>>,
 }
 
-impl From<ast::ViewType> for ViewType<UnlinkedStage> {
+impl From<ast::ViewType> for ViewType<UnlinkedPass> {
     fn from(
         ast::ViewType {
             open: _,
@@ -499,18 +641,18 @@ impl From<ast::ViewType> for ViewType<UnlinkedStage> {
     }
 }
 
-pub enum AssocTypeSource<S: HirStage> {
+pub enum AssocTypeSource<S: HirPass> {
     Simple(S::TypeRef),
     Grouped(TypeExpr<S>),
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for AssocTypeSource<S>
+impl<V, S: HirPass> TreeWalk<V, S> for AssocTypeSource<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = AssocTypeSource<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         match self {
             Self::Simple(x) => visitor.visit_type_ref(x).map(AssocTypeSource::Simple),
             Self::Grouped(x) => x.walk(visitor).map(AssocTypeSource::Grouped),
@@ -518,7 +660,7 @@ where
     }
 }
 
-impl From<ast::AssocTypeSource> for AssocTypeSource<UnlinkedStage> {
+impl From<ast::AssocTypeSource> for AssocTypeSource<UnlinkedPass> {
     fn from(value: ast::AssocTypeSource) -> Self {
         match value {
             ast::AssocTypeSource::Simple(inner) => Self::Simple(inner.into()),
@@ -528,12 +670,12 @@ impl From<ast::AssocTypeSource> for AssocTypeSource<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct AssocType<S: HirStage> {
+pub struct AssocType<S: HirPass> {
     pub base: AssocTypeSource<S>,
     pub assoc: TypeInstance<S>,
 }
 
-impl From<ast::AssocType> for AssocType<UnlinkedStage> {
+impl From<ast::AssocType> for AssocType<UnlinkedPass> {
     fn from(
         ast::AssocType {
             base,
@@ -549,12 +691,12 @@ impl From<ast::AssocType> for AssocType<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct FunType<S: HirStage> {
+pub struct FunType<S: HirPass> {
     pub params: Box<[TypeExpr<S>]>,
     pub ret: Option<Box<TypeExpr<S>>>,
 }
 
-impl From<ast::FunType> for FunType<UnlinkedStage> {
+impl From<ast::FunType> for FunType<UnlinkedPass> {
     fn from(
         ast::FunType {
             kw: _,
@@ -572,27 +714,27 @@ impl From<ast::FunType> for FunType<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct OpaqueType<S: HirStage>(pub TypeBound<S>);
+pub struct OpaqueType<S: HirPass>(pub TypeBound<S>);
 
-impl From<ast::OpaqueType> for OpaqueType<UnlinkedStage> {
+impl From<ast::OpaqueType> for OpaqueType<UnlinkedPass> {
     fn from(ast::OpaqueType { colon: _, bound }: ast::OpaqueType) -> Self {
         Self(bound.into())
     }
 }
 
 /// All/Any/One
-pub struct ComboBound<S: HirStage> {
+pub struct ComboBound<S: HirPass> {
     pub cmb: Combinator,
     pub bounds: Box<[TypeBound<S>]>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for ComboBound<S>
+impl<V, S: HirPass> TreeWalk<V, S> for ComboBound<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = ComboBound<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { cmb, bounds } = self;
         let bounds = bounds.walk(visitor);
         Ok(ComboBound {
@@ -602,7 +744,7 @@ where
     }
 }
 
-impl From<ast::ComboBound> for ComboBound<UnlinkedStage> {
+impl From<ast::ComboBound> for ComboBound<UnlinkedPass> {
     fn from(
         ast::ComboBound {
             lhs,
@@ -621,9 +763,9 @@ impl From<ast::ComboBound> for ComboBound<UnlinkedStage> {
 
 /// Not
 #[derive(Walkable)]
-pub struct NegativeBound<S: HirStage>(pub TypeBound<S>);
+pub struct NegativeBound<S: HirPass>(pub TypeBound<S>);
 
-impl From<ast::NegativeBound> for NegativeBound<UnlinkedStage> {
+impl From<ast::NegativeBound> for NegativeBound<UnlinkedPass> {
     fn from(ast::NegativeBound { not: _, rhs }: ast::NegativeBound) -> Self {
         Self(rhs.into())
     }
@@ -631,36 +773,36 @@ impl From<ast::NegativeBound> for NegativeBound<UnlinkedStage> {
 
 /// Only
 #[derive(Walkable)]
-pub struct ExactTypeBound<S: HirStage>(pub TypeExpr<S>);
+pub struct ExactTypeBound<S: HirPass>(pub TypeExpr<S>);
 
-impl From<ast::ExactTypeBound> for ExactTypeBound<UnlinkedStage> {
+impl From<ast::ExactTypeBound> for ExactTypeBound<UnlinkedPass> {
     fn from(ast::ExactTypeBound { kw: _, ty }: ast::ExactTypeBound) -> Self {
         Self(ty.into())
     }
 }
 
 /// Has
-pub struct MemberBound<S: HirStage> {
+pub struct MemberBound<S: HirPass> {
     /// Identifier
     // TBD: should this be an ID at any point before monomorphization?
     pub member: RelSpan,
     pub req: Option<TypeBound<S>>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for MemberBound<S>
+impl<V, S: HirPass> TreeWalk<V, S> for MemberBound<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = MemberBound<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { member, req } = self;
         let req = req.walk(visitor);
         Ok(MemberBound { member, req: req? })
     }
 }
 
-impl From<ast::MemberBound> for MemberBound<UnlinkedStage> {
+impl From<ast::MemberBound> for MemberBound<UnlinkedPass> {
     fn from(ast::MemberBound { kw: _, member, req }: ast::MemberBound) -> Self {
         Self {
             member,
@@ -671,9 +813,9 @@ impl From<ast::MemberBound> for MemberBound<UnlinkedStage> {
 
 /// Shape
 #[derive(Walkable)]
-pub struct ShapeBound<S: HirStage>(pub FunType<S>);
+pub struct ShapeBound<S: HirPass>(pub FunType<S>);
 
-impl From<ast::FunType> for ShapeBound<UnlinkedStage> {
+impl From<ast::FunType> for ShapeBound<UnlinkedPass> {
     fn from(value: ast::FunType) -> Self {
         Self(value.into())
     }
@@ -692,19 +834,19 @@ impl From<ast::OverloadBound> for OverloadBound {
 }
 
 /// Satisfies
-pub struct ExprBound<S: HirStage> {
+pub struct ExprBound<S: HirPass> {
     // TBD: should this be a special ID since it never actually appears in the program?
     pub param: S::VarDcl,
     pub expr: Expr<S>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for ExprBound<S>
+impl<V, S: HirPass> TreeWalk<V, S> for ExprBound<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = ExprBound<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { param, expr } = self;
         let param = visitor.visit_var_dcl(param);
         let expr = expr.walk(visitor);
@@ -715,7 +857,7 @@ where
     }
 }
 
-impl From<ast::ExprBound> for ExprBound<UnlinkedStage> {
+impl From<ast::ExprBound> for ExprBound<UnlinkedPass> {
     fn from(
         ast::ExprBound {
             kw: _,
@@ -732,7 +874,7 @@ impl From<ast::ExprBound> for ExprBound<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub enum TypeBound<S: HirStage> {
+pub enum TypeBound<S: HirPass> {
     Combo(ComboBound<S>),
     Not(Box<NegativeBound<S>>),
     Exact(ExactTypeBound<S>),
@@ -742,7 +884,7 @@ pub enum TypeBound<S: HirStage> {
     Satisfies(Box<ExprBound<S>>),
 }
 
-impl From<ast::TypeBound> for TypeBound<UnlinkedStage> {
+impl From<ast::TypeBound> for TypeBound<UnlinkedPass> {
     fn from(value: ast::TypeBound) -> Self {
         match value {
             ast::TypeBound::Combo(inner) => Self::Combo((*inner).into()),
@@ -762,7 +904,7 @@ impl From<ast::TypeBound> for TypeBound<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub enum TypeExpr<S: HirStage> {
+pub enum TypeExpr<S: HirPass> {
     Primitive(PrimitiveType),
     Instance(TypeInstance<S>),
     Fallible(Box<FallType<S>>),
@@ -773,7 +915,7 @@ pub enum TypeExpr<S: HirStage> {
     Opaque(Box<OpaqueType<S>>),
 }
 
-impl From<ast::TypeExpr> for TypeExpr<UnlinkedStage> {
+impl From<ast::TypeExpr> for TypeExpr<UnlinkedPass> {
     fn from(value: ast::TypeExpr) -> Self {
         match value {
             ast::TypeExpr::Primitive(inner) => Self::Primitive(inner.into()),
@@ -788,30 +930,30 @@ impl From<ast::TypeExpr> for TypeExpr<UnlinkedStage> {
     }
 }
 
-impl From<ast::TypeAnnotation> for TypeExpr<UnlinkedStage> {
+impl From<ast::TypeAnnotation> for TypeExpr<UnlinkedPass> {
     fn from(ast::TypeAnnotation { colon: _, ty }: ast::TypeAnnotation) -> Self {
         ty.into()
     }
 }
 
-pub struct BindingPattern<S: HirStage> {
+pub struct BindingPattern<S: HirPass> {
     pub var: S::VarDcl,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for BindingPattern<S>
+impl<V, S: HirPass> TreeWalk<V, S> for BindingPattern<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = BindingPattern<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { var } = self;
         let var = visitor.visit_var_dcl(var);
         Ok(BindingPattern { var: var? })
     }
 }
 
-impl From<ast::BindingPattern> for BindingPattern<UnlinkedStage> {
+impl From<ast::BindingPattern> for BindingPattern<UnlinkedPass> {
     fn from(ast::BindingPattern { ident }: ast::BindingPattern) -> Self {
         Self { var: ident.into() }
     }
@@ -829,7 +971,7 @@ impl From<ast::PickPattern> for PickPattern {
 }
 
 #[derive(Walkable)]
-pub enum Decl<S: HirStage> {
+pub enum Decl<S: HirPass> {
     Mod(DeclMod<S>),
     On(DeclOn<S>),
     Fun(DeclFun<S>),
@@ -842,7 +984,7 @@ pub enum Decl<S: HirStage> {
     Stmt(Stmt<S>),
 }
 
-impl From<ast::Decl> for Decl<UnlinkedStage> {
+impl From<ast::Decl> for Decl<UnlinkedPass> {
     fn from(value: ast::Decl) -> Self {
         match value {
             ast::Decl::Mod(inner) => Self::Mod(inner.into()),
@@ -879,42 +1021,36 @@ impl From<ast::Decl> for Decl<UnlinkedStage> {
     }
 }
 
-pub struct DeclMod<S: HirStage> {
+pub struct DeclMod<S: HirPass> {
     pub id: S::ModDcl,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for DeclMod<S>
+impl<V, S: HirPass> TreeWalk<V, S> for DeclMod<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = DeclMod<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { id } = self;
         let id = visitor.visit_mod_dcl(id);
         Ok(DeclMod { id: id? })
     }
 }
 
-impl From<ast::DeclMod> for DeclMod<UnlinkedStage> {
-    fn from(
-        ast::DeclMod {
-            kw: _,
-            name,
-            semi: _,
-        }: ast::DeclMod,
-    ) -> Self {
-        Self { id: name.into() }
+impl From<ast::DeclMod> for DeclMod<UnlinkedPass> {
+    fn from(decl: ast::DeclMod) -> Self {
+        Self { id: decl.into() }
     }
 }
 
 #[derive(Walkable)]
-pub struct TypeBoundClause<S: HirStage> {
+pub struct TypeBoundClause<S: HirPass> {
     pub target: TypeExpr<S>,
     pub bound: TypeBound<S>,
 }
 
-impl From<ast::TypeBoundClause> for TypeBoundClause<UnlinkedStage> {
+impl From<ast::TypeBoundClause> for TypeBoundClause<UnlinkedPass> {
     fn from(
         ast::TypeBoundClause {
             ty,
@@ -930,23 +1066,23 @@ impl From<ast::TypeBoundClause> for TypeBoundClause<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct IffClause<S: HirStage>(pub Box<[TypeBoundClause<S>]>);
+pub struct IffClause<S: HirPass>(pub Box<[TypeBoundClause<S>]>);
 
-impl From<ast::IffClause> for IffClause<UnlinkedStage> {
+impl From<ast::IffClause> for IffClause<UnlinkedPass> {
     fn from(ast::IffClause { iff: _, bounds }: ast::IffClause) -> Self {
         Self(convert_iter(bounds))
     }
 }
 
 #[derive(Walkable)]
-pub struct DeclOn<S: HirStage> {
+pub struct DeclOn<S: HirPass> {
     pub generics: Option<GenericGroup<S>>,
     pub target: TypeExpr<S>,
     pub iff: Option<IffClause<S>>,
     pub members: Box<[Decl<S>]>,
 }
 
-impl From<ast::DeclOn> for DeclOn<UnlinkedStage> {
+impl From<ast::DeclOn> for DeclOn<UnlinkedPass> {
     fn from(
         ast::DeclOn {
             kw: _,
@@ -970,30 +1106,30 @@ impl From<ast::DeclOn> for DeclOn<UnlinkedStage> {
     }
 }
 
-pub struct SelfParam<S: HirStage> {
+pub struct SelfParam<S: HirPass> {
     pub id: S::VarDcl,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for SelfParam<S>
+impl<V, S: HirPass> TreeWalk<V, S> for SelfParam<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = SelfParam<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { id } = self;
         let id = visitor.visit_var_dcl(id);
         Ok(SelfParam { id: id? })
     }
 }
 
-impl From<ast::SelfParam> for SelfParam<UnlinkedStage> {
+impl From<ast::SelfParam> for SelfParam<UnlinkedPass> {
     fn from(ast::SelfParam { span }: ast::SelfParam) -> Self {
         Self { id: span.into() }
     }
 }
 
-pub struct DeclFun<S: HirStage> {
+pub struct DeclFun<S: HirPass> {
     pub id: S::ItemDcl,
     pub generics: Option<GenericGroup<S>>,
     pub self_param: Option<SelfParam<S>>,
@@ -1003,13 +1139,13 @@ pub struct DeclFun<S: HirStage> {
     pub body: Option<BlockStmt<S>>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for DeclFun<S>
+impl<V, S: HirPass> TreeWalk<V, S> for DeclFun<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = DeclFun<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self {
             id,
             generics,
@@ -1038,7 +1174,7 @@ where
     }
 }
 
-impl From<ast::DeclFun> for DeclFun<UnlinkedStage> {
+impl From<ast::DeclFun> for DeclFun<UnlinkedPass> {
     fn from(value: ast::DeclFun) -> Self {
         let (
             ast::FnSignature {
@@ -1069,19 +1205,19 @@ impl From<ast::DeclFun> for DeclFun<UnlinkedStage> {
     }
 }
 
-pub struct FunParam<S: HirStage> {
+pub struct FunParam<S: HirPass> {
     /// Treated as a member of the function
     pub id: S::VarDcl,
     pub ty: TypeExpr<S>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for FunParam<S>
+impl<V, S: HirPass> TreeWalk<V, S> for FunParam<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = FunParam<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { id, ty } = self;
         let id = visitor.visit_var_dcl(id);
         let ty = ty.walk(visitor);
@@ -1089,7 +1225,7 @@ where
     }
 }
 
-impl From<ast::FnParam> for FunParam<UnlinkedStage> {
+impl From<ast::FnParam> for FunParam<UnlinkedPass> {
     fn from(ast::FnParam { name, ty }: ast::FnParam) -> Self {
         Self {
             id: name.into(),
@@ -1098,19 +1234,19 @@ impl From<ast::FnParam> for FunParam<UnlinkedStage> {
     }
 }
 
-pub struct DeclRec<S: HirStage> {
+pub struct DeclRec<S: HirPass> {
     pub id: S::ItemDcl,
     pub generics: Option<GenericGroup<S>>,
     pub fields: Box<[Field<S>]>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for DeclRec<S>
+impl<V, S: HirPass> TreeWalk<V, S> for DeclRec<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = DeclRec<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self {
             id,
             generics,
@@ -1127,7 +1263,7 @@ where
     }
 }
 
-impl From<ast::DeclRec> for DeclRec<UnlinkedStage> {
+impl From<ast::DeclRec> for DeclRec<UnlinkedPass> {
     fn from(
         ast::DeclRec {
             kw: _,
@@ -1149,18 +1285,18 @@ impl From<ast::DeclRec> for DeclRec<UnlinkedStage> {
     }
 }
 
-pub struct Field<S: HirStage> {
+pub struct Field<S: HirPass> {
     pub id: S::ItemDcl, // TODO: these should be treated like unique items
     pub ty: TypeExpr<S>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for Field<S>
+impl<V, S: HirPass> TreeWalk<V, S> for Field<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = Field<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { id, ty } = self;
         let id = visitor.visit_item_dcl(id);
         let ty = ty.walk(visitor);
@@ -1168,7 +1304,7 @@ where
     }
 }
 
-impl From<ast::Field> for Field<UnlinkedStage> {
+impl From<ast::Field> for Field<UnlinkedPass> {
     fn from(ast::Field { name, ty }: ast::Field) -> Self {
         Self {
             id: name.into(),
@@ -1177,18 +1313,18 @@ impl From<ast::Field> for Field<UnlinkedStage> {
     }
 }
 
-pub struct DeclCat<S: HirStage> {
+pub struct DeclCat<S: HirPass> {
     pub id: S::ItemDcl, // TODO: these should be treated like unique items
     pub discriminants: Box<[Discriminant<S>]>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for DeclCat<S>
+impl<V, S: HirPass> TreeWalk<V, S> for DeclCat<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = DeclCat<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { id, discriminants } = self;
         let id = visitor.visit_item_dcl(id);
         let discriminants = discriminants.walk(visitor);
@@ -1199,7 +1335,7 @@ where
     }
 }
 
-impl From<ast::DeclCat> for DeclCat<UnlinkedStage> {
+impl From<ast::DeclCat> for DeclCat<UnlinkedPass> {
     fn from(
         ast::DeclCat {
             kw: _,
@@ -1219,18 +1355,18 @@ impl From<ast::DeclCat> for DeclCat<UnlinkedStage> {
     }
 }
 
-pub struct Discriminant<S: HirStage> {
+pub struct Discriminant<S: HirPass> {
     pub id: S::ItemDcl,
     pub val: Option<Expr<S>>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for Discriminant<S>
+impl<V, S: HirPass> TreeWalk<V, S> for Discriminant<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = Discriminant<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { id, val } = self;
         let id = visitor.visit_item_dcl(id);
         let val = val.walk(visitor);
@@ -1238,7 +1374,7 @@ where
     }
 }
 
-impl From<ast::CatDisc> for Discriminant<UnlinkedStage> {
+impl From<ast::CatDisc> for Discriminant<UnlinkedPass> {
     fn from(ast::CatDisc { name, val }: ast::CatDisc) -> Self {
         Self {
             id: name.into(),
@@ -1247,19 +1383,19 @@ impl From<ast::CatDisc> for Discriminant<UnlinkedStage> {
     }
 }
 
-pub struct DeclUni<S: HirStage> {
+pub struct DeclUni<S: HirPass> {
     pub id: S::VarDcl,
     pub ty: Option<TypeExpr<S>>,
     pub init: Option<Expr<S>>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for DeclUni<S>
+impl<V, S: HirPass> TreeWalk<V, S> for DeclUni<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = DeclUni<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { id, ty, init } = self;
         let ty = ty.walk(visitor);
         let init = init.walk(visitor);
@@ -1273,7 +1409,7 @@ where
     }
 }
 
-pub enum Expr<S: HirStage> {
+pub enum Expr<S: HirPass> {
     Block(BlockExpr<S>),
     Binary(Box<Binary<S>>),
     Unary(Box<Unary<S>>),
@@ -1284,13 +1420,13 @@ pub enum Expr<S: HirStage> {
     Variable(S::VarRef),
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for Expr<S>
+impl<V, S: HirPass> TreeWalk<V, S> for Expr<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = Expr<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         match self {
             Self::Block(x) => x.walk(visitor).map(Expr::Block),
             Self::Binary(x) => x.walk(visitor).map(Expr::Binary),
@@ -1304,7 +1440,7 @@ where
     }
 }
 
-impl From<ast::Expr> for Expr<UnlinkedStage> {
+impl From<ast::Expr> for Expr<UnlinkedPass> {
     fn from(value: ast::Expr) -> Self {
         match value {
             ast::Expr::Block(inner) => Self::Block(inner.into()),
@@ -1322,13 +1458,13 @@ impl From<ast::Expr> for Expr<UnlinkedStage> {
     }
 }
 
-impl From<ast::Assignment> for Expr<UnlinkedStage> {
+impl From<ast::Assignment> for Expr<UnlinkedPass> {
     fn from(ast::Assignment { op: _, expr }: ast::Assignment) -> Self {
         expr.into()
     }
 }
 
-impl From<ast::Grouping> for Expr<UnlinkedStage> {
+impl From<ast::Grouping> for Expr<UnlinkedPass> {
     fn from(
         ast::Grouping {
             open: _,
@@ -1340,19 +1476,19 @@ impl From<ast::Grouping> for Expr<UnlinkedStage> {
     }
 }
 
-pub struct Binary<S: HirStage> {
+pub struct Binary<S: HirPass> {
     pub op: Operator,
     pub lhs: Expr<S>,
     pub rhs: Expr<S>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for Binary<S>
+impl<V, S: HirPass> TreeWalk<V, S> for Binary<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = Binary<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { op, lhs, rhs } = self;
         let lhs = lhs.walk(visitor);
         let rhs = rhs.walk(visitor);
@@ -1364,7 +1500,7 @@ where
     }
 }
 
-impl From<ast::Binary> for Binary<UnlinkedStage> {
+impl From<ast::Binary> for Binary<UnlinkedPass> {
     fn from(
         ast::Binary {
             lhs,
@@ -1381,19 +1517,19 @@ impl From<ast::Binary> for Binary<UnlinkedStage> {
     }
 }
 
-pub struct Unary<S: HirStage> {
+pub struct Unary<S: HirPass> {
     pub op: Operator,
     pub operand: Expr<S>,
     pub side: OpSide,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for Unary<S>
+impl<V, S: HirPass> TreeWalk<V, S> for Unary<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = Unary<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { op, operand, side } = self;
         let operand = operand.walk(visitor);
         Ok(Unary {
@@ -1404,7 +1540,7 @@ where
     }
 }
 
-impl From<ast::Unary> for Unary<UnlinkedStage> {
+impl From<ast::Unary> for Unary<UnlinkedPass> {
     fn from(
         ast::Unary {
             op,
@@ -1422,12 +1558,12 @@ impl From<ast::Unary> for Unary<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct Subscript<S: HirStage> {
+pub struct Subscript<S: HirPass> {
     pub arr: Expr<S>,
     pub idx: Expr<S>,
 }
 
-impl From<ast::Subscript> for Subscript<UnlinkedStage> {
+impl From<ast::Subscript> for Subscript<UnlinkedPass> {
     fn from(
         ast::Subscript {
             arr,
@@ -1444,12 +1580,12 @@ impl From<ast::Subscript> for Subscript<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct FnCall<S: HirStage> {
+pub struct FnCall<S: HirPass> {
     pub fun: Expr<S>,
     pub args: Box<[Expr<S>]>,
 }
 
-impl From<ast::FnCall> for FnCall<UnlinkedStage> {
+impl From<ast::FnCall> for FnCall<UnlinkedPass> {
     fn from(
         ast::FnCall {
             fun,
@@ -1499,10 +1635,10 @@ impl From<RelSpan> for UnlinkedDecl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkedDecl(pub ItemId);
 
-pub struct UnlinkedMod(pub RelSpan);
+pub struct UnlinkedMod(pub ast::DeclMod);
 
-impl From<RelSpan> for UnlinkedMod {
-    fn from(value: RelSpan) -> Self {
+impl From<ast::DeclMod> for UnlinkedMod {
+    fn from(value: ast::DeclMod) -> Self {
         Self(value)
     }
 }
@@ -1522,14 +1658,14 @@ impl From<ast::Variable> for UnlinkedVar {
 pub struct LinkedVar(pub VarId);
 
 #[derive(Walkable)]
-pub enum BlockExpr<S: HirStage> {
+pub enum BlockExpr<S: HirPass> {
     If(Box<IfStmt<S>>),
     Loop(Box<LoopStmt<S>>),
     Cord(Box<CordStmt<S>>),
     Block(BlockStmt<S>),
 }
 
-impl From<ast::BlockExpr> for BlockExpr<UnlinkedStage> {
+impl From<ast::BlockExpr> for BlockExpr<UnlinkedPass> {
     fn from(value: ast::BlockExpr) -> Self {
         match value {
             ast::BlockExpr::If(inner) => Self::If(Box::new((*inner).into())),
@@ -1552,19 +1688,19 @@ impl From<ast::BlockExpr> for BlockExpr<UnlinkedStage> {
     }
 }
 
-pub struct DeclPvt<S: HirStage> {
+pub struct DeclPvt<S: HirPass> {
     pub id: S::ItemDcl,
     pub ty: Option<TypeExpr<S>>,
     pub init: Expr<S>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for DeclPvt<S>
+impl<V, S: HirPass> TreeWalk<V, S> for DeclPvt<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = DeclPvt<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { id, ty, init } = self;
         let ty = ty.walk(visitor);
         let init = init.walk(visitor);
@@ -1578,20 +1714,20 @@ where
     }
 }
 
-pub struct DeclLet<S: HirStage> {
+pub struct DeclLet<S: HirPass> {
     // TODO: complex bindings
     pub id: S::VarDcl,
     pub ty: Option<TypeExpr<S>>,
     pub init: Option<Expr<S>>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for DeclLet<S>
+impl<V, S: HirPass> TreeWalk<V, S> for DeclLet<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = DeclLet<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { id, ty, init } = self;
         let ty = ty.walk(visitor);
         let init = init.walk(visitor);
@@ -1606,12 +1742,12 @@ where
 }
 
 #[derive(Walkable)]
-pub struct DeclDfer<S: HirStage> {
+pub struct DeclDfer<S: HirPass> {
     pub param: Option<BindingPattern<S>>,
     pub on_pop: BlockStmt<S>,
 }
 
-impl From<ast::DeclDfer> for DeclDfer<UnlinkedStage> {
+impl From<ast::DeclDfer> for DeclDfer<UnlinkedPass> {
     fn from(
         ast::DeclDfer {
             kw: _,
@@ -1633,7 +1769,7 @@ impl From<ast::DeclDfer> for DeclDfer<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub enum Stmt<S: HirStage> {
+pub enum Stmt<S: HirPass> {
     Expr(ExprStmt<S>),
     Print(PrintStmt<S>),
     If(IfStmt<S>),
@@ -1649,7 +1785,7 @@ pub enum Stmt<S: HirStage> {
     Block(BlockStmt<S>),
 }
 
-impl From<ast::Stmt> for Stmt<UnlinkedStage> {
+impl From<ast::Stmt> for Stmt<UnlinkedPass> {
     fn from(value: ast::Stmt) -> Self {
         match value {
             ast::Stmt::Expr(inner) => Self::Expr(inner.into()),
@@ -1694,18 +1830,18 @@ impl From<ast::Stmt> for Stmt<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct ExprStmt<S: HirStage>(pub Expr<S>);
+pub struct ExprStmt<S: HirPass>(pub Expr<S>);
 
-impl From<ast::ExprStmt> for ExprStmt<UnlinkedStage> {
+impl From<ast::ExprStmt> for ExprStmt<UnlinkedPass> {
     fn from(ast::ExprStmt { expr, semi: _ }: ast::ExprStmt) -> Self {
         Self(expr.into())
     }
 }
 
 #[derive(Walkable)]
-pub struct PrintStmt<S: HirStage>(pub Expr<S>);
+pub struct PrintStmt<S: HirPass>(pub Expr<S>);
 
-impl From<ast::PrintStmt> for PrintStmt<UnlinkedStage> {
+impl From<ast::PrintStmt> for PrintStmt<UnlinkedPass> {
     fn from(
         ast::PrintStmt {
             kw: _,
@@ -1718,13 +1854,13 @@ impl From<ast::PrintStmt> for PrintStmt<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct IfStmt<S: HirStage> {
+pub struct IfStmt<S: HirPass> {
     pub pred: Expr<S>,
     pub then: BlockStmt<S>,
     pub or: Option<Box<OrStmt<S>>>,
 }
 
-impl From<ast::IfStmt> for IfStmt<UnlinkedStage> {
+impl From<ast::IfStmt> for IfStmt<UnlinkedPass> {
     fn from(
         ast::IfStmt {
             kw: _,
@@ -1742,12 +1878,12 @@ impl From<ast::IfStmt> for IfStmt<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub enum OrStmt<S: HirStage> {
+pub enum OrStmt<S: HirPass> {
     More(IfStmt<S>),
     Last(BlockStmt<S>),
 }
 
-impl From<ast::OrBody> for OrStmt<UnlinkedStage> {
+impl From<ast::OrBody> for OrStmt<UnlinkedPass> {
     fn from(value: ast::OrBody) -> Self {
         match value {
             ast::OrBody::More(inner) => Self::More(inner.into()),
@@ -1756,19 +1892,19 @@ impl From<ast::OrBody> for OrStmt<UnlinkedStage> {
     }
 }
 
-impl From<ast::OrStmt> for OrStmt<UnlinkedStage> {
+impl From<ast::OrStmt> for OrStmt<UnlinkedPass> {
     fn from(ast::OrStmt { kw: _, body }: ast::OrStmt) -> Self {
         body.into()
     }
 }
 
 #[derive(Walkable)]
-pub struct PickExpr<S: HirStage> {
+pub struct PickExpr<S: HirPass> {
     pub expr: Expr<S>,
     pub arms: Box<[PickArm<S>]>,
 }
 
-impl From<ast::PickStmt> for PickExpr<UnlinkedStage> {
+impl From<ast::PickStmt> for PickExpr<UnlinkedPass> {
     fn from(
         ast::PickStmt {
             kw: _,
@@ -1786,12 +1922,12 @@ impl From<ast::PickStmt> for PickExpr<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct PickArm<S: HirStage> {
+pub struct PickArm<S: HirPass> {
     pub pat: PickPattern,
     pub expr: Expr<S>,
 }
 
-impl From<ast::PickArm> for PickArm<UnlinkedStage> {
+impl From<ast::PickArm> for PickArm<UnlinkedPass> {
     fn from(
         ast::PickArm {
             pattern,
@@ -1822,18 +1958,18 @@ impl From<ast::ScopeLabel> for UnlinkedLabel {
     }
 }
 
-pub struct LoopStmt<S: HirStage> {
+pub struct LoopStmt<S: HirPass> {
     pub label: Option<S::LabelDcl>,
     pub body: BlockStmt<S>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for LoopStmt<S>
+impl<V, S: HirPass> TreeWalk<V, S> for LoopStmt<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = LoopStmt<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { label, body } = self;
         let label = label.map(|x| visitor.visit_label_dcl(x)).transpose();
         let body = body.walk(visitor);
@@ -1844,18 +1980,18 @@ where
     }
 }
 
-pub struct CordStmt<S: HirStage> {
+pub struct CordStmt<S: HirPass> {
     pub label: Option<S::LabelDcl>,
     pub body: BlockStmt<S>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for CordStmt<S>
+impl<V, S: HirPass> TreeWalk<V, S> for CordStmt<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = CordStmt<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { label, body } = self;
         let label = label.map(|x| visitor.visit_label_dcl(x)).transpose();
         let body = body.walk(visitor);
@@ -1866,19 +2002,19 @@ where
     }
 }
 
-pub struct RepStmt<S: HirStage> {
+pub struct RepStmt<S: HirPass> {
     pub label: Option<S::LabelDcl>,
     pub pred: Expr<S>,
     pub body: BlockStmt<S>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for RepStmt<S>
+impl<V, S: HirPass> TreeWalk<V, S> for RepStmt<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = RepStmt<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { label, pred, body } = self;
         let label = label.map(|x| visitor.visit_label_dcl(x)).transpose();
         let pred = pred.walk(visitor);
@@ -1891,20 +2027,20 @@ where
     }
 }
 
-pub struct ForStmt<S: HirStage> {
+pub struct ForStmt<S: HirPass> {
     pub label: Option<S::LabelDcl>,
     pub var: BindingPattern<S>,
     pub iter: Expr<S>,
     pub body: BlockStmt<S>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for ForStmt<S>
+impl<V, S: HirPass> TreeWalk<V, S> for ForStmt<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = ForStmt<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self {
             label,
             var,
@@ -1925,11 +2061,11 @@ where
 }
 
 #[derive(Walkable)]
-pub struct GiveStmt<S: HirStage> {
+pub struct GiveStmt<S: HirPass> {
     pub expr: Option<Expr<S>>,
 }
 
-impl From<ast::GiveStmt> for GiveStmt<UnlinkedStage> {
+impl From<ast::GiveStmt> for GiveStmt<UnlinkedPass> {
     fn from(
         ast::GiveStmt {
             kw: _,
@@ -1944,11 +2080,11 @@ impl From<ast::GiveStmt> for GiveStmt<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct FailStmt<S: HirStage> {
+pub struct FailStmt<S: HirPass> {
     pub expr: Option<Expr<S>>,
 }
 
-impl From<ast::FailStmt> for FailStmt<UnlinkedStage> {
+impl From<ast::FailStmt> for FailStmt<UnlinkedPass> {
     fn from(
         ast::FailStmt {
             kw: _,
@@ -1962,18 +2098,18 @@ impl From<ast::FailStmt> for FailStmt<UnlinkedStage> {
     }
 }
 
-pub struct DoneStmt<S: HirStage> {
+pub struct DoneStmt<S: HirPass> {
     pub label: Option<S::LabelRef>,
     pub expr: Option<Expr<S>>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for DoneStmt<S>
+impl<V, S: HirPass> TreeWalk<V, S> for DoneStmt<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = DoneStmt<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { label, expr } = self;
         let label = label.map(|x| visitor.visit_label_ref(x)).transpose();
         let expr = expr.walk(visitor);
@@ -1984,7 +2120,7 @@ where
     }
 }
 
-impl From<ast::DoneStmt> for DoneStmt<UnlinkedStage> {
+impl From<ast::DoneStmt> for DoneStmt<UnlinkedPass> {
     fn from(
         ast::DoneStmt {
             kw: _,
@@ -2000,24 +2136,24 @@ impl From<ast::DoneStmt> for DoneStmt<UnlinkedStage> {
     }
 }
 
-pub struct SkipStmt<S: HirStage> {
+pub struct SkipStmt<S: HirPass> {
     pub label: Option<S::LabelRef>,
 }
 
-impl<V, S: HirStage> TreeWalk<V, S> for SkipStmt<S>
+impl<V, S: HirPass> TreeWalk<V, S> for SkipStmt<S>
 where
-    V: Visitor<S, Error: FromIterator<V::Error>>,
+    V: Visitor<S>,
 {
     type Output = SkipStmt<V::Output>;
 
-    fn walk(self, visitor: &mut V) -> Result<Self::Output, V::Error> {
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { label } = self;
         let label = label.map(|x| visitor.visit_label_ref(x)).transpose();
         Ok(SkipStmt { label: label? })
     }
 }
 
-impl From<ast::SkipStmt> for SkipStmt<UnlinkedStage> {
+impl From<ast::SkipStmt> for SkipStmt<UnlinkedPass> {
     fn from(
         ast::SkipStmt {
             kw: _,
@@ -2032,9 +2168,9 @@ impl From<ast::SkipStmt> for SkipStmt<UnlinkedStage> {
 }
 
 #[derive(Walkable)]
-pub struct BlockStmt<S: HirStage>(pub Box<[Decl<S>]>);
+pub struct BlockStmt<S: HirPass>(pub Box<[Decl<S>]>);
 
-impl From<ast::BlockStmt> for BlockStmt<UnlinkedStage> {
+impl From<ast::BlockStmt> for BlockStmt<UnlinkedPass> {
     fn from(
         ast::BlockStmt {
             open: _,
