@@ -256,6 +256,17 @@ pub trait Visitor<S: HirPass>:
             LabelRef = <Self as LabelRefVisitor<S::LabelRef>>::Value,
             Literal = <Self as LiteralVisitor<S::Literal>>::Value,
         >;
+
+    fn push_layer(&mut self) {}
+
+    fn pop_layer(&mut self) {}
+
+    /// Returns an error if the scope failed to push
+    fn push_scope(&mut self) -> Result<(), CheckDiagnostics> {
+        Ok(())
+    }
+
+    fn pop_scope(&mut self) {}
 }
 
 pub trait TreeWalk<V, S>
@@ -1074,12 +1085,40 @@ impl From<ast::IffClause> for IffClause<UnlinkedPass> {
     }
 }
 
-#[derive(Walkable)]
 pub struct DeclOn<S: HirPass> {
     pub generics: Option<GenericGroup<S>>,
     pub target: TypeExpr<S>,
     pub iff: Option<IffClause<S>>,
     pub members: Box<[Decl<S>]>,
+}
+
+impl<V, S: HirPass> TreeWalk<V, S> for DeclOn<S>
+where
+    V: Visitor<S>,
+{
+    type Output = DeclOn<V::Output>;
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
+        let Self {
+            generics,
+            target,
+            iff,
+            members,
+        } = self;
+        let generics = generics.walk(visitor);
+        let target = target.walk(visitor);
+        let iff = iff.walk(visitor);
+
+        visitor.push_layer();
+        let members = members.walk(visitor);
+        visitor.pop_layer();
+
+        Ok(DeclOn {
+            generics: generics?,
+            target: target?,
+            iff: iff?,
+            members: members?,
+        })
+    }
 }
 
 impl From<ast::DeclOn> for DeclOn<UnlinkedPass> {
@@ -1157,11 +1196,18 @@ where
         } = self;
         let id = visitor.visit_item_dcl(id);
         let generics = generics.walk(visitor);
-        let self_param = self_param.walk(visitor);
-        let params = params.walk(visitor);
         let ret = ret.walk(visitor);
         let iff = iff.walk(visitor);
+
+        visitor.push_layer();
+        let res = visitor.push_scope();
+        debug_assert!(res.is_ok(), "just pushed a layer");
+        let self_param = self_param.walk(visitor);
+        let params = params.walk(visitor);
         let body = body.walk(visitor);
+        visitor.pop_scope();
+        visitor.push_layer();
+
         Ok(DeclFun {
             id: id?,
             generics: generics?,
@@ -1254,7 +1300,12 @@ where
         } = self;
         let id = visitor.visit_item_dcl(id);
         let generics = generics.walk(visitor);
+
+        visitor.push_layer();
+        // TODO: need to associate the fields with the parent
         let fields = fields.walk(visitor);
+        visitor.pop_layer();
+
         Ok(DeclRec {
             id: id?,
             generics: generics?,
@@ -2167,8 +2218,28 @@ impl From<ast::SkipStmt> for SkipStmt<UnlinkedPass> {
     }
 }
 
-#[derive(Walkable)]
 pub struct BlockStmt<S: HirPass>(pub Box<[Decl<S>]>);
+
+impl<V, S: HirPass> TreeWalk<V, S> for BlockStmt<S>
+where
+    V: Visitor<S>,
+{
+    type Output = BlockStmt<V::Output>;
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
+        let scope_failed = visitor.push_scope().is_err();
+        if scope_failed {
+            visitor.push_layer();
+            let res = visitor.push_scope();
+            debug_assert!(res.is_ok(), "just pushed a layer");
+        }
+        let res = self.0.walk(visitor).map(BlockStmt);
+        visitor.pop_scope();
+        if scope_failed {
+            visitor.pop_layer();
+        }
+        res
+    }
+}
 
 impl From<ast::BlockStmt> for BlockStmt<UnlinkedPass> {
     fn from(

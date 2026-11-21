@@ -199,6 +199,34 @@ impl hir::VarDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_, '_> {
 
 impl hir::Visitor<PostDeclModPass> for DeclVisitor<'_, '_, '_, '_> {
     type Output = PostDeclPass;
+
+    fn push_layer(&mut self) {
+        self.env.module.push_layer();
+    }
+
+    fn pop_layer(&mut self) {
+        let res = self.env.module.pop_layer();
+        debug_assert!(res.is_some(), "layers should be balanced");
+    }
+
+    fn push_scope(&mut self) -> Result<(), CheckDiagnostics> {
+        self.env.module.push_scope().is_some().ok_or_else(|| {
+            self.diagnostics.push(Diagnostic::new(
+                todo!("scope open span"),
+                DiagnosticKind::Other {
+                    severity: Severity::Error,
+                    category: StaticAnalysis,
+                    msg: format!("cannot push a scope in global"),
+                },
+            ));
+            CheckDiagnostics
+        })
+    }
+
+    fn pop_scope(&mut self) {
+        let res = self.env.module.pop_scope();
+        debug_assert!(res.is_some(), "scopes should be balanced");
+    }
 }
 
 impl hir::IgnoreModDcl<<PostDeclModPass as HirPass>::ModDcl> for DeclVisitor<'_, '_, '_, '_> {}
@@ -211,3 +239,94 @@ impl hir::IgnoreTypeRef<<PostDeclModPass as HirPass>::TypeRef> for DeclVisitor<'
 impl hir::IgnoreLabelDcl<<PostDeclModPass as HirPass>::LabelDcl> for DeclVisitor<'_, '_, '_, '_> {}
 impl hir::IgnoreLabelRef<<PostDeclModPass as HirPass>::LabelRef> for DeclVisitor<'_, '_, '_, '_> {}
 impl hir::IgnoreLiteral<<PostDeclModPass as HirPass>::Literal> for DeclVisitor<'_, '_, '_, '_> {}
+
+pub struct PostVarRefPass;
+
+impl HirPass for PostVarRefPass {
+    type ModDcl = <PostDeclPass as HirPass>::ModDcl;
+    type ModRef = <PostDeclPass as HirPass>::ModRef;
+
+    type ItemDcl = <PostDeclPass as HirPass>::ItemDcl;
+    type ItemRef = hir::LinkedVar; // TODO: distinguish from var
+
+    type VarDcl = <PostDeclPass as HirPass>::VarDcl; // TODO: distinguish from item
+    type VarRef = hir::LinkedVar;
+
+    type TypeRef = <PostDeclPass as HirPass>::TypeRef;
+
+    type LabelDcl = <PostDeclPass as HirPass>::LabelDcl; // TODO: actually implement this
+    type LabelRef = <PostDeclPass as HirPass>::LabelRef;
+
+    type Literal = <PostDeclPass as HirPass>::Literal;
+}
+
+pub struct VarRefVisitor<'env, 'm_env, 'src, 'err> {
+    source: &'src SourceMap,
+    env: &'m_env mut ModScopeEnvironment<'env>,
+    diagnostics: &'err mut Vec<Diagnostic>,
+    file: FileId,
+}
+
+impl<'env, 'm_env, 'src, 'err> VarRefVisitor<'env, 'm_env, 'src, 'err> {
+    pub const fn new(
+        source: &'src SourceMap,
+        env: &'m_env mut ModScopeEnvironment<'env>,
+        diagnostics: &'err mut Vec<Diagnostic>,
+        file: FileId,
+    ) -> Self {
+        Self {
+            source,
+            env,
+            diagnostics,
+            file,
+        }
+    }
+}
+
+// rebuild the scope
+impl hir::ItemDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_, '_> {
+    type Value = hir::LinkedDecl;
+
+    fn visit_item_dcl(&mut self, x: hir::LinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+impl hir::VarDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_, '_> {
+    type Value = hir::LinkedDecl;
+
+    fn visit_var_dcl(&mut self, x: hir::LinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
+        Ok(x)
+    }
+}
+
+impl hir::ItemRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_, '_> {
+    type Value = hir::LinkedVar;
+
+    fn visit_item_ref(&mut self, x: hir::UnlinkedVar) -> Result<Self::Value, CheckDiagnostics> {
+        todo!()
+    }
+}
+
+impl hir::VarRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_, '_> {
+    type Value = hir::LinkedVar;
+
+    fn visit_var_ref(&mut self, x: hir::UnlinkedVar) -> Result<Self::Value, CheckDiagnostics> {
+        todo!()
+    }
+}
+
+impl hir::Visitor<PostDeclPass> for VarRefVisitor<'_, '_, '_, '_> {
+    type Output = PostVarRefPass;
+}
+
+impl hir::IgnoreModDcl<<PostDeclPass as HirPass>::ModDcl> for VarRefVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreModRef<<PostDeclPass as HirPass>::ModRef> for VarRefVisitor<'_, '_, '_, '_> {}
+// impl hir::IgnoreItemDcl<<PostDeclPass as HirPass>::ItemDcl> for VarRefVisitor<'_, '_, '_, '_> {}
+// impl hir::IgnoreItemRef<<PostDeclPass as HirPass>::ItemRef> for VarRefVisitor<'_, '_, '_, '_> {}
+// impl hir::IgnoreVarDcl<<PostDeclPass as HirPass>::VarDcl> for VarRefVisitor<'_, '_, '_, '_> {}
+// impl hir::IgnoreVarRef<<PostDeclPass as HirPass>::VarRef> for VarRefVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreTypeRef<<PostDeclPass as HirPass>::TypeRef> for VarRefVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreLabelDcl<<PostDeclPass as HirPass>::LabelDcl> for VarRefVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreLabelRef<<PostDeclPass as HirPass>::LabelRef> for VarRefVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreLiteral<<PostDeclPass as HirPass>::Literal> for VarRefVisitor<'_, '_, '_, '_> {}

@@ -151,21 +151,7 @@ impl ScopeEnvironment {
 pub struct ModScopeEnvironment<'env> {
     /// Indexed with [`ItemId`]
     decls: &'env mut Vec<Item>,
-    module: &'env mut Module,
-}
-
-impl std::ops::Deref for ModScopeEnvironment<'_> {
-    type Target = Module;
-
-    fn deref(&self) -> &Self::Target {
-        self.module
-    }
-}
-
-impl std::ops::DerefMut for ModScopeEnvironment<'_> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.module
-    }
+    pub module: &'env mut Module,
 }
 
 impl ModScopeEnvironment<'_> {
