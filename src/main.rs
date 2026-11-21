@@ -122,6 +122,7 @@ use crate::{
     analyzer::static_env::{
         ModId,
         scope::{
+            fmt::DisplayHir,
             hir::{self, TreeWalk as _},
             passes::{DeclModVisitor, PostDeclModPass},
         },
@@ -765,6 +766,14 @@ fn comp_file(
             } else {
                 todo!("error: REPL cannot have modules");
             }
+            println!(
+                "{:#}",
+                DisplayHir {
+                    source,
+                    env: scope_env,
+                    hir: &unit,
+                }
+            );
             Ok(unit)
         }
 
@@ -805,7 +814,6 @@ fn compile(
     }
     diagnostics.ok_or_err()?;
 
-    println!();
     println!("all modules located and parsed");
     println!("--- linking ---");
 

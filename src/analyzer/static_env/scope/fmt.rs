@@ -39,7 +39,7 @@ mod helpers {
     }
 
     impl<'buf> Indented<'buf> {
-        const INDENT: &str = "  ";
+        pub const INDENT: &str = "  ";
 
         fn wrap<'slot, 'fmt>(
             f: &'fmt mut fmt::Formatter<'_>,
@@ -745,7 +745,7 @@ impl<S: hir::HirPass> HirDisplay for hir::DeclOn<S> {
         }
         target.fmt(source, file, env, f)?;
         if let Some(iff) = iff {
-            write!(f, "{}", Punctuation::Iff)?;
+            write!(f, " {} ", Punctuation::Iff)?;
             let mut has_prev = false;
             for clause in &iff.0 {
                 if has_prev {
@@ -805,9 +805,11 @@ impl<S: hir::HirPass> HirDisplay for hir::DeclFun<S> {
             ret.fmt(source, file, env, f)?;
         }
         if let Some(iff) = iff {
+            writeln!(f)?;
             iff.fmt(source, file, env, f)?;
         }
         if let Some(body) = body {
+            f.write_str(if iff.is_some() { "\n" } else { " " })?;
             body.fmt(source, file, env, f)?;
         }
         Ok(())
