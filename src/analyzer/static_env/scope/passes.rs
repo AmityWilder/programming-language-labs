@@ -162,8 +162,27 @@ impl hir::ItemDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_, '_> {
     fn visit_item_dcl(&mut self, x: hir::UnlinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
         let hir::UnlinkedDecl(name) = x;
         let ident = name.within_file(self.file);
-        let id = self.env.decl_var(self.source[ident].to_owned(), ident);
-        Ok(hir::LinkedDecl(id))
+        match self.env.decl_item(self.source[ident].to_owned(), ident) {
+            Ok(id) => Ok(hir::LinkedDecl(id)),
+            Err(e) => {
+                self.diagnostics.push(Diagnostic::new(
+                    ident,
+                    DiagnosticKind::Other {
+                        severity: Severity::Error,
+                        category: StaticAnalysis,
+                        msg: format!(
+                            "duplicate item: first declaration at {}",
+                            self.env
+                                .get_decl(e.og)
+                                .expect("duplicate item error og should exist")
+                                .decl
+                                .display_loc(self.source)
+                        ),
+                    },
+                ));
+                Err(CheckDiagnostics)
+            }
+        }
     }
 }
 
