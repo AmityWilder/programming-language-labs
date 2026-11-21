@@ -2,7 +2,7 @@ use crate::{
     analyzer::static_env::{
         ModId,
         scope::{
-            env::ScopeEnvironment,
+            env::{ModScopeEnvironment, ScopeEnvironment},
             hir::{self, HirPass, UnlinkedPass},
         },
     },
@@ -102,6 +102,7 @@ impl hir::Visitor<UnlinkedPass> for DeclModVisitor<'_, '_, '_> {
     type Output = PostDeclModPass;
 }
 
+// impl hir::IgnoreModDcl<<UnlinkedPass as HirPass>::ModDcl> for DeclModVisitor<'_, '_, '_> {}
 impl hir::IgnoreModRef<<UnlinkedPass as HirPass>::ModRef> for DeclModVisitor<'_, '_, '_> {}
 impl hir::IgnoreItemDcl<<UnlinkedPass as HirPass>::ItemDcl> for DeclModVisitor<'_, '_, '_> {}
 impl hir::IgnoreItemRef<<UnlinkedPass as HirPass>::ItemRef> for DeclModVisitor<'_, '_, '_> {}
@@ -112,92 +113,85 @@ impl hir::IgnoreLabelDcl<<UnlinkedPass as HirPass>::LabelDcl> for DeclModVisitor
 impl hir::IgnoreLabelRef<<UnlinkedPass as HirPass>::LabelRef> for DeclModVisitor<'_, '_, '_> {}
 impl hir::IgnoreLiteral<<UnlinkedPass as HirPass>::Literal> for DeclModVisitor<'_, '_, '_> {}
 
-#[cfg(false)]
-impl hir::Visitor<hir::UnlinkedPass> for DeclModVisitor<'_, '_, '_> {
-    type Error = CheckDiagnostics;
-    type Output = PostDeclModPass;
+pub struct PostDeclPass;
 
-    fn visit_mod_dcl(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::ModDcl,
-    ) -> Result<<Self::Value as HirPass>::ModDcl, Self::Error> {
-        let hir::UnlinkedMod(name) = x;
-        let id = self
-            .env
-            .find_submodule(&self.source[name.within_file(self.file)])
-            .expect("should be handled in pre-scan");
-        Ok(hir::LinkedMod(id))
-    }
+impl HirPass for PostDeclPass {
+    type ModDcl = <PostDeclModPass as HirPass>::ModDcl;
+    type ModRef = <PostDeclModPass as HirPass>::ModRef;
 
-    fn visit_item_dcl(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::ItemDcl,
-    ) -> Result<<Self::Value as HirPass>::ItemDcl, Self::Error> {
-        let hir::UnlinkedDecl(name) = x;
-        let ident = name.within_file(self.file);
-        let id = self.env.decl_var(self.source[ident].to_owned(), ident);
-        Ok(hir::LinkedDecl(id))
-    }
+    type ItemDcl = hir::LinkedDecl;
+    type ItemRef = <PostDeclModPass as HirPass>::ItemRef; // TODO: distinguish from var
 
-    fn visit_var_dcl(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::VarDcl,
-    ) -> Result<<Self::Value as HirPass>::VarDcl, Self::Error> {
-        let hir::UnlinkedDecl(name) = x;
-        let ident = name.within_file(self.file);
-        let id = self.env.decl_var(self.source[ident].to_owned(), ident);
-        Ok(hir::LinkedDecl(id))
-    }
+    type VarDcl = hir::LinkedDecl; // TODO: distinguish from item
+    type VarRef = <PostDeclModPass as HirPass>::VarRef;
 
-    fn visit_label_dcl(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::LabelDcl,
-    ) -> Result<<Self::Value as HirPass>::LabelDcl, Self::Error> {
-        Ok(x)
-    }
+    type TypeRef = <PostDeclModPass as HirPass>::TypeRef;
 
-    fn visit_mod_ref(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::ModRef,
-    ) -> Result<<Self::Value as HirPass>::ModRef, Self::Error> {
-        Ok(x)
-    }
+    type LabelDcl = <PostDeclModPass as HirPass>::LabelDcl; // TODO: actually implement this
+    type LabelRef = <PostDeclModPass as HirPass>::LabelRef;
 
-    fn visit_item_ref(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::ItemRef,
-    ) -> Result<<Self::Value as HirPass>::ItemRef, Self::Error> {
-        Ok(x)
-    }
+    type Literal = <PostDeclModPass as HirPass>::Literal;
+}
 
-    fn visit_var_ref(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::VarRef,
-    ) -> Result<<Self::Value as HirPass>::VarRef, Self::Error> {
-        Ok(x)
-    }
+pub struct DeclVisitor<'env, 'm_env, 'src, 'err> {
+    source: &'src SourceMap,
+    env: &'m_env mut ModScopeEnvironment<'env>,
+    diagnostics: &'err mut Vec<Diagnostic>,
+    file: FileId,
+}
 
-    fn visit_type_ref(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::TypeRef,
-    ) -> Result<<Self::Value as HirPass>::TypeRef, Self::Error> {
-        Ok(x)
-    }
-
-    fn visit_label_ref(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::LabelRef,
-    ) -> Result<<Self::Value as HirPass>::LabelRef, Self::Error> {
-        Ok(x)
-    }
-
-    fn visit_literal(
-        &mut self,
-        x: <hir::UnlinkedPass as HirPass>::Literal,
-    ) -> Result<<Self::Value as HirPass>::Literal, Self::Error> {
-        Ok(x)
+impl<'env, 'm_env, 'src, 'err> DeclVisitor<'env, 'm_env, 'src, 'err> {
+    pub const fn new(
+        source: &'src SourceMap,
+        env: &'m_env mut ModScopeEnvironment<'env>,
+        diagnostics: &'err mut Vec<Diagnostic>,
+        file: FileId,
+    ) -> Self {
+        Self {
+            source,
+            env,
+            diagnostics,
+            file,
+        }
     }
 }
+
+impl hir::ItemDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_, '_> {
+    type Value = hir::LinkedDecl;
+
+    fn visit_item_dcl(&mut self, x: hir::UnlinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
+        let hir::UnlinkedDecl(name) = x;
+        let ident = name.within_file(self.file);
+        let id = self.env.decl_var(self.source[ident].to_owned(), ident);
+        Ok(hir::LinkedDecl(id))
+    }
+}
+
+impl hir::VarDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_, '_> {
+    type Value = hir::LinkedDecl;
+
+    fn visit_var_dcl(&mut self, x: hir::UnlinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
+        let hir::UnlinkedDecl(name) = x;
+        let ident = name.within_file(self.file);
+        let id = self.env.decl_var(self.source[ident].to_owned(), ident);
+        Ok(hir::LinkedDecl(id))
+    }
+}
+
+impl hir::Visitor<PostDeclModPass> for DeclVisitor<'_, '_, '_, '_> {
+    type Output = PostDeclPass;
+}
+
+impl hir::IgnoreModDcl<<PostDeclModPass as HirPass>::ModDcl> for DeclVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreModRef<<PostDeclModPass as HirPass>::ModRef> for DeclVisitor<'_, '_, '_, '_> {}
+// impl hir::IgnoreItemDcl<<PostDeclModPass as HirPass>::ItemDcl> for DeclVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreItemRef<<PostDeclModPass as HirPass>::ItemRef> for DeclVisitor<'_, '_, '_, '_> {}
+// impl hir::IgnoreVarDcl<<PostDeclModPass as HirPass>::VarDcl> for DeclVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreVarRef<<PostDeclModPass as HirPass>::VarRef> for DeclVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreTypeRef<<PostDeclModPass as HirPass>::TypeRef> for DeclVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreLabelDcl<<PostDeclModPass as HirPass>::LabelDcl> for DeclVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreLabelRef<<PostDeclModPass as HirPass>::LabelRef> for DeclVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreLiteral<<PostDeclModPass as HirPass>::Literal> for DeclVisitor<'_, '_, '_, '_> {}
 
 // impl ModScopeEnvironment<'_> {
 //     pub fn analyze(

@@ -124,7 +124,7 @@ use crate::{
         scope::{
             fmt::DisplayHir,
             hir::{self, TreeWalk as _},
-            passes::{DeclModVisitor, PostDeclModPass},
+            passes::{DeclModVisitor, DeclVisitor, PostDeclModPass},
         },
     },
     error::Diagnostic,
@@ -140,6 +140,7 @@ use crate::{
         span::RelSpan,
     },
     todo_types::Dummy,
+    util::OrAllErrsExt as _,
 };
 use analyzer::static_env::scope::env::ScopeEnvironment;
 use error::{CheckDiagnostics, fail::Failure};
@@ -817,45 +818,36 @@ fn compile(
     println!("all modules located and parsed");
     println!("--- linking ---");
 
-    // TODO
+    // declaration analysis
+    println!("analyzing declarations...");
+    let units = units
+        .into_iter()
+        .map(|unit| {
+            println!("analyzing {:?}", unit.file);
+            let &mod_id = file_mod_ids
+                .get(&unit.file)
+                .expect("should have been defined by `analyze_module_tree`");
+            let mut env = scope_env
+                .define_module(mod_id)
+                .expect("should have been defined by `analyze_module_tree`");
+            let mut visitor = DeclVisitor::new(source, &mut env, diagnostics, unit.file);
+            unit.walk(&mut visitor).inspect(|hir| {
+                println!(
+                    "hir:\n{:#}",
+                    DisplayHir {
+                        source,
+                        env: scope_env,
+                        hir,
+                    }
+                );
+            })
+        })
+        .collect_or_acc_errs::<Vec<_>, CheckDiagnostics>();
 
-    // // declaration analysis
-    // println!("analyzing declarations...");
-    // let units = units
-    //     .into_iter()
-    //     .map(|unit| {
-    //         println!("analyzing {:?}", unit.file);
-    //         let &mod_id = file_mod_ids
-    //             .get(&unit.file)
-    //             .expect("should have been defined by `analyze_module_tree`");
-    //         let mut env = scope_env
-    //             .define_module(mod_id)
-    //             .expect("should have been defined by `analyze_module_tree`");
-    //         let res = env.analyze(unit, source, diagnostics);
-    //         if let Ok(hir) = &res {
-    //             println!(
-    //                 "hir:\n{:#}",
-    //                 DisplayHir {
-    //                     source,
-    //                     env: scope_env,
-    //                     hir,
-    //                 }
-    //             );
-    //         } else {
-    //             debug_assert!(
-    //                 diagnostics.contains_err(),
-    //                 "should have an error if analysis failed"
-    //             );
-    //         }
-    //         res
-    //     })
-    //     .collect_or_acc_errs::<Vec<_>, DropAll>()
-    //     .ok();
+    // declaration errors
+    diagnostics.ok_or_err()?;
 
-    // // declaration errors
-    // diagnostics.ok_or_err()?;
-
-    // let units = units.expect("should have an output if there are no errors");
+    let units = units.expect("should have an output if there are no errors");
 
     // println!("analyzing scope...");
     // let units = units
