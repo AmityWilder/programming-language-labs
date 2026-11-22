@@ -251,7 +251,11 @@ impl HirDisplay for ItemId {
             }
             f.write_str(":\x1b[94m")?;
         }
-        write!(f, "{self}\x1b[96m#{kind:?}\x1b[94m}}\x1b[0m")
+        write!(
+            f,
+            "{self}@[ {} ]\x1b[96m#{kind:?}\x1b[94m}}\x1b[0m",
+            decl.display_loc(source),
+        )
     }
 }
 
