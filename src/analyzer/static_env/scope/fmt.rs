@@ -7,12 +7,17 @@
 )]
 
 use crate::{
+    SYNTAX_STYLE_ANSI,
     analyzer::static_env::{
         ItemId, ModId,
         scope::{
             env::{Item, ScopeEnvironment, ScopeId},
             hir::{self, HirUnit},
         },
+    },
+    highlight::{
+        style::StyleWrapper as _,
+        syntax::{GetSyntax as _, Syntax},
     },
     lex::token::{
         Operator,
@@ -230,7 +235,11 @@ impl HirDisplay for ItemId {
             children: _,
             scope,
         } = *item;
-        write!(f, "{}\x1b[94m{{", &source[decl])?;
+        write!(
+            f,
+            "{}\x1b[94m{{",
+            SYNTAX_STYLE_ANSI[kind.syntax()].style(&source[decl]),
+        )?;
         if let Some(parent) = parent {
             f.write_str("\x1b[0m")?;
             parent.fmt(source, file, env, f)?;
@@ -268,7 +277,12 @@ impl HirDisplay for ModId {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         let module = env.get_module(*self).expect("HIR IDs should be valid");
-        write!(f, "{}\x1b[92m{{{}}}\x1b[0m", module.name, self)
+        write!(
+            f,
+            "{}\x1b[92m{{{}}}\x1b[0m",
+            SYNTAX_STYLE_ANSI[Syntax::Modname].style(&module.name),
+            self
+        )
     }
 }
 
