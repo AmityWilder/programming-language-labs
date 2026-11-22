@@ -957,6 +957,7 @@ impl<S: hir::HirPass> HirDisplay for hir::DeclUni<S> {
     ) -> fmt::Result {
         let Self { id, ty, init } = self;
         write!(f, "{} ", Keyword::Uni)?;
+        id.fmt(source, file, env, f)?;
         if let Some(ty) = ty {
             f.write_str(": ")?;
             ty.fmt(source, file, env, f)?;
@@ -965,7 +966,7 @@ impl<S: hir::HirPass> HirDisplay for hir::DeclUni<S> {
             f.write_str(" = ")?;
             init.fmt(source, file, env, f)?;
         }
-        id.fmt(source, file, env, f)
+        f.write_str(";")
     }
 }
 
