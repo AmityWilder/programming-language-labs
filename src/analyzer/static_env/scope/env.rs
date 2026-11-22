@@ -3,21 +3,43 @@ use crate::{
     parse::ast::{self},
     src_code::span::Span,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    num::NonZero,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum ScopeId {
+    #[default]
+    Global,
+    Local {
+        layer: NonZero<usize>,
+        scope: usize,
+    },
+}
+const _: () = {
+    assert!(
+        std::mem::size_of::<ScopeId>() <= 2 * std::mem::size_of::<usize>(),
+        "should use NonZero niche for Global"
+    );
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
     pub decl: Span,
     pub parent: Option<ItemId>,
     pub children: BTreeMap<String, ItemId>,
+
+    pub scope: ScopeId,
 }
 
 impl Item {
-    pub const fn new(decl: Span) -> Self {
+    pub const fn new(decl: Span, scope: ScopeId) -> Self {
         Self {
             decl,
             parent: None,
             children: BTreeMap::new(),
+            scope,
         }
     }
 }
@@ -30,15 +52,17 @@ pub struct ModEntry {
     pub decl: Option<ast::DeclMod>,
 }
 
+/// A module with the provided name has already been declared in this module; duplicates are not allowed
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct DuplicateModuleError {
-    /// The ID of the original declaration
+    /// The ID of the first declaration of a module by this name
     pub og: ModId,
 }
 
+/// An item with the provided name has already been declared in this scope; duplicates are not allowed
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
 pub struct DuplicateItemError {
-    /// The ID of the original declaration
+    /// The ID of the first declaration of an item by this name in the current scope
     pub og: ItemId,
 }
 
@@ -50,12 +74,15 @@ pub enum LinkMemberError {
     DuplicateChild(DuplicateItemError),
 }
 
+/// Attempted to reference a module that was never declared
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UndeclaredModuleError;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateSubmoduleError {
+    /// The parent module was never declared
     UnknownParent(UndeclaredModuleError),
+    /// The parent module was declared, but the child module was already present in that parent
     DuplicateChild(DuplicateModuleError),
 }
 
@@ -159,10 +186,13 @@ impl ModScopeEnvironment<'_> {
         self.decls.get(id.0)
     }
 
+    /// Declare an item at the current scope, generating a new ID. \
+    /// Returns [`Err`] if an item with that name is already in-scope.
     pub fn decl_item(&mut self, name: String, decl: Span) -> Result<ItemId, DuplicateItemError> {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_item(name, id)?;
-        self.decls.push(Item::new(decl)); // now `id` refers to an item
+        self.decls
+            .push(Item::new(decl, self.module.current_scope())); // now `id` refers to an item
         Ok(id)
     }
 
@@ -173,7 +203,8 @@ impl ModScopeEnvironment<'_> {
         decl: Span,
     ) -> Result<ItemId, LinkMemberError> {
         let child = ItemId(self.decls.len());
-        self.decls.push(Item::new(decl));
+        self.decls
+            .push(Item::new(decl, self.module.current_scope()));
         // TODO: duplicate name check on parent
         let [parent_item, child_item] = self
             .decls
@@ -197,13 +228,18 @@ impl ModScopeEnvironment<'_> {
         }
     }
 
+    /// Declare a variable at the current scope, generating a new ID.
     pub fn decl_var(&mut self, name: String, decl: Span) -> VarId {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self.module.decl_var(name, id);
-        self.decls.push(Item::new(decl)); // now `id` refers to an item
+        self.decls
+            .push(Item::new(decl, self.module.current_scope())); // now `id` refers to an item
         id
     }
 }
+
+#[derive(Debug)]
+pub struct PopGlobalError;
 
 /// Functions have special scope limited to only themselves and global scope
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -225,10 +261,28 @@ impl Module {
         }
     }
 
+    /// Clears the scope data without removing any IDs
+    pub fn clear_scopes(&mut self) {
+        self.global.clear();
+        self.layers.clear();
+    }
+
+    pub fn current_scope(&self) -> ScopeId {
+        self.layers
+            .last()
+            .map_or(ScopeId::Global, |layer| ScopeId::Local {
+                layer: NonZero::new(self.layers.len())
+                    .expect("layer count should be nonzero if a last element exists"),
+                scope: layer.scopes.len(),
+            })
+    }
+
     pub fn find_submodule(&self, name: &str) -> Option<ModId> {
         self.submodules.get(name).copied()
     }
 
+    /// Returns [`Err`] if an module with `name` is already declared in this module \
+    /// (module declarations are file-level, so scoping does not allow duplicates)
     pub fn decl_submodule(&mut self, name: String, id: ModId) -> Result<(), DuplicateModuleError> {
         if let Some(og) = self.submodules.insert(name, id) {
             Err(DuplicateModuleError { og })
@@ -237,22 +291,22 @@ impl Module {
         }
     }
 
-    pub fn decl_item(&mut self, name: String, id: ItemId) -> Result<(), DuplicateItemError> {
-        self.layers
-            .last_mut()
-            .map_or(&mut self.global, |layer| {
-                layer.scopes.last_mut().unwrap_or(&mut layer.root)
-            })
-            .decl_item(name, id)
+    fn curr_scope(&mut self) -> &mut Scope {
+        self.layers.last_mut().map_or(&mut self.global, |layer| {
+            layer.scopes.last_mut().unwrap_or(&mut layer.root)
+        })
     }
 
+    /// Insert an item with an existing ID into the current scope. \
+    /// Returns [`Err`] if an item with `name` already exists at the current scope.
+    pub fn decl_item(&mut self, name: String, id: ItemId) -> Result<(), DuplicateItemError> {
+        self.curr_scope().decl_item(name, id)
+    }
+
+    /// Insert a variable with an existing ID into the current scope. \
+    /// Infallible because duplicate names shadow each other and a global scope is guaranteed.
     pub fn decl_var(&mut self, name: String, id: VarId) {
-        self.layers
-            .last_mut()
-            .map_or(&mut self.global, |layer| {
-                layer.scopes.last_mut().unwrap_or(&mut layer.root)
-            })
-            .decl_var(name, id);
+        self.curr_scope().decl_var(name, id);
     }
 
     pub fn lookup_item(&self, name: &str) -> Option<ItemId> {
@@ -336,6 +390,11 @@ impl Scope {
             items: HashMap::new(),
             vars: Vec::new(),
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.vars.clear();
     }
 
     fn decl_item(&mut self, key: String, id: ItemId) -> Result<(), DuplicateItemError> {

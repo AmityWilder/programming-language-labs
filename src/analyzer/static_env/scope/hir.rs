@@ -232,8 +232,54 @@ impl<T: IgnoreLiteral<U>, U> LiteralVisitor<U> for T {
     }
 }
 
+pub trait LayerHandle {
+    fn push_scope(&mut self);
+}
+
+pub trait ScopeVisitor {
+    /// A handle that allows a scope to be pushed without error
+    type LayerHandle: LayerHandle;
+
+    fn push_layer(&mut self) -> &mut Self::LayerHandle;
+
+    /// Popping a layer should also pop all scopes within that layer, so calling `pop_scope` is unnecessary.
+    fn pop_layer(&mut self);
+
+    /// Returns an error if the scope failed to push
+    fn push_scope(&mut self, span: RelSpan) -> Result<(), CheckDiagnostics>;
+
+    fn pop_scope(&mut self);
+
+    fn clear_scopes(&mut self);
+}
+
+pub trait IgnoreScope {}
+
+impl<T: IgnoreScope> ScopeVisitor for T {
+    type LayerHandle = Self;
+
+    fn push_layer(&mut self) -> &mut Self::LayerHandle {
+        self
+    }
+
+    fn pop_layer(&mut self) {}
+
+    fn push_scope(&mut self, _: RelSpan) -> Result<(), CheckDiagnostics> {
+        Ok(())
+    }
+
+    fn pop_scope(&mut self) {}
+
+    fn clear_scopes(&mut self) {}
+}
+
+impl<T: IgnoreScope> LayerHandle for T {
+    fn push_scope(&mut self) {}
+}
+
 pub trait Visitor<S: HirPass>:
-    ModDclVisitor<S::ModDcl>
+    ScopeVisitor
+    + ModDclVisitor<S::ModDcl>
     + ModRefVisitor<S::ModRef>
     + ItemDclVisitor<S::ItemDcl>
     + ItemRefVisitor<S::ItemRef>
@@ -256,17 +302,6 @@ pub trait Visitor<S: HirPass>:
             LabelRef = <Self as LabelRefVisitor<S::LabelRef>>::Value,
             Literal = <Self as LiteralVisitor<S::Literal>>::Value,
         >;
-
-    fn push_layer(&mut self) {}
-
-    fn pop_layer(&mut self) {}
-
-    /// Returns an error if the scope failed to push
-    fn push_scope(&mut self) -> Result<(), CheckDiagnostics> {
-        Ok(())
-    }
-
-    fn pop_scope(&mut self) {}
 }
 
 pub trait TreeWalk<V, S>
@@ -460,6 +495,7 @@ where
     fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { file, decls } = self;
         let decls = decls.walk(visitor);
+        visitor.clear_scopes();
         Ok(HirUnit {
             file,
             decls: decls?,
@@ -1199,14 +1235,11 @@ where
         let ret = ret.walk(visitor);
         let iff = iff.walk(visitor);
 
-        visitor.push_layer();
-        let res = visitor.push_scope();
-        debug_assert!(res.is_ok(), "just pushed a layer");
+        visitor.push_layer(); // Don't need to push a scope because layers start with a root scope
         let self_param = self_param.walk(visitor);
         let params = params.walk(visitor);
         let body = body.walk(visitor);
-        visitor.pop_scope();
-        visitor.push_layer();
+        visitor.pop_layer();
 
         Ok(DeclFun {
             id: id?,
@@ -2218,7 +2251,10 @@ impl From<ast::SkipStmt> for SkipStmt<UnlinkedPass> {
     }
 }
 
-pub struct BlockStmt<S: HirPass>(pub Box<[Decl<S>]>);
+pub struct BlockStmt<S: HirPass> {
+    pub open: RelSpan,
+    pub decls: Box<[Decl<S>]>,
+}
 
 impl<V, S: HirPass> TreeWalk<V, S> for BlockStmt<S>
 where
@@ -2226,16 +2262,17 @@ where
 {
     type Output = BlockStmt<V::Output>;
     fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
-        let scope_failed = visitor.push_scope().is_err();
+        let Self { open, decls } = self;
+        let scope_failed = visitor.push_scope(self.open).is_err();
+        // fallback; an error should still be produced, but this allows for the content of the scope to be tried anyway
         if scope_failed {
-            visitor.push_layer();
-            let res = visitor.push_scope();
-            debug_assert!(res.is_ok(), "just pushed a layer");
+            visitor.push_layer().push_scope();
         }
-        let res = self.0.walk(visitor).map(BlockStmt);
-        visitor.pop_scope();
+        let res = decls.walk(visitor).map(|decls| BlockStmt { open, decls });
         if scope_failed {
             visitor.pop_layer();
+        } else {
+            visitor.pop_scope();
         }
         res
     }
@@ -2244,11 +2281,14 @@ where
 impl From<ast::BlockStmt> for BlockStmt<UnlinkedPass> {
     fn from(
         ast::BlockStmt {
-            open: _,
+            open,
             body,
             close: _,
         }: ast::BlockStmt,
     ) -> Self {
-        Self(convert_iter(body))
+        Self {
+            open,
+            decls: convert_iter(body),
+        }
     }
 }

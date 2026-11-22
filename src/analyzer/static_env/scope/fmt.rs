@@ -10,7 +10,7 @@ use crate::{
     analyzer::static_env::{
         ItemId, ModId,
         scope::{
-            env::ScopeEnvironment,
+            env::{Item, ScopeEnvironment, ScopeId},
             hir::{self, HirUnit},
         },
     },
@@ -223,11 +223,32 @@ impl HirDisplay for ItemId {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         let item = env.get_decl(*self).expect("HIR IDs should be valid");
-        write!(f, "{}\x1b[94m{{", &source[item.decl])?;
-        if let Some(parent) = item.parent {
+        let Item {
+            decl,
+            parent,
+            children: _,
+            scope,
+        } = *item;
+        write!(f, "{}\x1b[94m{{", &source[decl])?;
+        if let Some(parent) = parent {
             f.write_str("\x1b[0m")?;
             parent.fmt(source, file, env, f)?;
             f.write_str("\x1b[90m::\x1b[94m")?;
+        }
+        {
+            f.write_str("\x1b[95m")?;
+            match scope {
+                ScopeId::Global => f.write_str("global")?,
+                ScopeId::Local { layer, scope } => {
+                    write!(f, "{layer}.")?;
+                    if scope == 0 {
+                        f.write_str("root")?;
+                    } else {
+                        write!(f, "{scope}")?;
+                    }
+                }
+            }
+            f.write_str(":\x1b[94m")?;
         }
         write!(f, "{self}}}\x1b[0m")
     }
@@ -1253,6 +1274,19 @@ impl HirDisplay for hir::LinkedVar {
     }
 }
 
+impl HirDisplay for hir::LinkedTypename {
+    fn fmt(
+        &self,
+        source: &SourceMap,
+        file: FileId,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        let Self(id) = self;
+        id.fmt(source, file, env, f)
+    }
+}
+
 impl<S: hir::HirPass> HirDisplay for hir::PrintStmt<S> {
     fn fmt(
         &self,
@@ -1539,7 +1573,7 @@ impl<S: hir::HirPass> HirDisplay for hir::BlockStmt<S> {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self(decls) = self;
+        let Self { open: _, decls } = self;
         HirBlock::new(f).entries(decls, source, file, env).finish()
     }
 }
