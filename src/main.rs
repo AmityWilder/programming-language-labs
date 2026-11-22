@@ -754,11 +754,14 @@ fn comp_file(
                 println!("no submodules declared");
             } else if let Some(parent) = code.loc().path() {
                 let dir = parent.with_extension("");
-                for name in submods.into_keys() {
+                for (name, submod_id) in submods {
                     println!("loading submodule {name}...");
                     match load_module(dir.as_path(), name.as_str()) {
                         Ok(submod) => {
-                            queue.push_back(source.push(submod));
+                            let submod_file = source.push(submod);
+                            let res = file_mod_ids.insert(submod_file, submod_id);
+                            debug_assert_eq!(res, None, "duplicate should produce an error");
+                            queue.push_back(submod_file);
                         }
 
                         Err(e) => todo!("error loading module: {e}"),
@@ -790,10 +793,10 @@ fn compile(
 ) -> Result<Dummy, CheckDiagnostics> {
     println!("--- per-file ---");
 
-    let mut ids = source.iter().map(|(id, _)| id).collect::<VecDeque<_>>();
+    let mut queue = source.iter().map(|(id, _)| id).collect::<VecDeque<_>>();
     let mut file_mod_ids = BTreeMap::new();
     let mut units = Vec::new();
-    while let Some(id) = ids.pop_front() {
+    while let Some(id) = queue.pop_front() {
         let loc = source[id].loc();
         println!(
             "processing file {loc} (mod {})",
@@ -803,7 +806,7 @@ fn compile(
             config,
             source,
             id,
-            &mut ids,
+            &mut queue,
             &mut file_mod_ids,
             scope_env,
             diagnostics,
@@ -837,6 +840,8 @@ fn compile(
                         hir,
                     }
                 );
+                #[cfg(all(debug_assertions, false))]
+                scope_env[mod_id].debug_exports();
             })
         })
         .collect_or_acc_errs::<Vec<_>, CheckDiagnostics>();
@@ -864,6 +869,8 @@ fn compile(
                         hir,
                     }
                 );
+                #[cfg(all(debug_assertions, false))]
+                scope_env[mod_id].debug_exports();
             })
         })
         .collect_or_acc_errs::<Vec<_>, CheckDiagnostics>();

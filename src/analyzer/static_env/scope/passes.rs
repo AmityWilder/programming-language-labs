@@ -175,8 +175,7 @@ impl hir::ScopeVisitor for DeclVisitor<'_, '_, '_> {
     }
 
     fn pop_layer(&mut self) {
-        let res = self.env[self.mod_id].pop_layer();
-        debug_assert!(res.is_some(), "layers should be balanced");
+        self.env[self.mod_id].pop_layer();
     }
 
     fn push_scope(&mut self, span: RelSpan) -> Result<(), CheckDiagnostics> {
@@ -194,8 +193,7 @@ impl hir::ScopeVisitor for DeclVisitor<'_, '_, '_> {
     }
 
     fn pop_scope(&mut self) {
-        let res = self.env[self.mod_id].pop_scope();
-        debug_assert!(res.is_some(), "scopes should be balanced");
+        self.env[self.mod_id].pop_scope();
     }
 
     fn clear_scopes(&mut self) {
@@ -242,10 +240,20 @@ impl hir::VarDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_> {
     fn visit_var_dcl(&mut self, x: hir::UnlinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
         let hir::UnlinkedDecl(name) = x;
         let ident = name.within_file(self.file);
-        let id = self
-            .env
-            .decl_var(self.mod_id, self.source[ident].to_owned(), ident);
-        Ok(hir::LinkedDecl(id))
+        self.env
+            .decl_var(self.mod_id, self.source[ident].to_owned(), ident)
+            .map(hir::LinkedDecl)
+            .map_err(|_| {
+                self.diagnostics.push(Diagnostic::new(
+                    ident,
+                    DiagnosticKind::Other {
+                        severity: Severity::Error,
+                        category: StaticAnalysis,
+                        msg: "cannot push variables to global scope, consider using `uni` or `pvt` instead or put in function scope".to_owned(),
+                    },
+                ));
+                CheckDiagnostics
+            })
     }
 }
 
@@ -316,10 +324,15 @@ impl<'env, 'src, 'err> VarRefVisitor<'env, 'src, 'err> {
         &mut self,
         path: I,
     ) -> Result<ModId, CheckDiagnostics> {
+        #[cfg(all(debug_assertions, false))]
+        self.env.debug_exports();
+
         let mut path_iter = path.into_iter().map(|span| span.within_file(self.file));
         Ok(if let Some(root) = path_iter.next() {
-            let mut prev_name = &self.source[root];
-            let mut id = self.env.find_library(prev_name).ok_or_else(|| {
+            let name = &self.source[root];
+            #[cfg(all(debug_assertions, false))]
+            println!("  looking for library {name}");
+            let mut id = self.env.find_library(name).ok_or_else(|| {
                 self.diagnostics.push(Diagnostic::new(
                     root,
                     DiagnosticKind::Other {
@@ -330,8 +343,13 @@ impl<'env, 'src, 'err> VarRefVisitor<'env, 'src, 'err> {
                 ));
                 CheckDiagnostics
             })?;
+            #[cfg(all(debug_assertions, false))]
+            println!("  found {id} exporting: {:?}", self.env[id]);
+            let mut prev_name = name;
             for submod in path_iter {
                 let name = &self.source[submod];
+                #[cfg(all(debug_assertions, false))]
+                println!("  looking for submodule {name}");
                 id = self.env[id]
                     .find_submodule(&self.source[submod])
                     .ok_or_else(|| {
@@ -345,8 +363,12 @@ impl<'env, 'src, 'err> VarRefVisitor<'env, 'src, 'err> {
                         ));
                         CheckDiagnostics
                     })?;
+                #[cfg(all(debug_assertions, false))]
+                println!("  found {id} exporting: {:?}", self.env[id]);
                 prev_name = name;
             }
+            #[cfg(all(debug_assertions, false))]
+            println!("  final module: {id}");
             id
         } else {
             self.mod_id
@@ -367,8 +389,7 @@ impl hir::ScopeVisitor for VarRefVisitor<'_, '_, '_> {
     }
 
     fn pop_layer(&mut self) {
-        let res = self.env[self.mod_id].pop_layer();
-        debug_assert!(res.is_some(), "layers should be balanced");
+        self.env[self.mod_id].pop_layer();
     }
 
     fn push_scope(&mut self, _: RelSpan) -> Result<(), CheckDiagnostics> {
@@ -381,8 +402,7 @@ impl hir::ScopeVisitor for VarRefVisitor<'_, '_, '_> {
     }
 
     fn pop_scope(&mut self) {
-        let res = self.env[self.mod_id].pop_scope();
-        debug_assert!(res.is_some(), "scopes should be balanced");
+        self.env[self.mod_id].pop_scope();
     }
 
     fn clear_scopes(&mut self) {
@@ -422,7 +442,11 @@ impl hir::VarDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_> {
         ).decl;
         let name = self.source[ident].to_owned();
         // important: `env.decl_*()` actually produces a new item ID, `env[self.mod_id].decl_*()` only pushes an ID to the scope!
-        self.env[self.mod_id].decl_var(name, id);
+        let res = self.env[self.mod_id].decl_var(name, id);
+        debug_assert!(
+            res.is_ok(),
+            "tried to push a variable to global scope; should have errored during earlier pass"
+        );
         Ok(x)
     }
 }

@@ -250,6 +250,8 @@ pub trait ScopeVisitor {
 
     fn pop_scope(&mut self);
 
+    /// Clears the scope tree in the current module, for a fresh rebuild.
+    /// Called before the first node is walked.
     fn clear_scopes(&mut self);
 }
 
@@ -494,8 +496,8 @@ where
 
     fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { file, decls } = self;
-        let decls = decls.walk(visitor);
         visitor.clear_scopes();
+        let decls = decls.walk(visitor);
         Ok(HirUnit {
             file,
             decls: decls?,
@@ -922,8 +924,10 @@ where
 
     fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { param, expr } = self;
+        visitor.push_layer();
         let param = visitor.visit_var_dcl(param);
         let expr = expr.walk(visitor);
+        visitor.pop_layer();
         Ok(ExprBound {
             param: param?,
             expr: expr?,
@@ -1495,7 +1499,7 @@ impl From<ast::CatDisc> for Discriminant<UnlinkedPass> {
 }
 
 pub struct DeclUni<S: HirPass> {
-    pub id: S::VarDcl,
+    pub id: S::ItemDcl,
     pub ty: Option<TypeExpr<S>>,
     pub init: Option<Expr<S>>,
 }
@@ -1511,7 +1515,7 @@ where
         let ty = ty.walk(visitor);
         let init = init.walk(visitor);
         // ID must be declared AFTER initializer and type
-        let id = visitor.visit_var_dcl(id);
+        let id = visitor.visit_item_dcl(id);
         Ok(DeclUni {
             id: id?,
             ty: ty?,
