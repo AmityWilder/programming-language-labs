@@ -5,6 +5,7 @@ fun is_valid(color: text) -> bool {
 }
 
 fun main() {
+    prnt(fruit::apples::NUMBER + "\n");
     prnt("name a fruit\n");
     cord {
         let fruit = inpt;

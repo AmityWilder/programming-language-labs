@@ -827,10 +827,7 @@ fn compile(
             let &mod_id = file_mod_ids
                 .get(&unit.file)
                 .expect("should have been defined by `analyze_module_tree`");
-            let mut env = scope_env
-                .define_module(mod_id)
-                .expect("should have been defined by `analyze_module_tree`");
-            let mut visitor = DeclVisitor::new(source, &mut env, diagnostics, unit.file);
+            let mut visitor = DeclVisitor::new(source, scope_env, diagnostics, mod_id, unit.file);
             unit.walk(&mut visitor).inspect(|hir| {
                 println!(
                     "hir:\n{:#}",
@@ -857,10 +854,7 @@ fn compile(
             let &mod_id = file_mod_ids
                 .get(&unit.file)
                 .expect("should have been defined by `analyze_module_tree`");
-            let mut env = scope_env
-                .define_module(mod_id)
-                .expect("should have been defined by `analyze_module_tree`");
-            let mut visitor = VarRefVisitor::new(source, &mut env, diagnostics, unit.file);
+            let mut visitor = VarRefVisitor::new(source, scope_env, diagnostics, mod_id, unit.file);
             unit.walk(&mut visitor).inspect(|hir| {
                 println!(
                     "linked hir:\n{:#}",

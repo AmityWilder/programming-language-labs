@@ -2,7 +2,7 @@ use crate::{
     analyzer::static_env::{
         ModId,
         scope::{
-            env::{self, ModScopeEnvironment, ScopeEnvironment},
+            env::{self, ScopeEnvironment},
             hir::{self, HirPass, UnlinkedPass},
         },
     },
@@ -137,47 +137,50 @@ impl HirPass for PostDeclPass {
     type Literal = <PostDeclModPass as HirPass>::Literal;
 }
 
-pub struct DeclVisitor<'env, 'm_env, 'src, 'err> {
+pub struct DeclVisitor<'env, 'src, 'err> {
     source: &'src SourceMap,
-    env: &'m_env mut ModScopeEnvironment<'env>,
+    env: &'env mut ScopeEnvironment,
     diagnostics: &'err mut Vec<Diagnostic>,
+    mod_id: ModId,
     file: FileId,
 }
 
-impl<'env, 'm_env, 'src, 'err> DeclVisitor<'env, 'm_env, 'src, 'err> {
+impl<'env, 'src, 'err> DeclVisitor<'env, 'src, 'err> {
     pub const fn new(
         source: &'src SourceMap,
-        env: &'m_env mut ModScopeEnvironment<'env>,
+        env: &'env mut ScopeEnvironment,
         diagnostics: &'err mut Vec<Diagnostic>,
+        mod_id: ModId,
         file: FileId,
     ) -> Self {
         Self {
             source,
             env,
             diagnostics,
+            mod_id,
             file,
         }
     }
 }
 
-impl hir::Visitor<PostDeclModPass> for DeclVisitor<'_, '_, '_, '_> {
+impl hir::Visitor<PostDeclModPass> for DeclVisitor<'_, '_, '_> {
     type Output = PostDeclPass;
 }
 
-impl hir::ScopeVisitor for DeclVisitor<'_, '_, '_, '_> {
+impl hir::ScopeVisitor for DeclVisitor<'_, '_, '_> {
     type LayerHandle = env::Layer;
 
     fn push_layer(&mut self) -> &mut env::Layer {
-        self.env.module.push_layer()
+        self.env[self.mod_id].push_layer()
     }
 
     fn pop_layer(&mut self) {
-        let res = self.env.module.pop_layer();
+        let res = self.env[self.mod_id].pop_layer();
         debug_assert!(res.is_some(), "layers should be balanced");
     }
 
     fn push_scope(&mut self, span: RelSpan) -> Result<(), CheckDiagnostics> {
-        self.env.module.push_scope().is_some().ok_or_else(|| {
+        self.env[self.mod_id].push_scope().is_some().ok_or_else(|| {
             self.diagnostics.push(Diagnostic::new(
                 span.within_file(self.file),
                 DiagnosticKind::Other {
@@ -191,22 +194,25 @@ impl hir::ScopeVisitor for DeclVisitor<'_, '_, '_, '_> {
     }
 
     fn pop_scope(&mut self) {
-        let res = self.env.module.pop_scope();
+        let res = self.env[self.mod_id].pop_scope();
         debug_assert!(res.is_some(), "scopes should be balanced");
     }
 
     fn clear_scopes(&mut self) {
-        self.env.module.clear_scopes();
+        self.env[self.mod_id].clear_scopes();
     }
 }
 
-impl hir::ItemDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_, '_> {
+impl hir::ItemDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_> {
     type Value = hir::LinkedDecl;
 
     fn visit_item_dcl(&mut self, x: hir::UnlinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
         let hir::UnlinkedDecl(name) = x;
         let ident = name.within_file(self.file);
-        match self.env.decl_item(self.source[ident].to_owned(), ident) {
+        match self
+            .env
+            .decl_item(self.mod_id, self.source[ident].to_owned(), ident)
+        {
             Ok(id) => Ok(hir::LinkedDecl(id)),
             Err(e) => {
                 self.diagnostics.push(Diagnostic::new(
@@ -230,13 +236,15 @@ impl hir::ItemDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_, '_> {
     }
 }
 
-impl hir::VarDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_, '_> {
+impl hir::VarDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_> {
     type Value = hir::LinkedDecl;
 
     fn visit_var_dcl(&mut self, x: hir::UnlinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
         let hir::UnlinkedDecl(name) = x;
         let ident = name.within_file(self.file);
-        let id = self.env.decl_var(self.source[ident].to_owned(), ident);
+        let id = self
+            .env
+            .decl_var(self.mod_id, self.source[ident].to_owned(), ident);
         Ok(hir::LinkedDecl(id))
     }
 }
@@ -248,16 +256,16 @@ impl hir::LayerHandle for env::Layer {
     }
 }
 
-impl hir::IgnoreModDcl<<PostDeclModPass as HirPass>::ModDcl> for DeclVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreModRef<<PostDeclModPass as HirPass>::ModRef> for DeclVisitor<'_, '_, '_, '_> {}
-// impl hir::IgnoreItemDcl<<PostDeclModPass as HirPass>::ItemDcl> for DeclVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreItemRef<<PostDeclModPass as HirPass>::ItemRef> for DeclVisitor<'_, '_, '_, '_> {}
-// impl hir::IgnoreVarDcl<<PostDeclModPass as HirPass>::VarDcl> for DeclVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreVarRef<<PostDeclModPass as HirPass>::VarRef> for DeclVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreTypeRef<<PostDeclModPass as HirPass>::TypeRef> for DeclVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreLabelDcl<<PostDeclModPass as HirPass>::LabelDcl> for DeclVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreLabelRef<<PostDeclModPass as HirPass>::LabelRef> for DeclVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreLiteral<<PostDeclModPass as HirPass>::Literal> for DeclVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreModDcl<<PostDeclModPass as HirPass>::ModDcl> for DeclVisitor<'_, '_, '_> {}
+impl hir::IgnoreModRef<<PostDeclModPass as HirPass>::ModRef> for DeclVisitor<'_, '_, '_> {}
+// impl hir::IgnoreItemDcl<<PostDeclModPass as HirPass>::ItemDcl> for DeclVisitor<'_, '_, '_, > {}
+impl hir::IgnoreItemRef<<PostDeclModPass as HirPass>::ItemRef> for DeclVisitor<'_, '_, '_> {}
+// impl hir::IgnoreVarDcl<<PostDeclModPass as HirPass>::VarDcl> for DeclVisitor<'_, '_, '_, > {}
+impl hir::IgnoreVarRef<<PostDeclModPass as HirPass>::VarRef> for DeclVisitor<'_, '_, '_> {}
+impl hir::IgnoreTypeRef<<PostDeclModPass as HirPass>::TypeRef> for DeclVisitor<'_, '_, '_> {}
+impl hir::IgnoreLabelDcl<<PostDeclModPass as HirPass>::LabelDcl> for DeclVisitor<'_, '_, '_> {}
+impl hir::IgnoreLabelRef<<PostDeclModPass as HirPass>::LabelRef> for DeclVisitor<'_, '_, '_> {}
+impl hir::IgnoreLiteral<<PostDeclModPass as HirPass>::Literal> for DeclVisitor<'_, '_, '_> {}
 
 pub struct PostVarRefPass;
 
@@ -279,48 +287,92 @@ impl HirPass for PostVarRefPass {
     type Literal = <PostDeclPass as HirPass>::Literal;
 }
 
-pub struct VarRefVisitor<'env, 'm_env, 'src, 'err> {
+pub struct VarRefVisitor<'env, 'src, 'err> {
     source: &'src SourceMap,
-    env: &'m_env mut ModScopeEnvironment<'env>,
+    env: &'env mut ScopeEnvironment,
     diagnostics: &'err mut Vec<Diagnostic>,
+    mod_id: ModId,
     file: FileId,
 }
 
-impl<'env, 'm_env, 'src, 'err> VarRefVisitor<'env, 'm_env, 'src, 'err> {
+impl<'env, 'src, 'err> VarRefVisitor<'env, 'src, 'err> {
     pub const fn new(
         source: &'src SourceMap,
-        env: &'m_env mut ModScopeEnvironment<'env>,
+        env: &'env mut ScopeEnvironment,
         diagnostics: &'err mut Vec<Diagnostic>,
+        mod_id: ModId,
         file: FileId,
     ) -> Self {
         Self {
             source,
             env,
             diagnostics,
+            mod_id,
             file,
         }
     }
+
+    fn lookup_mod_path<I: IntoIterator<Item = RelSpan>>(
+        &mut self,
+        path: I,
+    ) -> Result<ModId, CheckDiagnostics> {
+        let mut path_iter = path.into_iter().map(|span| span.within_file(self.file));
+        Ok(if let Some(root) = path_iter.next() {
+            let mut prev_name = &self.source[root];
+            let mut id = self.env.find_library(prev_name).ok_or_else(|| {
+                self.diagnostics.push(Diagnostic::new(
+                    root,
+                    DiagnosticKind::Other {
+                        severity: Severity::Error,
+                        category: StaticAnalysis,
+                        msg: "no library with this name exists in the project".to_owned(),
+                    },
+                ));
+                CheckDiagnostics
+            })?;
+            for submod in path_iter {
+                let name = &self.source[submod];
+                id = self.env[id]
+                    .find_submodule(&self.source[submod])
+                    .ok_or_else(|| {
+                        self.diagnostics.push(Diagnostic::new(
+                            root,
+                            DiagnosticKind::Other {
+                                severity: Severity::Error,
+                                category: StaticAnalysis,
+                                msg: format!("no submodule with this name exists in {prev_name}"),
+                            },
+                        ));
+                        CheckDiagnostics
+                    })?;
+                prev_name = name;
+            }
+            id
+        } else {
+            self.mod_id
+        })
+    }
 }
 
-impl hir::Visitor<PostDeclPass> for VarRefVisitor<'_, '_, '_, '_> {
+impl hir::Visitor<PostDeclPass> for VarRefVisitor<'_, '_, '_> {
     type Output = PostVarRefPass;
 }
 
 // rebuild scope
-impl hir::ScopeVisitor for VarRefVisitor<'_, '_, '_, '_> {
+impl hir::ScopeVisitor for VarRefVisitor<'_, '_, '_> {
     type LayerHandle = env::Layer;
 
     fn push_layer(&mut self) -> &mut Self::LayerHandle {
-        self.env.module.push_layer()
+        self.env[self.mod_id].push_layer()
     }
 
     fn pop_layer(&mut self) {
-        let res = self.env.module.pop_layer();
+        let res = self.env[self.mod_id].pop_layer();
         debug_assert!(res.is_some(), "layers should be balanced");
     }
 
     fn push_scope(&mut self, _: RelSpan) -> Result<(), CheckDiagnostics> {
-        let res = self.env.module.push_scope();
+        let res = self.env[self.mod_id].push_scope();
         debug_assert!(
             res.is_some(),
             "cannot push a scope to global; should have errored during earlier pass"
@@ -329,17 +381,17 @@ impl hir::ScopeVisitor for VarRefVisitor<'_, '_, '_, '_> {
     }
 
     fn pop_scope(&mut self) {
-        let res = self.env.module.pop_scope();
+        let res = self.env[self.mod_id].pop_scope();
         debug_assert!(res.is_some(), "scopes should be balanced");
     }
 
     fn clear_scopes(&mut self) {
-        self.env.module.clear_scopes();
+        self.env[self.mod_id].clear_scopes();
     }
 }
 
 // needed to rebuild scope visibility, does not actually modify the tree
-impl hir::ItemDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_, '_> {
+impl hir::ItemDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_> {
     type Value = hir::LinkedDecl;
 
     fn visit_item_dcl(&mut self, x: hir::LinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
@@ -348,8 +400,8 @@ impl hir::ItemDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_, '_> {
             "all IDs in the HIR should be valid if there were no errors during the declaration pass",
         ).decl;
         let name = self.source[ident].to_owned();
-        // important: `env.decl_*()` actually produces a new item ID, `env.module.decl_*()` only pushes an ID to the scope!
-        let res = self.env.module.decl_item(name, id);
+        // important: `env.decl_*()` actually produces a new item ID, `env[self.mod_id].decl_*()` only pushes an ID to the scope!
+        let res = self.env[self.mod_id].decl_item(name, id);
         debug_assert_eq!(
             res,
             Ok(()),
@@ -360,7 +412,7 @@ impl hir::ItemDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_, '_> {
 }
 
 // needed to rebuild scope visibility, does not actually modify the tree
-impl hir::VarDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_, '_> {
+impl hir::VarDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_> {
     type Value = hir::LinkedDecl;
 
     fn visit_var_dcl(&mut self, x: hir::LinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
@@ -369,62 +421,62 @@ impl hir::VarDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_, '_> {
             "all IDs in the HIR should be valid if there were no errors during the declaration pass",
         ).decl;
         let name = self.source[ident].to_owned();
-        // important: `env.decl_*()` actually produces a new item ID, `env.module.decl_*()` only pushes an ID to the scope!
-        self.env.module.decl_var(name, id);
+        // important: `env.decl_*()` actually produces a new item ID, `env[self.mod_id].decl_*()` only pushes an ID to the scope!
+        self.env[self.mod_id].decl_var(name, id);
         Ok(x)
     }
 }
 
 // TODO: items can be things other than variables!!
-impl hir::ItemRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_, '_> {
+impl hir::ItemRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_> {
     type Value = hir::LinkedVar;
 
     fn visit_item_ref(&mut self, x: hir::UnlinkedVar) -> Result<Self::Value, CheckDiagnostics> {
         let hir::UnlinkedVar(ast::Variable { path, ident }) = x;
-        if let Some(_path @ [_, ..]) = path {
-            Ok(todo!("item path"))
-        } else {
-            let ident = ident.within_file(self.file);
-            let name = &self.source[ident];
-            self.env
-                .module
-                .lookup_item(name)
-                .map(hir::LinkedVar)
-                .ok_or_else(|| {
-                    self.diagnostics
-                        .push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
-                    CheckDiagnostics
-                })
-        }
+        let mod_id = self.lookup_mod_path(
+            path.into_iter()
+                .flatten()
+                .map(|ast::ModPathPart { ident, sep: _ }| ident),
+        )?;
+        let ident = ident.within_file(self.file);
+        let name = &self.source[ident];
+        self.env[mod_id]
+            .lookup_item(name)
+            .map(hir::LinkedVar)
+            .ok_or_else(|| {
+                self.diagnostics
+                    .push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
+                CheckDiagnostics
+            })
     }
 }
 
-impl hir::VarRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_, '_> {
+impl hir::VarRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_> {
     type Value = hir::LinkedVar;
 
     fn visit_var_ref(&mut self, x: hir::UnlinkedVar) -> Result<Self::Value, CheckDiagnostics> {
         let hir::UnlinkedVar(ast::Variable { path, ident }) = x;
-        if let Some(_path @ [_, ..]) = path {
-            Ok(todo!("variable path"))
-        } else {
-            let ident = ident.within_file(self.file);
-            let name = &self.source[ident];
-            self.env
-                .module
-                .lookup_var(name)
-                // might be a function
-                .or_else(|| self.env.module.lookup_item(name))
-                .map(hir::LinkedVar)
-                .ok_or_else(|| {
-                    self.diagnostics
-                        .push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
-                    CheckDiagnostics
-                })
-        }
+        let mod_id = self.lookup_mod_path(
+            path.into_iter()
+                .flatten()
+                .map(|ast::ModPathPart { ident, sep: _ }| ident),
+        )?;
+        let ident = ident.within_file(self.file);
+        let name = &self.source[ident];
+        self.env[mod_id]
+            .lookup_var(name)
+            // might be a function
+            .or_else(|| self.env[mod_id].lookup_item(name))
+            .map(hir::LinkedVar)
+            .ok_or_else(|| {
+                self.diagnostics
+                    .push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
+                CheckDiagnostics
+            })
     }
 }
 
-impl hir::TypeRefVisitor<hir::UnlinkedTypename> for VarRefVisitor<'_, '_, '_, '_> {
+impl hir::TypeRefVisitor<hir::UnlinkedTypename> for VarRefVisitor<'_, '_, '_> {
     type Value = hir::LinkedTypename;
 
     fn visit_type_ref(
@@ -435,8 +487,7 @@ impl hir::TypeRefVisitor<hir::UnlinkedTypename> for VarRefVisitor<'_, '_, '_, '_
         if path.is_empty() {
             let ident = name.within_file(self.file);
             let name = &self.source[ident];
-            self.env
-                .module
+            self.env[self.mod_id]
                 .lookup_item(name)
                 .map(hir::LinkedTypename)
                 .ok_or_else(|| {
@@ -450,13 +501,13 @@ impl hir::TypeRefVisitor<hir::UnlinkedTypename> for VarRefVisitor<'_, '_, '_, '_
     }
 }
 
-impl hir::IgnoreModDcl<<PostDeclPass as HirPass>::ModDcl> for VarRefVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreModRef<<PostDeclPass as HirPass>::ModRef> for VarRefVisitor<'_, '_, '_, '_> {}
-// impl hir::IgnoreItemDcl<<PostDeclPass as HirPass>::ItemDcl> for VarRefVisitor<'_, '_, '_, '_> {}
-// impl hir::IgnoreItemRef<<PostDeclPass as HirPass>::ItemRef> for VarRefVisitor<'_, '_, '_, '_> {}
-// impl hir::IgnoreVarDcl<<PostDeclPass as HirPass>::VarDcl> for VarRefVisitor<'_, '_, '_, '_> {}
-// impl hir::IgnoreVarRef<<PostDeclPass as HirPass>::VarRef> for VarRefVisitor<'_, '_, '_, '_> {}
-// impl hir::IgnoreTypeRef<<PostDeclPass as HirPass>::TypeRef> for VarRefVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreLabelDcl<<PostDeclPass as HirPass>::LabelDcl> for VarRefVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreLabelRef<<PostDeclPass as HirPass>::LabelRef> for VarRefVisitor<'_, '_, '_, '_> {}
-impl hir::IgnoreLiteral<<PostDeclPass as HirPass>::Literal> for VarRefVisitor<'_, '_, '_, '_> {}
+impl hir::IgnoreModDcl<<PostDeclPass as HirPass>::ModDcl> for VarRefVisitor<'_, '_, '_> {}
+impl hir::IgnoreModRef<<PostDeclPass as HirPass>::ModRef> for VarRefVisitor<'_, '_, '_> {}
+// impl hir::IgnoreItemDcl<<PostDeclPass as HirPass>::ItemDcl> for VarRefVisitor<'_, '_, '_, > {}
+// impl hir::IgnoreItemRef<<PostDeclPass as HirPass>::ItemRef> for VarRefVisitor<'_, '_, '_, > {}
+// impl hir::IgnoreVarDcl<<PostDeclPass as HirPass>::VarDcl> for VarRefVisitor<'_, '_, '_, > {}
+// impl hir::IgnoreVarRef<<PostDeclPass as HirPass>::VarRef> for VarRefVisitor<'_, '_, '_, > {}
+// impl hir::IgnoreTypeRef<<PostDeclPass as HirPass>::TypeRef> for VarRefVisitor<'_, '_, '_, > {}
+impl hir::IgnoreLabelDcl<<PostDeclPass as HirPass>::LabelDcl> for VarRefVisitor<'_, '_, '_> {}
+impl hir::IgnoreLabelRef<<PostDeclPass as HirPass>::LabelRef> for VarRefVisitor<'_, '_, '_> {}
+impl hir::IgnoreLiteral<<PostDeclPass as HirPass>::Literal> for VarRefVisitor<'_, '_, '_> {}

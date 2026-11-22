@@ -97,6 +97,28 @@ pub struct ScopeEnvironment {
     modules: Vec<ModEntry>,
 }
 
+impl std::ops::Index<ModId> for ScopeEnvironment {
+    type Output = Module;
+
+    fn index(&self, index: ModId) -> &Self::Output {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "ModId can only be obtained by pushing a module, and modules cannot be removed or rearranged"
+        )]
+        &self.modules[index.0].def
+    }
+}
+
+impl std::ops::IndexMut<ModId> for ScopeEnvironment {
+    fn index_mut(&mut self, index: ModId) -> &mut Self::Output {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "ModId can only be obtained by pushing a module, and modules cannot be removed or rearranged"
+        )]
+        &mut self.modules[index.0].def
+    }
+}
+
 impl ScopeEnvironment {
     pub const fn new() -> Self {
         Self {
@@ -159,52 +181,31 @@ impl ScopeEnvironment {
         Ok(id)
     }
 
-    /// Can be called more than once on the same module
-    pub fn define_module(
-        &mut self,
-        id: ModId,
-    ) -> Result<ModScopeEnvironment<'_>, UndeclaredModuleError> {
-        self.modules
-            .get_mut(id.0)
-            .map(|ent| ModScopeEnvironment {
-                decls: &mut self.decls,
-                module: &mut ent.def,
-            })
-            .ok_or(UndeclaredModuleError)
-    }
-}
-
-#[derive(Debug)]
-pub struct ModScopeEnvironment<'env> {
-    /// Indexed with [`ItemId`]
-    decls: &'env mut Vec<Item>,
-    pub module: &'env mut Module,
-}
-
-impl ModScopeEnvironment<'_> {
-    pub fn get_decl(&self, id: ItemId) -> Option<&Item> {
-        self.decls.get(id.0)
-    }
-
     /// Declare an item at the current scope, generating a new ID. \
     /// Returns [`Err`] if an item with that name is already in-scope.
-    pub fn decl_item(&mut self, name: String, decl: Span) -> Result<ItemId, DuplicateItemError> {
+    pub fn decl_item(
+        &mut self,
+        within: ModId,
+        name: String,
+        decl: Span,
+    ) -> Result<ItemId, DuplicateItemError> {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
-        self.module.decl_item(name, id)?;
+        self[within].decl_item(name, id)?;
         self.decls
-            .push(Item::new(decl, self.module.current_scope())); // now `id` refers to an item
+            .push(Item::new(decl, self[within].current_scope())); // now `id` refers to an item
         Ok(id)
     }
 
     pub fn decl_member(
         &mut self,
+        within: ModId,
         parent: ItemId,
         name: String,
         decl: Span,
     ) -> Result<ItemId, LinkMemberError> {
         let child = ItemId(self.decls.len());
         self.decls
-            .push(Item::new(decl, self.module.current_scope()));
+            .push(Item::new(decl, self[within].current_scope()));
         // TODO: duplicate name check on parent
         let [parent_item, child_item] = self
             .decls
@@ -229,11 +230,11 @@ impl ModScopeEnvironment<'_> {
     }
 
     /// Declare a variable at the current scope, generating a new ID.
-    pub fn decl_var(&mut self, name: String, decl: Span) -> VarId {
+    pub fn decl_var(&mut self, within: ModId, name: String, decl: Span) -> VarId {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
-        self.module.decl_var(name, id);
+        self[within].decl_var(name, id);
         self.decls
-            .push(Item::new(decl, self.module.current_scope())); // now `id` refers to an item
+            .push(Item::new(decl, self[within].current_scope())); // now `id` refers to an item
         id
     }
 }
