@@ -9,7 +9,7 @@
 
 use crate::{
     analyzer::{
-        static_env::{ItemId, ModId, TypeId, VarId},
+        static_env::{ItemId, ModId, TypeId, VarId, scope::env::ItemKind},
         types::bounds::Combinator,
     },
     error::CheckDiagnostics,
@@ -588,8 +588,11 @@ where
 }
 
 impl From<RelSpan> for GenericParam<UnlinkedPass> {
-    fn from(value: RelSpan) -> Self {
-        Self(UnlinkedDecl(value))
+    fn from(ident: RelSpan) -> Self {
+        Self(UnlinkedDecl {
+            kind: ItemKind::TypeParam,
+            ident,
+        })
     }
 }
 
@@ -945,7 +948,10 @@ impl From<ast::ExprBound> for ExprBound<UnlinkedPass> {
         }: ast::ExprBound,
     ) -> Self {
         Self {
-            param: name.into(),
+            param: UnlinkedDecl {
+                kind: ItemKind::BoundParam,
+                ident: name,
+            },
             expr: expr.into(),
         }
     }
@@ -1031,12 +1037,6 @@ where
     }
 }
 
-impl From<ast::BindingPattern> for BindingPattern<UnlinkedPass> {
-    fn from(ast::BindingPattern { ident }: ast::BindingPattern) -> Self {
-        Self { var: ident.into() }
-    }
-}
-
 #[derive(Walkable)]
 pub struct PickPattern {
     // TODO
@@ -1076,14 +1076,30 @@ impl From<ast::Decl> for Decl<UnlinkedPass> {
                 semi: _,
             }) => {
                 let ast::BindingPattern { ident } = binding;
-                let id = ident.into();
                 let ty = ty.map(Into::into);
                 let init = assignment.map(Into::into);
                 match kw {
-                    ast::VarKeyword::Let => Self::Let(DeclLet { id, ty, init }),
-                    ast::VarKeyword::Uni => Self::Uni(DeclUni { id, ty, init }),
+                    ast::VarKeyword::Let => Self::Let(DeclLet {
+                        id: UnlinkedDecl {
+                            kind: ItemKind::Var,
+                            ident,
+                        },
+                        ty,
+                        init,
+                    }),
+                    ast::VarKeyword::Uni => Self::Uni(DeclUni {
+                        id: UnlinkedDecl {
+                            kind: ItemKind::Uni,
+                            ident,
+                        },
+                        ty,
+                        init,
+                    }),
                     ast::VarKeyword::Pvt => Self::Pvt(DeclPvt {
-                        id,
+                        id: UnlinkedDecl {
+                            kind: ItemKind::Pvt,
+                            ident,
+                        },
                         ty,
                         // TODO: make this the parser's job
                         init: init.expect("pvt should have initializer"),
@@ -1231,7 +1247,12 @@ where
 
 impl From<ast::SelfParam> for SelfParam<UnlinkedPass> {
     fn from(ast::SelfParam { span }: ast::SelfParam) -> Self {
-        Self { id: span.into() }
+        Self {
+            id: UnlinkedDecl {
+                kind: ItemKind::Me,
+                ident: span,
+            },
+        }
     }
 }
 
@@ -1304,7 +1325,10 @@ impl From<ast::DeclFun> for DeclFun<UnlinkedPass> {
             ast::DeclFun::Define(ast::DefFun { head, body }) => (head, Some(body)),
         };
         Self {
-            id: name.into(),
+            id: UnlinkedDecl {
+                kind: ItemKind::Fun,
+                ident: name,
+            },
             generics: generics.map(Into::into),
             self_param: self_param.map(Into::into),
             params: convert_iter(params),
@@ -1338,7 +1362,10 @@ where
 impl From<ast::FnParam> for FunParam<UnlinkedPass> {
     fn from(ast::FnParam { name, ty }: ast::FnParam) -> Self {
         Self {
-            id: name.into(),
+            id: UnlinkedDecl {
+                kind: ItemKind::Param,
+                ident: name,
+            },
             ty: ty.into(),
         }
     }
@@ -1393,7 +1420,10 @@ impl From<ast::DeclRec> for DeclRec<UnlinkedPass> {
         }: ast::DeclRec,
     ) -> Self {
         Self {
-            id: name.into(),
+            id: UnlinkedDecl {
+                kind: ItemKind::Rec,
+                ident: name,
+            },
             generics: generics.map(Into::into),
             fields: convert_iter(fields),
         }
@@ -1422,7 +1452,10 @@ where
 impl From<ast::Field> for Field<UnlinkedPass> {
     fn from(ast::Field { name, ty }: ast::Field) -> Self {
         Self {
-            id: name.into(),
+            id: UnlinkedDecl {
+                kind: ItemKind::Field,
+                ident: name,
+            },
             ty: ty.into(),
         }
     }
@@ -1464,7 +1497,10 @@ impl From<ast::DeclCat> for DeclCat<UnlinkedPass> {
         }: ast::DeclCat,
     ) -> Self {
         Self {
-            id: name.into(),
+            id: UnlinkedDecl {
+                kind: ItemKind::Cat,
+                ident: name,
+            },
             discriminants: convert_iter(items),
         }
     }
@@ -1492,7 +1528,10 @@ where
 impl From<ast::CatDisc> for Discriminant<UnlinkedPass> {
     fn from(ast::CatDisc { name, val }: ast::CatDisc) -> Self {
         Self {
-            id: name.into(),
+            id: UnlinkedDecl {
+                kind: ItemKind::Discrim,
+                ident: name,
+            },
             val: val.map(Into::into),
         }
     }
@@ -1739,12 +1778,10 @@ impl From<ast::Directive> for Directive {
     }
 }
 
-pub struct UnlinkedDecl(pub RelSpan);
-
-impl From<RelSpan> for UnlinkedDecl {
-    fn from(value: RelSpan) -> Self {
-        Self(value)
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub struct UnlinkedDecl {
+    pub kind: ItemKind,
+    pub ident: RelSpan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1874,9 +1911,14 @@ impl From<ast::DeclDfer> for DeclDfer<UnlinkedPass> {
             param: param.map(
                 |ast::DferParam {
                      open: _,
-                     param,
+                     param: ast::BindingPattern { ident },
                      close: _,
-                 }| param.into(),
+                 }| BindingPattern {
+                    var: UnlinkedDecl {
+                        kind: ItemKind::DferParam,
+                        ident,
+                    },
+                },
             ),
             on_pop: on_pop.into(),
         }
@@ -1923,12 +1965,17 @@ impl From<ast::Stmt> for Stmt<UnlinkedPass> {
                         body,
                     }),
                     ast::LoopKind::For {
-                        bind,
+                        bind: ast::BindingPattern { ident },
                         in_kw: _,
                         iter,
                     } => Self::For(ForStmt {
                         label,
-                        var: bind.into(),
+                        var: BindingPattern {
+                            var: UnlinkedDecl {
+                                kind: ItemKind::Var,
+                                ident,
+                            },
+                        },
                         iter: iter.into(),
                         body,
                     }),

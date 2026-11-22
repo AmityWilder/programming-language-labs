@@ -24,9 +24,129 @@ const _: () = {
     );
 };
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ItemKind {
+    /// Declared with `pvt`
+    Pvt,
+    /// Declared with `uni`
+    Uni,
+    /// Declared with `let` or a `for` loop
+    Var,
+    /// A `me` parameter
+    Me,
+    /// A `fun` parameter (but not `me`)
+    Param,
+    /// A `dfer` parameter
+    DferParam,
+    /// A generic parameter
+    TypeParam,
+    /// Declared with `for` in a satisfies/expression bound
+    BoundParam,
+    /// Declared with `rec`
+    Rec,
+    /// A `rec` field
+    Field,
+    /// Declared with `cat`
+    Cat,
+    /// A `cat` discriminant
+    Discrim,
+    /// Declared with `sup`
+    SubType,
+    /// Declared with `sub`
+    SuperType,
+    /// Declared with `alt`
+    Alt,
+    /// Declared with `fun`
+    Fun,
+}
+
+impl std::fmt::Debug for ItemKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let decl = match self {
+            Self::Pvt => "pvt",
+            Self::Uni => "uni",
+            Self::Var => "var",
+            Self::TypeParam => "generic",
+            Self::BoundParam => "bound",
+            Self::Rec | Self::Field => "rec",
+            Self::Cat | Self::Discrim => "cat",
+            Self::SubType => "sub",
+            Self::SuperType => "sup",
+            Self::Alt => "alt",
+            Self::Me | Self::Param | Self::Fun => "fun",
+            Self::DferParam => "dfer",
+        };
+        f.write_str(decl)?;
+        let decl_spec = match self {
+            Self::Me => Some("me"),
+            Self::Param | Self::TypeParam | Self::BoundParam | Self::DferParam => Some("param"),
+            Self::Field => Some("field"),
+            Self::Discrim => Some("discr"),
+            _ => None,
+        };
+        if let Some(decl_spec) = decl_spec {
+            write!(f, ".{decl_spec}")?;
+        }
+        let kind = match self {
+            Self::Uni
+            | Self::Var
+            | Self::Me
+            | Self::Param
+            | Self::BoundParam
+            | Self::Field
+            | Self::Pvt
+            | Self::Discrim
+            | Self::DferParam => "data",
+
+            Self::Rec
+            | Self::Cat
+            | Self::SubType
+            | Self::SuperType
+            | Self::Alt
+            | Self::TypeParam => "layout",
+
+            Self::Fun => "behavior",
+        };
+        write!(f, ">{kind}")?;
+        let kind_spec = match self {
+            Self::BoundParam | Self::Field | Self::TypeParam => Some("hypothetical"),
+            Self::Pvt | Self::Discrim => Some("constant"),
+            Self::Alt => Some("alias"),
+
+            _ => None,
+        };
+        if let Some(kind_spec) = kind_spec {
+            write!(f, ".{kind_spec}")?;
+        }
+        Ok(())
+    }
+}
+
+impl crate::highlight::syntax::GetSyntax for ItemKind {
+    fn syntax(&self) -> crate::highlight::syntax::Syntax {
+        use crate::highlight::syntax::Syntax;
+        match self {
+            Self::Pvt => Syntax::Constant,
+            Self::Uni | Self::Var => Syntax::Variable,
+            Self::Me => Syntax::LanguageVariable,
+            Self::Param | Self::DferParam | Self::BoundParam => Syntax::Param,
+            Self::Field => Syntax::Field,
+            Self::Discrim => Syntax::Discriminant,
+            Self::TypeParam
+            | Self::Rec
+            | Self::Cat
+            | Self::SubType
+            | Self::SuperType
+            | Self::Alt => Syntax::Typename,
+            Self::Fun => Syntax::Callable,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
     pub decl: Span,
+    pub kind: ItemKind,
     pub parent: Option<ItemId>,
     pub children: BTreeMap<String, ItemId>,
 
@@ -34,9 +154,10 @@ pub struct Item {
 }
 
 impl Item {
-    pub const fn new(decl: Span, scope: ScopeId) -> Self {
+    pub const fn new(decl: Span, kind: ItemKind, scope: ScopeId) -> Self {
         Self {
             decl,
+            kind,
             parent: None,
             children: BTreeMap::new(),
             scope,
@@ -191,12 +312,13 @@ impl ScopeEnvironment {
         &mut self,
         within: ModId,
         name: String,
+        kind: ItemKind,
         decl: Span,
     ) -> Result<ItemId, DuplicateItemError> {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self[within].decl_item(name, id)?;
         self.decls
-            .push(Item::new(decl, self[within].current_scope())); // now `id` refers to an item
+            .push(Item::new(decl, kind, self[within].current_scope())); // now `id` refers to an item
         Ok(id)
     }
 
@@ -205,11 +327,12 @@ impl ScopeEnvironment {
         within: ModId,
         parent: ItemId,
         name: String,
+        kind: ItemKind,
         decl: Span,
     ) -> Result<ItemId, LinkMemberError> {
         let child = ItemId(self.decls.len());
         self.decls
-            .push(Item::new(decl, self[within].current_scope()));
+            .push(Item::new(decl, kind, self[within].current_scope()));
         // TODO: duplicate name check on parent
         let [parent_item, child_item] = self
             .decls
@@ -238,12 +361,13 @@ impl ScopeEnvironment {
         &mut self,
         within: ModId,
         name: String,
+        kind: ItemKind,
         decl: Span,
     ) -> Result<VarId, GlobalVarError> {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self[within].decl_var(name, id)?;
         self.decls
-            .push(Item::new(decl, self[within].current_scope())); // now `id` refers to an item
+            .push(Item::new(decl, kind, self[within].current_scope())); // now `id` refers to an item
         Ok(id)
     }
 

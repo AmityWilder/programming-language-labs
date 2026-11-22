@@ -225,6 +225,7 @@ impl HirDisplay for ItemId {
         let item = env.get_decl(*self).expect("HIR IDs should be valid");
         let Item {
             decl,
+            kind,
             parent,
             children: _,
             scope,
@@ -250,7 +251,7 @@ impl HirDisplay for ItemId {
             }
             f.write_str(":\x1b[94m")?;
         }
-        write!(f, "{self}}}\x1b[0m")
+        write!(f, "{self}\x1b[96m#{kind:?}\x1b[94m}}\x1b[0m")
     }
 }
 
@@ -1201,8 +1202,8 @@ impl HirDisplay for hir::UnlinkedDecl {
         _env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self(span) = self;
-        f.write_str(&source[file][*span])
+        let Self { kind: _, ident } = self;
+        f.write_str(&source[file][*ident])
     }
 }
 

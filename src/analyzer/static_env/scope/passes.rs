@@ -205,11 +205,11 @@ impl hir::ItemDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_> {
     type Value = hir::LinkedDecl;
 
     fn visit_item_dcl(&mut self, x: hir::UnlinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
-        let hir::UnlinkedDecl(name) = x;
-        let ident = name.within_file(self.file);
+        let hir::UnlinkedDecl { kind, ident } = x;
+        let ident = ident.within_file(self.file);
         match self
             .env
-            .decl_item(self.mod_id, self.source[ident].to_owned(), ident)
+            .decl_item(self.mod_id, self.source[ident].to_owned(), kind, ident)
         {
             Ok(id) => Ok(hir::LinkedDecl(id)),
             Err(e) => {
@@ -238,10 +238,10 @@ impl hir::VarDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_> {
     type Value = hir::LinkedDecl;
 
     fn visit_var_dcl(&mut self, x: hir::UnlinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
-        let hir::UnlinkedDecl(name) = x;
-        let ident = name.within_file(self.file);
+        let hir::UnlinkedDecl { kind, ident } = x;
+        let ident = ident.within_file(self.file);
         self.env
-            .decl_var(self.mod_id, self.source[ident].to_owned(), ident)
+            .decl_var(self.mod_id, self.source[ident].to_owned(), kind, ident)
             .map(hir::LinkedDecl)
             .map_err(|_| {
                 self.diagnostics.push(Diagnostic::new(

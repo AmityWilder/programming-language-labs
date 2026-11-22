@@ -311,17 +311,7 @@ impl AstNode for FnCall {
 
 impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for FnCall {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
-        // HACK: using special case for determining callable syntax
-        if let Expr::Variable(fun) = &self.fun {
-            if let Some(path) = &fun.path {
-                for part in path {
-                    part.visit_spans(brack_depth, visit);
-                }
-            }
-            visit(fun.ident, Syntax::Callable);
-        } else {
-            self.fun.visit_spans(brack_depth, visit);
-        }
+        self.fun.visit_spans(brack_depth, visit);
         visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
         for arg in &self.args {
