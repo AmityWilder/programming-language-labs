@@ -574,15 +574,15 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for NamespacePathPart {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GenericGroup {
+pub struct GenericParams {
     /// `<`
     pub open: RelSpan,
-    pub list: Vec<TypeExpr>,
+    pub list: Vec<RelSpan>,
     /// `>`
     pub close: RelSpan,
 }
 
-impl AstNode for GenericGroup {
+impl AstNode for GenericParams {
     fn span_start(&self) -> uspan {
         self.open.start
     }
@@ -592,7 +592,36 @@ impl AstNode for GenericGroup {
     }
 }
 
-impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GenericGroup {
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GenericParams {
+    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
+        visit(self.open, Syntax::Bracket(brack_depth));
+        for &item in &self.list {
+            visit(item, Syntax::Typename);
+        }
+        visit(self.close, Syntax::Bracket(brack_depth));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericArgs {
+    /// `<`
+    pub open: RelSpan,
+    pub list: Vec<TypeExpr>,
+    /// `>`
+    pub close: RelSpan,
+}
+
+impl AstNode for GenericArgs {
+    fn span_start(&self) -> uspan {
+        self.open.start
+    }
+
+    fn span_end(&self) -> uspan {
+        self.close.end
+    }
+}
+
+impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for GenericArgs {
     fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
         visit(self.open, Syntax::Bracket(brack_depth));
         let inner_depth = brack_depth.wrapping_add(1);
@@ -707,7 +736,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Typename {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeInstance {
     pub name: Typename,
-    pub args: Option<GenericGroup>,
+    pub args: Option<GenericArgs>,
 }
 
 impl AstNode for TypeInstance {
@@ -2172,7 +2201,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for DeclMod {
 pub struct DeclOn {
     /// `on`
     pub kw: RelSpan,
-    pub params: Option<GenericGroup>,
+    pub params: Option<GenericParams>,
     pub ty: TypeExpr,
     pub iff: Option<IffClause>,
     pub body: BlockStmt,
@@ -2288,7 +2317,7 @@ pub struct FnSignature {
     pub kw: RelSpan,
     /// Ident
     pub name: RelSpan,
-    pub generics: Option<GenericGroup>,
+    pub generics: Option<GenericParams>,
     /// `(`
     pub open: RelSpan,
     pub self_param: Option<SelfParam>,
@@ -2576,7 +2605,7 @@ pub struct DeclRec {
     pub kw: RelSpan,
     /// Identifier
     pub name: RelSpan,
-    pub generics: Option<GenericGroup>,
+    pub generics: Option<GenericParams>,
     pub body: FieldSet,
 }
 

@@ -229,9 +229,20 @@ impl LispDisplay for ast::DeclType {
     }
 }
 
-impl LispDisplay for ast::GenericGroup {
+impl LispDisplay for ast::GenericParams {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new("generics", source, f)
+        LispCall::new("generic_params", source, f)
+            .write_arg_iter(
+                self.list.iter().map(|&name| (name, Syntax::Typename)),
+                source,
+            )
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::GenericArgs {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LispCall::new("generic_args", source, f)
             .write_arg_iter(self.list.as_slice(), source)
             .finish()
     }

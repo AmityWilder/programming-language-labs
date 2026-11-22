@@ -573,18 +573,45 @@ impl From<ast::Typename> for UnlinkedTypename {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkedTypename(pub TypeId);
 
-#[derive(Walkable)]
-pub struct GenericGroup<S: HirPass>(pub Box<[TypeExpr<S>]>);
+pub struct GenericParam<S: HirPass>(pub S::ItemDcl);
 
-impl From<ast::GenericGroup> for GenericGroup<UnlinkedPass> {
-    fn from(value: ast::GenericGroup) -> Self {
+impl<V, S: HirPass> TreeWalk<V, S> for GenericParam<S>
+where
+    V: Visitor<S>,
+{
+    type Output = GenericParam<V::Output>;
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
+        visitor.visit_item_dcl(self.0).map(GenericParam)
+    }
+}
+
+impl From<RelSpan> for GenericParam<UnlinkedPass> {
+    fn from(value: RelSpan) -> Self {
+        Self(UnlinkedDecl(value))
+    }
+}
+
+#[derive(Walkable)]
+pub struct GenericParams<S: HirPass>(pub Box<[GenericParam<S>]>);
+
+impl From<ast::GenericParams> for GenericParams<UnlinkedPass> {
+    fn from(value: ast::GenericParams) -> Self {
+        Self(convert_iter(value.list))
+    }
+}
+
+#[derive(Walkable)]
+pub struct GenericArgs<S: HirPass>(pub Box<[TypeExpr<S>]>);
+
+impl From<ast::GenericArgs> for GenericArgs<UnlinkedPass> {
+    fn from(value: ast::GenericArgs) -> Self {
         Self(convert_iter(value.list))
     }
 }
 
 pub struct TypeInstance<S: HirPass> {
     pub name: S::TypeRef,
-    pub args: Option<GenericGroup<S>>,
+    pub args: Option<GenericArgs<S>>,
 }
 
 impl<V, S: HirPass> TreeWalk<V, S> for TypeInstance<S>
@@ -1122,7 +1149,7 @@ impl From<ast::IffClause> for IffClause<UnlinkedPass> {
 }
 
 pub struct DeclOn<S: HirPass> {
-    pub generics: Option<GenericGroup<S>>,
+    pub generics: Option<GenericParams<S>>,
     pub target: TypeExpr<S>,
     pub iff: Option<IffClause<S>>,
     pub members: Box<[Decl<S>]>,
@@ -1206,7 +1233,7 @@ impl From<ast::SelfParam> for SelfParam<UnlinkedPass> {
 
 pub struct DeclFun<S: HirPass> {
     pub id: S::ItemDcl,
-    pub generics: Option<GenericGroup<S>>,
+    pub generics: Option<GenericParams<S>>,
     pub self_param: Option<SelfParam<S>>,
     pub params: Box<[FunParam<S>]>,
     pub ret: Option<TypeExpr<S>>,
@@ -1315,7 +1342,7 @@ impl From<ast::FnParam> for FunParam<UnlinkedPass> {
 
 pub struct DeclRec<S: HirPass> {
     pub id: S::ItemDcl,
-    pub generics: Option<GenericGroup<S>>,
+    pub generics: Option<GenericParams<S>>,
     pub fields: Box<[Field<S>]>,
 }
 

@@ -9,7 +9,7 @@ use crate::{
     error::{
         CheckDiagnostics, Diagnostic, DiagnosticCategory::StaticAnalysis, DiagnosticKind, Severity,
     },
-    parse::ast::AstNode as _,
+    parse::ast::{self, AstNode as _},
     src_code::{
         map::SourceMap,
         span::{FileId, RelSpan},
@@ -181,8 +181,7 @@ impl hir::ScopeVisitor for DeclVisitor<'_, '_, '_, '_> {
             self.diagnostics.push(Diagnostic::new(
                 span.within_file(self.file),
                 DiagnosticKind::Other {
-                    // TODO: make this an ERROR once functions are implemented!
-                    severity: Severity::Warning,
+                    severity: Severity::Error,
                     category: StaticAnalysis,
                     msg: "cannot push a scope in global".to_owned(),
                 },
@@ -322,7 +321,10 @@ impl hir::ScopeVisitor for VarRefVisitor<'_, '_, '_, '_> {
 
     fn push_scope(&mut self, _: RelSpan) -> Result<(), CheckDiagnostics> {
         let res = self.env.module.push_scope();
-        debug_assert!(res.is_some(), "should have errored during declaration pass");
+        debug_assert!(
+            res.is_some(),
+            "cannot push a scope to global; should have errored during earlier pass"
+        );
         Ok(())
     }
 
@@ -373,11 +375,27 @@ impl hir::VarDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_, '_> {
     }
 }
 
+// TODO: items can be things other than variables!!
 impl hir::ItemRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_, '_> {
     type Value = hir::LinkedVar;
 
     fn visit_item_ref(&mut self, x: hir::UnlinkedVar) -> Result<Self::Value, CheckDiagnostics> {
-        todo!()
+        let hir::UnlinkedVar(ast::Variable { path, ident }) = x;
+        if let Some(_path @ [_, ..]) = path {
+            Ok(todo!("item path"))
+        } else {
+            let ident = ident.within_file(self.file);
+            let name = &self.source[ident];
+            self.env
+                .module
+                .lookup_item(name)
+                .map(hir::LinkedVar)
+                .ok_or_else(|| {
+                    self.diagnostics
+                        .push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
+                    CheckDiagnostics
+                })
+        }
     }
 }
 
@@ -385,7 +403,24 @@ impl hir::VarRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_, '_> {
     type Value = hir::LinkedVar;
 
     fn visit_var_ref(&mut self, x: hir::UnlinkedVar) -> Result<Self::Value, CheckDiagnostics> {
-        todo!()
+        let hir::UnlinkedVar(ast::Variable { path, ident }) = x;
+        if let Some(_path @ [_, ..]) = path {
+            Ok(todo!("variable path"))
+        } else {
+            let ident = ident.within_file(self.file);
+            let name = &self.source[ident];
+            self.env
+                .module
+                .lookup_var(name)
+                // might be a function
+                .or_else(|| self.env.module.lookup_item(name))
+                .map(hir::LinkedVar)
+                .ok_or_else(|| {
+                    self.diagnostics
+                        .push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
+                    CheckDiagnostics
+                })
+        }
     }
 }
 
@@ -396,7 +431,22 @@ impl hir::TypeRefVisitor<hir::UnlinkedTypename> for VarRefVisitor<'_, '_, '_, '_
         &mut self,
         x: hir::UnlinkedTypename,
     ) -> Result<Self::Value, CheckDiagnostics> {
-        todo!()
+        let hir::UnlinkedTypename(ast::Typename { path, name }) = x;
+        if path.is_empty() {
+            let ident = name.within_file(self.file);
+            let name = &self.source[ident];
+            self.env
+                .module
+                .lookup_item(name)
+                .map(hir::LinkedTypename)
+                .ok_or_else(|| {
+                    self.diagnostics
+                        .push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
+                    CheckDiagnostics
+                })
+        } else {
+            Ok(todo!("type path"))
+        }
     }
 }
 

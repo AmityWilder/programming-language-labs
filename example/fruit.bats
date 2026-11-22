@@ -4,7 +4,7 @@ fun is_valid(color: text) -> bool {
     give color == "red" | color == "yellow" | color == "green";
 }
 
-{
+fun main() {
     prnt("name a fruit\n");
     cord {
         let fruit = inpt;

@@ -311,23 +311,40 @@ impl Module {
 
     pub fn lookup_item(&self, name: &str) -> Option<ItemId> {
         std::iter::once(&self.global)
-            .chain(self.layers.iter().flat_map(|layer| layer.scopes.iter()))
+            .chain(
+                self.layers
+                    .iter()
+                    .flat_map(|layer| std::iter::once(&layer.root).chain(&layer.scopes)),
+            )
             .rev()
             .find_map(|scope| scope.items.get(name).copied())
     }
 
     pub fn lookup_var(&self, name: &str) -> Option<VarId> {
-        self.global
-            .vars
-            .iter()
+        #[cfg(all(debug_assertions, false))]
+        println!("looking for `{name}`...");
+
+        let res = std::iter::once(&self.global)
             .chain(
                 self.layers
                     .iter()
-                    .flat_map(|layer| layer.scopes.iter().flat_map(|scope| scope.vars.iter())),
+                    .flat_map(|layer| std::iter::once(&layer.root).chain(&layer.scopes)),
             )
+            .flat_map(|scope| &scope.vars)
             .rev()
-            .find(|(key, _)| *key == name)
-            .map(|(_, val)| *val)
+            .find(|(key, _)| {
+                #[cfg(all(debug_assertions, false))]
+                println!("    trying `{key}`");
+                *key == name
+            })
+            .map(|(_, val)| *val);
+        #[cfg(all(debug_assertions, false))]
+        if let Some(res) = &res {
+            println!("  found: `{res}`");
+        } else {
+            println!("  no match found");
+        }
+        res
     }
 
     pub fn push_layer(&mut self) -> &mut Layer {

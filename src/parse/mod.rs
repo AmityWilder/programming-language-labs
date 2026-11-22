@@ -163,7 +163,7 @@ macro_rules! push_parse_call {
                 .iter()
                 .copied()
                 .rfind(|(name, _)| *name == fn_name);
-            if false {
+            if cfg!(false) {
                 println!(
                     "{}. {fn_name}: {}; previously {:?}",
                     $parser.call_stack.len(),
@@ -635,7 +635,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "fun_declaration", x))
     }
 
-    /// `fun_signature -> "fun" IDENT ( generic_group )?
+    /// `fun_signature -> "fun" IDENT ( generic_params )?
     ///     "(" ( IDENT type_annotation ( "," IDENT type_annotation )* ( "," )? )? ")"
     ///     ( fun_ret )? ( iff_clause )?`
     pub fn fun_signature(&mut self) -> Option<Result<ast::FnSignature>> {
@@ -643,7 +643,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         self.pull_if_eq(Keyword::Fun)
             .map(|kw| {
                 let name = self.try_pull_eq(TokenKind::Ident)?;
-                let generics = self.generic_group().transpose()?;
+                let generics = self.generic_params().transpose()?;
                 let (open, (self_param, params), close) = self
                     .pull_if_delim(Bracket::Paren, |p| {
                         let kw = p
@@ -678,26 +678,24 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
     /// `fun_param -> IDENT type_annotation`
     pub fn fun_param(&mut self) -> Option<Result<ast::FnParam>> {
         push_parse_call!(self, "fun_param");
-        Some(
-            self.try_pull_eq(TokenKind::Ident)
-                .and_then(|name| {
-                    Ok(ast::FnParam {
-                        name,
-                        ty: self.type_annotation().ok_or_unexpected(self)?,
-                    })
+        self.pull_if_eq(TokenKind::Ident)
+            .map(|name| {
+                Ok(ast::FnParam {
+                    name,
+                    ty: self.type_annotation().ok_or_unexpected(self)?,
                 })
-                .inspect_always(|x| pop_parse_call!(self, "fun_param", x)),
-        )
+            })
+            .inspect_always(|x| pop_parse_call!(self, "fun_param", x))
     }
 
-    /// `on_declaration -> "on" ( generic_group )? type_expression ( iff_clause )? block_statement`
+    /// `on_declaration -> "on" ( generic_params )? type_expression ( iff_clause )? block_statement`
     pub fn on_declaration(&mut self) -> Option<Result<ast::DeclOn>> {
         push_parse_call!(self, "on_declaration");
         self.pull_if_eq(Keyword::On)
             .map(|kw| {
                 Ok(ast::DeclOn {
                     kw,
-                    params: self.generic_group().transpose()?,
+                    params: self.generic_params().transpose()?,
                     ty: self.type_expression()?,
                     iff: self.iff_clause().transpose()?,
                     body: self.block_statement().ok_or_unexpected(self)?,
@@ -706,7 +704,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "on_declaration", x))
     }
 
-    /// `rec_declaration -> "rec" IDENT ( generic_group )? field_set`
+    /// `rec_declaration -> "rec" IDENT ( generic_params )? field_set`
     pub fn rec_declaration(&mut self) -> Option<Result<ast::DeclRec>> {
         push_parse_call!(self, "rec_declaration");
         self.pull_if_eq(Keyword::Rec)
@@ -714,7 +712,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 Ok(ast::DeclRec {
                     kw,
                     name: self.try_pull_eq(TokenKind::Ident)?,
-                    generics: self.generic_group().transpose()?,
+                    generics: self.generic_params().transpose()?,
                     body: self
                         .field_set()
                         .ok_or_else_flat(|| self.error(ExpectedToken::RecBody))?,
@@ -752,7 +750,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "field", x))
     }
 
-    /// `cat_declaration -> "cat" name ( generic_group )? cat_disc_set`
+    /// `cat_declaration -> "cat" name ( generic_params )? cat_disc_set`
     pub fn cat_declaration(&mut self) -> Option<Result<ast::DeclCat>> {
         push_parse_call!(self, "cat_declaration");
         self.pull_if_eq(Keyword::Cat)
@@ -1615,9 +1613,23 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "group", x))
     }
 
-    /// `generic_group -> "<" ( type_expression ( "," type_expression )* ( "," )? )? ">"`
-    fn generic_group(&mut self) -> Option<Result<ast::GenericGroup>> {
-        push_parse_call!(self, "generic_group");
+    /// `generic_params -> "<" ( IDENT ( "," IDENT )* ( "," )? )? ">"`
+    fn generic_params(&mut self) -> Option<Result<ast::GenericParams>> {
+        push_parse_call!(self, "generic_params");
+        self.pull_if_delim(Bracket::Angle, |parser| {
+            parser.pull_terminated(Punctuation::Comma, |parser| {
+                parser
+                    .is_next_not_angle_close()
+                    .then(|| parser.try_pull_eq(TokenKind::Ident))
+            })
+        })
+        .map_inner(|(open, list, close)| ast::GenericParams { open, list, close })
+        .inspect_always(|x| pop_parse_call!(self, "generic_params", x))
+    }
+
+    /// `generic_args -> "<" ( type_expression ( "," type_expression )* ( "," )? )? ">"`
+    fn generic_args(&mut self) -> Option<Result<ast::GenericArgs>> {
+        push_parse_call!(self, "generic_args");
         self.pull_if_delim(Bracket::Angle, |parser| {
             parser.pull_terminated(Punctuation::Comma, |parser| {
                 parser
@@ -1625,8 +1637,8 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                     .then(|| parser.type_expression())
             })
         })
-        .map_inner(|(open, list, close)| ast::GenericGroup { open, list, close })
-        .inspect_always(|x| pop_parse_call!(self, "generic_group", x))
+        .map_inner(|(open, list, close)| ast::GenericArgs { open, list, close })
+        .inspect_always(|x| pop_parse_call!(self, "generic_args", x))
     }
 
     /// `type_expression -> fallible_type`
@@ -1688,7 +1700,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                             ast::AssocTypeSource::Simple(name) => {
                                 Ok(ast::TypeExpr::Instance(ast::TypeInstance {
                                     name,
-                                    args: self.generic_group().transpose()?,
+                                    args: self.generic_args().transpose()?,
                                 }))
                             }
                             // TBD: is the `<>` is important?
@@ -1823,7 +1835,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "primitive_type", x))
     }
 
-    /// `type_instance -> typename ( generic_group )?`
+    /// `type_instance -> typename ( generic_args )?`
     fn type_instance(&mut self) -> Result<ast::TypeInstance> {
         push_parse_call!(self, "type_instance");
         self.typename()
@@ -1831,7 +1843,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .and_then(|name| {
                 Ok(ast::TypeInstance {
                     name,
-                    args: self.generic_group().transpose()?,
+                    args: self.generic_args().transpose()?,
                 })
             })
             .inspect_always(|x| pop_parse_call!(self, "type_instance", x))

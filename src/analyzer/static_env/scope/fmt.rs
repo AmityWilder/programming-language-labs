@@ -328,7 +328,43 @@ impl HirDisplay for hir::UnlinkedTypename {
     }
 }
 
-impl<S: hir::HirPass> HirDisplay for hir::GenericGroup<S> {
+impl<S: hir::HirPass> HirDisplay for hir::GenericParam<S> {
+    fn fmt(
+        &self,
+        source: &SourceMap,
+        file: FileId,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        let Self(inner) = self;
+        inner.fmt(source, file, env, f)
+    }
+}
+
+impl<S: hir::HirPass> HirDisplay for hir::GenericParams<S> {
+    fn fmt(
+        &self,
+        source: &SourceMap,
+        file: FileId,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        let Self(params) = self;
+        f.write_str("<")?;
+        let mut has_prev = false;
+        for param in params {
+            if has_prev {
+                f.write_str(", ")?;
+            } else {
+                has_prev = true;
+            }
+            param.fmt(source, file, env, f)?;
+        }
+        f.write_str(">")
+    }
+}
+
+impl<S: hir::HirPass> HirDisplay for hir::GenericArgs<S> {
     fn fmt(
         &self,
         source: &SourceMap,
