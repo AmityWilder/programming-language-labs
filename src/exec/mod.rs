@@ -3,19 +3,6 @@ use crate::types::{byte, fail, flpt, none, sint, text, uint};
 pub mod env;
 pub mod tree;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ControlFlow<B, E, C = ()> {
-    Continue(C),
-    Break(B),
-    Err(E),
-}
-
-impl<B, E, C: Default> Default for ControlFlow<B, E, C> {
-    fn default() -> Self {
-        Self::Continue(C::default())
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct EnvId(usize);
 
@@ -31,7 +18,15 @@ pub enum Value {
     Flpt(flpt),
     Char(char),
     Text(text),
+
+    /// A reference
     Var(EnvId),
+
+    /// Technically also a reference
+    View {
+        start: EnvId,
+        count: usize,
+    },
 }
 
 impl From<none> for Value {

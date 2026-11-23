@@ -3,11 +3,10 @@
 use super::Type;
 use crate::{
     error::fail::Failure,
-    exec::{ControlFlow, EnvId, Value, env::Environment},
+    exec::{EnvId, Value, env::Environment},
     todo_types::Todo,
     types::{byte, fail, flpt, none, sint, text, uint},
 };
-use ControlFlow::*;
 
 const STATIC_GUARANTEE: &str = "should be guaranteed by static analysis";
 
@@ -19,17 +18,13 @@ pub struct Program {
 impl Program {
     pub fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         for stmt in &self.stmts {
-            match stmt.exec(env) {
-                Continue(()) => {}
-                Break(()) => break,
-                Err(e) => return Result::Err(e),
-            }
+            stmt.exec(env)?;
         }
         Ok(())
     }
 }
 
-fn eval_to_exec(res: ControlFlow<Value, Failure>) -> ControlFlow<(), Failure> {
+fn eval_to_exec(res: Result<Value, Failure>) -> Result<(), Failure> {
     res.map(|x| {
         #[cfg(debug_assertions)]
         if !matches!(x, Value::None) {
@@ -45,41 +40,55 @@ pub enum Stmt {
     Loop(Loop),
     Dfer(Dfer),
     Branch(Branch),
+    Give(Give),
+    Fail(Fail),
+    Skip(Skip),
+    Done(Done),
 }
 
 impl Stmt {
-    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+    pub fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
         match self {
             Self::Expr(x) => x.eval(env),
             Self::Print(x) => x.eval(env),
             Self::Loop(x) => x.eval(env),
             Self::Dfer(x) => x.eval(env),
             Self::Branch(x) => x.eval(env),
+            Self::Give(_) => todo!(),
+            Self::Fail(x) => Err(x.eval(env)),
+            Self::Skip(_) => todo!(),
+            Self::Done(_) => todo!(),
         }
     }
 
-    pub fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+    pub fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         eval_to_exec(self.eval(env))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Expr {
-    Operation(Operation),
     Literal(Value),
     Access(EnvId),
+    Operation(Operation),
+}
+
+impl Default for Expr {
+    fn default() -> Self {
+        Self::Literal(Value::None)
+    }
 }
 
 impl Expr {
-    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+    pub fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
         match self {
-            Self::Operation(x) => x.eval(env),
             Self::Literal(x) => Ok(x.clone()),
             Self::Access(x) => Ok(Value::Var(*x)),
+            Self::Operation(x) => x.eval(env),
         }
     }
 
-    pub fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+    pub fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         eval_to_exec(self.eval(env))
     }
 
@@ -131,7 +140,7 @@ pub struct Operation {
 }
 
 impl Operation {
-    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+    pub fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
         match self.what {
             Callable::Builtin(op) => op.eval(env, &self.args),
             Callable::UserDefined(_fun) => todo!(),
@@ -159,6 +168,10 @@ pub enum BuiltinOp {
     ExistsS,
     ExistsC,
     ExistsT,
+
+    // TODO: how will other views be indexed?
+    IndexT,
+    SliceT,
 
     NotL,
     NotB,
@@ -315,7 +328,7 @@ pub enum BuiltinOp {
 }
 
 impl BuiltinOp {
-    pub fn eval(self, env: &mut Environment, args: &[Expr]) -> ControlFlow<Value, Failure> {
+    pub fn eval(self, env: &mut Environment, args: &[Expr]) -> Result<Value, Failure> {
         use BuiltinOp::*;
         Ok(match (self, args) {
             (InptB, []) => todo!("byte input"),
@@ -329,6 +342,11 @@ impl BuiltinOp {
             (ExistsS, [x]) => Value::Bool(x.eval_sint(env)? != 0),
             (ExistsC, [x]) => Value::Bool(x.eval_char(env)? != '\0'),
             (ExistsT, [x]) => Value::Bool(!x.eval_text(env)?.is_empty()),
+
+            // TBD: is x a character index or a byte index?
+            (IndexT, [x]) => todo!(),
+            // TBD: range?
+            (SliceT, [x]) => todo!(),
 
             (NotL, [x]) => Value::Bool(!x.eval_bool(env)?),
             (NotB, [x]) => Value::Byte(!x.eval_byte(env)?),
@@ -511,6 +529,8 @@ impl BuiltinOp {
             ExistsS => &[Sint],
             ExistsC => &[Char],
             ExistsT => &[Text],
+            IndexT => &[Uint],
+            SliceT => todo!(),
             NotL => &[Bool],
             NotB => &[Byte],
             NotU => &[Uint],
@@ -650,11 +670,11 @@ pub struct Print {
     pub msg: Expr,
 }
 impl Print {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
         self.exec(env).map(|()| Value::None)
     }
 
-    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         self.msg.eval_text(env).map(|msg| print!("{msg}"))
     }
 }
@@ -665,13 +685,14 @@ pub struct Loop {
 }
 
 impl Loop {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
         loop {
-            self.block.eval(env);
+            // TODO: skip/done/give
+            self.block.eval(env)?;
         }
     }
 
-    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         eval_to_exec(self.eval(env))
     }
 }
@@ -679,15 +700,23 @@ impl Loop {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Dfer {
     pub do_first: Block,
+    pub ret_param: Option<EnvId>,
     pub on_pop: Block,
 }
 
 impl Dfer {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
-        todo!()
+    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
+        let res = self.do_first.eval(env);
+        if let Some(_id) = self.ret_param {
+            // assign res to return parameter variable in environment
+            self.on_pop.eval(env)
+        } else {
+            self.on_pop.exec(env)?;
+            res
+        }
     }
 
-    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         eval_to_exec(self.eval(env))
     }
 }
@@ -700,7 +729,7 @@ pub struct Branch {
 }
 
 impl Branch {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
         for case in &self.cases {
             if case.pred.eval_bool(env)? {
                 return case.then.eval(env);
@@ -711,7 +740,7 @@ impl Branch {
             .map_or(Ok(Value::None), |then| then.eval(env))
     }
 
-    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         eval_to_exec(self.eval(env))
     }
 }
@@ -729,14 +758,44 @@ pub struct Block {
 }
 
 impl Block {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
+        let mut res = Value::None;
         for stmt in &self.stmts {
-            stmt.eval(env)?;
+            res = stmt.eval(env)?;
         }
-        Ok(Value::None)
+        Ok(res)
     }
 
-    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         eval_to_exec(self.eval(env))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+pub struct Give {
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+pub struct Fail {
+    pub value: Expr,
+}
+
+impl Fail {
+    fn eval(&self, env: &mut Environment) -> Failure {
+        self.value
+            .eval_text(env)
+            .map_or_else(std::convert::identity, Failure::Other)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd /*, Default*/)]
+pub struct Skip {
+    pub label: Todo,
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd /*, Default*/)]
+pub struct Done {
+    pub label: Todo,
+    pub value: Expr,
 }

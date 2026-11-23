@@ -1,5 +1,5 @@
 /// Runtime error - essentially an exception
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Hash)]
 pub enum Failure {
     ParseBool,
     ParseInt,
@@ -12,7 +12,9 @@ pub enum Failure {
     UnhandledOrNone,
     UnhandledOrNevr,
     FailedRead,
-    Uninitialized, // TODO: change this to be guarded by static analysis
+    /// TODO: change this to be guarded by static analysis
+    Uninitialized,
+    Other(String),
 }
 
 impl From<std::str::ParseBoolError> for Failure {
@@ -64,6 +66,7 @@ impl std::fmt::Display for Failure {
             Self::UnhandledOrNevr => write!(f, "tried to perform an operation with nevr"),
             Self::FailedRead => write!(f, "failed to read input"),
             Self::Uninitialized => write!(f, "attempted to read uninitialized memory"),
+            Self::Other(e) => e.fmt(f),
         }
     }
 }
