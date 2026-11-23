@@ -154,8 +154,9 @@ use std::{
 };
 
 mod analyzer;
-mod arrayvec;
+mod collections;
 mod error;
+mod exec;
 mod highlight;
 mod lex;
 mod parse;
