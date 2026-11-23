@@ -3,9 +3,13 @@
 use super::Type;
 use crate::{
     error::fail::Failure,
-    exec::{EnvId, Value},
+    exec::{ControlFlow, EnvId, Value, env::Environment},
     todo_types::Todo,
+    types::{byte, fail, flpt, none, sint, text, uint},
 };
+use ControlFlow::*;
+
+const STATIC_GUARANTEE: &str = "should be guaranteed by static analysis";
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Program {
@@ -13,45 +17,110 @@ pub struct Program {
 }
 
 impl Program {
-    pub fn run(&self) -> Result<(), Failure> {
+    pub fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         for stmt in &self.stmts {
-            stmt.run()?;
+            match stmt.exec(env) {
+                Continue(()) => {}
+                Break(()) => break,
+                Err(e) => return Result::Err(e),
+            }
         }
         Ok(())
     }
 }
 
+fn eval_to_exec(res: ControlFlow<Value, Failure>) -> ControlFlow<(), Failure> {
+    res.map(|x| {
+        #[cfg(debug_assertions)]
+        if !matches!(x, Value::None) {
+            println!("WARNING: expression has a non-none result that is not handled: {x:?}");
+        }
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Stmt {
     Expr(Expr),
-    Print(Expr),
+    Print(Print),
+    Loop(Loop),
+    Dfer(Dfer),
+    Branch(Branch),
 }
 
 impl Stmt {
-    pub fn run(&self) -> Result<(), Failure> {
+    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
         match self {
-            Self::Expr(x) => x.eval().map(|x| {
-                debug_assert_eq!(x, todo!("none"), "static analysis should convert to none")
-            }),
-            Self::Print(x) => todo!(),
+            Self::Expr(x) => x.eval(env),
+            Self::Print(x) => x.eval(env),
+            Self::Loop(x) => x.eval(env),
+            Self::Dfer(x) => x.eval(env),
+            Self::Branch(x) => x.eval(env),
         }
+    }
+
+    pub fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+        eval_to_exec(self.eval(env))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Expr {
     Operation(Operation),
-    Literal(Literal),
-    Access(Variable),
+    Literal(Value),
+    Access(EnvId),
 }
 
 impl Expr {
-    pub fn eval(&self) -> Result<Value, Failure> {
+    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
         match self {
-            Self::Operation(x) => x.eval(),
-            Self::Literal(x) => Ok(x.val.clone()),
-            Self::Access(x) => todo!(),
+            Self::Operation(x) => x.eval(env),
+            Self::Literal(x) => Ok(x.clone()),
+            Self::Access(x) => Ok(Value::Var(*x)),
         }
+    }
+
+    pub fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+        eval_to_exec(self.eval(env))
+    }
+
+    pub fn eval_none(&self, env: &mut Environment) -> Result<none, Failure> {
+        self.eval(env).map(|x| x.none().expect(STATIC_GUARANTEE))
+    }
+
+    pub fn eval_fail(&self, env: &mut Environment) -> Result<fail, Failure> {
+        self.eval(env).map(|x| x.fail().expect(STATIC_GUARANTEE))
+    }
+
+    pub fn eval_bool(&self, env: &mut Environment) -> Result<bool, Failure> {
+        self.eval(env).map(|x| x.bool().expect(STATIC_GUARANTEE))
+    }
+
+    pub fn eval_byte(&self, env: &mut Environment) -> Result<byte, Failure> {
+        self.eval(env).map(|x| x.byte().expect(STATIC_GUARANTEE))
+    }
+
+    pub fn eval_uint(&self, env: &mut Environment) -> Result<uint, Failure> {
+        self.eval(env).map(|x| x.uint().expect(STATIC_GUARANTEE))
+    }
+
+    pub fn eval_sint(&self, env: &mut Environment) -> Result<sint, Failure> {
+        self.eval(env).map(|x| x.sint().expect(STATIC_GUARANTEE))
+    }
+
+    pub fn eval_flpt(&self, env: &mut Environment) -> Result<flpt, Failure> {
+        self.eval(env).map(|x| x.flpt().expect(STATIC_GUARANTEE))
+    }
+
+    pub fn eval_char(&self, env: &mut Environment) -> Result<char, Failure> {
+        self.eval(env).map(|x| x.char().expect(STATIC_GUARANTEE))
+    }
+
+    pub fn eval_text(&self, env: &mut Environment) -> Result<text, Failure> {
+        self.eval(env).map(|x| x.text().expect(STATIC_GUARANTEE))
+    }
+
+    pub fn eval_var(&self, env: &mut Environment) -> Result<EnvId, Failure> {
+        self.eval(env).map(|x| x.var().expect(STATIC_GUARANTEE))
     }
 }
 
@@ -62,9 +131,9 @@ pub struct Operation {
 }
 
 impl Operation {
-    pub fn eval(&self) -> Result<Value, Failure> {
+    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
         match self.what {
-            Callable::Builtin(op) => op.eval(&self.args),
+            Callable::Builtin(op) => op.eval(env, &self.args),
             Callable::UserDefined(_fun) => todo!(),
         }
     }
@@ -246,185 +315,180 @@ pub enum BuiltinOp {
 }
 
 impl BuiltinOp {
-    pub fn eval(self, args: &[Expr]) -> Result<Value, Failure> {
-        const GUARANTEE: &str = "should be guaranteed by static analysis";
+    pub fn eval(self, env: &mut Environment, args: &[Expr]) -> ControlFlow<Value, Failure> {
         use BuiltinOp::*;
-        // short-circuiting
-        Ok(
-            if matches!(self, AndL | OrL | XorL | NandL | NorL | XnorL) {
-                let mut args = args
-                    .iter()
-                    .map(|x| x.eval().map(|x| x.bool().expect(GUARANTEE)));
-                let mut acc = args.next().expect("should have at least one element")?;
-                match self {
-                    AndL | NandL => {
-                        for arg in args {
-                            acc &= arg?;
-                        }
-                    }
-                    OrL | NorL => {
-                        for arg in args {
-                            acc |= arg?;
-                        }
-                    }
-                    XorL | XnorL => {
-                        for arg in args {
-                            acc ^= arg?;
-                        }
-                    }
+        Ok(match (self, args) {
+            (InptB, []) => todo!("byte input"),
+            (InptC, []) => todo!("char input"),
+            (InptT, []) => todo!("text input"),
+
+            (ExistsN | ExistsF, [_]) => Value::Bool(false),
+            (ExistsL, [x]) => Value::Bool(x.eval_bool(env)?),
+            (ExistsB, [x]) => Value::Bool(x.eval_byte(env)? != 0),
+            (ExistsU, [x]) => Value::Bool(x.eval_uint(env)? != 0),
+            (ExistsS, [x]) => Value::Bool(x.eval_sint(env)? != 0),
+            (ExistsC, [x]) => Value::Bool(x.eval_char(env)? != '\0'),
+            (ExistsT, [x]) => Value::Bool(!x.eval_text(env)?.is_empty()),
+
+            (NotL, [x]) => Value::Bool(!x.eval_bool(env)?),
+            (NotB, [x]) => Value::Byte(!x.eval_byte(env)?),
+            (NotU, [x]) => Value::Uint(!x.eval_uint(env)?),
+            (NotS, [x]) => Value::Sint(!x.eval_sint(env)?),
+
+            // short-circuiting
+            (AndL | OrL | XorL | NandL | NorL | XnorL, [a, b]) => {
+                let res = match self {
+                    AndL | NandL => a.eval_bool(env)? && b.eval_bool(env)?,
+                    OrL | NorL => a.eval_bool(env)? || b.eval_bool(env)?,
+                    XorL | XnorL => a.eval_bool(env)? != b.eval_bool(env)?,
+
                     _ => unreachable!(),
-                }
-                Value::Bool(acc ^ matches!(self, NandL | NorL | XnorL))
-            } else {
-                match (self, args) {
-                    (InptB, []) => todo!(),
-                    (InptC, []) => todo!(),
-                    (InptT, []) => todo!(),
+                };
+                let is_neg = matches!(self, NandL | NorL | XnorL);
+                Value::Bool(res ^ is_neg)
+            }
 
-                    (ExistsN | ExistsF, [_]) => Value::Bool(false),
-                    (ExistsL, [x]) => Value::Bool(x.eval()?.bool().expect(GUARANTEE)),
-                    (ExistsB, [x]) => Value::Bool(x.eval()?.byte().expect(GUARANTEE) != 0),
-                    (ExistsU, [x]) => Value::Bool(x.eval()?.uint().expect(GUARANTEE) != 0),
-                    (ExistsS, [x]) => Value::Bool(x.eval()?.sint().expect(GUARANTEE) != 0),
-                    (ExistsC, [x]) => Value::Bool(x.eval()?.char().expect(GUARANTEE) != '\0'),
-                    (ExistsT, [x]) => Value::Bool(!x.eval()?.text().expect(GUARANTEE).is_empty()),
+            (AndB, [a, b]) => Value::Byte(a.eval_byte(env)? & b.eval_byte(env)?),
+            (AndU, [a, b]) => Value::Uint(a.eval_uint(env)? & b.eval_uint(env)?),
+            (AndS, [a, b]) => Value::Sint(a.eval_sint(env)? & b.eval_sint(env)?),
 
-                    (NotL, [x]) => Value::Bool(!x.eval()?.bool().expect(GUARANTEE)),
-                    (NotB, [x]) => Value::Byte(!x.eval()?.byte().expect(GUARANTEE)),
-                    (NotU, [x]) => Value::Uint(!x.eval()?.uint().expect(GUARANTEE)),
-                    (NotS, [x]) => Value::Sint(!x.eval()?.sint().expect(GUARANTEE)),
+            (OrB, [a, b]) => Value::Byte(a.eval_byte(env)? | b.eval_byte(env)?),
+            (OrU, [a, b]) => Value::Uint(a.eval_uint(env)? | b.eval_uint(env)?),
+            (OrS, [a, b]) => Value::Sint(a.eval_sint(env)? | b.eval_sint(env)?),
 
-                    (AndL | OrL | XorL | NandL | NorL | XnorL, _) => {
-                        unreachable!()
-                    }
+            (XorB, [a, b]) => Value::Byte(a.eval_byte(env)? ^ b.eval_byte(env)?),
+            (XorU, [a, b]) => Value::Uint(a.eval_uint(env)? ^ b.eval_uint(env)?),
+            (XorS, [a, b]) => Value::Sint(a.eval_sint(env)? ^ b.eval_sint(env)?),
 
-                    (AndB, [a, b]) => Value::Byte(todo!()),
-                    (AndU, [a, b]) => Value::Uint(todo!()),
-                    (AndS, [a, b]) => Value::Sint(todo!()),
-                    (OrB, [a, b]) => Value::Byte(todo!()),
-                    (OrU, [a, b]) => Value::Uint(todo!()),
-                    (OrS, [a, b]) => Value::Sint(todo!()),
-                    (XorB, [a, b]) => Value::Byte(todo!()),
-                    (XorU, [a, b]) => Value::Uint(todo!()),
-                    (XorS, [a, b]) => Value::Sint(todo!()),
-                    (NandB, [a, b]) => Value::Byte(todo!()),
-                    (NandU, [a, b]) => Value::Uint(todo!()),
-                    (NandS, [a, b]) => Value::Sint(todo!()),
-                    (NorB, [a, b]) => Value::Byte(todo!()),
-                    (NorU, [a, b]) => Value::Uint(todo!()),
-                    (NorS, [a, b]) => Value::Sint(todo!()),
-                    (XnorB, [a, b]) => Value::Byte(todo!()),
-                    (XnorU, [a, b]) => Value::Uint(todo!()),
-                    (XnorS, [a, b]) => Value::Sint(todo!()),
+            (NandB, [a, b]) => Value::Byte(!(a.eval_byte(env)? & b.eval_byte(env)?)),
+            (NandU, [a, b]) => Value::Uint(!(a.eval_uint(env)? & b.eval_uint(env)?)),
+            (NandS, [a, b]) => Value::Sint(!(a.eval_sint(env)? & b.eval_sint(env)?)),
 
-                    (EqL, [a, b]) => Value::Bool(a.eval()? == b.eval()?),
-                    (EqB, [a, b]) => Value::Bool(a.eval()? == b.eval()?),
-                    (EqU, [a, b]) => Value::Bool(a.eval()? == b.eval()?),
-                    (EqS, [a, b]) => Value::Bool(a.eval()? == b.eval()?),
-                    (EqC, [a, b]) => Value::Bool(a.eval()? == b.eval()?),
-                    (EqT, [a, b]) => Value::Bool(a.eval()? == b.eval()?),
-                    (NeL, [a, b]) => Value::Bool(a.eval()? != b.eval()?),
-                    (NeB, [a, b]) => Value::Bool(a.eval()? != b.eval()?),
-                    (NeU, [a, b]) => Value::Bool(a.eval()? != b.eval()?),
-                    (NeS, [a, b]) => Value::Bool(a.eval()? != b.eval()?),
-                    (NeC, [a, b]) => Value::Bool(a.eval()? != b.eval()?),
-                    (NeT, [a, b]) => Value::Bool(a.eval()? != b.eval()?),
-                    (LtL, [a, b]) => Value::Bool(a.eval()? < b.eval()?),
-                    (LtB, [a, b]) => Value::Bool(a.eval()? < b.eval()?),
-                    (LtU, [a, b]) => Value::Bool(a.eval()? < b.eval()?),
-                    (LtS, [a, b]) => Value::Bool(a.eval()? < b.eval()?),
-                    (LtC, [a, b]) => Value::Bool(a.eval()? < b.eval()?),
-                    (LtT, [a, b]) => Value::Bool(a.eval()? < b.eval()?),
-                    (GtL, [a, b]) => Value::Bool(a.eval()? > b.eval()?),
-                    (GtB, [a, b]) => Value::Bool(a.eval()? > b.eval()?),
-                    (GtU, [a, b]) => Value::Bool(a.eval()? > b.eval()?),
-                    (GtS, [a, b]) => Value::Bool(a.eval()? > b.eval()?),
-                    (GtC, [a, b]) => Value::Bool(a.eval()? > b.eval()?),
-                    (GtT, [a, b]) => Value::Bool(a.eval()? > b.eval()?),
-                    (LeL, [a, b]) => Value::Bool(a.eval()? <= b.eval()?),
-                    (LeB, [a, b]) => Value::Bool(a.eval()? <= b.eval()?),
-                    (LeU, [a, b]) => Value::Bool(a.eval()? <= b.eval()?),
-                    (LeS, [a, b]) => Value::Bool(a.eval()? <= b.eval()?),
-                    (LeC, [a, b]) => Value::Bool(a.eval()? <= b.eval()?),
-                    (LeT, [a, b]) => Value::Bool(a.eval()? <= b.eval()?),
-                    (GeL, [a, b]) => Value::Bool(a.eval()? >= b.eval()?),
-                    (GeB, [a, b]) => Value::Bool(a.eval()? >= b.eval()?),
-                    (GeU, [a, b]) => Value::Bool(a.eval()? >= b.eval()?),
-                    (GeS, [a, b]) => Value::Bool(a.eval()? >= b.eval()?),
-                    (GeC, [a, b]) => Value::Bool(a.eval()? >= b.eval()?),
-                    (GeT, [a, b]) => Value::Bool(a.eval()? >= b.eval()?),
+            (NorB, [a, b]) => Value::Byte(!(a.eval_byte(env)? | b.eval_byte(env)?)),
+            (NorU, [a, b]) => Value::Uint(!(a.eval_uint(env)? | b.eval_uint(env)?)),
+            (NorS, [a, b]) => Value::Sint(!(a.eval_sint(env)? | b.eval_sint(env)?)),
 
-                    (NegS, [x]) => todo!(),
-                    (NegF, [x]) => todo!(),
-                    (AddB, [a, b]) => todo!(),
-                    (AddU, [a, b]) => todo!(),
-                    (AddS, [a, b]) => todo!(),
-                    (AddF, [a, b]) => todo!(),
-                    (SubB, [a, b]) => todo!(),
-                    (SubU, [a, b]) => todo!(),
-                    (SubS, [a, b]) => todo!(),
-                    (SubF, [a, b]) => todo!(),
-                    (MulB, [a, b]) => todo!(),
-                    (MulU, [a, b]) => todo!(),
-                    (MulS, [a, b]) => todo!(),
-                    (MulF, [a, b]) => todo!(),
-                    (DivB, [a, b]) => todo!(),
-                    (DivU, [a, b]) => todo!(),
-                    (DivS, [a, b]) => todo!(),
-                    (RemB, [a, b]) => todo!(),
-                    (RemU, [a, b]) => todo!(),
-                    (RemS, [a, b]) => todo!(),
-                    (PowBB, [a, b]) => todo!(),
-                    (PowBU, [a, b]) => todo!(),
-                    (PowUB, [a, b]) => todo!(),
-                    (PowUU, [a, b]) => todo!(),
-                    (PowSB, [a, b]) => todo!(),
-                    (PowSU, [a, b]) => todo!(),
-                    (PowFB, [a, b]) => todo!(),
-                    (PowFU, [a, b]) => todo!(),
-                    (PowFF, [a, b]) => todo!(),
-                    (ShlBB, [a, b]) => todo!(),
-                    (ShlBU, [a, b]) => todo!(),
-                    (ShlBS, [a, b]) => todo!(),
-                    (ShlUB, [a, b]) => todo!(),
-                    (ShlUU, [a, b]) => todo!(),
-                    (ShlUS, [a, b]) => todo!(),
-                    (ShlSB, [a, b]) => todo!(),
-                    (ShlSU, [a, b]) => todo!(),
-                    (ShlSS, [a, b]) => todo!(),
-                    (ShrBB, [a, b]) => todo!(),
-                    (ShrBU, [a, b]) => todo!(),
-                    (ShrBS, [a, b]) => todo!(),
-                    (ShrUB, [a, b]) => todo!(),
-                    (ShrUU, [a, b]) => todo!(),
-                    (ShrUS, [a, b]) => todo!(),
-                    (ShrSB, [a, b]) => todo!(),
-                    (ShrSU, [a, b]) => todo!(),
-                    (ShrSS, [a, b]) => todo!(),
-                    (RotlBB, [a, b]) => todo!(),
-                    (RotlBU, [a, b]) => todo!(),
-                    (RotlBS, [a, b]) => todo!(),
-                    (RotlUB, [a, b]) => todo!(),
-                    (RotlUU, [a, b]) => todo!(),
-                    (RotlUS, [a, b]) => todo!(),
-                    (RotlSB, [a, b]) => todo!(),
-                    (RotlSU, [a, b]) => todo!(),
-                    (RotlSS, [a, b]) => todo!(),
-                    (RotrBB, [a, b]) => todo!(),
-                    (RotrBU, [a, b]) => todo!(),
-                    (RotrBS, [a, b]) => todo!(),
-                    (RotrUB, [a, b]) => todo!(),
-                    (RotrUU, [a, b]) => todo!(),
-                    (RotrUS, [a, b]) => todo!(),
-                    (RotrSB, [a, b]) => todo!(),
-                    (RotrSU, [a, b]) => todo!(),
-                    (RotrSS, [a, b]) => todo!(),
+            (XnorB, [a, b]) => Value::Byte(!(a.eval_byte(env)? ^ b.eval_byte(env)?)),
+            (XnorU, [a, b]) => Value::Uint(!(a.eval_uint(env)? ^ b.eval_uint(env)?)),
+            (XnorS, [a, b]) => Value::Sint(!(a.eval_sint(env)? ^ b.eval_sint(env)?)),
 
-                    // TODO: this will also match any new operators added. thats bad.
-                    _ => panic!("invalid operands; {GUARANTEE}"),
-                }
-            },
-        )
+            (EqL, [a, b]) => Value::Bool(a.eval_bool(env)? == b.eval_bool(env)?),
+            (EqB, [a, b]) => Value::Bool(a.eval_byte(env)? == b.eval_byte(env)?),
+            (EqU, [a, b]) => Value::Bool(a.eval_uint(env)? == b.eval_uint(env)?),
+            (EqS, [a, b]) => Value::Bool(a.eval_sint(env)? == b.eval_sint(env)?),
+            (EqC, [a, b]) => Value::Bool(a.eval_char(env)? == b.eval_char(env)?),
+            (EqT, [a, b]) => Value::Bool(a.eval_text(env)? == b.eval_text(env)?),
+
+            (NeL, [a, b]) => Value::Bool(a.eval_bool(env)? != b.eval_bool(env)?),
+            (NeB, [a, b]) => Value::Bool(a.eval_byte(env)? != b.eval_byte(env)?),
+            (NeU, [a, b]) => Value::Bool(a.eval_uint(env)? != b.eval_uint(env)?),
+            (NeS, [a, b]) => Value::Bool(a.eval_sint(env)? != b.eval_sint(env)?),
+            (NeC, [a, b]) => Value::Bool(a.eval_char(env)? != b.eval_char(env)?),
+            (NeT, [a, b]) => Value::Bool(a.eval_text(env)? != b.eval_text(env)?),
+
+            (LtB, [a, b]) => Value::Bool(a.eval_byte(env)? < b.eval_byte(env)?),
+            (LtU, [a, b]) => Value::Bool(a.eval_uint(env)? < b.eval_uint(env)?),
+            (LtS, [a, b]) => Value::Bool(a.eval_sint(env)? < b.eval_sint(env)?),
+            (LtC, [a, b]) => Value::Bool(a.eval_char(env)? < b.eval_char(env)?),
+            (LtT, [a, b]) => Value::Bool(a.eval_text(env)? < b.eval_text(env)?),
+
+            (GtB, [a, b]) => Value::Bool(a.eval_byte(env)? > b.eval_byte(env)?),
+            (GtU, [a, b]) => Value::Bool(a.eval_uint(env)? > b.eval_uint(env)?),
+            (GtS, [a, b]) => Value::Bool(a.eval_sint(env)? > b.eval_sint(env)?),
+            (GtC, [a, b]) => Value::Bool(a.eval_char(env)? > b.eval_char(env)?),
+            (GtT, [a, b]) => Value::Bool(a.eval_text(env)? > b.eval_text(env)?),
+
+            (LeB, [a, b]) => Value::Bool(a.eval_byte(env)? <= b.eval_byte(env)?),
+            (LeU, [a, b]) => Value::Bool(a.eval_uint(env)? <= b.eval_uint(env)?),
+            (LeS, [a, b]) => Value::Bool(a.eval_sint(env)? <= b.eval_sint(env)?),
+            (LeC, [a, b]) => Value::Bool(a.eval_char(env)? <= b.eval_char(env)?),
+            (LeT, [a, b]) => Value::Bool(a.eval_text(env)? <= b.eval_text(env)?),
+
+            (GeB, [a, b]) => Value::Bool(a.eval_byte(env)? >= b.eval_byte(env)?),
+            (GeU, [a, b]) => Value::Bool(a.eval_uint(env)? >= b.eval_uint(env)?),
+            (GeS, [a, b]) => Value::Bool(a.eval_sint(env)? >= b.eval_sint(env)?),
+            (GeC, [a, b]) => Value::Bool(a.eval_char(env)? >= b.eval_char(env)?),
+            (GeT, [a, b]) => Value::Bool(a.eval_text(env)? >= b.eval_text(env)?),
+
+            (NegS, [x]) => Value::Sint(-x.eval_sint(env)?),
+            (NegF, [x]) => Value::Flpt(-x.eval_flpt(env)?),
+
+            (AddB, [a, b]) => Value::Byte(a.eval_byte(env)? + b.eval_byte(env)?),
+            (AddU, [a, b]) => Value::Uint(a.eval_uint(env)? + b.eval_uint(env)?),
+            (AddS, [a, b]) => Value::Sint(a.eval_sint(env)? + b.eval_sint(env)?),
+            (AddF, [a, b]) => Value::Flpt(a.eval_flpt(env)? + b.eval_flpt(env)?),
+
+            (SubB, [a, b]) => Value::Byte(a.eval_byte(env)? - b.eval_byte(env)?),
+            (SubU, [a, b]) => Value::Uint(a.eval_uint(env)? - b.eval_uint(env)?),
+            (SubS, [a, b]) => Value::Sint(a.eval_sint(env)? - b.eval_sint(env)?),
+            (SubF, [a, b]) => Value::Flpt(a.eval_flpt(env)? - b.eval_flpt(env)?),
+
+            (MulB, [a, b]) => Value::Byte(a.eval_byte(env)? * b.eval_byte(env)?),
+            (MulU, [a, b]) => Value::Uint(a.eval_uint(env)? * b.eval_uint(env)?),
+            (MulS, [a, b]) => Value::Sint(a.eval_sint(env)? * b.eval_sint(env)?),
+            (MulF, [a, b]) => Value::Flpt(a.eval_flpt(env)? * b.eval_flpt(env)?),
+
+            (DivB, [a, b]) => Value::Byte(a.eval_byte(env)? / b.eval_byte(env)?),
+            (DivU, [a, b]) => Value::Uint(a.eval_uint(env)? / b.eval_uint(env)?),
+            (DivS, [a, b]) => Value::Sint(a.eval_sint(env)? / b.eval_sint(env)?),
+
+            (RemB, [a, b]) => Value::Byte(a.eval_byte(env)? % b.eval_byte(env)?),
+            (RemU, [a, b]) => Value::Uint(a.eval_uint(env)? % b.eval_uint(env)?),
+            (RemS, [a, b]) => Value::Sint(a.eval_sint(env)? % b.eval_sint(env)?),
+
+            (PowBB, [a, b]) => todo!(),
+            (PowBU, [a, b]) => todo!(),
+            (PowUB, [a, b]) => todo!(),
+            (PowUU, [a, b]) => todo!(),
+            (PowSB, [a, b]) => todo!(),
+            (PowSU, [a, b]) => todo!(),
+            (PowFB, [a, b]) => todo!(),
+            (PowFU, [a, b]) => todo!(),
+            (PowFF, [a, b]) => todo!(),
+
+            (ShlBB, [a, b]) => todo!(),
+            (ShlBU, [a, b]) => todo!(),
+            (ShlBS, [a, b]) => todo!(),
+            (ShlUB, [a, b]) => todo!(),
+            (ShlUU, [a, b]) => todo!(),
+            (ShlUS, [a, b]) => todo!(),
+            (ShlSB, [a, b]) => todo!(),
+            (ShlSU, [a, b]) => todo!(),
+            (ShlSS, [a, b]) => todo!(),
+
+            (ShrBB, [a, b]) => todo!(),
+            (ShrBU, [a, b]) => todo!(),
+            (ShrBS, [a, b]) => todo!(),
+            (ShrUB, [a, b]) => todo!(),
+            (ShrUU, [a, b]) => todo!(),
+            (ShrUS, [a, b]) => todo!(),
+            (ShrSB, [a, b]) => todo!(),
+            (ShrSU, [a, b]) => todo!(),
+            (ShrSS, [a, b]) => todo!(),
+
+            (RotlBB, [a, b]) => todo!(),
+            (RotlBU, [a, b]) => todo!(),
+            (RotlBS, [a, b]) => todo!(),
+            (RotlUB, [a, b]) => todo!(),
+            (RotlUU, [a, b]) => todo!(),
+            (RotlUS, [a, b]) => todo!(),
+            (RotlSB, [a, b]) => todo!(),
+            (RotlSU, [a, b]) => todo!(),
+            (RotlSS, [a, b]) => todo!(),
+
+            (RotrBB, [a, b]) => todo!(),
+            (RotrBU, [a, b]) => todo!(),
+            (RotrBS, [a, b]) => todo!(),
+            (RotrUB, [a, b]) => todo!(),
+            (RotrUU, [a, b]) => todo!(),
+            (RotrUS, [a, b]) => todo!(),
+            (RotrSB, [a, b]) => todo!(),
+            (RotrSU, [a, b]) => todo!(),
+            (RotrSS, [a, b]) => todo!(),
+
+            // TODO: this will also match any new operators added. thats bad.
+            _ => panic!("invalid operands; {STATIC_GUARANTEE}"),
+        })
     }
 
     pub const fn operand_count(self) -> usize {
@@ -581,18 +645,35 @@ impl BuiltinOp {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct Literal {
-    pub val: Value,
+pub struct Print {
+    /// Promised by static analysis to output text
+    pub msg: Expr,
 }
+impl Print {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+        self.exec(env).map(|()| Value::None)
+    }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Variable {
-    pub id: EnvId,
+    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+        self.msg.eval_text(env).map(|msg| print!("{msg}"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Loop {
     pub block: Block,
+}
+
+impl Loop {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+        loop {
+            self.block.eval(env);
+        }
+    }
+
+    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+        eval_to_exec(self.eval(env))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -601,10 +682,38 @@ pub struct Dfer {
     pub on_pop: Block,
 }
 
+impl Dfer {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+        todo!()
+    }
+
+    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+        eval_to_exec(self.eval(env))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Branch {
-    /// Trailing `else` case has a tautological predicate
     pub cases: Vec<Case>,
+    /// Trailing `or` case
+    pub default: Option<Block>,
+}
+
+impl Branch {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+        for case in &self.cases {
+            if case.pred.eval_bool(env)? {
+                return case.then.eval(env);
+            }
+        }
+        self.default
+            .as_ref()
+            .map_or(Ok(Value::None), |then| then.eval(env))
+    }
+
+    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+        eval_to_exec(self.eval(env))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -617,4 +726,17 @@ pub struct Case {
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
+}
+
+impl Block {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Value, Failure> {
+        for stmt in &self.stmts {
+            stmt.eval(env)?;
+        }
+        Ok(Value::None)
+    }
+
+    fn exec(&self, env: &mut Environment) -> ControlFlow<(), Failure> {
+        eval_to_exec(self.eval(env))
+    }
 }

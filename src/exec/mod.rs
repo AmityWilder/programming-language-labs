@@ -1,7 +1,20 @@
-use crate::types::{byte, fail, flpt, sint, text, uint};
+use crate::types::{byte, fail, flpt, none, sint, text, uint};
 
 pub mod env;
 pub mod tree;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ControlFlow<B, E, C = ()> {
+    Continue(C),
+    Break(B),
+    Err(E),
+}
+
+impl<B, E, C: Default> Default for ControlFlow<B, E, C> {
+    fn default() -> Self {
+        Self::Continue(C::default())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct EnvId(usize);
@@ -21,8 +34,8 @@ pub enum Value {
     Var(EnvId),
 }
 
-impl From<()> for Value {
-    fn from((): ()) -> Self {
+impl From<none> for Value {
+    fn from((): none) -> Self {
         Self::None
     }
 }
@@ -83,11 +96,11 @@ impl std::fmt::Display for TypeMismatchError {
 
 impl std::error::Error for TypeMismatchError {}
 
-impl TryFrom<Value> for () {
+impl TryFrom<Value> for none {
     type Error = TypeMismatchError;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
-        value.is_none().ok_or(TypeMismatchError)
+        value.none().ok_or(TypeMismatchError)
     }
 }
 impl TryFrom<Value> for fail {
@@ -155,8 +168,11 @@ impl TryFrom<Value> for EnvId {
 }
 
 impl Value {
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
+    pub fn none(self) -> Option<none> {
+        match self {
+            Value::None => Some(()),
+            _ => None,
+        }
     }
 
     pub fn fail(self) -> Option<fail> {
