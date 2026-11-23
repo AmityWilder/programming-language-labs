@@ -65,10 +65,14 @@ pub fn preprocess(
         // no change
         None
     } else {
-        let tokens = lex(id, src.as_str(), diagnostics);
         match SourceCode::with_expansion(loc, src, mac) {
             Ok(mut code) => {
-                code.set_tokens(tokens);
+                code.set_tokens(
+                    lex(code.content(), |rel, kind| {
+                        diagnostics.push(Diagnostic::new(rel.within_file(id), kind));
+                    })
+                    .collect(),
+                );
                 Some(code)
             }
             Err(e) => {

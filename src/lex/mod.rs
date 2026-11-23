@@ -1,10 +1,10 @@
 use crate::{
-    error::{Diagnostic, DiagnosticKind},
+    error::DiagnosticKind,
     lex::{
         symbols::{CHAR_DELIM, ESCAPE, MACRO_PARAM_PREFIX, MACRO_PREFIX, TEXT_DELIM},
-        token::{TokenKind, TokenTable, keyword::Keyword, punc::Punctuation},
+        token::{TokenKind, keyword::Keyword, punc::Punctuation},
     },
-    src_code::span::{FileId, RelSpan, usize_to_uspan, uspan},
+    src_code::span::{RelSpan, usize_to_uspan, uspan},
 };
 
 pub mod symbols;
@@ -272,19 +272,34 @@ impl Iterator for Lexer<'_> {
             )
             .map(|(len, kind, e)| (usize_to_uspan(len), kind, e))
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // min: the entire remaining text is one big token.
+        // if the text is empty, there are no more tokens.
+        let lo = usize::from(!self.source.is_empty());
+        // max: every character in the remaining text is a separate token.
+        let (_, hi) = self.source.chars().size_hint();
+        (lo, hi)
+    }
 }
 
-pub fn lex(file: FileId, code: &str, diagnostics: &mut Vec<Diagnostic>) -> TokenTable {
-    let mut tokens = Vec::new();
+impl std::iter::FusedIterator for Lexer<'_> {}
+
+pub fn lex<F>(
+    code: &str,
+    mut push_diagnostic: F,
+) -> std::iter::Map<Lexer<'_>, impl FnMut(<Lexer<'_> as Iterator>::Item) -> (uspan, TokenKind)>
+where
+    F: FnMut(RelSpan, DiagnosticKind),
+{
     let mut start: uspan = 0;
-    for (len, kind, e) in Lexer::new(code) {
+    Lexer::new(code).map(move |(len, kind, e)| {
         let end = start.strict_add(len);
         if let Some(kind) = e {
-            let span = RelSpan::from(start..end).within_file(file);
-            diagnostics.push(Diagnostic::new(span, kind));
+            push_diagnostic(RelSpan::from(start..end), kind);
         }
-        tokens.push((len, kind));
         start = end;
-    }
-    TokenTable { tokens }
+        (len, kind)
+    })
 }

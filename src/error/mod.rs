@@ -15,7 +15,7 @@ use crate::{
             MACRO_PREFIX, TEXT_DELIM,
         },
         token::{
-            Operator, TokenKind,
+            NumberBase, Operator, TokenKind,
             esc::escape_char,
             keyword::Keyword,
             punc::{BadBracketCombo, Bracket, OpSide},
@@ -135,49 +135,14 @@ pub struct CheckDiagnostics;
 
 impl FromIterator<Self> for CheckDiagnostics {
     fn from_iter<I: IntoIterator<Item = Self>>(iter: I) -> Self {
-        drop_all(iter.into_iter());
+        drop_all(iter);
         Self
     }
 }
 
 impl Extend<Self> for CheckDiagnostics {
     fn extend<I: IntoIterator<Item = Self>>(&mut self, iter: I) {
-        drop_all(iter.into_iter());
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum NumberBase {
-    Bin,
-    Oct,
-    #[default]
-    Dec,
-    Hex,
-}
-
-impl NumberBase {
-    pub const fn as_num(self) -> u8 {
-        match self {
-            Self::Bin => 2,
-            Self::Oct => 8,
-            Self::Dec => 10,
-            Self::Hex => 16,
-        }
-    }
-
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Bin => "binary",
-            Self::Oct => "octal",
-            Self::Dec => "decimal",
-            Self::Hex => "hexadecimal",
-        }
-    }
-}
-
-impl From<NumberBase> for u8 {
-    fn from(value: NumberBase) -> Self {
-        value.as_num()
+        drop_all(iter);
     }
 }
 

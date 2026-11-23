@@ -256,7 +256,7 @@ impl GetSyntax for (&str, TokenKind) {
             TokenKind::MParam => Syntax::MacroParam,
 
             TokenKind::Ident => {
-                let case = IdentCase::from(self.0);
+                let case = IdentCase::str_case(self.0).unwrap_or(IdentCase::Other);
                 match case {
                     IdentCase::Other | IdentCase::Snake => Syntax::Variable,
                     IdentCase::Pascal => Syntax::Typename,

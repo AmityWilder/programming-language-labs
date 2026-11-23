@@ -3,13 +3,13 @@ rec Vector2 {
     y: flpt,
 }
 
-on Vector2 {
-    fun len_sqr(me) -> flpt {
-        let x = /*me.x*/ 0.0;
-        let y = /*me.y*/ 0.0;
-        give x*x + y*y;
-    }
-}
+//on Vector2 {
+//    fun len_sqr(me) -> flpt {
+//        let x = me.x;
+//        let y = me.y;
+//        give x*x + y*y;
+//    }
+//}
 
 rec Point2 {
     x: sint,
@@ -27,14 +27,14 @@ rec Vector3 {
     z: flpt,
 }
 
-on Vector3 {
-    fun len_sqr(me) -> flpt {
-        let x = /*me.x*/ 0.0;
-        let y = /*me.y*/ 0.0;
-        let z = /*me.z*/ 0.0;
-        give x*x + y*y + z*z;
-    }
-}
+//on Vector3 {
+//    fun len_sqr(me) -> flpt {
+//        let x = me.x;
+//        let y = me.y;
+//        let z = me.z;
+//        give x*x + y*y + z*z;
+//    }
+//}
 
 rec Point3 {
     x: sint,

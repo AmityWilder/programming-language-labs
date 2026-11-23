@@ -26,7 +26,6 @@ fn convert_iter<U, A: IntoIterator<Item: Into<U>>, B: FromIterator<U>>(vec: A) -
 
 pub trait HirPass {
     type ModDcl: super::fmt::HirDisplay;
-    type ModRef: super::fmt::HirDisplay;
 
     type ItemDcl: super::fmt::HirDisplay;
     type ItemRef: super::fmt::HirDisplay;
@@ -46,7 +45,6 @@ pub struct UnlinkedPass;
 
 impl HirPass for UnlinkedPass {
     type ModDcl = UnlinkedMod;
-    type ModRef = UnlinkedMod;
 
     type ItemDcl = UnlinkedDecl;
     type ItemRef = UnlinkedVar;
@@ -66,12 +64,11 @@ pub struct FinalPass;
 
 impl HirPass for FinalPass {
     type ModDcl = LinkedMod;
-    type ModRef = LinkedMod;
 
-    type ItemDcl = LinkedVar;
+    type ItemDcl = LinkedDecl;
     type ItemRef = LinkedVar;
 
-    type VarDcl = LinkedVar;
+    type VarDcl = LinkedDecl;
     type VarRef = LinkedVar;
 
     type TypeRef = LinkedTypename;
@@ -252,21 +249,13 @@ impl<T: IgnoreLiteral<U>, U> LiteralVisitor<U> for T {
     }
 }
 
-pub trait LayerHandle {
-    fn push_scope(&mut self);
-}
-
 pub trait ScopeVisitor {
-    /// A handle that allows a scope to be pushed without error
-    type LayerHandle: LayerHandle;
-
-    fn push_layer(&mut self) -> &mut Self::LayerHandle;
+    fn push_layer(&mut self);
 
     /// Popping a layer should also pop all scopes within that layer, so calling `pop_scope` is unnecessary.
     fn pop_layer(&mut self);
 
-    /// Returns an error if the scope failed to push
-    fn push_scope(&mut self, span: RelSpan) -> Result<(), CheckDiagnostics>;
+    fn push_scope(&mut self);
 
     fn pop_scope(&mut self);
 
@@ -278,31 +267,16 @@ pub trait ScopeVisitor {
 pub trait IgnoreScope {}
 
 impl<T: IgnoreScope> ScopeVisitor for T {
-    type LayerHandle = Self;
-
-    fn push_layer(&mut self) -> &mut Self::LayerHandle {
-        self
-    }
-
+    fn push_layer(&mut self) {}
     fn pop_layer(&mut self) {}
-
-    fn push_scope(&mut self, _: RelSpan) -> Result<(), CheckDiagnostics> {
-        Ok(())
-    }
-
-    fn pop_scope(&mut self) {}
-
-    fn clear_scopes(&mut self) {}
-}
-
-impl<T: IgnoreScope> LayerHandle for T {
     fn push_scope(&mut self) {}
+    fn pop_scope(&mut self) {}
+    fn clear_scopes(&mut self) {}
 }
 
 pub trait Visitor<S: HirPass>:
     ScopeVisitor
     + ModDclVisitor<S::ModDcl>
-    + ModRefVisitor<S::ModRef>
     + ItemDclVisitor<S::ItemDcl>
     + ItemRefVisitor<S::ItemRef>
     + VarDclVisitor<S::VarDcl>
@@ -314,7 +288,6 @@ pub trait Visitor<S: HirPass>:
 {
     type Output: HirPass<
             ModDcl = <Self as ModDclVisitor<S::ModDcl>>::Value,
-            ModRef = <Self as ModRefVisitor<S::ModRef>>::Value,
             ItemDcl = <Self as ItemDclVisitor<S::ItemDcl>>::Value,
             ItemRef = <Self as ItemRefVisitor<S::ItemRef>>::Value,
             VarDcl = <Self as VarDclVisitor<S::VarDcl>>::Value,
@@ -2363,7 +2336,6 @@ impl From<ast::SkipStmt> for SkipStmt<UnlinkedPass> {
 }
 
 pub struct BlockStmt<S: HirPass> {
-    pub open: RelSpan,
     pub decls: Box<[Decl<S>]>,
 }
 
@@ -2373,18 +2345,10 @@ where
 {
     type Output = BlockStmt<V::Output>;
     fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
-        let Self { open, decls } = self;
-        let scope_failed = visitor.push_scope(self.open).is_err();
-        // fallback; an error should still be produced, but this allows for the content of the scope to be tried anyway
-        if scope_failed {
-            visitor.push_layer().push_scope();
-        }
-        let res = decls.walk(visitor).map(|decls| BlockStmt { open, decls });
-        if scope_failed {
-            visitor.pop_layer();
-        } else {
-            visitor.pop_scope();
-        }
+        let Self { decls } = self;
+        visitor.push_scope();
+        let res = decls.walk(visitor).map(|decls| BlockStmt { decls });
+        visitor.pop_scope();
         res
     }
 }
@@ -2392,13 +2356,12 @@ where
 impl From<ast::BlockStmt> for BlockStmt<UnlinkedPass> {
     fn from(
         ast::BlockStmt {
-            open,
+            open: _,
             body,
             close: _,
         }: ast::BlockStmt,
     ) -> Self {
         Self {
-            open,
             decls: convert_iter(body),
         }
     }

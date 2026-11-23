@@ -274,8 +274,9 @@ impl std::fmt::Debug for FileId {
 }
 
 impl FileId {
+    /// # Safety
     /// Caller must ensure this is a legitimate file index.
-    pub(super) const fn new(i: uspan) -> Self {
+    pub const unsafe fn new(i: uspan) -> Self {
         Self(i)
     }
 

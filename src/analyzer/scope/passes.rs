@@ -1,14 +1,12 @@
 use crate::{
     analyzer::{
         scope::hir::{self, HirPass, UnlinkedPass},
-        static_env::{
-            ModId,
-            scope::{self, ScopeEnvironment},
-        },
+        static_env::{ModId, scope::ScopeEnvironment},
     },
     error::{
         CheckDiagnostics, Diagnostic, DiagnosticCategory::StaticAnalysis, DiagnosticKind, Severity,
     },
+    lex::token::{CharLiteral, NumberLiteral, TextLiteral},
     parse::ast::{self, AstNode as _},
     src_code::{
         map::SourceMap,
@@ -21,7 +19,6 @@ pub struct PostDeclModPass;
 
 impl HirPass for PostDeclModPass {
     type ModDcl = hir::LinkedMod;
-    type ModRef = <hir::UnlinkedPass as HirPass>::ModRef;
 
     type ItemDcl = <hir::UnlinkedPass as HirPass>::ItemDcl;
     type ItemRef = <hir::UnlinkedPass as HirPass>::ItemRef; // TODO: distinguish from var
@@ -106,7 +103,6 @@ impl hir::ModDclVisitor<hir::UnlinkedMod> for DeclModVisitor<'_, '_, '_> {
 }
 
 // impl hir::IgnoreModDcl<<UnlinkedPass as HirPass>::ModDcl> for DeclModVisitor<'_, '_, '_> {}
-impl hir::IgnoreModRef<<UnlinkedPass as HirPass>::ModRef> for DeclModVisitor<'_, '_, '_> {}
 impl hir::IgnoreItemDcl<<UnlinkedPass as HirPass>::ItemDcl> for DeclModVisitor<'_, '_, '_> {}
 impl hir::IgnoreItemRef<<UnlinkedPass as HirPass>::ItemRef> for DeclModVisitor<'_, '_, '_> {}
 impl hir::IgnoreVarDcl<<UnlinkedPass as HirPass>::VarDcl> for DeclModVisitor<'_, '_, '_> {}
@@ -121,7 +117,6 @@ pub struct PostDeclPass;
 
 impl HirPass for PostDeclPass {
     type ModDcl = <PostDeclModPass as HirPass>::ModDcl;
-    type ModRef = <PostDeclModPass as HirPass>::ModRef;
 
     type ItemDcl = hir::LinkedDecl;
     type ItemRef = <PostDeclModPass as HirPass>::ItemRef; // TODO: distinguish from var
@@ -168,28 +163,16 @@ impl hir::Visitor<PostDeclModPass> for DeclVisitor<'_, '_, '_> {
 }
 
 impl hir::ScopeVisitor for DeclVisitor<'_, '_, '_> {
-    type LayerHandle = scope::Layer;
-
-    fn push_layer(&mut self) -> &mut scope::Layer {
-        self.env[self.mod_id].push_layer()
+    fn push_layer(&mut self) {
+        self.env[self.mod_id].push_layer();
     }
 
     fn pop_layer(&mut self) {
         self.env[self.mod_id].pop_layer();
     }
 
-    fn push_scope(&mut self, span: RelSpan) -> Result<(), CheckDiagnostics> {
-        self.env[self.mod_id].push_scope().is_some().ok_or_else(|| {
-            self.diagnostics.push(Diagnostic::new(
-                span.within_file(self.file),
-                DiagnosticKind::Other {
-                    severity: Severity::Error,
-                    category: StaticAnalysis,
-                    msg: "cannot push a scope in global".to_owned(),
-                },
-            ));
-            CheckDiagnostics
-        })
+    fn push_scope(&mut self) {
+        self.env[self.mod_id].push_scope();
     }
 
     fn pop_scope(&mut self) {
@@ -240,32 +223,16 @@ impl hir::VarDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_> {
     fn visit_var_dcl(&mut self, x: hir::UnlinkedDecl) -> Result<Self::Value, CheckDiagnostics> {
         let hir::UnlinkedDecl { kind, ident } = x;
         let ident = ident.within_file(self.file);
-        self.env
-            .decl_var(self.mod_id, self.source[ident].to_owned(), kind, ident)
-            .map(hir::LinkedDecl)
-            .map_err(|_| {
-                self.diagnostics.push(Diagnostic::new(
-                    ident,
-                    DiagnosticKind::Other {
-                        severity: Severity::Error,
-                        category: StaticAnalysis,
-                        msg: "cannot push variables to global scope, consider using `uni` or `pvt` instead or put in function scope".to_owned(),
-                    },
-                ));
-                CheckDiagnostics
-            })
-    }
-}
-
-impl hir::LayerHandle for scope::Layer {
-    fn push_scope(&mut self) {
-        // calls the inherent method
-        self.push_scope();
+        Ok(hir::LinkedDecl(self.env.decl_var(
+            self.mod_id,
+            self.source[ident].to_owned(),
+            kind,
+            ident,
+        )))
     }
 }
 
 impl hir::IgnoreModDcl<<PostDeclModPass as HirPass>::ModDcl> for DeclVisitor<'_, '_, '_> {}
-impl hir::IgnoreModRef<<PostDeclModPass as HirPass>::ModRef> for DeclVisitor<'_, '_, '_> {}
 // impl hir::IgnoreItemDcl<<PostDeclModPass as HirPass>::ItemDcl> for DeclVisitor<'_, '_, '_, > {}
 impl hir::IgnoreItemRef<<PostDeclModPass as HirPass>::ItemRef> for DeclVisitor<'_, '_, '_> {}
 // impl hir::IgnoreVarDcl<<PostDeclModPass as HirPass>::VarDcl> for DeclVisitor<'_, '_, '_, > {}
@@ -274,12 +241,12 @@ impl hir::IgnoreTypeRef<<PostDeclModPass as HirPass>::TypeRef> for DeclVisitor<'
 impl hir::IgnoreLabelDcl<<PostDeclModPass as HirPass>::LabelDcl> for DeclVisitor<'_, '_, '_> {}
 impl hir::IgnoreLabelRef<<PostDeclModPass as HirPass>::LabelRef> for DeclVisitor<'_, '_, '_> {}
 impl hir::IgnoreLiteral<<PostDeclModPass as HirPass>::Literal> for DeclVisitor<'_, '_, '_> {}
+// impl hir::IgnoreScope for DeclVisitor<'_, '_, '_> {}
 
 pub struct PostVarRefPass;
 
 impl HirPass for PostVarRefPass {
     type ModDcl = <PostDeclPass as HirPass>::ModDcl;
-    type ModRef = <PostDeclPass as HirPass>::ModRef;
 
     type ItemDcl = <PostDeclPass as HirPass>::ItemDcl;
     type ItemRef = hir::LinkedVar; // TODO: distinguish from var
@@ -382,23 +349,16 @@ impl hir::Visitor<PostDeclPass> for VarRefVisitor<'_, '_, '_> {
 
 // rebuild scope
 impl hir::ScopeVisitor for VarRefVisitor<'_, '_, '_> {
-    type LayerHandle = scope::Layer;
-
-    fn push_layer(&mut self) -> &mut Self::LayerHandle {
-        self.env[self.mod_id].push_layer()
+    fn push_layer(&mut self) {
+        self.env[self.mod_id].push_layer();
     }
 
     fn pop_layer(&mut self) {
         self.env[self.mod_id].pop_layer();
     }
 
-    fn push_scope(&mut self, _: RelSpan) -> Result<(), CheckDiagnostics> {
-        let res = self.env[self.mod_id].push_scope();
-        debug_assert!(
-            res.is_some(),
-            "cannot push a scope to global; should have errored during earlier pass"
-        );
-        Ok(())
+    fn push_scope(&mut self) {
+        self.env[self.mod_id].push_scope();
     }
 
     fn pop_scope(&mut self) {
@@ -442,11 +402,7 @@ impl hir::VarDclVisitor<hir::LinkedDecl> for VarRefVisitor<'_, '_, '_> {
         ).decl;
         let name = self.source[ident].to_owned();
         // important: `env.decl_*()` actually produces a new item ID, `env[self.mod_id].decl_*()` only pushes an ID to the scope!
-        let res = self.env[self.mod_id].decl_var(name, id);
-        debug_assert!(
-            res.is_ok(),
-            "tried to push a variable to global scope; should have errored during earlier pass"
-        );
+        self.env[self.mod_id].decl_var(name, id);
         Ok(x)
     }
 }
@@ -526,7 +482,6 @@ impl hir::TypeRefVisitor<hir::UnlinkedTypename> for VarRefVisitor<'_, '_, '_> {
 }
 
 impl hir::IgnoreModDcl<<PostDeclPass as HirPass>::ModDcl> for VarRefVisitor<'_, '_, '_> {}
-impl hir::IgnoreModRef<<PostDeclPass as HirPass>::ModRef> for VarRefVisitor<'_, '_, '_> {}
 // impl hir::IgnoreItemDcl<<PostDeclPass as HirPass>::ItemDcl> for VarRefVisitor<'_, '_, '_, > {}
 // impl hir::IgnoreItemRef<<PostDeclPass as HirPass>::ItemRef> for VarRefVisitor<'_, '_, '_, > {}
 // impl hir::IgnoreVarDcl<<PostDeclPass as HirPass>::VarDcl> for VarRefVisitor<'_, '_, '_, > {}
@@ -535,3 +490,96 @@ impl hir::IgnoreModRef<<PostDeclPass as HirPass>::ModRef> for VarRefVisitor<'_, 
 impl hir::IgnoreLabelDcl<<PostDeclPass as HirPass>::LabelDcl> for VarRefVisitor<'_, '_, '_> {}
 impl hir::IgnoreLabelRef<<PostDeclPass as HirPass>::LabelRef> for VarRefVisitor<'_, '_, '_> {}
 impl hir::IgnoreLiteral<<PostDeclPass as HirPass>::Literal> for VarRefVisitor<'_, '_, '_> {}
+// impl hir::IgnoreScope for VarRefVisitor<'_, '_, '_> {}
+
+pub struct LitVisitor<'env, 'src, 'err> {
+    source: &'src SourceMap,
+    env: &'env mut ScopeEnvironment,
+    diagnostics: &'err mut Vec<Diagnostic>,
+    mod_id: ModId,
+    file: FileId,
+}
+
+impl<'env, 'src, 'err> LitVisitor<'env, 'src, 'err> {
+    pub const fn new(
+        source: &'src SourceMap,
+        env: &'env mut ScopeEnvironment,
+        diagnostics: &'err mut Vec<Diagnostic>,
+        mod_id: ModId,
+        file: FileId,
+    ) -> Self {
+        Self {
+            source,
+            env,
+            diagnostics,
+            mod_id,
+            file,
+        }
+    }
+}
+
+impl hir::Visitor<PostVarRefPass> for LitVisitor<'_, '_, '_> {
+    type Output = hir::FinalPass;
+}
+
+impl hir::LiteralVisitor<hir::UnlinkedLiteral> for LitVisitor<'_, '_, '_> {
+    type Value = hir::LinkedLiteral;
+
+    fn visit_literal(&mut self, x: hir::UnlinkedLiteral) -> Result<Self::Value, CheckDiagnostics> {
+        let hir::UnlinkedLiteral(ast::Literal { kind, span }) = x;
+        let span = span.within_file(self.file);
+        let lex = &self.source[span];
+        Ok(match kind {
+            ast::LiteralKind::None => hir::LinkedLiteral::None,
+
+            ast::LiteralKind::Bool(x) => hir::LinkedLiteral::Bool(x),
+
+            ast::LiteralKind::Number => match lex.parse::<NumberLiteral>().map_err(|e| {
+                self.diagnostics.push(Diagnostic::new(span, e.into()));
+                CheckDiagnostics
+            })? {
+                NumberLiteral::Byte(x) => hir::LinkedLiteral::Byte(x),
+                NumberLiteral::Uint(x) => hir::LinkedLiteral::Uint(x),
+                NumberLiteral::Sint(x) => hir::LinkedLiteral::Sint(x),
+                NumberLiteral::Flpt(x) => hir::LinkedLiteral::Flpt(x),
+            },
+
+            ast::LiteralKind::Char => hir::LinkedLiteral::Char(
+                lex.parse::<CharLiteral>()
+                    .map_err(|e| {
+                        self.diagnostics.push(Diagnostic::new(
+                            span,
+                            e.try_into().expect("should include delimiters"),
+                        ));
+                        CheckDiagnostics
+                    })?
+                    .0,
+            ),
+
+            ast::LiteralKind::Text => hir::LinkedLiteral::Text(
+                lex.parse::<TextLiteral>()
+                    .map_err(|e| {
+                        self.diagnostics.push(Diagnostic::new(
+                            span,
+                            e.try_into().expect("should include delimiters"),
+                        ));
+                        CheckDiagnostics
+                    })?
+                    .0,
+            ),
+
+            ast::LiteralKind::Macro => todo!("error: should not have any macros at this point"),
+        })
+    }
+}
+
+impl hir::IgnoreModDcl<<PostVarRefPass as HirPass>::ModDcl> for LitVisitor<'_, '_, '_> {}
+impl hir::IgnoreItemDcl<<PostVarRefPass as HirPass>::ItemDcl> for LitVisitor<'_, '_, '_> {}
+impl hir::IgnoreItemRef<<PostVarRefPass as HirPass>::ItemRef> for LitVisitor<'_, '_, '_> {}
+impl hir::IgnoreVarDcl<<PostVarRefPass as HirPass>::VarDcl> for LitVisitor<'_, '_, '_> {}
+impl hir::IgnoreVarRef<<PostVarRefPass as HirPass>::VarRef> for LitVisitor<'_, '_, '_> {}
+impl hir::IgnoreTypeRef<<PostVarRefPass as HirPass>::TypeRef> for LitVisitor<'_, '_, '_> {}
+impl hir::IgnoreLabelDcl<<PostVarRefPass as HirPass>::LabelDcl> for LitVisitor<'_, '_, '_> {}
+impl hir::IgnoreLabelRef<<PostVarRefPass as HirPass>::LabelRef> for LitVisitor<'_, '_, '_> {}
+// impl hir::IgnoreLiteral<<PostVarRefPass as HirPass>::Literal> for LiteralVisitor<'_, '_, '_> {}
+impl hir::IgnoreScope for LitVisitor<'_, '_, '_> {}

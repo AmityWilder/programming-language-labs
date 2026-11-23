@@ -120,10 +120,11 @@
 
 use crate::{
     analyzer::{
+        mir,
         scope::{
             fmt::DisplayHir,
             hir::{self, TreeWalk as _},
-            passes::{DeclModVisitor, DeclVisitor, PostDeclModPass, VarRefVisitor},
+            passes::{DeclModVisitor, DeclVisitor, LitVisitor, PostDeclModPass, VarRefVisitor},
         },
         static_env::{ModId, scope::ScopeEnvironment},
     },
@@ -598,7 +599,12 @@ fn comp_file(
     println!("scanning...");
     {
         let code = &mut source[id];
-        code.set_tokens(lex::lex(id, code.content(), diagnostics));
+        code.set_tokens(
+            lex::lex(code.content(), |rel, kind| {
+                diagnostics.push(Diagnostic::new(rel.within_file(id), kind));
+            })
+            .collect(),
+        );
     }
 
     let code = &source[id];
@@ -839,23 +845,28 @@ fn compile(
                 scope_env[mod_id].debug_exports();
             })
         })
-        .collect_or_acc_errs::<Vec<_>, CheckDiagnostics>();
+        .collect_or_acc_errs::<Vec<_>, CheckDiagnostics>()
+        .inspect_err(|_| {
+            debug_assert!(
+                diagnostics.contains_err(),
+                "should have an error if output fails"
+            );
+        })?;
 
     // declaration errors
     diagnostics.ok_or_err()?;
-
-    let units = units.expect("should have an output if there are no errors");
 
     println!("analyzing scope...");
     let units = units
         .into_iter()
         .map(|unit| {
+            // references
             println!("linking {:?}", unit.file);
             let &mod_id = file_mod_ids
                 .get(&unit.file)
                 .expect("should have been defined by `analyze_module_tree`");
             let mut visitor = VarRefVisitor::new(source, scope_env, diagnostics, mod_id, unit.file);
-            unit.walk(&mut visitor).inspect(|hir| {
+            let unit = unit.walk(&mut visitor).inspect(|hir| {
                 println!(
                     "linked hir:\n{:#}",
                     DisplayHir {
@@ -866,14 +877,49 @@ fn compile(
                 );
                 #[cfg(all(debug_assertions, false))]
                 scope_env[mod_id].debug_exports();
+            })?;
+
+            // literals
+            println!("parsing literals in {:?}", unit.file);
+            let &mod_id = file_mod_ids
+                .get(&unit.file)
+                .expect("should have been defined by `analyze_module_tree`");
+            let mut visitor = LitVisitor::new(source, scope_env, diagnostics, mod_id, unit.file);
+            unit.walk(&mut visitor).inspect(|hir| {
+                println!(
+                    "hir:\n{:#}",
+                    DisplayHir {
+                        source,
+                        env: scope_env,
+                        hir,
+                    }
+                );
+                #[cfg(all(debug_assertions, false))]
+                scope_env[mod_id].debug_exports();
             })
         })
-        .collect_or_acc_errs::<Vec<_>, CheckDiagnostics>();
+        .collect_or_acc_errs::<Vec<_>, CheckDiagnostics>()
+        .inspect_err(|_| {
+            debug_assert!(
+                diagnostics.contains_err(),
+                "should have an error if output fails"
+            );
+        })?;
 
     // link errors
     diagnostics.ok_or_err()?;
 
-    let units = units.expect("should have an output if there are no errors");
+    let prgm = mir::finalize(units, source, scope_env, diagnostics).inspect_err(|_| {
+        debug_assert!(
+            diagnostics.contains_err(),
+            "should have an error if output fails"
+        );
+    })?;
+
+    // MIR errors
+    diagnostics.ok_or_err()?;
+
+    println!("program: {prgm:#?}");
 
     // -------------------------------------------------------------------------
 

@@ -3,7 +3,7 @@ use crate::{
     lex::token::TokenKind,
     src_code::{
         code::{ExpansionData, SourceCode},
-        span::{FileId, RelSpan, Span},
+        span::{FileId, RelSpan, Span, usize_to_uspan},
     },
 };
 
@@ -73,17 +73,26 @@ impl SourceMap {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (FileId, &SourceCode)> {
-        (0..).map(FileId::new).zip(self.files.iter())
+        self.files
+            .iter()
+            .enumerate()
+            // SAFETY: a file's ID is its index
+            .map(|(i, file)| (unsafe { FileId::new(usize_to_uspan(i)) }, file))
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (FileId, &mut SourceCode)> {
-        (0..).map(FileId::new).zip(self.files.iter_mut())
+        self.files
+            .iter_mut()
+            .enumerate()
+            // SAFETY: a file's ID is its index
+            .map(|(i, file)| (unsafe { FileId::new(usize_to_uspan(i)) }, file))
     }
 
     pub fn push(&mut self, code: SourceCode) -> FileId {
-        let id = FileId::new(uspan::try_from(self.files.len()).expect("too many files"));
+        let id = uspan::try_from(self.files.len()).expect("too many files");
         self.files.push(code);
-        id
+        // SAFETY: this is the index of the file we just pushed
+        unsafe { FileId::new(id) }
     }
 
     /// Returns [`None`] if the `rel` field of `span` does not refer to a valid range within `file`

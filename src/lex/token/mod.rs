@@ -1,10 +1,15 @@
 use crate::{
-    lex::token::{keyword::Keyword, punc::Punctuation},
+    error::{DiagnosticKind, NumErrorKind},
+    lex::{
+        symbols::{BYTE_SUFFIX, CHAR_DELIM, SIGNED_SUFFIX, TEXT_DELIM, UNSIGNED_SUFFIX},
+        token::{keyword::Keyword, punc::Punctuation},
+    },
     parse::ast::ExprPrecedence,
     src_code::{
         code::{LineContentSpans, SourceCode},
         span::{RelSpan, usize_to_uspan, uspan},
     },
+    types::{byte, flpt, sint, uint},
 };
 use std::range::Range;
 
@@ -95,6 +100,118 @@ pub mod keyword;
 pub mod punc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct CharLiteral(pub char);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CharLiteralError {
+    /// Not a valid char literal token, should not have attempted to parse
+    MissingOpen,
+    EmptyCharLiteral,
+    MultiCharLiteral,
+    EndlessCharLiteral,
+    EscapedCharLiteralEnd,
+    InvalidEscape,
+}
+
+impl TryFrom<CharLiteralError> for DiagnosticKind {
+    type Error = ();
+
+    fn try_from(value: CharLiteralError) -> Result<Self, Self::Error> {
+        match value {
+            CharLiteralError::MissingOpen => Err(()),
+            CharLiteralError::EmptyCharLiteral => Ok(Self::EmptyCharLiteral),
+            CharLiteralError::MultiCharLiteral => Ok(Self::MultiCharLiteral),
+            CharLiteralError::EndlessCharLiteral => Ok(Self::EndlessCharLiteral),
+            CharLiteralError::EscapedCharLiteralEnd => Ok(Self::EscapedCharLiteralEnd),
+            CharLiteralError::InvalidEscape => Ok(Self::InvalidEscape),
+        }
+    }
+}
+
+impl std::str::FromStr for CharLiteral {
+    type Err = CharLiteralError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.contains(r"\'") {
+            return Err(CharLiteralError::EscapedCharLiteralEnd);
+        }
+        let s = s
+            .strip_prefix(CHAR_DELIM)
+            .ok_or(CharLiteralError::MissingOpen)?
+            .strip_suffix(CHAR_DELIM)
+            .ok_or_else(|| CharLiteralError::EndlessCharLiteral)?;
+        if s.is_empty() {
+            Err(CharLiteralError::EmptyCharLiteral)
+        } else if let Some((len, res)) = esc::escape_char(s) {
+            res.map_err(|()| CharLiteralError::InvalidEscape)
+                .and_then(|ch| {
+                    if len == s.len() {
+                        Ok(ch)
+                    } else {
+                        debug_assert!(len < s.len(), "escape_char should not indicate a longer escape than the entire literal");
+                        Err(CharLiteralError::MultiCharLiteral)
+                    }
+                })
+        } else {
+            let mut iter = s.chars();
+            let ch = iter.next().expect("should not be empty in this branch");
+            if iter.next().is_none() {
+                Err(CharLiteralError::EmptyCharLiteral)
+            } else {
+                Ok(ch)
+            }
+        }
+        .map(Self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct TextLiteral(pub String);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TextLiteralError {
+    /// Not a valid char literal token, should not have attempted to parse
+    MissingOpen,
+    EndlessTextLiteral,
+    EscapedTextLiteralEnd,
+    InvalidEscape,
+}
+
+impl TryFrom<TextLiteralError> for DiagnosticKind {
+    type Error = ();
+
+    fn try_from(value: TextLiteralError) -> Result<Self, Self::Error> {
+        match value {
+            TextLiteralError::MissingOpen => Err(()),
+            TextLiteralError::EndlessTextLiteral => Ok(Self::EndlessStringLiteral),
+            TextLiteralError::EscapedTextLiteralEnd => Ok(Self::EscapedStringLiteralEnd),
+            TextLiteralError::InvalidEscape => Ok(Self::InvalidEscape),
+        }
+    }
+}
+
+impl std::str::FromStr for TextLiteral {
+    type Err = TextLiteralError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.contains(r#"\""#) {
+            return Err(TextLiteralError::EscapedTextLiteralEnd);
+        }
+        let s = s
+            .strip_prefix(TEXT_DELIM)
+            .ok_or(TextLiteralError::MissingOpen)?
+            .strip_suffix(TEXT_DELIM)
+            .ok_or(TextLiteralError::EndlessTextLiteral)?;
+        let mut res = s.to_owned();
+        for esc in esc::Escapes::new(s) {
+            let (range, ch) = esc.map_err(|_| TextLiteralError::InvalidEscape)?;
+            res.replace_range(range, ch.encode_utf8(&mut [0; char::MAX_LEN_UTF8]));
+        }
+        Ok(Self(res))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum IdentKind {
     #[default]
     Variable,
@@ -120,6 +237,94 @@ pub enum PuncKind {
     Bracket(u8),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub enum NumberLiteral {
+    Byte(byte),
+    Uint(uint),
+    Sint(sint),
+    Flpt(flpt),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NumberLiteralError {
+    /// Unsigned cannot be negated
+    UnsignedNeg,
+
+    /// A number literal could not be evaluated as a number
+    InvalidNumLiteral(NumErrorKind),
+}
+
+impl From<NumberLiteralError> for DiagnosticKind {
+    fn from(value: NumberLiteralError) -> Self {
+        match value {
+            NumberLiteralError::UnsignedNeg => Self::UnsignedNeg,
+            NumberLiteralError::InvalidNumLiteral(e) => Self::InvalidNumLiteral(e),
+        }
+    }
+}
+
+impl std::str::FromStr for NumberLiteral {
+    type Err = NumberLiteralError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.replace('_', ""); // TODO: surely this can be optimized?
+        if s.contains(['.', 'e', 'E']) {
+            // float
+            s.parse()
+                .map(Self::Flpt)
+                .map_err(|_| NumberLiteralError::InvalidNumLiteral(NumErrorKind::InvalidFlpt))
+        } else {
+            // integer
+            if let Some(s) = s.strip_suffix(BYTE_SUFFIX) {
+                s.parse().map(Self::Byte)
+            } else if let Some(s) = s.strip_suffix(UNSIGNED_SUFFIX) {
+                s.parse().map(Self::Uint)
+            } else {
+                s.strip_suffix(SIGNED_SUFFIX)
+                    .unwrap_or(&s)
+                    .parse()
+                    .map(Self::Sint)
+            }
+            .map_err(|_| NumberLiteralError::InvalidNumLiteral(NumErrorKind::InvalidInt))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum NumberBase {
+    Bin,
+    Oct,
+    #[default]
+    Dec,
+    Hex,
+}
+
+impl NumberBase {
+    pub const fn as_num(self) -> u8 {
+        match self {
+            Self::Bin => 2,
+            Self::Oct => 8,
+            Self::Dec => 10,
+            Self::Hex => 16,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Bin => "binary",
+            Self::Oct => "octal",
+            Self::Dec => "decimal",
+            Self::Hex => "hexadecimal",
+        }
+    }
+}
+
+impl From<NumberBase> for u8 {
+    fn from(value: NumberBase) -> Self {
+        value.as_num()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum NumberSuffix {
     #[default]
@@ -139,47 +344,52 @@ pub enum IdentCase {
     Screaming,
 }
 
-impl From<&str> for IdentCase {
-    fn from(value: &str) -> Self {
-        // PascalCase is allowed to contain underscores, as long as they aren't infix
-        let value = value.trim_matches('_');
-        let mut chars = value.chars();
-        if chars
-            .find(|ch| ch.is_alphabetic())
-            .is_some_and(char::is_uppercase)
-        {
-            if chars.any(char::is_lowercase) {
-                if value.contains('_') {
-                    Self::Other
+impl IdentCase {
+    pub fn str_case(value: &str) -> Option<Self> {
+        value
+            .chars()
+            .all(|ch| ch.is_alphanumeric() || ch == '_')
+            .then(|| {
+                // PascalCase is allowed to contain underscores, as long as they aren't infix
+                let value = value.trim_matches('_');
+                let mut chars = value.chars();
+                if chars
+                    .find(|ch| ch.is_alphabetic())
+                    .is_some_and(char::is_uppercase)
+                {
+                    if chars.any(char::is_lowercase) {
+                        if value.contains('_') {
+                            Self::Other
+                        } else {
+                            debug_assert!(
+                                !value.contains('_')
+                                    && value
+                                        .trim_start_matches(char::is_numeric)
+                                        .starts_with(char::is_uppercase)
+                                    && value.contains(char::is_lowercase),
+                                "expected PascalCase\n actual: {value:?}"
+                            );
+                            Self::Pascal
+                        }
+                    } else {
+                        debug_assert!(
+                            value
+                                .chars()
+                                .all(|ch| ch == '_' || ch.is_uppercase() || ch.is_numeric()),
+                            "expected SCREAMING_SNAKE_CASE\n actual: {value:?}"
+                        );
+                        Self::Screaming
+                    }
                 } else {
                     debug_assert!(
-                        !value.contains('_')
-                            && value
-                                .trim_start_matches(char::is_numeric)
-                                .starts_with(char::is_uppercase)
-                            && value.contains(char::is_lowercase),
-                        "expected PascalCase"
+                        value
+                            .chars()
+                            .all(|ch| ch == '_' || ch.is_lowercase() || ch.is_numeric()),
+                        "expected snake_case\n actual: {value:?}"
                     );
-                    Self::Pascal
+                    Self::Snake
                 }
-            } else {
-                debug_assert!(
-                    value
-                        .chars()
-                        .all(|ch| ch == '_' || ch.is_uppercase() || ch.is_numeric()),
-                    "expected SCREAMING_SNAKE_CASE"
-                );
-                Self::Screaming
-            }
-        } else {
-            debug_assert!(
-                value
-                    .chars()
-                    .all(|ch| ch == '_' || ch.is_lowercase() || ch.is_numeric()),
-                "expected snake_case"
-            );
-            Self::Snake
-        }
+            })
     }
 }
 
@@ -445,6 +655,20 @@ impl Iterator for TokenLines<'_, '_> {
 pub struct TokenTable {
     /// (length, kind)
     pub tokens: Vec<(uspan, TokenKind)>,
+}
+
+impl From<Vec<(uspan, TokenKind)>> for TokenTable {
+    fn from(tokens: Vec<(uspan, TokenKind)>) -> Self {
+        Self { tokens }
+    }
+}
+
+impl FromIterator<(uspan, TokenKind)> for TokenTable {
+    fn from_iter<I: IntoIterator<Item = (uspan, TokenKind)>>(iter: I) -> Self {
+        Self {
+            tokens: Vec::from_iter(iter),
+        }
+    }
 }
 
 impl TokenTable {

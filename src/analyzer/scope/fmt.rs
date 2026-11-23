@@ -1646,7 +1646,7 @@ impl<S: hir::HirPass> HirDisplay for hir::BlockStmt<S> {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self { open: _, decls } = self;
+        let Self { decls } = self;
         HirBlock::new(f).entries(decls, source, file, env).finish()
     }
 }

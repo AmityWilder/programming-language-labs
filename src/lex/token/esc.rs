@@ -144,4 +144,18 @@ mod tests {
         let esc = escape_char(SOURCE);
         assert_eq!(esc, Some((SOURCE.len(), Ok('\\'))));
     }
+
+    #[test]
+    fn test_esc_bad() {
+        const SOURCE: &str = r"\";
+        let esc = escape_char(SOURCE);
+        assert_eq!(esc, Some((SOURCE.len(), Err(()))));
+    }
+
+    #[test]
+    fn test_escless() {
+        const SOURCE: &str = r"a";
+        let esc = escape_char(SOURCE);
+        assert_eq!(esc, None);
+    }
 }

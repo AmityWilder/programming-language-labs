@@ -634,13 +634,13 @@ impl Fail {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd /*, Default*/)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Skip {
-    pub label: Todo,
+    pub label: Option<Todo>,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd /*, Default*/)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Done {
-    pub label: Todo,
+    pub label: Option<Todo>,
     pub value: Expr,
 }
