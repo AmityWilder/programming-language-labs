@@ -1,6 +1,5 @@
 //! The representation of the program that will actually be interpreted
 
-use super::Type;
 use crate::{
     error::fail::Failure,
     exec::{EnvId, Value, env::Environment},
@@ -12,7 +11,7 @@ const STATIC_GUARANTEE: &str = "should be guaranteed by static analysis";
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Program {
-    pub stmts: Vec<Stmt>,
+    pub stmts: Box<[Stmt]>,
 }
 
 impl Program {
@@ -136,7 +135,7 @@ impl Expr {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Operation {
     pub what: Callable,
-    pub args: Vec<Expr>,
+    pub args: Box<[Expr]>,
 }
 
 impl Operation {
@@ -508,160 +507,6 @@ impl BuiltinOp {
             _ => panic!("invalid operands; {STATIC_GUARANTEE}"),
         })
     }
-
-    pub const fn operand_count(self) -> usize {
-        self.operands().len()
-    }
-
-    pub const fn operands(self) -> &'static [Type] {
-        use BuiltinOp::*;
-        use Type::*;
-        #[expect(clippy::match_same_arms)]
-        match self {
-            InptB => &[],
-            InptC => &[],
-            InptT => &[],
-            ExistsN => &[None],
-            ExistsF => &[Flpt],
-            ExistsL => &[Bool],
-            ExistsB => &[Byte],
-            ExistsU => &[Uint],
-            ExistsS => &[Sint],
-            ExistsC => &[Char],
-            ExistsT => &[Text],
-            IndexT => &[Uint],
-            SliceT => todo!(),
-            NotL => &[Bool],
-            NotB => &[Byte],
-            NotU => &[Uint],
-            NotS => &[Sint],
-            AndL => &[Bool, Bool],
-            AndB => &[Byte, Byte],
-            AndU => &[Uint, Uint],
-            AndS => &[Sint, Sint],
-            OrL => &[Bool, Bool],
-            OrB => &[Byte, Byte],
-            OrU => &[Uint, Uint],
-            OrS => &[Sint, Sint],
-            XorL => &[Bool, Bool],
-            XorB => &[Byte, Byte],
-            XorU => &[Uint, Uint],
-            XorS => &[Sint, Sint],
-            NandL => &[Bool, Bool],
-            NandB => &[Byte, Byte],
-            NandU => &[Uint, Uint],
-            NandS => &[Sint, Sint],
-            NorL => &[Bool, Bool],
-            NorB => &[Byte, Byte],
-            NorU => &[Uint, Uint],
-            NorS => &[Sint, Sint],
-            XnorL => &[Bool, Bool],
-            XnorB => &[Byte, Byte],
-            XnorU => &[Uint, Uint],
-            XnorS => &[Sint, Sint],
-            EqL => &[Bool, Bool],
-            EqB => &[Byte, Byte],
-            EqU => &[Uint, Uint],
-            EqS => &[Sint, Sint],
-            EqC => &[Char, Char],
-            EqT => &[Text, Text],
-            NeL => &[Bool, Bool],
-            NeB => &[Byte, Byte],
-            NeU => &[Uint, Uint],
-            NeS => &[Sint, Sint],
-            NeC => &[Char, Char],
-            NeT => &[Text, Text],
-            LtL => &[Bool, Bool],
-            LtB => &[Byte, Byte],
-            LtU => &[Uint, Uint],
-            LtS => &[Sint, Sint],
-            LtC => &[Char, Char],
-            LtT => &[Text, Text],
-            GtL => &[Bool, Bool],
-            GtB => &[Byte, Byte],
-            GtU => &[Uint, Uint],
-            GtS => &[Sint, Sint],
-            GtC => &[Char, Char],
-            GtT => &[Text, Text],
-            LeL => &[Bool, Bool],
-            LeB => &[Byte, Byte],
-            LeU => &[Uint, Uint],
-            LeS => &[Sint, Sint],
-            LeC => &[Char, Char],
-            LeT => &[Text, Text],
-            GeL => &[Bool, Bool],
-            GeB => &[Byte, Byte],
-            GeU => &[Uint, Uint],
-            GeS => &[Sint, Sint],
-            GeC => &[Char, Char],
-            GeT => &[Text, Text],
-            NegS => &[Sint],
-            NegF => &[Flpt],
-            AddB => &[Byte, Byte],
-            AddU => &[Uint, Uint],
-            AddS => &[Sint, Sint],
-            AddF => &[Flpt, Flpt],
-            SubB => &[Byte, Byte],
-            SubU => &[Uint, Uint],
-            SubS => &[Sint, Sint],
-            SubF => &[Flpt, Flpt],
-            MulB => &[Byte, Byte],
-            MulU => &[Uint, Uint],
-            MulS => &[Sint, Sint],
-            MulF => &[Flpt, Flpt],
-            DivB => &[Byte, Byte],
-            DivU => &[Uint, Uint],
-            DivS => &[Sint, Sint],
-            RemB => &[Byte, Byte],
-            RemU => &[Uint, Uint],
-            RemS => &[Sint, Sint],
-            PowBB => &[Byte, Byte],
-            PowBU => &[Byte, Uint],
-            PowUB => &[Uint, Byte],
-            PowUU => &[Uint, Uint],
-            PowSB => &[Sint, Byte],
-            PowSU => &[Sint, Uint],
-            PowFB => &[Flpt, Byte],
-            PowFU => &[Flpt, Uint],
-            PowFF => &[Flpt, Flpt],
-            ShlBB => &[Byte, Byte],
-            ShlBU => &[Byte, Uint],
-            ShlBS => &[Byte, Sint],
-            ShlUB => &[Uint, Byte],
-            ShlUU => &[Uint, Uint],
-            ShlUS => &[Uint, Sint],
-            ShlSB => &[Sint, Byte],
-            ShlSU => &[Sint, Uint],
-            ShlSS => &[Sint, Sint],
-            ShrBB => &[Byte, Byte],
-            ShrBU => &[Byte, Uint],
-            ShrBS => &[Byte, Sint],
-            ShrUB => &[Uint, Byte],
-            ShrUU => &[Uint, Uint],
-            ShrUS => &[Uint, Sint],
-            ShrSB => &[Sint, Byte],
-            ShrSU => &[Sint, Uint],
-            ShrSS => &[Sint, Sint],
-            RotlBB => &[Byte, Byte],
-            RotlBU => &[Byte, Uint],
-            RotlBS => &[Byte, Sint],
-            RotlUB => &[Uint, Byte],
-            RotlUU => &[Uint, Uint],
-            RotlUS => &[Uint, Sint],
-            RotlSB => &[Sint, Byte],
-            RotlSU => &[Sint, Uint],
-            RotlSS => &[Sint, Sint],
-            RotrBB => &[Byte, Byte],
-            RotrBU => &[Byte, Uint],
-            RotrBS => &[Byte, Sint],
-            RotrUB => &[Uint, Byte],
-            RotrUU => &[Uint, Uint],
-            RotrUS => &[Uint, Sint],
-            RotrSB => &[Sint, Byte],
-            RotrSU => &[Sint, Uint],
-            RotrSS => &[Sint, Sint],
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -723,7 +568,7 @@ impl Dfer {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Branch {
-    pub cases: Vec<Case>,
+    pub cases: Box<[Case]>,
     /// Trailing `or` case
     pub default: Option<Block>,
 }
@@ -754,7 +599,7 @@ pub struct Case {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Block {
-    pub stmts: Vec<Stmt>,
+    pub stmts: Box<[Stmt]>,
 }
 
 impl Block {

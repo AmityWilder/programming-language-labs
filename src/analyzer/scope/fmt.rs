@@ -8,11 +8,11 @@
 
 use crate::{
     SYNTAX_STYLE_ANSI,
-    analyzer::static_env::{
-        ItemId, ModId,
-        scope::{
-            env::{Item, ScopeEnvironment, ScopeId},
-            hir::{self, HirUnit},
+    analyzer::{
+        scope::hir::{self, HirUnit},
+        static_env::{
+            ItemId, ModId,
+            scope::{Item, ScopeEnvironment, ScopeId},
         },
     },
     highlight::{
@@ -30,12 +30,8 @@ use crate::{
 use std::fmt;
 
 mod helpers {
-    use super::HirDisplay;
-    use crate::{
-        analyzer::static_env::scope::env::ScopeEnvironment,
-        src_code::{map::SourceMap, span::FileId},
-    };
-    use std::fmt::{self, Write};
+    use super::*;
+    use fmt::Write;
 
     /// [`std::fmt::PadAdapter`] is private :c
     pub struct Indented<'buf> {
@@ -1281,6 +1277,27 @@ impl HirDisplay for hir::UnlinkedLiteral {
         let Self(inner) = self;
         let ast::Literal { kind: _, span } = inner;
         write!(f, "{}", &source[file][*span])
+    }
+}
+
+impl HirDisplay for hir::LinkedLiteral {
+    fn fmt(
+        &self,
+        _source: &SourceMap,
+        _file: FileId,
+        _env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        match *self {
+            Self::None => f.write_str("none"),
+            Self::Bool(x) => f.write_str(if x { "true" } else { "fals" }),
+            Self::Byte(x) => write!(f, "{x}b"),
+            Self::Uint(x) => write!(f, "{x}u"),
+            Self::Sint(x) => write!(f, "{x}s"),
+            Self::Flpt(x) => write!(f, "{x}"),
+            Self::Char(x) => write!(f, "{x:?}"),
+            Self::Text(ref x) => write!(f, "{x:?}"),
+        }
     }
 }
 

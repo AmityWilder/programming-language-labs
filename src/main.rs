@@ -119,15 +119,15 @@
 )]
 
 use crate::{
-    analyzer::static_env::{
-        ModId,
+    analyzer::{
         scope::{
             fmt::DisplayHir,
             hir::{self, TreeWalk as _},
             passes::{DeclModVisitor, DeclVisitor, PostDeclModPass, VarRefVisitor},
         },
+        static_env::{ModId, scope::ScopeEnvironment},
     },
-    error::Diagnostic,
+    error::{CheckDiagnostics, Diagnostic, fail::Failure},
     highlight::{
         TokenHighlight, highlight,
         style::{Color, Style, StyleWrapper},
@@ -135,18 +135,12 @@ use crate::{
     },
     parse::ast::VisitSpans as _,
     src_code::{
-        code::{CreateSourceCodeError, SourceCode, SourceLoc, eq_module_name},
+        code::{CreateSourceCodeError, ExpansionData, SourceCode, SourceLoc, eq_module_name},
         map::SourceMap,
-        span::RelSpan,
+        span::{FileId, RelSpan, usize_to_uspan},
     },
     todo_types::Dummy,
     util::OrAllErrsExt as _,
-};
-use analyzer::static_env::scope::env::ScopeEnvironment;
-use error::{CheckDiagnostics, fail::Failure};
-use src_code::{
-    code::ExpansionData,
-    span::{FileId, usize_to_uspan},
 };
 use std::{
     collections::{BTreeMap, VecDeque},

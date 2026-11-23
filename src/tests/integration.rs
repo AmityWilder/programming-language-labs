@@ -1,6 +1,6 @@
 use crate::{
     Cli,
-    analyzer::static_env::scope::env::ScopeEnvironment,
+    analyzer::static_env::scope::ScopeEnvironment,
     compile,
     src_code::{
         code::{SourceCode, SourceLoc},

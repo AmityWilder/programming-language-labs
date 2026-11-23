@@ -233,18 +233,3 @@ impl Value {
         }
     }
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum Type {
-    #[default]
-    None,
-    Fail,
-    Nevr,
-    Bool,
-    Byte,
-    Uint,
-    Sint,
-    Flpt,
-    Char,
-    Text,
-}

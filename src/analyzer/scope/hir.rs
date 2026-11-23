@@ -9,14 +9,14 @@
 
 use crate::{
     analyzer::{
-        static_env::{ItemId, ModId, TypeId, VarId, scope::env::ItemKind},
+        static_env::{ItemId, ModId, TypeId, VarId, scope::ItemKind},
         types::bounds::Combinator,
     },
     error::CheckDiagnostics,
     lex::token::{Operator, punc::OpSide},
     parse::ast,
     src_code::span::{FileId, RelSpan},
-    todo_types::Todo,
+    types::{byte, flpt, sint, text, uint},
     util::OrAllErrsExt as _,
 };
 
@@ -60,6 +60,26 @@ impl HirPass for UnlinkedPass {
     type LabelRef = UnlinkedLabel;
 
     type Literal = UnlinkedLiteral;
+}
+
+pub struct FinalPass;
+
+impl HirPass for FinalPass {
+    type ModDcl = LinkedMod;
+    type ModRef = LinkedMod;
+
+    type ItemDcl = LinkedVar;
+    type ItemRef = LinkedVar;
+
+    type VarDcl = LinkedVar;
+    type VarRef = LinkedVar;
+
+    type TypeRef = LinkedTypename;
+
+    type LabelDcl = LinkedLabel;
+    type LabelRef = LinkedLabel;
+
+    type Literal = LinkedLiteral;
 }
 
 pub trait ModDclVisitor<T> {
@@ -1755,6 +1775,7 @@ impl From<ast::FnCall> for FnCall<UnlinkedPass> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UnlinkedLiteral(pub ast::Literal);
 
 impl From<ast::Literal> for UnlinkedLiteral {
@@ -1763,7 +1784,18 @@ impl From<ast::Literal> for UnlinkedLiteral {
     }
 }
 
-pub struct LinkedLiteral(pub Todo);
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+pub enum LinkedLiteral {
+    #[default]
+    None,
+    Bool(bool),
+    Byte(byte),
+    Uint(uint),
+    Sint(sint),
+    Flpt(flpt),
+    Char(char),
+    Text(text),
+}
 
 #[derive(Walkable)]
 pub enum Directive {
@@ -2106,7 +2138,8 @@ impl From<ast::PickArm> for PickArm<UnlinkedPass> {
 
 pub struct UnlinkedLabel(pub RelSpan);
 
-pub struct LinkedLabel(pub Todo);
+/// TODO
+pub type LinkedLabel = UnlinkedLabel;
 
 impl From<ast::Label> for UnlinkedLabel {
     fn from(ast::Label { dot: _, name }: ast::Label) -> Self {

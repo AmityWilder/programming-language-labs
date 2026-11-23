@@ -1,9 +1,9 @@
 use crate::{
-    analyzer::static_env::{
-        ModId,
-        scope::{
-            env::{self, ScopeEnvironment},
-            hir::{self, HirPass, UnlinkedPass},
+    analyzer::{
+        scope::hir::{self, HirPass, UnlinkedPass},
+        static_env::{
+            ModId,
+            scope::{self, ScopeEnvironment},
         },
     },
     error::{
@@ -168,9 +168,9 @@ impl hir::Visitor<PostDeclModPass> for DeclVisitor<'_, '_, '_> {
 }
 
 impl hir::ScopeVisitor for DeclVisitor<'_, '_, '_> {
-    type LayerHandle = env::Layer;
+    type LayerHandle = scope::Layer;
 
-    fn push_layer(&mut self) -> &mut env::Layer {
+    fn push_layer(&mut self) -> &mut scope::Layer {
         self.env[self.mod_id].push_layer()
     }
 
@@ -257,7 +257,7 @@ impl hir::VarDclVisitor<hir::UnlinkedDecl> for DeclVisitor<'_, '_, '_> {
     }
 }
 
-impl hir::LayerHandle for env::Layer {
+impl hir::LayerHandle for scope::Layer {
     fn push_scope(&mut self) {
         // calls the inherent method
         self.push_scope();
@@ -382,7 +382,7 @@ impl hir::Visitor<PostDeclPass> for VarRefVisitor<'_, '_, '_> {
 
 // rebuild scope
 impl hir::ScopeVisitor for VarRefVisitor<'_, '_, '_> {
-    type LayerHandle = env::Layer;
+    type LayerHandle = scope::Layer;
 
     fn push_layer(&mut self) -> &mut Self::LayerHandle {
         self.env[self.mod_id].push_layer()
