@@ -27,6 +27,8 @@
     formatting_options,
     default_ignorable,
     try_entry,
+    try_trait_v2,
+    try_trait_v2_residual,
 )]
 #![forbid(
     clippy::missing_safety_doc,

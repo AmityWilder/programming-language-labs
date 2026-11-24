@@ -141,7 +141,15 @@ impl hir::DeclUni<hir::FinalPass> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Option<tree::Expr>, CheckDiagnostics> {
         self.init
-            .map(|x| x.finalize(source, env, diagnostics))
+            .map(|x| {
+                Ok(tree::Expr::Operation(tree::Operation {
+                    what: tree::Callable::Builtin(tree::BuiltinOp::Assign),
+                    args: Box::from([
+                        self.id.finalize(source, env, diagnostics)?,
+                        x.finalize(source, env, diagnostics)?,
+                    ]),
+                }))
+            })
             .transpose()
     }
 }
@@ -154,7 +162,15 @@ impl hir::DeclLet<hir::FinalPass> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Option<tree::Expr>, CheckDiagnostics> {
         self.init
-            .map(|x| x.finalize(source, env, diagnostics))
+            .map(|x| {
+                Ok(tree::Expr::Operation(tree::Operation {
+                    what: tree::Callable::Builtin(tree::BuiltinOp::Assign),
+                    args: Box::from([
+                        self.id.finalize(source, env, diagnostics)?,
+                        x.finalize(source, env, diagnostics)?,
+                    ]),
+                }))
+            })
             .transpose()
     }
 }
@@ -394,6 +410,18 @@ impl hir::LinkedLiteral {
     }
 }
 
+impl hir::LinkedDecl {
+    fn finalize(
+        self,
+        _source: &SourceMap,
+        _env: &mut ScopeEnvironment,
+        _diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<tree::Expr, CheckDiagnostics> {
+        let Self(id) = self;
+        Ok(tree::Expr::Access(EnvId(id.get())))
+    }
+}
+
 impl hir::LinkedVar {
     fn finalize(
         self,
@@ -447,7 +475,10 @@ impl<S: hir::HirPass> Iterator for IfStmtIntoIter<S> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if let Self::More(x) = std::mem::take(self) {
+        if matches!(self, Self::More(_)) {
+            let Self::More(x) = std::mem::take(self) else {
+                unreachable!("guarded by matches!()")
+            };
             let hir::IfStmt { pred, then, or } = x;
             if let Some(or) = or {
                 *self = match *or {
@@ -560,7 +591,10 @@ impl hir::RepStmt<hir::FinalPass> {
         finalize_decls(body.decls, source, env, diagnostics).map(|mut stmts: VecDeque<_>| {
             stmts.push_front(tree::Stmt::Branch(tree::Branch {
                 cases: Box::from([tree::Case {
-                    pred,
+                    pred: tree::Expr::Operation(tree::Operation {
+                        what: tree::Callable::Builtin(tree::BuiltinOp::Not),
+                        args: Box::from([pred]),
+                    }),
                     then: tree::Block {
                         stmts: Box::from([tree::Stmt::Done(tree::Done {
                             // only escape this loop

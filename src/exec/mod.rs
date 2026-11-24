@@ -1,4 +1,7 @@
-use crate::types::{byte, fail, flpt, none, sint, text, uint};
+use crate::{
+    todo_types::Todo,
+    types::{byte, fail, flpt, none, sint, text, uint},
+};
 
 pub mod builtin_op;
 pub mod env;
@@ -6,6 +9,88 @@ pub mod tree;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct EnvId(pub usize);
+
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ControlFlow<E, T, U = T, L = Todo> {
+    Ok(T),
+    Err(E),
+    Skip { label: Option<L> },
+    Break { label: Option<L>, value: U },
+    Return { value: U },
+}
+
+impl<E, T, U, L> ControlFlow<E, T, U, L> {
+    #[inline]
+    pub fn ok(self) -> Result<T, ControlFlow<E, !, U, L>> {
+        match self {
+            Self::Ok(x) => Ok(x),
+            Self::Err(e) => Err(ControlFlow::Err(e)),
+            Self::Skip { label } => Err(ControlFlow::Skip { label }),
+            Self::Break { label, value } => Err(ControlFlow::Break { label, value }),
+            Self::Return { value } => Err(ControlFlow::Return { value }),
+        }
+    }
+
+    #[inline]
+    pub fn map<F, O>(self, f: F) -> ControlFlow<E, O, U, L>
+    where
+        F: FnOnce(T) -> O,
+    {
+        match self {
+            Self::Ok(x) => ControlFlow::Ok(f(x)),
+            Self::Err(e) => ControlFlow::Err(e),
+            Self::Skip { label } => ControlFlow::Skip { label },
+            Self::Break { label, value } => ControlFlow::Break { label, value },
+            Self::Return { value } => ControlFlow::Return { value },
+        }
+    }
+}
+
+impl<E, T, U, L> std::ops::Residual<T> for ControlFlow<E, !, U, L> {
+    type TryType = ControlFlow<E, T, U, L>;
+}
+
+impl<E, T, U, L> std::ops::FromResidual<ControlFlow<E, !, U, L>> for ControlFlow<E, T, U, L> {
+    #[inline]
+    fn from_residual(residual: ControlFlow<E, !, U, L>) -> Self {
+        match residual {
+            ControlFlow::Ok(_) => unreachable!(),
+            ControlFlow::Err(e) => Self::Err(e),
+            ControlFlow::Skip { label } => Self::Skip { label },
+            ControlFlow::Break { label, value } => Self::Break { label, value },
+            ControlFlow::Return { value } => Self::Return { value },
+        }
+    }
+}
+
+impl<E, T, U, L> std::ops::Try for ControlFlow<E, T, U, L> {
+    type Output = T;
+    type Residual = ControlFlow<E, !, U, L>;
+
+    #[inline]
+    fn from_output(output: Self::Output) -> Self {
+        Self::Ok(output)
+    }
+
+    #[inline]
+    fn branch(self) -> std::ops::ControlFlow<Self::Residual, Self::Output> {
+        use std::ops::ControlFlow::{Break, Continue};
+        match self {
+            Self::Ok(val) => Continue(val),
+            Self::Err(e) => Break(ControlFlow::Err(e)),
+            Self::Skip { label } => Break(ControlFlow::Skip { label }),
+            Self::Break { label, value } => Break(ControlFlow::Break { label, value }),
+            Self::Return { value } => Break(ControlFlow::Return { value }),
+        }
+    }
+}
+
+impl<T: Default, U, E, L> Default for ControlFlow<E, T, U, L> {
+    fn default() -> Self {
+        Self::Ok(T::default())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub enum Value {

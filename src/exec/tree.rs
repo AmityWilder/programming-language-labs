@@ -1,5 +1,6 @@
 //! The representation of the program that will actually be interpreted
 
+use super::ControlFlow;
 pub use super::builtin_op::BuiltinOp;
 use crate::{
     error::fail::Failure,
@@ -10,6 +11,12 @@ use crate::{
 
 const STATIC_GUARANTEE: &str = "should be guaranteed by static analysis";
 
+#[cfg(debug_assertions)]
+thread_local! {
+    /// For debugging
+    static DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Program {
     pub stmts: Box<[Stmt]>,
@@ -18,19 +25,21 @@ pub struct Program {
 impl Program {
     pub fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         for stmt in &self.stmts {
-            stmt.exec(env)?;
+            match stmt.eval(env) {
+                ControlFlow::Ok(res) => {
+                    debug_assert_eq!(res, Value::None, "non-none output from statement");
+                }
+                ControlFlow::Err(e) => return Err(e),
+
+                ControlFlow::Skip { .. } => todo!("error: attempted to `skip` outside of a loop"),
+                ControlFlow::Break { .. } => todo!("error: attempted to `done` outside of a loop"),
+                ControlFlow::Return { .. } => {
+                    todo!("error: attempted to `give` outside of a function")
+                }
+            }
         }
         Ok(())
     }
-}
-
-fn eval_to_exec(res: Result<Value, Failure>) -> Result<(), Failure> {
-    res.map(|x| {
-        #[cfg(debug_assertions)]
-        if !matches!(x, Value::None) {
-            println!("WARNING: expression has a non-none result that is not handled: {x:?}");
-        }
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -47,22 +56,18 @@ pub enum Stmt {
 }
 
 impl Stmt {
-    pub fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
+    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
         match self {
             Self::Expr(x) => x.eval(env),
             Self::Print(x) => x.eval(env),
             Self::Loop(x) => x.eval(env),
             Self::Dfer(x) => x.eval(env),
             Self::Branch(x) => x.eval(env),
-            Self::Give(_) => todo!(),
-            Self::Fail(x) => Err(x.eval(env)),
-            Self::Skip(_) => todo!(),
-            Self::Done(_) => todo!(),
+            Self::Give(x) => x.eval(env),
+            Self::Fail(x) => ControlFlow::Err(x.eval(env)),
+            Self::Skip(x) => x.eval(env),
+            Self::Done(x) => x.eval(env),
         }
-    }
-
-    pub fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
-        eval_to_exec(self.eval(env))
     }
 }
 
@@ -80,55 +85,66 @@ impl Default for Expr {
 }
 
 impl Expr {
-    pub fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
-        match self {
-            Self::Literal(x) => Ok(x.clone()),
-            Self::Access(x) => Ok(Value::Var(*x)),
-            Self::Operation(x) => x.eval(env),
+    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value, Value> {
+        if cfg!(all(debug_assertions, false)) {
+            for _ in 0..DEPTH.get() {
+                print!("  ");
+            }
+            println!("<evaluating: {self:?}>");
+            DEPTH.update(|n| n + 1);
         }
+        let res = match self {
+            Self::Literal(x) => ControlFlow::Ok(x.clone()),
+            Self::Access(x) => ControlFlow::Ok(Value::Var(*x)),
+            Self::Operation(x) => x.eval(env),
+        };
+        if cfg!(all(debug_assertions, false)) {
+            DEPTH.update(|n| n - 1);
+            for _ in 0..DEPTH.get() {
+                print!("  ");
+            }
+            println!(" <result: {res:?}>");
+        }
+        res
     }
 
-    pub fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
-        eval_to_exec(self.eval(env))
-    }
-
-    pub fn eval_none(&self, env: &mut Environment) -> Result<none, Failure> {
+    pub fn eval_none(&self, env: &mut Environment) -> ControlFlow<Failure, none, Value> {
         self.eval(env).map(|x| x.none().expect(STATIC_GUARANTEE))
     }
 
-    pub fn eval_fail(&self, env: &mut Environment) -> Result<fail, Failure> {
+    pub fn eval_fail(&self, env: &mut Environment) -> ControlFlow<Failure, fail, Value> {
         self.eval(env).map(|x| x.fail().expect(STATIC_GUARANTEE))
     }
 
-    pub fn eval_bool(&self, env: &mut Environment) -> Result<bool, Failure> {
+    pub fn eval_bool(&self, env: &mut Environment) -> ControlFlow<Failure, bool, Value> {
         self.eval(env).map(|x| x.bool().expect(STATIC_GUARANTEE))
     }
 
-    pub fn eval_byte(&self, env: &mut Environment) -> Result<byte, Failure> {
+    pub fn eval_byte(&self, env: &mut Environment) -> ControlFlow<Failure, byte, Value> {
         self.eval(env).map(|x| x.byte().expect(STATIC_GUARANTEE))
     }
 
-    pub fn eval_uint(&self, env: &mut Environment) -> Result<uint, Failure> {
+    pub fn eval_uint(&self, env: &mut Environment) -> ControlFlow<Failure, uint, Value> {
         self.eval(env).map(|x| x.uint().expect(STATIC_GUARANTEE))
     }
 
-    pub fn eval_sint(&self, env: &mut Environment) -> Result<sint, Failure> {
+    pub fn eval_sint(&self, env: &mut Environment) -> ControlFlow<Failure, sint, Value> {
         self.eval(env).map(|x| x.sint().expect(STATIC_GUARANTEE))
     }
 
-    pub fn eval_flpt(&self, env: &mut Environment) -> Result<flpt, Failure> {
+    pub fn eval_flpt(&self, env: &mut Environment) -> ControlFlow<Failure, flpt, Value> {
         self.eval(env).map(|x| x.flpt().expect(STATIC_GUARANTEE))
     }
 
-    pub fn eval_char(&self, env: &mut Environment) -> Result<char, Failure> {
+    pub fn eval_char(&self, env: &mut Environment) -> ControlFlow<Failure, char, Value> {
         self.eval(env).map(|x| x.char().expect(STATIC_GUARANTEE))
     }
 
-    pub fn eval_text(&self, env: &mut Environment) -> Result<text, Failure> {
+    pub fn eval_text(&self, env: &mut Environment) -> ControlFlow<Failure, text, Value> {
         self.eval(env).map(|x| x.text().expect(STATIC_GUARANTEE))
     }
 
-    pub fn eval_var(&self, env: &mut Environment) -> Result<EnvId, Failure> {
+    pub fn eval_var(&self, env: &mut Environment) -> ControlFlow<Failure, EnvId, Value> {
         self.eval(env).map(|x| x.var().expect(STATIC_GUARANTEE))
     }
 }
@@ -140,7 +156,7 @@ pub struct Operation {
 }
 
 impl Operation {
-    pub fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
+    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
         match self.what {
             Callable::Builtin(op) => op.eval(env, &self.args),
             Callable::UserDefined(_fun) => todo!(),
@@ -160,12 +176,11 @@ pub struct Print {
     pub msg: Expr,
 }
 impl Print {
-    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
-        self.exec(env).map(|()| Value::None)
-    }
-
-    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
-        self.msg.eval_text(env).map(|msg| print!("{msg}"))
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        self.msg.eval_text(env).map(|msg| {
+            print!("{msg}");
+            Value::None
+        })
     }
 }
 
@@ -175,15 +190,28 @@ pub struct Loop {
 }
 
 impl Loop {
-    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
         loop {
-            // TODO: skip/done/give
-            self.block.eval(env)?;
-        }
-    }
+            match self.block.eval(env) {
+                ControlFlow::Ok(res) => {
+                    debug_assert_eq!(res, Value::None, "non-none loop body");
+                }
 
-    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
-        eval_to_exec(self.eval(env))
+                ControlFlow::Skip { label }
+                    if label.is_none_or(|_| todo!("test if label matches this loop")) =>
+                {
+                    // TODO: jump to the iterator if this is a for loop
+                }
+
+                ControlFlow::Break { label, value } | ControlFlow::Break { label, value }
+                    if label.is_none_or(|_| todo!("test if label matches this loop")) =>
+                {
+                    break ControlFlow::Ok(value);
+                }
+
+                res => break res,
+            }
+        }
     }
 }
 
@@ -195,19 +223,20 @@ pub struct Dfer {
 }
 
 impl Dfer {
-    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
         let res = self.do_first.eval(env);
         if let Some(_id) = self.ret_param {
             // assign res to return parameter variable in environment
             self.on_pop.eval(env)
         } else {
-            self.on_pop.exec(env)?;
+            let on_pop_res = self.on_pop.eval(env)?;
+            debug_assert_eq!(
+                on_pop_res,
+                Value::None,
+                "on_pop has a non-none output, but doesn't accept the return as a parameter"
+            );
             res
         }
-    }
-
-    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
-        eval_to_exec(self.eval(env))
     }
 }
 
@@ -219,19 +248,16 @@ pub struct Branch {
 }
 
 impl Branch {
-    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
-        for case in &self.cases {
-            if case.pred.eval_bool(env)? {
-                return case.then.eval(env);
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        let Self { cases, default } = self;
+        for Case { pred, then } in cases {
+            if pred.eval_bool(env)? {
+                return then.eval(env);
             }
         }
-        self.default
+        default
             .as_ref()
-            .map_or(Ok(Value::None), |then| then.eval(env))
-    }
-
-    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
-        eval_to_exec(self.eval(env))
+            .map_or(ControlFlow::Ok(Value::None), |then| then.eval(env))
     }
 }
 
@@ -248,22 +274,29 @@ pub struct Block {
 }
 
 impl Block {
-    fn eval(&self, env: &mut Environment) -> Result<Value, Failure> {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
         let mut res = Value::None;
         for stmt in &self.stmts {
             res = stmt.eval(env)?;
         }
-        Ok(res)
-    }
-
-    fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
-        eval_to_exec(self.eval(env))
+        ControlFlow::Ok(res)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Give {
     pub value: Expr,
+}
+
+impl Give {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        let Self { value } = self;
+        match value.eval(env) {
+            ControlFlow::Ok(value) => ControlFlow::Return { value },
+            ControlFlow::Err(e) => ControlFlow::Err(e),
+            _ => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
@@ -273,9 +306,11 @@ pub struct Fail {
 
 impl Fail {
     fn eval(&self, env: &mut Environment) -> Failure {
-        self.value
-            .eval_text(env)
-            .map_or_else(std::convert::identity, Failure::Other)
+        match self.value.eval_text(env) {
+            ControlFlow::Ok(x) => Failure::Other(x),
+            ControlFlow::Err(e) => e,
+            _ => todo!(),
+        }
     }
 }
 
@@ -284,8 +319,29 @@ pub struct Skip {
     pub label: Option<Todo>,
 }
 
+impl Skip {
+    fn eval(&self, _env: &mut Environment) -> ControlFlow<Failure, Value> {
+        let Self { label } = self;
+        ControlFlow::Skip { label: *label }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Done {
     pub label: Option<Todo>,
     pub value: Expr,
+}
+
+impl Done {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        let Self { label, value } = self;
+        match value.eval(env) {
+            ControlFlow::Ok(value) => ControlFlow::Break {
+                label: *label,
+                value,
+            },
+            ControlFlow::Err(e) => ControlFlow::Err(e),
+            _ => todo!(),
+        }
+    }
 }

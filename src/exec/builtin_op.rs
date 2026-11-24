@@ -7,6 +7,8 @@ use crate::{
 #[cfg(true)]
 mod inner {
     use super::*;
+    use crate::exec::ControlFlow;
+    use std::ops::FromResidual as _;
 
     #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
     pub enum BuiltinOp {
@@ -43,15 +45,30 @@ mod inner {
     }
 
     impl BuiltinOp {
-        pub fn eval(self, env: &mut Environment, args: &[Expr]) -> Result<Value, Failure> {
-            Ok(match self {
+        pub fn eval(self, env: &mut Environment, args: &[Expr]) -> ControlFlow<Failure, Value> {
+            ControlFlow::Ok(match self {
                 // mutate reference
-                Self::Assign => todo!("exec Assign"),
+                Self::Assign => {
+                    let [a, b] = args else { unimplemented!() };
+                    let var = a.eval_var(env)?;
+                    let value = b.eval(env)?;
+                    if let Some(var) = env.get_mut(var) {
+                        // existing
+                        *var = value;
+                    } else {
+                        // initializer
+                        env.insert(var, value);
+                    }
+                    Value::None
+                }
 
                 // short circuiting
                 Self::And | Self::Or | Self::Nand | Self::Nor => {
                     let [a, b] = args else { unimplemented!() };
-                    match a.eval(env)? {
+                    match match a.eval(env) {
+                        ControlFlow::Ok(x) => x,
+                        res => return res,
+                    } {
                         Value::Bool(a) => {
                             let res = match self {
                                 Self::And | Self::Nand => a && b.eval_bool(env)?,
@@ -84,18 +101,22 @@ mod inner {
 
                 _ => {
                     // TODO: collecting is expensive, replace with fixed size
-                    let args = args
+                    let args = match args
                         .iter()
                         .map(|x| {
-                            x.eval(env).map(|res| {
-                                let mut res = &res;
-                                while let Value::Var(id) = *res {
-                                    res = env.get(id).expect("invalid reference");
+                            x.eval(env).ok().map(|val| {
+                                if let Value::Var(id) = val {
+                                    env.get(id).expect("invalid reference").clone()
+                                } else {
+                                    val
                                 }
-                                res.clone()
                             })
                         })
-                        .collect::<Result<Vec<_>, Failure>>()?;
+                        .collect::<Result<Vec<Value>, ControlFlow<Failure, !, Value>>>()
+                    {
+                        Ok(list) => list,
+                        Err(res) => return ControlFlow::from_residual(res),
+                    };
                     match self {
                         Self::Assign | Self::And | Self::Or | Self::Nand | Self::Nor => {
                             unreachable!()
