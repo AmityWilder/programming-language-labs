@@ -225,9 +225,33 @@ pub struct Dfer {
 impl Dfer {
     fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
         let res = self.do_first.eval(env);
-        if let Some(_id) = self.ret_param {
-            // assign res to return parameter variable in environment
-            self.on_pop.eval(env)
+        if let Some(id) = self.ret_param {
+            match res {
+                ControlFlow::Ok(value) => {
+                    env.insert(id, value);
+                    self.on_pop.eval(env)
+                }
+                ControlFlow::Err(e) => {
+                    env.insert(id, Value::Fail(e));
+                    self.on_pop.eval(env)
+                }
+                ControlFlow::Skip { label } => {
+                    env.insert(id, Value::None);
+                    let res = self.on_pop.eval(env)?; // TODO: dfer should not
+                    debug_assert_eq!(res, Value::None, "non-none dfer result in skip");
+                    ControlFlow::Skip { label }
+                }
+                ControlFlow::Break { label, value } => {
+                    env.insert(id, value);
+                    let value = self.on_pop.eval(env)?; // TODO: dfer should not
+                    ControlFlow::Break { label, value }
+                }
+                ControlFlow::Return { value } => {
+                    env.insert(id, value);
+                    let value = self.on_pop.eval(env)?; // TODO: dfer should not
+                    ControlFlow::Return { value }
+                }
+            }
         } else {
             let on_pop_res = self.on_pop.eval(env)?;
             debug_assert_eq!(

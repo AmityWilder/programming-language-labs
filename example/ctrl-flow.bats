@@ -10,4 +10,12 @@ rep i < 5 {
     prnt(i + "\n");
     i = i + 1;
 }
+let i = 0;
+cord {
+    dfer { prnt("second\n"); }
+    dfer { prnt("first\n"); }
+    prnt(i + "\n");
+    i = i + 1;
+    if i == 1 { skip; }
+}
 prnt("finished\n");

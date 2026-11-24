@@ -1,6 +1,8 @@
 use super::EnvId;
 use crate::exec::Value;
 
+// TODO: push down automata
+
 /// Runtime environment
 #[derive(Debug)]
 pub struct Environment {
@@ -19,17 +21,15 @@ impl Environment {
     /// Create a new variable and assign it with the value
     pub fn insert(&mut self, id: EnvId, value: Value) -> &mut Value {
         let EnvId(id) = id;
-        let len = self.stack.len();
-        assert!(
-            id >= len,
-            "should not insert into existing variable\
-            \n  left: {id}\
-            \n right: {len}",
-        );
-        if id > len {
-            self.stack.resize_with(id, Value::default);
+        if let Some(var) = self.stack.get_mut(id) {
+            *var = value;
+            var
+        } else {
+            if id > self.stack.len() {
+                self.stack.resize_with(id, Value::default);
+            }
+            self.stack.push_mut(value)
         }
-        self.stack.push_mut(value)
     }
 
     pub fn get(&self, id: EnvId) -> Option<&Value> {

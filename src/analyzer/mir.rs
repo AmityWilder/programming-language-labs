@@ -1,5 +1,8 @@
 use crate::{
-    analyzer::{scope::hir, static_env::scope::ScopeEnvironment},
+    analyzer::{
+        scope::hir,
+        static_env::{VarId, scope::ScopeEnvironment},
+    },
     error::{CheckDiagnostics, Diagnostic},
     exec::{EnvId, Value, tree},
     src_code::map::SourceMap,
@@ -7,6 +10,12 @@ use crate::{
 use std::collections::VecDeque;
 
 // TODO: this skips a lot of passes
+
+impl ScopeEnvironment {
+    fn get_env_id(&self, id: VarId) -> EnvId {
+        EnvId(id.get())
+    }
+}
 
 pub fn finalize(
     hir: Vec<hir::HirUnit<hir::FinalPass>>,
@@ -46,12 +55,11 @@ where
     stmts.extend_reserve(hi.unwrap_or(lo));
     while let Some(decl) = decls.next() {
         match decl {
-            hir::Decl::Dfer(x) => {
+            hir::Decl::Dfer(hir::DeclDfer { param, on_pop }) => {
                 stmts.extend_one(tree::Stmt::Dfer(tree::Dfer {
-                    // TODO
-                    ret_param: None,
+                    ret_param: param.map(|x| env.get_env_id(x.var.0)),
 
-                    on_pop: x.on_pop.finalize(source, env, diagnostics)?,
+                    on_pop: on_pop.finalize(source, env, diagnostics)?,
 
                     do_first: tree::Block {
                         stmts: finalize_decls::<_, Vec<_>>(decls, source, env, diagnostics)?
@@ -414,11 +422,11 @@ impl hir::LinkedDecl {
     fn finalize(
         self,
         _source: &SourceMap,
-        _env: &mut ScopeEnvironment,
+        env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         let Self(id) = self;
-        Ok(tree::Expr::Access(EnvId(id.get())))
+        Ok(tree::Expr::Access(env.get_env_id(id)))
     }
 }
 

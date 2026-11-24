@@ -202,7 +202,7 @@ mod inner {
 
                                 (Value::Text(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} + {b:?}"),
                             }
                         }
                         Self::Sub => {
