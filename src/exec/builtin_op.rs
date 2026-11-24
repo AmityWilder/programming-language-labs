@@ -45,11 +45,10 @@ mod inner {
     impl BuiltinOp {
         pub fn eval(self, env: &mut Environment, args: &[Expr]) -> Result<Value, Failure> {
             Ok(match self {
+                // mutate reference
                 Self::Assign => todo!("exec Assign"),
-                Self::Inpt => todo!("exec Inpt"),
-                Self::Index => todo!("exec Index"),
-                Self::Slice => todo!("exec Slice"),
 
+                // short circuiting
                 Self::And | Self::Or | Self::Nand | Self::Nor => {
                     let [a, b] = args else { unimplemented!() };
                     match a.eval(env)? {
@@ -82,129 +81,247 @@ mod inner {
                         _ => todo!("error: incompatible"),
                     }
                 }
-                Self::Xor => {
-                    let [a, b] = args else { unimplemented!() };
-                    match (a.eval(env)?, b.eval(env)?) {
-                        (Value::Bool(a), Value::Bool(b)) => Value::Bool(a ^ b),
-                        (Value::Byte(a), Value::Byte(b)) => Value::Byte(a ^ b),
-                        (Value::Uint(a), Value::Uint(b)) => Value::Uint(a ^ b),
-                        (Value::Sint(a), Value::Sint(b)) => Value::Sint(a ^ b),
 
-                        _ => todo!("error: incompatible"),
+                _ => {
+                    // TODO: collecting is expensive, replace with fixed size
+                    let args = args
+                        .iter()
+                        .map(|x| {
+                            x.eval(env).map(|res| {
+                                let mut res = &res;
+                                while let Value::Var(id) = *res {
+                                    res = env.get(id).expect("invalid reference");
+                                }
+                                res.clone()
+                            })
+                        })
+                        .collect::<Result<Vec<_>, Failure>>()?;
+                    match self {
+                        Self::Assign | Self::And | Self::Or | Self::Nand | Self::Nor => {
+                            unreachable!()
+                        }
+
+                        Self::Inpt => todo!("exec Inpt"),
+                        Self::Index => todo!("exec Index"),
+                        Self::Slice => todo!("exec Slice"),
+
+                        Self::Xor => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            match (a, b) {
+                                (Value::Bool(a), Value::Bool(b)) => Value::Bool(a ^ b),
+                                (Value::Byte(a), Value::Byte(b)) => Value::Byte(a ^ b),
+                                (Value::Uint(a), Value::Uint(b)) => Value::Uint(a ^ b),
+                                (Value::Sint(a), Value::Sint(b)) => Value::Sint(a ^ b),
+
+                                _ => todo!("error: incompatible"),
+                            }
+                        }
+                        Self::Xnor => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            match (a, b) {
+                                (Value::Bool(a), Value::Bool(b)) => Value::Bool(!(a ^ b)),
+                                (Value::Byte(a), Value::Byte(b)) => Value::Byte(!(a ^ b)),
+                                (Value::Uint(a), Value::Uint(b)) => Value::Uint(!(a ^ b)),
+                                (Value::Sint(a), Value::Sint(b)) => Value::Sint(!(a ^ b)),
+
+                                _ => todo!("error: incompatible"),
+                            }
+                        }
+                        Self::Not => {
+                            let [x] = <[_; 1]>::try_from(args).expect("bad argcount");
+                            match x {
+                                Value::Bool(x) => Value::Bool(!x),
+                                Value::Byte(x) => Value::Byte(!x),
+                                Value::Uint(x) => Value::Uint(!x),
+                                Value::Sint(x) => Value::Sint(!x),
+
+                                _ => todo!("error: unsupported"),
+                            }
+                        }
+                        Self::Exists => {
+                            let [x] = <[_; 1]>::try_from(args).expect("bad argcount");
+                            Value::Bool(match x {
+                                Value::None | Value::Fail(_) => false,
+
+                                Value::Bool(x) => x,
+                                Value::Byte(x) => x != 0,
+                                Value::Uint(x) => x != 0,
+                                Value::Sint(x) => x != 0,
+                                Value::Flpt(x) => !x.is_nan(),
+                                Value::Char(x) => x != '\0',
+                                Value::Text(x) => !x.is_empty(),
+
+                                Value::Var(_) => todo!(),
+                                Value::View { .. } => todo!(),
+                            })
+                        }
+                        Self::Add => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => Value::Byte(a + b),
+                                (Value::Uint(a), Value::Uint(b)) => Value::Uint(a + b),
+                                (Value::Sint(a), Value::Sint(b)) => Value::Sint(a + b),
+                                (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a + b),
+
+                                (Value::Text(a), Value::None) => Value::Text(format!("{a}none")),
+                                (Value::Text(a), Value::Bool(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Text(a), Value::Byte(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Text(a), Value::Uint(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Text(a), Value::Sint(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Text(a), Value::Flpt(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Text(a), Value::Char(b)) => Value::Text(format!("{a}{b}")),
+
+                                (Value::None, Value::Text(b)) => Value::Text(format!("none{b}")),
+                                (Value::Bool(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Byte(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Uint(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Sint(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Flpt(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
+                                (Value::Char(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
+
+                                (Value::Text(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
+
+                                _ => todo!("error: incompatible"),
+                            }
+                        }
+                        Self::Sub => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => Value::Byte(a - b),
+                                (Value::Uint(a), Value::Uint(b)) => Value::Uint(a - b),
+                                (Value::Sint(a), Value::Sint(b)) => Value::Sint(a - b),
+                                (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a - b),
+
+                                _ => todo!("error: incompatible"),
+                            }
+                        }
+                        Self::Neg => todo!("exec Neg"),
+                        Self::Mul => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => Value::Byte(a * b),
+                                (Value::Uint(a), Value::Uint(b)) => Value::Uint(a * b),
+                                (Value::Sint(a), Value::Sint(b)) => Value::Sint(a * b),
+                                (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a * b),
+
+                                _ => todo!("error: incompatible"),
+                            }
+                        }
+                        Self::Pow => todo!("exec Pow"),
+                        Self::Div => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => Value::Byte(a / b),
+                                (Value::Uint(a), Value::Uint(b)) => Value::Uint(a / b),
+                                (Value::Sint(a), Value::Sint(b)) => Value::Sint(a / b),
+                                (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a / b),
+
+                                _ => todo!("error: incompatible"),
+                            }
+                        }
+                        Self::Rem => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => Value::Byte(a % b),
+                                (Value::Uint(a), Value::Uint(b)) => Value::Uint(a % b),
+                                (Value::Sint(a), Value::Sint(b)) => Value::Sint(a % b),
+                                (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a % b),
+
+                                _ => todo!("error: incompatible"),
+                            }
+                        }
+                        Self::Shl => todo!("exec Shl"),
+                        Self::Shr => todo!("exec Shr"),
+                        Self::Rotl => todo!("exec Rotl"),
+                        Self::Rotr => todo!("exec Rotr"),
+
+                        Self::Eq => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            Value::Bool(match (a, b) {
+                                (Value::None, Value::None) => todo!("none equality"),
+                                (Value::Fail(_), Value::Fail(_)) => todo!("failure equality"),
+                                (Value::Bool(a), Value::Bool(b)) => a == b,
+                                (Value::Byte(a), Value::Byte(b)) => a == b,
+                                (Value::Uint(a), Value::Uint(b)) => a == b,
+                                (Value::Sint(a), Value::Sint(b)) => a == b,
+                                (Value::Flpt(a), Value::Flpt(b)) => a == b,
+                                (Value::Char(a), Value::Char(b)) => a == b,
+                                (Value::Text(a), Value::Text(b)) => a == b,
+
+                                _ => todo!("error: incompatible"),
+                            })
+                        }
+                        Self::Ne => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            Value::Bool(match (a, b) {
+                                (Value::None, Value::None) => todo!("none equality"),
+                                (Value::Fail(_), Value::Fail(_)) => todo!("failure equality"),
+                                (Value::Bool(a), Value::Bool(b)) => a != b,
+                                (Value::Byte(a), Value::Byte(b)) => a != b,
+                                (Value::Uint(a), Value::Uint(b)) => a != b,
+                                (Value::Sint(a), Value::Sint(b)) => a != b,
+                                (Value::Flpt(a), Value::Flpt(b)) => a != b,
+                                (Value::Char(a), Value::Char(b)) => a != b,
+                                (Value::Text(a), Value::Text(b)) => a != b,
+
+                                _ => todo!("error: incompatible"),
+                            })
+                        }
+
+                        Self::Lt => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            Value::Bool(match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => a < b,
+                                (Value::Uint(a), Value::Uint(b)) => a < b,
+                                (Value::Sint(a), Value::Sint(b)) => a < b,
+                                (Value::Flpt(a), Value::Flpt(b)) => a < b,
+                                (Value::Char(a), Value::Char(b)) => a < b,
+                                (Value::Text(a), Value::Text(b)) => a < b,
+
+                                _ => todo!("error: incompatible"),
+                            })
+                        }
+                        Self::Gt => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            Value::Bool(match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => a > b,
+                                (Value::Uint(a), Value::Uint(b)) => a > b,
+                                (Value::Sint(a), Value::Sint(b)) => a > b,
+                                (Value::Flpt(a), Value::Flpt(b)) => a > b,
+                                (Value::Char(a), Value::Char(b)) => a > b,
+                                (Value::Text(a), Value::Text(b)) => a > b,
+
+                                _ => todo!("error: incompatible"),
+                            })
+                        }
+                        Self::Le => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            Value::Bool(match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => a <= b,
+                                (Value::Uint(a), Value::Uint(b)) => a <= b,
+                                (Value::Sint(a), Value::Sint(b)) => a <= b,
+                                (Value::Flpt(a), Value::Flpt(b)) => a <= b,
+                                (Value::Char(a), Value::Char(b)) => a <= b,
+                                (Value::Text(a), Value::Text(b)) => a <= b,
+
+                                _ => todo!("error: incompatible"),
+                            })
+                        }
+                        Self::Ge => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            Value::Bool(match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => a >= b,
+                                (Value::Uint(a), Value::Uint(b)) => a >= b,
+                                (Value::Sint(a), Value::Sint(b)) => a >= b,
+                                (Value::Flpt(a), Value::Flpt(b)) => a >= b,
+                                (Value::Char(a), Value::Char(b)) => a >= b,
+                                (Value::Text(a), Value::Text(b)) => a >= b,
+
+                                _ => todo!("error: incompatible"),
+                            })
+                        }
                     }
                 }
-                Self::Xnor => {
-                    let [a, b] = args else { unimplemented!() };
-                    match (a.eval(env)?, b.eval(env)?) {
-                        (Value::Bool(a), Value::Bool(b)) => Value::Bool(!(a ^ b)),
-                        (Value::Byte(a), Value::Byte(b)) => Value::Byte(!(a ^ b)),
-                        (Value::Uint(a), Value::Uint(b)) => Value::Uint(!(a ^ b)),
-                        (Value::Sint(a), Value::Sint(b)) => Value::Sint(!(a ^ b)),
-
-                        _ => todo!("error: incompatible"),
-                    }
-                }
-                Self::Not => {
-                    let [x] = args else { unimplemented!() };
-                    match x.eval(env)? {
-                        Value::Bool(x) => Value::Bool(!x),
-                        Value::Byte(x) => Value::Byte(!x),
-                        Value::Uint(x) => Value::Uint(!x),
-                        Value::Sint(x) => Value::Sint(!x),
-
-                        _ => todo!("error: unsupported"),
-                    }
-                }
-                Self::Exists => {
-                    let [x] = args else { unimplemented!() };
-                    Value::Bool(match x.eval(env)? {
-                        Value::None | Value::Fail(_) => false,
-
-                        Value::Bool(x) => x,
-                        Value::Byte(x) => x != 0,
-                        Value::Uint(x) => x != 0,
-                        Value::Sint(x) => x != 0,
-                        Value::Flpt(x) => !x.is_nan(),
-                        Value::Char(x) => x != '\0',
-                        Value::Text(x) => !x.is_empty(),
-
-                        Value::Var(_) => todo!(),
-                        Value::View { .. } => todo!(),
-                    })
-                }
-                Self::Add => {
-                    let [a, b] = args else { unimplemented!() };
-                    match (a.eval(env)?, b.eval(env)?) {
-                        (Value::Byte(a), Value::Byte(b)) => Value::Byte(a + b),
-                        (Value::Uint(a), Value::Uint(b)) => Value::Uint(a + b),
-                        (Value::Sint(a), Value::Sint(b)) => Value::Sint(a + b),
-                        (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a + b),
-
-                        (Value::Text(a), Value::None) => Value::Text(format!("{a}none")),
-                        (Value::Text(a), Value::Bool(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Text(a), Value::Byte(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Text(a), Value::Uint(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Text(a), Value::Sint(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Text(a), Value::Flpt(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Text(a), Value::Char(b)) => Value::Text(format!("{a}{b}")),
-
-                        (Value::Text(a), Value::Var(b)) => match env.get(b).expect("missing") {
-                            Value::None => Value::Text(format!("{a}none")),
-                            Value::Bool(b) => Value::Text(format!("{a}{b}")),
-                            Value::Byte(b) => Value::Text(format!("{a}{b}")),
-                            Value::Uint(b) => Value::Text(format!("{a}{b}")),
-                            Value::Sint(b) => Value::Text(format!("{a}{b}")),
-                            Value::Flpt(b) => Value::Text(format!("{a}{b}")),
-                            Value::Char(b) => Value::Text(format!("{a}{b}")),
-                            Value::Text(b) => Value::Text(format!("{a}{b}")),
-                            Value::Var(_) => todo!("indirection"),
-
-                            _ => todo!("error: incompatible"),
-                        },
-
-                        (Value::None, Value::Text(b)) => Value::Text(format!("none{b}")),
-                        (Value::Bool(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Byte(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Uint(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Sint(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Flpt(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
-                        (Value::Char(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
-
-                        (Value::Var(a), Value::Text(b)) => match env.get(a).expect("missing") {
-                            Value::None => Value::Text(format!("none{b}")),
-                            Value::Bool(a) => Value::Text(format!("{a}{b}")),
-                            Value::Byte(a) => Value::Text(format!("{a}{b}")),
-                            Value::Uint(a) => Value::Text(format!("{a}{b}")),
-                            Value::Sint(a) => Value::Text(format!("{a}{b}")),
-                            Value::Flpt(a) => Value::Text(format!("{a}{b}")),
-                            Value::Char(a) => Value::Text(format!("{a}{b}")),
-                            Value::Text(a) => Value::Text(format!("{a}{b}")),
-                            Value::Var(_) => todo!("indirection"),
-
-                            _ => todo!("error: incompatible"),
-                        },
-
-                        (Value::Text(a), Value::Text(b)) => Value::Text(format!("{a}{b}")),
-
-                        _ => todo!("error: incompatible"),
-                    }
-                }
-                Self::Sub => todo!("exec Sub"),
-                Self::Neg => todo!("exec Neg"),
-                Self::Mul => todo!("exec Mul"),
-                Self::Pow => todo!("exec Pow"),
-                Self::Div => todo!("exec Div"),
-                Self::Rem => todo!("exec Rem"),
-                Self::Shl => todo!("exec Shl"),
-                Self::Shr => todo!("exec Shr"),
-                Self::Rotl => todo!("exec Rotl"),
-                Self::Rotr => todo!("exec Rotr"),
-                Self::Lt => todo!("exec Lt"),
-                Self::Gt => todo!("exec Gt"),
-                Self::Ne => todo!("exec Ne"),
-                Self::Le => todo!("exec Le"),
-                Self::Eq => todo!("exec Eq"),
-                Self::Ge => todo!("exec Ge"),
             })
         }
     }
