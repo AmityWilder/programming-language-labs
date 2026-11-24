@@ -1,7 +1,7 @@
 use crate::{
     analyzer::{scope::hir, static_env::scope::ScopeEnvironment},
     error::{CheckDiagnostics, Diagnostic},
-    exec::tree,
+    exec::{EnvId, Value, tree},
     src_code::map::SourceMap,
 };
 use std::collections::VecDeque;
@@ -238,7 +238,7 @@ impl hir::BlockExpr<hir::FinalPass> {
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        todo!()
+        todo!("mir block expression")
     }
 }
 
@@ -254,50 +254,54 @@ impl hir::Binary<hir::FinalPass> {
         let lhs = lhs.finalize(source, env, diagnostics)?;
         let rhs = rhs.finalize(source, env, diagnostics)?;
         let args = Box::from([lhs, rhs]);
-        let what = match op {
-            Operator::Assign => todo!(),
-            Operator::And => todo!(),
-            Operator::Or => todo!(),
-            Operator::Nand => todo!(),
-            Operator::Nor => todo!(),
-            Operator::Xor => todo!(),
-            Operator::Xnor => todo!(),
-            Operator::AndAssign => todo!(),
-            Operator::OrAssign => todo!(),
-            Operator::XorAssign => todo!(),
-            Operator::NandAssign => todo!(),
-            Operator::NorAssign => todo!(),
-            Operator::XnorAssign => todo!(),
-            Operator::Add => todo!(),
-            Operator::Sub => todo!(),
-            Operator::Mul => todo!(),
-            Operator::Pow => todo!(),
-            Operator::Div => todo!(),
-            Operator::Rem => todo!(),
-            Operator::AddAssign => todo!(),
-            Operator::SubAssign => todo!(),
-            Operator::MulAssign => todo!(),
-            Operator::PowAssign => todo!(),
-            Operator::DivAssign => todo!(),
-            Operator::RemAssign => todo!(),
-            Operator::Shl => todo!(),
-            Operator::Shr => todo!(),
-            Operator::Rotl => todo!(),
-            Operator::Rotr => todo!(),
-            Operator::ShlAssign => todo!(),
-            Operator::ShrAssign => todo!(),
-            Operator::RotlAssign => todo!(),
-            Operator::RotrAssign => todo!(),
-            Operator::Lt => todo!(),
-            Operator::Gt => todo!(),
-            Operator::Ne => todo!(),
-            Operator::Le => todo!(),
-            Operator::Eq => todo!(),
-            Operator::Ge => todo!(),
-            Operator::Convert => todo!(),
-            Operator::Transmute => todo!(),
+
+        let what = tree::Callable::Builtin(match op {
+            Operator::Assign => tree::BuiltinOp::Assign,
+            Operator::AndAssign => todo!("mir assignment"),
+            Operator::OrAssign => todo!("mir assignment"),
+            Operator::XorAssign => todo!("mir assignment"),
+            Operator::NandAssign => todo!("mir assignment"),
+            Operator::NorAssign => todo!("mir assignment"),
+            Operator::XnorAssign => todo!("mir assignment"),
+            Operator::AddAssign => todo!("mir assignment"),
+            Operator::SubAssign => todo!("mir assignment"),
+            Operator::MulAssign => todo!("mir assignment"),
+            Operator::PowAssign => todo!("mir assignment"),
+            Operator::DivAssign => todo!("mir assignment"),
+            Operator::RemAssign => todo!("mir assignment"),
+            Operator::ShlAssign => todo!("mir assignment"),
+            Operator::ShrAssign => todo!("mir assignment"),
+            Operator::RotlAssign => todo!("mir assignment"),
+            Operator::RotrAssign => todo!("mir assignment"),
+
+            Operator::And => tree::BuiltinOp::And,
+            Operator::Or => tree::BuiltinOp::Or,
+            Operator::Nand => tree::BuiltinOp::Nand,
+            Operator::Nor => tree::BuiltinOp::Nor,
+            Operator::Xor => tree::BuiltinOp::Xor,
+            Operator::Xnor => tree::BuiltinOp::Xnor,
+            Operator::Add => tree::BuiltinOp::Add,
+            Operator::Sub => tree::BuiltinOp::Sub,
+            Operator::Mul => tree::BuiltinOp::Mul,
+            Operator::Pow => tree::BuiltinOp::Pow,
+            Operator::Div => tree::BuiltinOp::Div,
+            Operator::Rem => tree::BuiltinOp::Rem,
+            Operator::Shl => tree::BuiltinOp::Shl,
+            Operator::Shr => tree::BuiltinOp::Shr,
+            Operator::Rotl => tree::BuiltinOp::Rotl,
+            Operator::Rotr => tree::BuiltinOp::Rotr,
+            Operator::Lt => tree::BuiltinOp::Lt,
+            Operator::Gt => tree::BuiltinOp::Gt,
+            Operator::Ne => tree::BuiltinOp::Ne,
+            Operator::Le => tree::BuiltinOp::Le,
+            Operator::Eq => tree::BuiltinOp::Eq,
+            Operator::Ge => tree::BuiltinOp::Ge,
+            Operator::Convert => todo!("mir binary operator"),
+            Operator::Transmute => todo!("mir binary operator"),
+
             _ => todo!("not a binary operator"),
-        };
+        });
+
         Ok(tree::Expr::Operation(tree::Operation { what, args }))
     }
 }
@@ -313,18 +317,21 @@ impl hir::Unary<hir::FinalPass> {
         let Self { op, operand, side } = self;
         let operand = operand.finalize(source, env, diagnostics)?;
         let args = Box::from([operand]);
-        let what = match op {
-            Operator::Not => todo!(),
-            Operator::Exists => todo!(),
-            Operator::Incr => todo!(),
-            Operator::Neg => todo!(),
-            Operator::Decr => todo!(),
-            Operator::Coalesce => todo!(),
-            Operator::Ref => todo!(),
-            Operator::Dot => todo!(),
-            Operator::Szof => todo!(),
+
+        let what = tree::Callable::Builtin(match op {
+            Operator::Not => tree::BuiltinOp::Not,
+            Operator::Exists => tree::BuiltinOp::Exists,
+            Operator::Incr => todo!("mir unary operator"),
+            Operator::Neg => tree::BuiltinOp::Neg,
+            Operator::Decr => todo!("mir unary operator"),
+            Operator::Coalesce => todo!("mir unary operator"),
+            Operator::Ref => todo!("mir unary operator"),
+            Operator::Dot => todo!("mir unary operator"),
+            Operator::Szof => todo!("mir unary operator"),
+
             _ => todo!("not a unary operator"),
-        };
+        });
+
         Ok(tree::Expr::Operation(tree::Operation { what, args }))
     }
 }
@@ -336,7 +343,7 @@ impl hir::Subscript<hir::FinalPass> {
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        todo!()
+        todo!("mir indexer")
     }
 }
 
@@ -347,7 +354,7 @@ impl hir::FnCall<hir::FinalPass> {
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        todo!()
+        todo!("mir fn call")
     }
 }
 
@@ -358,7 +365,12 @@ impl hir::Directive {
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        todo!()
+        Ok(match self {
+            Self::Inpt => tree::Expr::Operation(tree::Operation {
+                what: tree::Callable::Builtin(tree::BuiltinOp::Inpt),
+                args: Default::default(),
+            }),
+        })
     }
 }
 
@@ -369,7 +381,16 @@ impl hir::LinkedLiteral {
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        todo!()
+        Ok(tree::Expr::Literal(match self {
+            Self::None => Value::None,
+            Self::Bool(x) => Value::Bool(x),
+            Self::Byte(x) => Value::Byte(x),
+            Self::Uint(x) => Value::Uint(x),
+            Self::Sint(x) => Value::Sint(x),
+            Self::Flpt(x) => Value::Flpt(x),
+            Self::Char(x) => Value::Char(x),
+            Self::Text(x) => Value::Text(x),
+        }))
     }
 }
 
@@ -380,7 +401,8 @@ impl hir::LinkedVar {
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        todo!()
+        let Self(id) = self;
+        Ok(tree::Expr::Access(EnvId(id.get())))
     }
 }
 
@@ -483,7 +505,7 @@ impl hir::PickExpr<hir::FinalPass> {
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Branch, CheckDiagnostics> {
-        todo!()
+        todo!("mir pick expression")
     }
 }
 
@@ -565,29 +587,41 @@ impl hir::ForStmt<hir::FinalPass> {
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Loop, CheckDiagnostics> {
-        todo!()
+        todo!("mir for loop")
     }
 }
 
 impl hir::GiveStmt<hir::FinalPass> {
     fn finalize(
         self,
-        _source: &SourceMap,
-        _env: &mut ScopeEnvironment,
-        _diagnostics: &mut Vec<Diagnostic>,
+        source: &SourceMap,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Give, CheckDiagnostics> {
-        todo!()
+        Ok(tree::Give {
+            value: self
+                .expr
+                .map(|x| x.finalize(source, env, diagnostics))
+                .transpose()?
+                .unwrap_or_default(),
+        })
     }
 }
 
 impl hir::FailStmt<hir::FinalPass> {
     fn finalize(
         self,
-        _source: &SourceMap,
-        _env: &mut ScopeEnvironment,
-        _diagnostics: &mut Vec<Diagnostic>,
+        source: &SourceMap,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Fail, CheckDiagnostics> {
-        todo!()
+        Ok(tree::Fail {
+            value: self
+                .expr
+                .map(|x| x.finalize(source, env, diagnostics))
+                .transpose()?
+                .unwrap_or_default(),
+        })
     }
 }
 
@@ -598,18 +632,27 @@ impl hir::SkipStmt<hir::FinalPass> {
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Skip, CheckDiagnostics> {
-        todo!()
+        // TODO: label
+        Ok(tree::Skip { label: None })
     }
 }
 
 impl hir::DoneStmt<hir::FinalPass> {
     fn finalize(
         self,
-        _source: &SourceMap,
-        _env: &mut ScopeEnvironment,
-        _diagnostics: &mut Vec<Diagnostic>,
+        source: &SourceMap,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Done, CheckDiagnostics> {
-        todo!()
+        // TODO: label
+        Ok(tree::Done {
+            label: None,
+            value: self
+                .expr
+                .map(|x| x.finalize(source, env, diagnostics))
+                .transpose()?
+                .unwrap_or_default(),
+        })
     }
 }
 

@@ -14,6 +14,12 @@ pub mod scope;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ItemId(pub(self) usize);
 
+impl ItemId {
+    pub const fn get(self) -> usize {
+        self.0
+    }
+}
+
 pub type TypeId = ItemId;
 pub type FuncId = ItemId;
 pub type VarId = ItemId;

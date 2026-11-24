@@ -140,9 +140,9 @@ use crate::{
         map::SourceMap,
         span::{FileId, RelSpan, usize_to_uspan},
     },
-    todo_types::Dummy,
     util::OrAllErrsExt as _,
 };
+use exec::{env::Environment, tree::Program};
 use std::{
     collections::{BTreeMap, VecDeque},
     path::{Path, PathBuf},
@@ -791,7 +791,7 @@ fn compile(
     source: &mut SourceMap,
     diagnostics: &mut Vec<Diagnostic>,
     scope_env: &mut ScopeEnvironment,
-) -> Result<Dummy, CheckDiagnostics> {
+) -> Result<Program, CheckDiagnostics> {
     println!("--- per-file ---");
 
     let mut queue = source.iter().map(|(id, _)| id).collect::<VecDeque<_>>();
@@ -921,65 +921,15 @@ fn compile(
 
     println!("program: {prgm:#?}");
 
-    // -------------------------------------------------------------------------
-
-    // let (program, env) = match analyze(source, &prgm) {
-    //     Ok(prgm) => prgm,
-    //     Err(errs) => {
-    //         // static analysis errors
-    //         let any_err = if config.print_errors {
-    //             println!();
-    //             list_errors("static analysis", errs)
-    //         } else {
-    //             errs.into_iter().next().is_some()
-    //         };
-    //         debug_assert!(
-    //             any_err,
-    //             "static analysis should only error if there is an error (duh)"
-    //         );
-    //         return;
-    //     }
-    // };
-
-    // // println!("static analysis: {program:#?}");
-
-    // // execution
-    // if config.do_eval {
-    //     let outer_style = Style::new().foreground(highlight::style::Color::BrightBlack);
-    //     println!(
-    //         "\n{}running...\n----------{}",
-    //         outer_style.begin(),
-    //         outer_style.end()
-    //     );
-    //     let res = interpret(&program, env);
-    //     if let Err(e) = res
-    //         && config.print_errors
-    //     {
-    //         let style = SYNTAX_STYLE_ANSI.invalid;
-    //         println!(
-    //             "{}----------{}\n{}unhandled runtime error: {e}{}",
-    //             outer_style.begin(),
-    //             outer_style.end(),
-    //             style.begin(),
-    //             style.end()
-    //         );
-    //     } else {
-    //         println!(
-    //             "{}----------\nfinished{}\n",
-    //             outer_style.begin(),
-    //             outer_style.end()
-    //         );
-    //     }
-    // }
-
     // any remaining errors
     diagnostics.ok_or_err()?;
     println!("--- compilation successful ---");
-    Ok(Dummy)
+    Ok(prgm)
 }
 
-fn run_program(_prgm: &Dummy) -> Result<(), Failure> {
-    todo!("runtime")
+fn run_program(prgm: &Program) -> Result<(), Failure> {
+    let mut env = Environment::new();
+    prgm.exec(&mut env)
 }
 
 fn pop_trailing_newline(s: &mut String) {

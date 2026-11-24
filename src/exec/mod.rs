@@ -1,10 +1,11 @@
 use crate::types::{byte, fail, flpt, none, sint, text, uint};
 
+pub mod builtin_op;
 pub mod env;
 pub mod tree;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct EnvId(usize);
+pub struct EnvId(pub usize);
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub enum Value {
