@@ -396,10 +396,7 @@ impl MirDisplay for tree::Operation {
                         f.write_char(']')
                     }
                     Nary::Call => {
-                        let [fun, args @ ..] = args else {
-                            return Err(fmt::Error);
-                        };
-                        fun.fmt(f)?;
+                        f.write_str(sym)?;
                         f.write_char('(')?;
                         let mut has_prev = false;
                         for arg in args {
