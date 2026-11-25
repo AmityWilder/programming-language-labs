@@ -145,7 +145,7 @@ impl<'src> Lexer<'src> {
 
     fn ident(&mut self) -> usize {
         self.source
-            .find(|ch: char| !ch.is_alphanumeric() && ch != '_')
+            .find(|ch: char| !ch.is_alphanumeric() && !matches!(ch, '_' | '\''))
             .unwrap_or(self.source.len())
     }
 

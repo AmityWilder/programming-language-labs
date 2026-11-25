@@ -132,14 +132,17 @@ impl std::str::FromStr for CharLiteral {
     type Err = CharLiteralError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.contains(r"\'") {
-            return Err(CharLiteralError::EscapedCharLiteralEnd);
-        }
         let s = s
             .strip_prefix(CHAR_DELIM)
             .ok_or(CharLiteralError::MissingOpen)?
             .strip_suffix(CHAR_DELIM)
-            .ok_or_else(|| CharLiteralError::EndlessCharLiteral)?;
+            .ok_or_else(|| {
+                if s.contains(r"\'") {
+                    CharLiteralError::EscapedCharLiteralEnd
+                } else {
+                    CharLiteralError::EndlessCharLiteral
+                }
+            })?;
         if s.is_empty() {
             Err(CharLiteralError::EmptyCharLiteral)
         } else if let Some((len, res)) = esc::escape_char(s) {
@@ -155,8 +158,8 @@ impl std::str::FromStr for CharLiteral {
         } else {
             let mut iter = s.chars();
             let ch = iter.next().expect("should not be empty in this branch");
-            if iter.next().is_none() {
-                Err(CharLiteralError::EmptyCharLiteral)
+            if iter.next().is_some() {
+                Err(CharLiteralError::MultiCharLiteral)
             } else {
                 Ok(ch)
             }
@@ -194,19 +197,33 @@ impl std::str::FromStr for TextLiteral {
     type Err = TextLiteralError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.contains(r#"\""#) {
-            return Err(TextLiteralError::EscapedTextLiteralEnd);
-        }
         let s = s
             .strip_prefix(TEXT_DELIM)
             .ok_or(TextLiteralError::MissingOpen)?
             .strip_suffix(TEXT_DELIM)
-            .ok_or(TextLiteralError::EndlessTextLiteral)?;
-        let mut res = s.to_owned();
+            .ok_or_else(|| {
+                if s.contains(r#"\""#) {
+                    TextLiteralError::EscapedTextLiteralEnd
+                } else {
+                    TextLiteralError::EndlessTextLiteral
+                }
+            })?;
+        let mut res = String::with_capacity(s.len());
+        let mut prev_end = 0;
         for esc in esc::Escapes::new(s) {
             let (range, ch) = esc.map_err(|_| TextLiteralError::InvalidEscape)?;
-            res.replace_range(range, ch.encode_utf8(&mut [0; char::MAX_LEN_UTF8]));
+            if range.start > prev_end {
+                res.push_str(&s[prev_end..range.start]);
+            } else {
+                debug_assert_eq!(
+                    range.start, prev_end,
+                    "range should not start earlier than previous end"
+                );
+            }
+            prev_end = range.end;
+            res.push(ch);
         }
+        res.push_str(&s[prev_end..]);
         Ok(Self(res))
     }
 }

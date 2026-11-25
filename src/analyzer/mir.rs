@@ -101,6 +101,10 @@ impl hir::Decl<hir::FinalPass> {
 
             hir::Decl::Dfer(_) => unimplemented!("should be handled by caller"),
 
+            hir::Decl::Stmt(hir::Stmt::Block(x)) => x
+                .finalize(source, env, diagnostics)
+                .map(|x| x.stmts.to_vec()),
+
             hir::Decl::Stmt(x) => x.finalize(source, env, diagnostics).map(|x| vec![x]),
         }
     }
@@ -281,22 +285,23 @@ impl hir::Binary<hir::FinalPass> {
 
         let what = tree::Callable::Builtin(match op {
             Operator::Assign => tree::BuiltinOp::Assign,
-            Operator::AndAssign => todo!("mir assignment"),
-            Operator::OrAssign => todo!("mir assignment"),
-            Operator::XorAssign => todo!("mir assignment"),
-            Operator::NandAssign => todo!("mir assignment"),
-            Operator::NorAssign => todo!("mir assignment"),
-            Operator::XnorAssign => todo!("mir assignment"),
-            Operator::AddAssign => todo!("mir assignment"),
-            Operator::SubAssign => todo!("mir assignment"),
-            Operator::MulAssign => todo!("mir assignment"),
-            Operator::PowAssign => todo!("mir assignment"),
-            Operator::DivAssign => todo!("mir assignment"),
-            Operator::RemAssign => todo!("mir assignment"),
-            Operator::ShlAssign => todo!("mir assignment"),
-            Operator::ShrAssign => todo!("mir assignment"),
-            Operator::RotlAssign => todo!("mir assignment"),
-            Operator::RotrAssign => todo!("mir assignment"),
+
+            Operator::AndAssign
+            | Operator::OrAssign
+            | Operator::XorAssign
+            | Operator::NandAssign
+            | Operator::NorAssign
+            | Operator::XnorAssign
+            | Operator::AddAssign
+            | Operator::SubAssign
+            | Operator::MulAssign
+            | Operator::PowAssign
+            | Operator::DivAssign
+            | Operator::RemAssign
+            | Operator::ShlAssign
+            | Operator::ShrAssign
+            | Operator::RotlAssign
+            | Operator::RotrAssign => todo!("mir assignment shorthand"),
 
             Operator::And => tree::BuiltinOp::And,
             Operator::Or => tree::BuiltinOp::Or,
@@ -320,8 +325,8 @@ impl hir::Binary<hir::FinalPass> {
             Operator::Le => tree::BuiltinOp::Le,
             Operator::Eq => tree::BuiltinOp::Eq,
             Operator::Ge => tree::BuiltinOp::Ge,
-            Operator::Convert => todo!("mir binary operator"),
-            Operator::Transmute => todo!("mir binary operator"),
+            Operator::Convert => todo!("mir Convert operator"),
+            Operator::Transmute => todo!("mir Transmute operator"),
 
             _ => todo!("not a binary operator"),
         });
@@ -345,13 +350,13 @@ impl hir::Unary<hir::FinalPass> {
         let what = tree::Callable::Builtin(match op {
             Operator::Not => tree::BuiltinOp::Not,
             Operator::Exists => tree::BuiltinOp::Exists,
-            Operator::Incr => todo!("mir unary operator"),
+            Operator::Incr => todo!("mir Incr operator"),
             Operator::Neg => tree::BuiltinOp::Neg,
-            Operator::Decr => todo!("mir unary operator"),
-            Operator::Coalesce => todo!("mir unary operator"),
-            Operator::Ref => todo!("mir unary operator"),
-            Operator::Dot => todo!("mir unary operator"),
-            Operator::Szof => todo!("mir unary operator"),
+            Operator::Decr => todo!("mir Decr operator"),
+            Operator::Coalesce => todo!("mir Coalesce operator"),
+            Operator::Ref => todo!("mir Ref operator"),
+            Operator::Dot => todo!("mir Dot operator"),
+            Operator::Szof => todo!("mir Szof operator"),
 
             _ => todo!("not a unary operator"),
         });

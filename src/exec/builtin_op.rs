@@ -50,7 +50,10 @@ mod inner {
                 // mutate reference
                 Self::Assign => {
                     let [a, b] = args else { unimplemented!() };
-                    let var = a.eval_var(env)?;
+                    // TODO: change this to eval_var() when the static analyzer can determine types statically
+                    let Some(var) = a.eval(env)?.var() else {
+                        return ControlFlow::Err(Failure::ImmutableAssignment);
+                    };
                     let value = b.eval(env)?;
                     if let Some(var) = env.get_mut(var) {
                         // existing
@@ -105,8 +108,13 @@ mod inner {
                         .iter()
                         .map(|x| {
                             x.eval(env).ok().map(|val| {
-                                if let Value::Var(id) = val {
-                                    env.get(id).expect("invalid reference").clone()
+                                if matches!(val, Value::Var(_)) {
+                                    let mut val = &val;
+                                    while let Value::Var(id) = *val {
+                                        // TODO: what if there's a cycle?
+                                        val = env.get(id).expect("invalid reference");
+                                    }
+                                    val.clone()
                                 } else {
                                     val
                                 }
@@ -122,7 +130,15 @@ mod inner {
                             unreachable!()
                         }
 
-                        Self::Inpt => todo!("exec Inpt"),
+                        Self::Inpt => {
+                            let mut buf = String::new();
+                            if std::io::stdin().read_line(&mut buf).is_err() {
+                                return ControlFlow::Err(Failure::FailedRead);
+                            }
+                            crate::pop_trailing_newline(&mut buf);
+                            Value::Text(buf)
+                        }
+
                         Self::Index => todo!("exec Index"),
                         Self::Slice => todo!("exec Slice"),
 
@@ -134,7 +150,7 @@ mod inner {
                                 (Value::Uint(a), Value::Uint(b)) => Value::Uint(a ^ b),
                                 (Value::Sint(a), Value::Sint(b)) => Value::Sint(a ^ b),
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} ^ {b:?}"),
                             }
                         }
                         Self::Xnor => {
@@ -145,7 +161,7 @@ mod inner {
                                 (Value::Uint(a), Value::Uint(b)) => Value::Uint(!(a ^ b)),
                                 (Value::Sint(a), Value::Sint(b)) => Value::Sint(!(a ^ b)),
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} !^ {b:?}"),
                             }
                         }
                         Self::Not => {
@@ -213,10 +229,18 @@ mod inner {
                                 (Value::Sint(a), Value::Sint(b)) => Value::Sint(a - b),
                                 (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a - b),
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} - {b:?}"),
                             }
                         }
-                        Self::Neg => todo!("exec Neg"),
+                        Self::Neg => {
+                            let [x] = <[_; 1]>::try_from(args).expect("bad argcount");
+                            match x {
+                                Value::Sint(x) => Value::Sint(-x),
+                                Value::Flpt(x) => Value::Flpt(-x),
+
+                                x => todo!("error: unsupported: -{x:?}"),
+                            }
+                        }
                         Self::Mul => {
                             let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
                             match (a, b) {
@@ -225,10 +249,26 @@ mod inner {
                                 (Value::Sint(a), Value::Sint(b)) => Value::Sint(a * b),
                                 (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a * b),
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} * {b:?}"),
                             }
                         }
-                        Self::Pow => todo!("exec Pow"),
+                        Self::Pow => {
+                            let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            match (a, b) {
+                                (Value::Byte(a), Value::Byte(b)) => Value::Byte(a.pow(b.into())),
+                                (Value::Uint(a), Value::Uint(b)) => Value::Uint(
+                                    b.try_into()
+                                        .map_or_else(|_| todo!("overflow"), |b| a.pow(b)),
+                                ),
+                                (Value::Sint(a), Value::Uint(b)) => Value::Sint(
+                                    b.try_into()
+                                        .map_or_else(|_| todo!("overflow"), |b| a.pow(b)),
+                                ),
+                                (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a.powf(b)),
+
+                                (a, b) => todo!("error: incompatible: {a:?} ** {b:?}"),
+                            }
+                        }
                         Self::Div => {
                             let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
                             match (a, b) {
@@ -237,7 +277,7 @@ mod inner {
                                 (Value::Sint(a), Value::Sint(b)) => Value::Sint(a / b),
                                 (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a / b),
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} / {b:?}"),
                             }
                         }
                         Self::Rem => {
@@ -248,7 +288,7 @@ mod inner {
                                 (Value::Sint(a), Value::Sint(b)) => Value::Sint(a % b),
                                 (Value::Flpt(a), Value::Flpt(b)) => Value::Flpt(a % b),
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} % {b:?}"),
                             }
                         }
                         Self::Shl => todo!("exec Shl"),
@@ -269,7 +309,7 @@ mod inner {
                                 (Value::Char(a), Value::Char(b)) => a == b,
                                 (Value::Text(a), Value::Text(b)) => a == b,
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} == {b:?}"),
                             })
                         }
                         Self::Ne => {
@@ -285,7 +325,7 @@ mod inner {
                                 (Value::Char(a), Value::Char(b)) => a != b,
                                 (Value::Text(a), Value::Text(b)) => a != b,
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} != {b:?}"),
                             })
                         }
 
@@ -299,7 +339,7 @@ mod inner {
                                 (Value::Char(a), Value::Char(b)) => a < b,
                                 (Value::Text(a), Value::Text(b)) => a < b,
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} < {b:?}"),
                             })
                         }
                         Self::Gt => {
@@ -312,7 +352,7 @@ mod inner {
                                 (Value::Char(a), Value::Char(b)) => a > b,
                                 (Value::Text(a), Value::Text(b)) => a > b,
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} > {b:?}"),
                             })
                         }
                         Self::Le => {
@@ -325,7 +365,7 @@ mod inner {
                                 (Value::Char(a), Value::Char(b)) => a <= b,
                                 (Value::Text(a), Value::Text(b)) => a <= b,
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} <= {b:?}"),
                             })
                         }
                         Self::Ge => {
@@ -338,7 +378,7 @@ mod inner {
                                 (Value::Char(a), Value::Char(b)) => a >= b,
                                 (Value::Text(a), Value::Text(b)) => a >= b,
 
-                                _ => todo!("error: incompatible"),
+                                (a, b) => todo!("error: incompatible: {a:?} >= {b:?}"),
                             })
                         }
                     }

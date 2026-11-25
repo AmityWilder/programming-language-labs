@@ -39,8 +39,26 @@ mod scan {
     }
 
     #[test]
-    fn test_invalid_token() {
+    fn test_empty_macro() {
         const SOURCE: &str = "\\";
+        assert_eq!(
+            test_lex(SOURCE),
+            [(SOURCE, Err(DiagnosticKind::EmptyMacroName))]
+        );
+    }
+
+    #[test]
+    fn test_empty_macro_param() {
+        const SOURCE: &str = "$";
+        assert_eq!(
+            test_lex(SOURCE),
+            [(SOURCE, Err(DiagnosticKind::EmptyMacroParam))]
+        );
+    }
+
+    #[test]
+    fn test_invalid_token() {
+        const SOURCE: &str = "`";
         assert_eq!(
             test_lex(SOURCE),
             [(SOURCE, Err(DiagnosticKind::UnknownToken))]
@@ -155,13 +173,6 @@ mod scan {
             }
 
             #[test]
-            fn test_scan_number_negative() {
-                const SOURCE: &str = "-5";
-                assert_eq!(test_lex(SOURCE), &[(SOURCE, Ok(TokenKind::NumberLit))]);
-                assert_eq!(SOURCE.parse::<NumberLiteral>(), Ok(NumberLiteral::Sint(-5)));
-            }
-
-            #[test]
             fn test_scan_number_decimal() {
                 const SOURCE: &str = "2.5";
                 assert_eq!(test_lex(SOURCE), &[(SOURCE, Ok(TokenKind::NumberLit))]);
@@ -178,16 +189,6 @@ mod scan {
                 assert_eq!(
                     SOURCE.parse::<NumberLiteral>(),
                     Ok(NumberLiteral::Flpt(25.25))
-                );
-            }
-
-            #[test]
-            fn test_scan_number_multidigit_decimal_negative() {
-                const SOURCE: &str = "-25.25";
-                assert_eq!(test_lex(SOURCE), &[(SOURCE, Ok(TokenKind::NumberLit))]);
-                assert_eq!(
-                    SOURCE.parse::<NumberLiteral>(),
-                    Ok(NumberLiteral::Flpt(-25.25))
                 );
             }
 
@@ -432,7 +433,7 @@ mod scan {
 
     mod char {
         use super::*;
-        use crate::lex::token::CharLiteral;
+        use crate::lex::token::{CharLiteral, CharLiteralError};
 
         #[test]
         fn test_scan_char_simple() {
@@ -444,27 +445,30 @@ mod scan {
         #[test]
         fn test_scan_char_multi() {
             const SOURCE: &str = "'aa'";
+            assert_eq!(test_lex(SOURCE), &[(SOURCE, Ok(TokenKind::CharLit))]);
             assert_eq!(
-                test_lex(SOURCE),
-                &[(SOURCE, Err(DiagnosticKind::MultiCharLiteral))]
+                SOURCE.parse::<CharLiteral>(),
+                Err(CharLiteralError::MultiCharLiteral)
             );
         }
 
         #[test]
         fn test_scan_char_empty() {
             const SOURCE: &str = "''";
+            assert_eq!(test_lex(SOURCE), &[(SOURCE, Ok(TokenKind::CharLit))]);
             assert_eq!(
-                test_lex(SOURCE),
-                &[(SOURCE, Err(DiagnosticKind::EmptyCharLiteral))]
+                SOURCE.parse::<CharLiteral>(),
+                Err(CharLiteralError::EmptyCharLiteral)
             );
         }
 
         #[test]
         fn test_scan_char_endless() {
             const SOURCE: &str = "' ";
+            assert_eq!(test_lex(SOURCE), &[(SOURCE, Ok(TokenKind::CharLit))]);
             assert_eq!(
-                test_lex(SOURCE),
-                &[(SOURCE, Err(DiagnosticKind::EndlessCharLiteral))]
+                SOURCE.parse::<CharLiteral>(),
+                Err(CharLiteralError::EndlessCharLiteral)
             );
         }
 

@@ -2,7 +2,7 @@
 {
     let n = 5b;
 
-    let x = 5 -:> uint | fail;
+    //let x = 5 -:> uint | fail;
 
     //rep n < 256b {
     //    prnt(n + "\n");
