@@ -222,23 +222,19 @@ impl<'src> Iterator for CommentCodeSegments<'src> {
                     code
                 } else {
                     #[expect(clippy::string_slice, reason = "`len..` is a valid string slice")]
-                    {
-                        self.source = &self.source[self.source.len()..];
-                    }
+                    (self.source = &self.source[self.source.len()..]);
                     code
                 }
             })
             .or_else(|| {
-                // span
+                // inline
                 self.source.split_once('`').map(|(_, code)| {
                     if let Some((code, rest)) = code.split_once('`') {
                         self.source = rest;
                         code
                     } else {
                         #[expect(clippy::string_slice, reason = "`len..` is a valid string slice")]
-                        {
-                            self.source = &self.source[self.source.len()..];
-                        }
+                        (self.source = &self.source[self.source.len()..]);
                         code
                     }
                 })
@@ -246,38 +242,275 @@ impl<'src> Iterator for CommentCodeSegments<'src> {
     }
 }
 
+#[cfg(test)]
+mod comment_code_segments_tests {
+    use super::*;
+
+    #[test]
+    fn test_line_comment_no_segments() {
+        const SOURCE: &str = "// apple";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, [] as [&str; 0]);
+    }
+
+    #[test]
+    fn test_line_comment_one_inline_full() {
+        const SOURCE: &str = "//`orange`";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_line_comment_one_inline_trailing() {
+        const SOURCE: &str = "// apple `orange`";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_line_comment_one_inline_leading() {
+        const SOURCE: &str = "//`apple` orange";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["apple"]);
+    }
+
+    #[test]
+    fn test_line_comment_one_inline_infix() {
+        const SOURCE: &str = "// apple `orange` banana";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_line_comment_multiple_inline_consecutive() {
+        const SOURCE: &str = "//`apple``orange`";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["apple", "orange"]);
+    }
+
+    #[test]
+    fn test_line_comment_multiple_inline_separated() {
+        const SOURCE: &str = "// apple `orange` banana `mango`";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange", "mango"]);
+    }
+
+    #[test]
+    fn test_block_comment_no_segments() {
+        const SOURCE: &str = "/* apple*/";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, [] as [&str; 0]);
+    }
+
+    #[test]
+    fn test_block_comment_one_inline_full() {
+        const SOURCE: &str = "/*`orange`*/";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_block_comment_one_inline_trailing() {
+        const SOURCE: &str = "/* apple `orange`*/";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_block_comment_one_inline_leading() {
+        const SOURCE: &str = "/*`apple` orange*/";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["apple"]);
+    }
+
+    #[test]
+    fn test_block_comment_one_inline_infix() {
+        const SOURCE: &str = "/* apple `orange` banana */";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_block_comment_multiple_inline_consecutive() {
+        const SOURCE: &str = "/*`apple``orange`*/";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["apple", "orange"]);
+    }
+
+    #[test]
+    fn test_block_comment_multiple_inline_separated() {
+        const SOURCE: &str = "/* apple `orange` banana `mango` */";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange", "mango"]);
+    }
+
+    #[test]
+    fn test_line_comment_one_block_full() {
+        const SOURCE: &str = "//```orange```";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_line_comment_one_block_trailing() {
+        const SOURCE: &str = "// apple ```orange```";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_line_comment_one_block_leading() {
+        const SOURCE: &str = "//```apple``` orange";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["apple"]);
+    }
+
+    #[test]
+    fn test_line_comment_one_block_infix() {
+        const SOURCE: &str = "// apple ```orange``` banana";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_line_comment_multiple_block_consecutive() {
+        const SOURCE: &str = "//```apple``````orange```";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["apple", "orange"]);
+    }
+
+    #[test]
+    fn test_line_comment_multiple_block_separated() {
+        const SOURCE: &str = "// apple ```orange``` banana ```mango```";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange", "mango"]);
+    }
+
+    #[test]
+    fn test_block_comment_one_block_full() {
+        const SOURCE: &str = "/*```orange```*/";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_block_comment_one_block_trailing() {
+        const SOURCE: &str = "/* apple ```orange```*/";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_block_comment_one_block_leading() {
+        const SOURCE: &str = "/*```apple``` orange*/";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["apple"]);
+    }
+
+    #[test]
+    fn test_block_comment_one_block_infix() {
+        const SOURCE: &str = "/* apple ```orange``` banana */";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange"]);
+    }
+
+    #[test]
+    fn test_block_comment_multiple_block_consecutive() {
+        const SOURCE: &str = "/*```apple``````orange```*/";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["apple", "orange"]);
+    }
+
+    #[test]
+    fn test_block_comment_multiple_block_separated() {
+        const SOURCE: &str = "/* apple ```orange``` banana ```mango``` */";
+        let iter = CommentCodeSegments::new(SOURCE);
+        let list = iter.collect::<Vec<_>>();
+        assert_eq!(list, ["orange", "mango"]);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CommentCodeLex<'src> {
+    comment: &'src str,
+    code: &'src str,
+    lexer: Lexer<'src>,
+}
+
+impl<'src> CommentCodeLex<'src> {
+    fn new(comment: &'src str, code: &'src str) -> Self {
+        Self {
+            comment,
+            code,
+            lexer: Lexer::new(code),
+        }
+    }
+}
+
+impl<'src> Iterator for CommentCodeLex<'src> {
+    type Item = (Range<usize>, Syntax);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.lexer.next().map(|(len, kind, _)| {
+            let lex;
+            (lex, self.code) = self.code.split_at(uspan_to_usize(len));
+            (
+                self.comment
+                    .substr_range(lex)
+                    .expect("lex should be a substr of comment"),
+                (lex, kind).syntax(),
+            )
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CommentCode<'src> {
     comment: &'src str,
-    scanner:
-        std::iter::FlatMap<CommentCodeSegments<'src>, Lexer<'src>, fn(&'src str) -> Lexer<'src>>,
+    iter: CommentCodeSegments<'src>,
 }
 
 impl<'src> CommentCode<'src> {
     fn new(comment: &'src str) -> Self {
         Self {
             comment,
-            scanner: CommentCodeSegments::new(comment).flat_map(Lexer::new),
+            iter: CommentCodeSegments::new(comment),
         }
     }
 }
 
-impl Iterator for CommentCode<'_> {
-    type Item = (Range<usize>, Syntax);
+impl<'src> Iterator for CommentCode<'src> {
+    type Item = CommentCodeLex<'src>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.scanner.next().map({
-            let mut prev_end = 0usize;
-            move |(len, kind, _)| {
-                let start = prev_end;
-                prev_end = start + uspan_to_usize(len);
-                let range = Range {
-                    start,
-                    end: prev_end,
-                };
-                (range, (&self.comment[range], kind).syntax())
-            }
-        })
+        self.iter
+            .next()
+            .map(|s| CommentCodeLex::new(self.comment, s))
     }
 }
 
@@ -291,7 +524,7 @@ pub enum HighlightToken<'src> {
     TextLiteral(SubTokenSyntax<'src, EscapedRanges<EscapeRanges<'src>>>),
 
     /// String literal containing escapes - interleaves the escape sequences between un-escaped chunks
-    Comment(SubTokenSyntax<'src, CommentCode<'src>>),
+    Comment(SubTokenSyntax<'src, std::iter::Flatten<CommentCode<'src>>>),
 
     /// Any token that doesn't have subtokens
     Simple(std::iter::Once<(&'src str, Syntax)>),
@@ -354,9 +587,11 @@ where
         }
 
         // comment with code segments
-        Syntax::Comment if lex.contains('`') => {
-            HighlightToken::Comment(SubTokenSyntax::new(lex, syn, CommentCode::new(lex)))
-        }
+        Syntax::Comment if lex.contains('`') => HighlightToken::Comment(SubTokenSyntax::new(
+            lex,
+            syn,
+            CommentCode::new(lex).flatten(),
+        )),
 
         // an item
         _ => HighlightToken::Simple(std::iter::once((lex, syn))),
