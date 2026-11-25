@@ -702,10 +702,9 @@ fn comp_file(
         println!("\x1b[0m{}:", code.loc());
         let mut tokens = Vec::with_capacity(code.tokens().tokens.len());
         let mut skipped_tokens = code.tokens().iter().peekable();
-        let mut f = {
-            let tokens = &mut tokens;
-            let mut prev_end = 0;
-            move |span: RelSpan, syn: Syntax| {
+        let mut prev_end = 0;
+        for decl in &unit.decls {
+            decl.visit_spans(0, &mut |span: RelSpan, syn: Syntax| {
                 #[cfg(debug_assertions)]
                 let mut curr_end = span.start; // if no tokens are visited, default to the value that is legitimate
                 while skipped_tokens
@@ -730,11 +729,13 @@ fn comp_file(
                 debug_assert_eq!(curr_end, span.start, "missed some token(s)");
                 prev_end = span.end;
                 tokens.push((&code[span], syn));
-            }
-        };
-        for decl in &unit.decls {
-            decl.visit_spans(0, &mut f);
+            });
         }
+        tokens.extend(
+            skipped_tokens
+                .skip_while(|(x, _)| x.end <= prev_end)
+                .map(|(span, kind)| (&code[span], kind).get_syntax()),
+        ); // consume remaining tokens
         print_highlighted(source, code, tokens, code.expansions(), &SYNTAX_STYLE_ANSI);
         println!();
     }
