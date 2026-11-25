@@ -232,8 +232,6 @@ impl Iterator for Lexer<'_> {
                     let s = &self.source[..len];
                     if let Some(kw) = Keyword::try_from_str(s) {
                         (len, TokenKind::Keyword(kw), None)
-                    } else if matches!(s, "true" | "fals") {
-                        (len, TokenKind::BoolLit(s == "true"), None)
                     } else {
                         (self.ident(), TokenKind::Ident, None)
                     }

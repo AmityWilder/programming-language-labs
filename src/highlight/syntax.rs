@@ -2,8 +2,7 @@
 
 use crate::{
     highlight::style::Style,
-    lex::token::{IdentCase, TokenKind, punc::Punctuation},
-    // scanner::token::{Token, value::LexValue},
+    lex::token::{IdentCase, TokenKind, keyword::Keyword, punc::Punctuation},
 };
 
 /// Syntactic element category for highlighting
@@ -251,7 +250,6 @@ impl GetSyntax for (&str, TokenKind) {
             TokenKind::NumberLit => Syntax::NumberLiteral,
             TokenKind::CharLit => Syntax::CharLiteral,
             TokenKind::TextLit => Syntax::TextLiteral,
-            TokenKind::BoolLit(_) => Syntax::LanguageDefined,
             TokenKind::Macro => Syntax::MacroName,
             TokenKind::MParam => Syntax::MacroParam,
 
@@ -264,16 +262,55 @@ impl GetSyntax for (&str, TokenKind) {
                 }
             }
 
-            TokenKind::Keyword(kw) => {
-                if kw.is_flow() {
-                    Syntax::FlowKeyword
-                } else if kw.is_type() && /* TODO: differenciate type vs value in semantics */ !kw.is_value()
-                {
-                    Syntax::Typename
-                } else {
-                    Syntax::Keyword
-                }
-            }
+            TokenKind::Keyword(kw) => match kw {
+                Keyword::True | Keyword::Fals | Keyword::None => Syntax::LanguageDefined,
+
+                Keyword::Me => Syntax::LanguageVariable,
+
+                Keyword::If
+                | Keyword::Or
+                | Keyword::Tor
+                | Keyword::Pick
+                | Keyword::Rep
+                | Keyword::For
+                | Keyword::In
+                | Keyword::Loop
+                | Keyword::Cord
+                | Keyword::Dfer
+                | Keyword::Done
+                | Keyword::Skip
+                | Keyword::Give
+                | Keyword::Fail
+                | Keyword::Emit
+                | Keyword::Def
+                | Keyword::Rot => Syntax::FlowKeyword,
+
+                Keyword::Nevr
+                | Keyword::Bool
+                | Keyword::Byte
+                | Keyword::Uint
+                | Keyword::Sint
+                | Keyword::Flpt
+                | Keyword::Char
+                | Keyword::Text => Syntax::Typename,
+
+                Keyword::Mod
+                | Keyword::Rec
+                | Keyword::Sup
+                | Keyword::Cat
+                | Keyword::Alt
+                | Keyword::Sub
+                | Keyword::Fun
+                | Keyword::On
+                | Keyword::Let
+                | Keyword::Uni
+                | Keyword::Pvt
+                | Keyword::Has
+                | Keyword::Only
+                | Keyword::Szof
+                | Keyword::Prnt
+                | Keyword::Inpt => Syntax::Keyword,
+            },
 
             TokenKind::Punc(
                 Punctuation::MacroConcat

@@ -7,7 +7,13 @@
 )]
 
 use super::{EnvId, Value, tree};
-use crate::types::{byte, fail, flpt, none, sint, text, uint};
+use crate::{
+    lex::{
+        symbols::{BYTE_SUFFIX, SIGNED_SUFFIX, UNSIGNED_SUFFIX},
+        token::{keyword::Keyword, punc::Punctuation},
+    },
+    types::{byte, fail, flpt, none, sint, text, uint},
+};
 use std::fmt::{self, Write};
 
 mod helpers {
@@ -151,7 +157,13 @@ impl fmt::Display for DisplayMir<'_> {
 impl MirDisplay for tree::Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { stmts } = self;
+        let mut has_prev = false;
         for stmt in stmts {
+            if has_prev {
+                f.write_char('\n')?;
+            } else {
+                has_prev = true;
+            }
             stmt.fmt(f)?;
         }
         Ok(())
@@ -211,43 +223,43 @@ impl MirDisplay for Value {
 
 impl MirDisplay for none {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("none")
+        f.write_str(Keyword::None.as_str())
     }
 }
 
 impl MirDisplay for fail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "fail{{{self}}}")
+        write!(f, "{}{{{self}}}", Keyword::Fail)
     }
 }
 
 impl MirDisplay for bool {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(if *self { "true" } else { "fals" })
+        f.write_str(if *self { Keyword::True } else { Keyword::Fals }.as_str())
     }
 }
 
 impl MirDisplay for byte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self}b")
+        write!(f, "{self}{BYTE_SUFFIX}")
     }
 }
 
 impl MirDisplay for uint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self}u")
+        write!(f, "{self}{UNSIGNED_SUFFIX}")
     }
 }
 
 impl MirDisplay for sint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self}s")
+        write!(f, "{self}{SIGNED_SUFFIX}")
     }
 }
 
 impl MirDisplay for flpt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self}f")
+        write!(f, "{self}")
     }
 }
 
@@ -266,7 +278,7 @@ impl MirDisplay for text {
 impl MirDisplay for EnvId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self(id) = self;
-        write!(f, "var{id:#X}")
+        write!(f, "var@{id:X}")
     }
 }
 
@@ -316,33 +328,33 @@ impl MirDisplay for tree::Operation {
                     tree::BuiltinOp::Index | tree::BuiltinOp::Slice => Nary::Subscript,
                 };
                 let sym = match op {
-                    tree::BuiltinOp::Assign => "=",
-                    tree::BuiltinOp::Inpt => "inpt",
-                    tree::BuiltinOp::Exists => "!!",
+                    tree::BuiltinOp::Assign => Punctuation::Assign.as_str(),
+                    tree::BuiltinOp::Inpt => Keyword::Inpt.as_str(),
+                    tree::BuiltinOp::Exists => Punctuation::Exists.as_str(),
                     tree::BuiltinOp::Index | tree::BuiltinOp::Slice => "",
-                    tree::BuiltinOp::Not => "!",
-                    tree::BuiltinOp::And => "&",
-                    tree::BuiltinOp::Or => "|",
-                    tree::BuiltinOp::Xor => "^",
-                    tree::BuiltinOp::Nand => "!&",
-                    tree::BuiltinOp::Nor => "!|",
-                    tree::BuiltinOp::Xnor => "!^",
-                    tree::BuiltinOp::Eq => "==",
-                    tree::BuiltinOp::Ne => "!=",
-                    tree::BuiltinOp::Lt => "<",
-                    tree::BuiltinOp::Gt => ">",
-                    tree::BuiltinOp::Le => "<=",
-                    tree::BuiltinOp::Ge => ">=",
-                    tree::BuiltinOp::Add => "+",
-                    tree::BuiltinOp::Neg | tree::BuiltinOp::Sub => "-",
-                    tree::BuiltinOp::Mul => "*",
-                    tree::BuiltinOp::Div => "/",
-                    tree::BuiltinOp::Rem => "%",
-                    tree::BuiltinOp::Pow => "**",
-                    tree::BuiltinOp::Shl => "<<",
-                    tree::BuiltinOp::Shr => ">>",
-                    tree::BuiltinOp::Rotl => "[<<]",
-                    tree::BuiltinOp::Rotr => "[>>]",
+                    tree::BuiltinOp::Not => Punctuation::Not.as_str(),
+                    tree::BuiltinOp::And => Punctuation::And.as_str(),
+                    tree::BuiltinOp::Or => Punctuation::Or.as_str(),
+                    tree::BuiltinOp::Xor => Punctuation::Xor.as_str(),
+                    tree::BuiltinOp::Nand => Punctuation::Nand.as_str(),
+                    tree::BuiltinOp::Nor => Punctuation::Nor.as_str(),
+                    tree::BuiltinOp::Xnor => Punctuation::Xnor.as_str(),
+                    tree::BuiltinOp::Eq => Punctuation::Eq.as_str(),
+                    tree::BuiltinOp::Ne => Punctuation::Ne.as_str(),
+                    tree::BuiltinOp::Lt => Punctuation::Lt.as_str(),
+                    tree::BuiltinOp::Gt => Punctuation::Gt.as_str(),
+                    tree::BuiltinOp::Le => Punctuation::Le.as_str(),
+                    tree::BuiltinOp::Ge => Punctuation::Ge.as_str(),
+                    tree::BuiltinOp::Add => Punctuation::Add.as_str(),
+                    tree::BuiltinOp::Neg | tree::BuiltinOp::Sub => Punctuation::SubNeg.as_str(),
+                    tree::BuiltinOp::Mul => Punctuation::Mul.as_str(),
+                    tree::BuiltinOp::Div => Punctuation::Div.as_str(),
+                    tree::BuiltinOp::Rem => Punctuation::Rem.as_str(),
+                    tree::BuiltinOp::Pow => Punctuation::Pow.as_str(),
+                    tree::BuiltinOp::Shl => Punctuation::Shl.as_str(),
+                    tree::BuiltinOp::Shr => Punctuation::Shr.as_str(),
+                    tree::BuiltinOp::Rotl => Punctuation::Rotl.as_str(),
+                    tree::BuiltinOp::Rotr => Punctuation::Rotr.as_str(),
                 };
                 match nary {
                     Nary::Nullary => {
@@ -352,18 +364,26 @@ impl MirDisplay for tree::Operation {
                     Nary::UnaryPre => {
                         let [x] = args else { return Err(fmt::Error) };
                         f.write_str(sym)?;
-                        x.fmt(f)
+                        f.write_char('(')?;
+                        x.fmt(f)?;
+                        f.write_char(')')
                     }
                     Nary::UnaryPost => {
                         let [x] = args else { return Err(fmt::Error) };
+                        f.write_char('(')?;
                         x.fmt(f)?;
+                        f.write_char(')')?;
                         f.write_str(sym)
                     }
                     Nary::Binary => {
                         let [a, b] = args else { return Err(fmt::Error) };
+                        f.write_char('(')?;
                         a.fmt(f)?;
+                        f.write_char(')')?;
                         f.write_str(sym)?;
-                        b.fmt(f)
+                        f.write_char('(')?;
+                        b.fmt(f)?;
+                        f.write_char(')')
                     }
                     Nary::Subscript => {
                         let [x, i] = args else { return Err(fmt::Error) };
@@ -384,7 +404,7 @@ impl MirDisplay for tree::Operation {
 impl MirDisplay for tree::Print {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { msg } = self;
-        f.write_str("prnt(")?;
+        write!(f, "{}(", Keyword::Prnt)?;
         msg.fmt(f)?;
         f.write_str(");")
     }
@@ -393,7 +413,7 @@ impl MirDisplay for tree::Print {
 impl MirDisplay for tree::Loop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { block } = self;
-        f.write_str("loop")?;
+        write!(f, "{} ", Keyword::Loop)?;
         block.fmt(f)
     }
 }
@@ -412,15 +432,17 @@ impl MirDisplay for tree::Dfer {
             ret_param,
             on_pop,
         } = self;
-        f.write_str("dfer")?;
+        f.write_str(Keyword::Dfer.as_str())?;
         if let Some(ret_param) = ret_param {
             f.write_char('(')?;
             ret_param.fmt(f)?;
             f.write_char(')')?;
         }
+        f.write_char(' ')?;
         on_pop.fmt(f)?;
         let tree::Block { stmts } = do_first;
         for stmt in stmts {
+            f.write_char('\n')?;
             stmt.fmt(f)?;
         }
         Ok(())
@@ -433,16 +455,17 @@ impl MirDisplay for tree::Branch {
         let mut has_prev = false;
         for tree::Case { pred, then } in cases {
             if has_prev {
-                f.write_str(" or ")?;
+                write!(f, " {} ", Keyword::Or)?;
             } else {
                 has_prev = true;
             }
-            f.write_str("if ")?;
+            write!(f, "{} ", Keyword::If)?;
             pred.fmt(f)?;
+            f.write_char(' ')?;
             then.fmt(f)?;
         }
         if let Some(default) = default {
-            f.write_str(" or ")?;
+            write!(f, " {} ", Keyword::Or)?;
             default.fmt(f)?;
         }
         Ok(())
@@ -452,7 +475,7 @@ impl MirDisplay for tree::Branch {
 impl MirDisplay for tree::Give {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { value } = self;
-        f.write_str("give ")?;
+        write!(f, "{} ", Keyword::Give)?;
         value.fmt(f)?;
         f.write_char(';')
     }
@@ -461,7 +484,7 @@ impl MirDisplay for tree::Give {
 impl MirDisplay for tree::Fail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { value } = self;
-        f.write_str("fail ")?;
+        write!(f, "{} ", Keyword::Fail)?;
         value.fmt(f)?;
         f.write_char(';')
     }
@@ -470,8 +493,9 @@ impl MirDisplay for tree::Fail {
 impl MirDisplay for tree::Skip {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { label } = self;
-        f.write_str("skip ")?;
+        f.write_str(Keyword::Skip.as_str())?;
         if let Some(label) = label {
+            f.write_char(' ')?;
             label.fmt(f)?;
         }
         f.write_char(';')
@@ -481,7 +505,7 @@ impl MirDisplay for tree::Skip {
 impl MirDisplay for tree::Done {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { label, value } = self;
-        f.write_str("done ")?;
+        write!(f, "{} ", Keyword::Done)?;
         if let Some(label) = label {
             label.fmt(f)?;
         }

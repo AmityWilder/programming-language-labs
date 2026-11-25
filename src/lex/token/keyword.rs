@@ -10,7 +10,8 @@ define_token_eq! {
 
         /// The "self" parameter
         Me = "me",
-        // TODO: booleans are currently bespoke
+        True = "true",
+        Fals = "fals",
 
         // ----------------------------
         // Builtin types
@@ -468,52 +469,5 @@ define_token_eq! {
 
         /// Input from the console (TODO: REPLACE)
         Inpt = "inpt",
-    }
-}
-
-impl Keyword {
-    /// Test if a keyword is a "flow" keyword
-    pub const fn is_flow(self) -> bool {
-        matches!(
-            self,
-            Self::If
-                | Self::Or
-                | Self::Tor
-                | Self::Pick
-                | Self::Rep
-                | Self::For
-                | Self::In
-                | Self::Loop
-                | Self::Cord
-                | Self::Dfer
-                | Self::Done
-                | Self::Skip
-                | Self::Give
-                | Self::Fail
-                | Self::Emit
-                | Self::Def
-                | Self::Rot
-        )
-    }
-
-    /// Test if a keyword is a language defined value
-    pub const fn is_value(self) -> bool {
-        matches!(self, Self::None | Self::Fail)
-    }
-
-    /// Test if a keyword is a language defined type
-    pub const fn is_type(self) -> bool {
-        matches!(
-            self,
-            Self::None
-                | Self::Nevr
-                | Self::Fail
-                | Self::Bool
-                | Self::Uint
-                | Self::Sint
-                | Self::Flpt
-                | Self::Char
-                | Self::Text
-        )
     }
 }

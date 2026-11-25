@@ -19,10 +19,13 @@ use crate::{
         style::StyleWrapper as _,
         syntax::{GetSyntax as _, Syntax},
     },
-    lex::token::{
-        Operator,
-        keyword::Keyword,
-        punc::{OpSide, Punctuation},
+    lex::{
+        symbols::{BYTE_SUFFIX, SIGNED_SUFFIX, UNSIGNED_SUFFIX},
+        token::{
+            Operator,
+            keyword::Keyword,
+            punc::{OpSide, Punctuation},
+        },
     },
     parse::ast,
     src_code::{map::SourceMap, span::FileId},
@@ -1289,11 +1292,11 @@ impl HirDisplay for hir::LinkedLiteral {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match *self {
-            Self::None => f.write_str("none"),
-            Self::Bool(x) => f.write_str(if x { "true" } else { "fals" }),
-            Self::Byte(x) => write!(f, "{x}b"),
-            Self::Uint(x) => write!(f, "{x}u"),
-            Self::Sint(x) => write!(f, "{x}s"),
+            Self::None => f.write_str(Keyword::None.as_str()),
+            Self::Bool(x) => f.write_str(if x { Keyword::True } else { Keyword::Fals }.as_str()),
+            Self::Byte(x) => write!(f, "{x}{BYTE_SUFFIX}"),
+            Self::Uint(x) => write!(f, "{x}{UNSIGNED_SUFFIX}"),
+            Self::Sint(x) => write!(f, "{x}{SIGNED_SUFFIX}"),
             Self::Flpt(x) => write!(f, "{x}"),
             Self::Char(x) => write!(f, "{x:?}"),
             Self::Text(ref x) => write!(f, "{x:?}"),
@@ -1327,7 +1330,7 @@ impl HirDisplay for hir::UnlinkedVar {
         let crate::parse::ast::Variable { path, ident } = var;
         if let Some(path) = path {
             for part in path {
-                write!(f, "{}::", &source[file][part.ident])?;
+                write!(f, "{}{}", &source[file][part.ident], Punctuation::PathSep)?;
             }
         }
         write!(f, "{}", &source[file][*ident])

@@ -364,8 +364,8 @@ macro_rules! literal_tests {
 }
 
 literal_tests! {
-    test_print_literal_bool0(Literal(BoolLiteral(true)), "true");
-    test_print_literal_bool1(Literal(BoolLiteral(false)), "false");
+    test_print_literal_bool0(Literal(Keyword::True), "true");
+    test_print_literal_bool1(Literal(Keyword::Fals), "false");
     test_print_literal_none(Literal(Keyword::None), "none");
     test_print_literal_sint(Literal(SIntLiteral(-53)), "-53");
     test_print_literal_uint(Literal(SIntLiteral(78)), "78");

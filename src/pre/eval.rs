@@ -1,7 +1,7 @@
 use crate::{
     analyzer::types::PrimitiveType,
     error::{Diagnostic, DiagnosticKind},
-    lex::token::{Operator, TokenKind, punc::OpSide},
+    lex::token::{Operator, TokenKind, keyword::Keyword, punc::OpSide},
     pre::{StreamSpan, ast},
     spec_ops::{BitRotate as _, BitShift as _},
     src_code::{map::SourceMap, span::FileId},
@@ -304,7 +304,9 @@ impl<'src> PreExpr<'src> {
 
                     // TBD: should this even be handled by eval?
                     Operator::MacroStringify => PreVal::Text(match operand {
-                        PreVal::Bool(x) => (if x { "true" } else { "fals" }).to_owned(),
+                        PreVal::Bool(x) => {
+                            (if x { Keyword::True } else { Keyword::Fals }).to_string()
+                        }
                         PreVal::Byte(x) => x.to_string(),
                         PreVal::Uint(x) => x.to_string(),
                         PreVal::Sint(x) => x.to_string(),

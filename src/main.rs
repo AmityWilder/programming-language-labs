@@ -131,6 +131,7 @@ use crate::{
         static_env::{ModId, scope::ScopeEnvironment},
     },
     error::{CheckDiagnostics, Diagnostic, fail::Failure},
+    exec::fmt::DisplayMir,
     highlight::{
         TokenHighlight, highlight,
         style::{Color, Style, StyleWrapper},
@@ -836,7 +837,7 @@ fn compile(
             let mut visitor = DeclVisitor::new(source, scope_env, diagnostics, mod_id, unit.file);
             unit.walk(&mut visitor).inspect(|hir| {
                 println!(
-                    "hir:\n{:#}",
+                    "HIR:\n{:#}",
                     DisplayHir {
                         source,
                         env: scope_env,
@@ -870,7 +871,7 @@ fn compile(
             let mut visitor = VarRefVisitor::new(source, scope_env, diagnostics, mod_id, unit.file);
             let unit = unit.walk(&mut visitor).inspect(|hir| {
                 println!(
-                    "linked hir:\n{:#}",
+                    "linked HIR:\n{:#}",
                     DisplayHir {
                         source,
                         env: scope_env,
@@ -889,7 +890,7 @@ fn compile(
             let mut visitor = LitVisitor::new(source, scope_env, diagnostics, mod_id, unit.file);
             unit.walk(&mut visitor).inspect(|hir| {
                 println!(
-                    "hir:\n{:#}",
+                    "HIR:\n{:#}",
                     DisplayHir {
                         source,
                         env: scope_env,
@@ -921,7 +922,7 @@ fn compile(
     // MIR errors
     diagnostics.ok_or_err()?;
 
-    println!("program: {prgm:#?}");
+    println!("MIR:\n{:#}", DisplayMir { mir: &prgm });
 
     // any remaining errors
     diagnostics.ok_or_err()?;

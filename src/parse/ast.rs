@@ -1267,7 +1267,8 @@ impl LiteralKind {
     pub const fn new(value: TokenKind) -> Option<Self> {
         Some(match value {
             TokenKind::Keyword(Keyword::None) => Self::None,
-            TokenKind::BoolLit(b) => Self::Bool(b),
+            TokenKind::Keyword(Keyword::True) => Self::Bool(true),
+            TokenKind::Keyword(Keyword::Fals) => Self::Bool(false),
             TokenKind::NumberLit => Self::Number,
             TokenKind::CharLit => Self::Char,
             TokenKind::TextLit => Self::Text,
@@ -1279,7 +1280,7 @@ impl LiteralKind {
     pub const fn to_token_kind(self) -> TokenKind {
         match self {
             Self::None => TokenKind::Keyword(Keyword::None),
-            Self::Bool(b) => TokenKind::BoolLit(b),
+            Self::Bool(b) => TokenKind::Keyword(if b { Keyword::True } else { Keyword::Fals }),
             Self::Number => TokenKind::NumberLit,
             Self::Char => TokenKind::CharLit,
             Self::Text => TokenKind::TextLit,
