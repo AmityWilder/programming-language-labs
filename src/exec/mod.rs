@@ -5,6 +5,7 @@ use crate::{
 
 pub mod builtin_op;
 pub mod env;
+pub mod fmt;
 pub mod tree;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
