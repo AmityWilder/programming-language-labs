@@ -7,13 +7,14 @@ use crate::{
 #[cfg(true)]
 mod inner {
     use super::*;
-    use crate::exec::ControlFlow;
+    use crate::{exec::ControlFlow, lex::token::keyword::Keyword};
     use std::ops::FromResidual as _;
 
     #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
     pub enum BuiltinOp {
         Assign,
         Inpt,
+        Prnt,
         Exists,
         /// TODO: how will other views be indexed?
         Index,
@@ -137,6 +138,25 @@ mod inner {
                             }
                             crate::pop_trailing_newline(&mut buf);
                             Value::Text(buf)
+                        }
+
+                        Self::Prnt => {
+                            let [x] = <[_; 1]>::try_from(args).expect("bad argcount");
+                            match x {
+                                Value::None => print!("{}", Keyword::None),
+                                Value::Bool(x) => {
+                                    print!("{}", if x { Keyword::True } else { Keyword::Fals })
+                                }
+                                Value::Byte(x) => print!("{x}"),
+                                Value::Uint(x) => print!("{x}"),
+                                Value::Sint(x) => print!("{x}"),
+                                Value::Flpt(x) => print!("{x}"),
+                                Value::Char(x) => print!("{x}"),
+                                Value::Text(x) => print!("{x}"),
+
+                                x => todo!("error: unsupported: prnt({x:?})"),
+                            }
+                            Value::None
                         }
 
                         Self::Index => todo!("exec Index"),

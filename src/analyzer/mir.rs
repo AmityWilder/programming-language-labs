@@ -208,7 +208,7 @@ impl hir::Stmt<hir::FinalPass> {
     ) -> Result<tree::Stmt, CheckDiagnostics> {
         match self {
             Self::Expr(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Expr),
-            Self::Print(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Print),
+            Self::Print(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Expr),
 
             Self::If(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Branch),
             Self::Pick(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Branch),
@@ -453,10 +453,13 @@ impl hir::PrintStmt<hir::FinalPass> {
         source: &SourceMap,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<tree::Print, CheckDiagnostics> {
-        self.0
-            .finalize(source, env, diagnostics)
-            .map(|msg| tree::Print { msg })
+    ) -> Result<tree::Expr, CheckDiagnostics> {
+        self.0.finalize(source, env, diagnostics).map(|msg| {
+            tree::Expr::Operation(tree::Operation {
+                what: tree::Callable::Builtin(tree::BuiltinOp::Prnt),
+                args: Box::from([msg]),
+            })
+        })
     }
 }
 

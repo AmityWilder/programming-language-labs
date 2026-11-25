@@ -45,7 +45,6 @@ impl Program {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Stmt {
     Expr(Expr),
-    Print(Print),
     Loop(Loop),
     Dfer(Dfer),
     Branch(Branch),
@@ -59,7 +58,6 @@ impl Stmt {
     pub fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
         match self {
             Self::Expr(x) => x.eval(env),
-            Self::Print(x) => x.eval(env),
             Self::Loop(x) => x.eval(env),
             Self::Dfer(x) => x.eval(env),
             Self::Branch(x) => x.eval(env),
@@ -109,43 +107,73 @@ impl Expr {
     }
 
     pub fn eval_none(&self, env: &mut Environment) -> ControlFlow<Failure, none, Value> {
-        self.eval(env).map(|x| x.none().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::None => (),
+            x => panic!("expected none, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 
     pub fn eval_fail(&self, env: &mut Environment) -> ControlFlow<Failure, fail, Value> {
-        self.eval(env).map(|x| x.fail().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::Fail(x) => x,
+            x => panic!("expected fail, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 
     pub fn eval_bool(&self, env: &mut Environment) -> ControlFlow<Failure, bool, Value> {
-        self.eval(env).map(|x| x.bool().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::Bool(x) => x,
+            x => panic!("expected bool, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 
     pub fn eval_byte(&self, env: &mut Environment) -> ControlFlow<Failure, byte, Value> {
-        self.eval(env).map(|x| x.byte().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::Byte(x) => x,
+            x => panic!("expected byte, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 
     pub fn eval_uint(&self, env: &mut Environment) -> ControlFlow<Failure, uint, Value> {
-        self.eval(env).map(|x| x.uint().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::Uint(x) => x,
+            x => panic!("expected uint, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 
     pub fn eval_sint(&self, env: &mut Environment) -> ControlFlow<Failure, sint, Value> {
-        self.eval(env).map(|x| x.sint().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::Sint(x) => x,
+            x => panic!("expected sint, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 
     pub fn eval_flpt(&self, env: &mut Environment) -> ControlFlow<Failure, flpt, Value> {
-        self.eval(env).map(|x| x.flpt().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::Flpt(x) => x,
+            x => panic!("expected flpt, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 
     pub fn eval_char(&self, env: &mut Environment) -> ControlFlow<Failure, char, Value> {
-        self.eval(env).map(|x| x.char().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::Char(x) => x,
+            x => panic!("expected char, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 
     pub fn eval_text(&self, env: &mut Environment) -> ControlFlow<Failure, text, Value> {
-        self.eval(env).map(|x| x.text().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::Text(x) => x,
+            x => panic!("expected text, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 
     pub fn eval_var(&self, env: &mut Environment) -> ControlFlow<Failure, EnvId, Value> {
-        self.eval(env).map(|x| x.var().expect(STATIC_GUARANTEE))
+        self.eval(env).map(|x| match x {
+            Value::Var(x) => x,
+            x => panic!("expected var, found {x:?}. {}", STATIC_GUARANTEE),
+        })
     }
 }
 
@@ -168,20 +196,6 @@ impl Operation {
 pub enum Callable {
     Builtin(BuiltinOp),
     UserDefined(Todo),
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub struct Print {
-    /// Promised by static analysis to output text
-    pub msg: Expr,
-}
-impl Print {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
-        self.msg.eval_text(env).map(|msg| {
-            print!("{msg}");
-            Value::None
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]

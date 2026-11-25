@@ -177,7 +177,6 @@ impl MirDisplay for tree::Stmt {
                 x.fmt(f)?;
                 f.write_char(';')
             }
-            Self::Print(x) => x.fmt(f),
             Self::Loop(x) => x.fmt(f),
             Self::Dfer(x) => x.fmt(f),
             Self::Branch(x) => x.fmt(f),
@@ -293,6 +292,7 @@ impl MirDisplay for tree::Operation {
                     UnaryPost,
                     Binary,
                     Subscript,
+                    Call,
                 }
                 let nary = match op {
                     tree::BuiltinOp::Inpt => Nary::Nullary,
@@ -326,10 +326,13 @@ impl MirDisplay for tree::Operation {
                     | tree::BuiltinOp::Rotr => Nary::Binary,
 
                     tree::BuiltinOp::Index | tree::BuiltinOp::Slice => Nary::Subscript,
+
+                    tree::BuiltinOp::Prnt => Nary::Call,
                 };
                 let sym = match op {
                     tree::BuiltinOp::Assign => Punctuation::Assign.as_str(),
                     tree::BuiltinOp::Inpt => Keyword::Inpt.as_str(),
+                    tree::BuiltinOp::Prnt => Keyword::Prnt.as_str(),
                     tree::BuiltinOp::Exists => Punctuation::Exists.as_str(),
                     tree::BuiltinOp::Index | tree::BuiltinOp::Slice => "",
                     tree::BuiltinOp::Not => Punctuation::Not.as_str(),
@@ -392,21 +395,29 @@ impl MirDisplay for tree::Operation {
                         i.fmt(f)?;
                         f.write_char(']')
                     }
+                    Nary::Call => {
+                        let [fun, args @ ..] = args else {
+                            return Err(fmt::Error);
+                        };
+                        fun.fmt(f)?;
+                        f.write_char('(')?;
+                        let mut has_prev = false;
+                        for arg in args {
+                            if has_prev {
+                                f.write_str(", ")?;
+                            } else {
+                                has_prev = true;
+                            }
+                            arg.fmt(f)?;
+                        }
+                        f.write_char(')')
+                    }
                 }
             }
 
             // TODO
             tree::Callable::UserDefined(x) => x.fmt(f),
         }
-    }
-}
-
-impl MirDisplay for tree::Print {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { msg } = self;
-        write!(f, "{}(", Keyword::Prnt)?;
-        msg.fmt(f)?;
-        f.write_str(");")
     }
 }
 
