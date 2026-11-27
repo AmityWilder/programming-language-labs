@@ -1565,6 +1565,20 @@ impl HirDisplay for hir::UnlinkedLabel {
     }
 }
 
+impl HirDisplay for hir::LinkedLabel {
+    fn fmt(
+        &self,
+        source: &SourceMap,
+        file: FileId,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        let Self(id) = self;
+        f.write_str(".")?;
+        id.fmt(source, file, env, f)
+    }
+}
+
 impl<S: hir::HirPass> HirDisplay for hir::GiveStmt<S> {
     fn fmt(
         &self,

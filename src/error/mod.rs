@@ -1389,20 +1389,18 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
     // }
 }
 
-struct DisplayWith<F>(F);
-
-impl<F: Fn(&mut Formatter<'_>) -> fmt::Result> fmt::Display for DisplayWith<F> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.0(f)
-    }
-}
-
 impl Display for ContextDiagnostic<'_, '_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let (color, title) = match self.error.kind.severity() {
+            Severity::Info => (Color::BrightCyan, "info"),
+            Severity::Suggestion => (Color::BrightGreen, "suggestion"),
+            Severity::Warning => (Color::BrightYellow, "warning"),
+            Severity::Error => (Color::BrightRed, "error"),
+        };
         write!(
             f,
-            "{}error{}: ",
-            Style::new().foreground(Color::BrightRed).bold(true).begin(),
+            "{}{title}{}: ",
+            Style::new().foreground(color).bold(true).begin(),
             Style::new().foreground(Color::BrightWhite).begin()
         )?;
         self.err(f)?;

@@ -76,3 +76,76 @@ pub trait OrAllErrsExt<T, E>: Sized + IntoIterator<Item = Result<T, E>> {
 }
 
 impl<T, E, I: IntoIterator<Item = Result<T, E>>> OrAllErrsExt<T, E> for I {}
+
+/// The `err_or_*` counterparts to the standard library's `ok_or_*` methods on [`Option`].
+pub trait ErrOrExt<E> {
+    fn err_or<T>(self, v: T) -> Result<T, E>;
+
+    fn err_or_else<T, F>(self, v: F) -> Result<T, E>
+    where
+        F: FnOnce() -> T;
+}
+
+impl<E> ErrOrExt<E> for Option<E> {
+    #[inline]
+    fn err_or<T>(self, v: T) -> Result<T, E> {
+        match self {
+            Some(err) => Err(err),
+            None => Ok(v),
+        }
+    }
+
+    #[inline]
+    fn err_or_else<T, F>(self, v: F) -> Result<T, E>
+    where
+        F: FnOnce() -> T,
+    {
+        match self {
+            Some(err) => Err(err),
+            None => Ok(v()),
+        }
+    }
+}
+
+pub trait TransposeErrExt<T, E> {
+    fn transpose_err(self) -> Result<T, Option<E>>;
+}
+
+impl<T, E> TransposeErrExt<T, E> for Option<Result<T, E>> {
+    #[inline]
+    fn transpose_err(self) -> Result<T, Option<E>> {
+        match self {
+            Some(Ok(x)) => Ok(x),
+            Some(Err(e)) => Err(Some(e)),
+            None => Err(None),
+        }
+    }
+}
+
+pub trait InspectNone {
+    fn inspect_none<F>(self, f: F) -> Self
+    where
+        F: FnOnce();
+}
+
+impl<T> InspectNone for Option<T> {
+    fn inspect_none<F>(self, f: F) -> Self
+    where
+        F: FnOnce(),
+    {
+        if matches!(self, None) {
+            f();
+        }
+        self
+    }
+}
+
+pub trait InspectAlways: Sized {
+    fn inspect_always(self, f: impl FnOnce(&Self)) -> Self {
+        f(&self);
+        self
+    }
+}
+
+impl<T> InspectAlways for Option<T> {}
+impl<T, E> InspectAlways for Result<T, E> {}

@@ -21,8 +21,8 @@ impl ItemId {
 }
 
 pub type TypeId = ItemId;
-pub type FuncId = ItemId;
 pub type VarId = ItemId;
+pub type LabelId = ItemId;
 
 impl std::fmt::Debug for ItemId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -48,6 +48,7 @@ impl std::fmt::Display for ModId {
     }
 }
 
+/// Like a literal, but can be more a more complex type
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConstantValue(Todo);
 
@@ -61,13 +62,3 @@ impl StaticTypeSize for ConstantValue {
         todo!("constants must be statically sized")
     }
 }
-// impl<'src> GetType<'src> for ConstantValue {
-//     type Output<'ty>
-//         = &'ty AbstractType<'src>
-//     where
-//         'src: 'ty;
-
-//     fn get_type<'ty>(&self, _env: &'ty StaticEnvironment<'src>) -> Option<Self::Output<'ty>> {
-//         todo!()
-//     }
-// }

@@ -9,7 +9,7 @@
 
 use crate::{
     analyzer::{
-        static_env::{ItemId, ModId, TypeId, VarId, scope::ItemKind},
+        static_env::{ItemId, LabelId, ModId, TypeId, VarId, scope::ItemKind},
         types::bounds::Combinator,
     },
     error::CheckDiagnostics,
@@ -2111,9 +2111,6 @@ impl From<ast::PickArm> for PickArm<UnlinkedPass> {
 
 pub struct UnlinkedLabel(pub RelSpan);
 
-/// TODO
-pub type LinkedLabel = UnlinkedLabel;
-
 impl From<ast::Label> for UnlinkedLabel {
     fn from(ast::Label { dot: _, name }: ast::Label) -> Self {
         Self(name)
@@ -2125,6 +2122,8 @@ impl From<ast::ScopeLabel> for UnlinkedLabel {
         label.into()
     }
 }
+
+pub struct LinkedLabel(pub LabelId);
 
 pub struct LoopStmt<S: HirPass> {
     pub label: Option<S::LabelDcl>,
@@ -2139,8 +2138,15 @@ where
 
     fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { label, body } = self;
-        let label = label.map(|x| visitor.visit_label_dcl(x)).transpose();
-        let body = body.walk(visitor);
+        // HACK: inlined from BlockStmt so that `label` can be within the scope of the block
+        let (label, body) = {
+            let BlockStmt { decls } = body;
+            visitor.push_scope();
+            let label = label.map(|x| visitor.visit_label_dcl(x)).transpose();
+            let body = decls.walk(visitor).map(|decls| BlockStmt { decls });
+            visitor.pop_scope();
+            (label, body)
+        };
         Ok(LoopStmt {
             label: label?,
             body: body?,
@@ -2161,8 +2167,15 @@ where
 
     fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         let Self { label, body } = self;
-        let label = label.map(|x| visitor.visit_label_dcl(x)).transpose();
-        let body = body.walk(visitor);
+        // HACK: inlined from BlockStmt so that `label` can be within the scope of the block
+        let (label, body) = {
+            let BlockStmt { decls } = body;
+            visitor.push_scope();
+            let label = label.map(|x| visitor.visit_label_dcl(x)).transpose();
+            let body = decls.walk(visitor).map(|decls| BlockStmt { decls });
+            visitor.pop_scope();
+            (label, body)
+        };
         Ok(CordStmt {
             label: label?,
             body: body?,
@@ -2215,10 +2228,17 @@ where
             iter,
             body,
         } = self;
-        let label = label.map(|x| visitor.visit_label_dcl(x)).transpose();
-        let var = var.walk(visitor);
         let iter = iter.walk(visitor);
-        let body = body.walk(visitor);
+        // HACK: inlined from BlockStmt so that `label` can be within the scope of the block
+        let (label, var, body) = {
+            let BlockStmt { decls } = body;
+            visitor.push_scope();
+            let label = label.map(|x| visitor.visit_label_dcl(x)).transpose();
+            let var = var.walk(visitor);
+            let body = decls.walk(visitor).map(|decls| BlockStmt { decls });
+            visitor.pop_scope();
+            (label, var, body)
+        };
         Ok(ForStmt {
             label: label?,
             var: var?,

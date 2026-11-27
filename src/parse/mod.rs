@@ -10,7 +10,7 @@ use crate::{
         code::SourceCode,
         span::{FileId, RelSpan, usize_to_uspan, uspan},
     },
-    util::OrAllErrsExt as _,
+    util::{InspectAlways as _, OrAllErrsExt as _},
 };
 use ast::{Expectable, ExpectableExt};
 
@@ -57,18 +57,8 @@ pub mod util {
             self.unwrap_or_else(move || Err(error()))
         }
     }
-
-    pub trait InspectAlways: Sized {
-        fn inspect_always(self, f: impl FnOnce(&Self)) -> Self {
-            f(&self);
-            self
-        }
-    }
-
-    impl<T> InspectAlways for Option<T> {}
-    impl<T, E> InspectAlways for Result<T, E> {}
 }
-use util::{InspectAlways as _, MapInner as _, OkOrFlatten as _};
+use util::{MapInner as _, OkOrFlatten as _};
 
 pub type Result<T> = std::result::Result<T, CheckDiagnostics>;
 

@@ -1,5 +1,5 @@
 use crate::{
-    analyzer::static_env::{ItemId, LibId, ModId, VarId},
+    analyzer::static_env::{ItemId, LabelId, LibId, ModId, VarId},
     parse::ast::{self},
     src_code::span::Span,
 };
@@ -58,6 +58,8 @@ pub enum ItemKind {
     Alt,
     /// Declared with `fun`
     Fun,
+    /// Declared with `.name:` where `name` is the label name
+    Label,
 }
 
 impl std::fmt::Debug for ItemKind {
@@ -75,6 +77,7 @@ impl std::fmt::Debug for ItemKind {
             Self::Alt => "alt",
             Self::Me | Self::Param | Self::Fun => "fun",
             Self::DferParam => "dfer",
+            Self::Label => "loop",
         };
         f.write_str(decl)?;
         let decl_spec = match self {
@@ -82,6 +85,7 @@ impl std::fmt::Debug for ItemKind {
             Self::Param | Self::TypeParam | Self::BoundParam | Self::DferParam => Some("param"),
             Self::Field => Some("field"),
             Self::Discrim => Some("discr"),
+            Self::Label => Some("label"),
             _ => None,
         };
         if let Some(decl_spec) = decl_spec {
@@ -105,13 +109,13 @@ impl std::fmt::Debug for ItemKind {
             | Self::Alt
             | Self::TypeParam => "layout",
 
-            Self::Fun => "behavior",
+            Self::Fun | Self::Label => "flow",
         };
         write!(f, ">{kind}")?;
         let kind_spec = match self {
             Self::BoundParam | Self::Field | Self::TypeParam => Some("hypothetical"),
             Self::Pvt | Self::Discrim => Some("constant"),
-            Self::Alt => Some("alias"),
+            Self::Alt | Self::Label => Some("alias"),
 
             _ => None,
         };
@@ -139,6 +143,7 @@ impl crate::highlight::syntax::GetSyntax for ItemKind {
             | Self::SuperType
             | Self::Alt => Syntax::Typename,
             Self::Fun => Syntax::Callable,
+            Self::Label => Syntax::Label,
         }
     }
 }
@@ -185,6 +190,13 @@ pub struct DuplicateModuleError {
 pub struct DuplicateItemError {
     /// The ID of the first declaration of an item by this name in the current scope
     pub og: ItemId,
+}
+
+/// An ancestor loop shares a name with this label
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash)]
+pub struct LabelJrError {
+    /// The ID of the ancestor sharing a name with this label
+    pub og: LabelId,
 }
 
 /// Attempted to push a shadowable variable to global scope (only unique items can be at global scope)
@@ -306,22 +318,6 @@ impl ScopeEnvironment {
         Ok(id)
     }
 
-    /// Declare an item at the current scope, generating a new ID. \
-    /// Returns [`Err`] if an item with that name is already in-scope.
-    pub fn decl_item(
-        &mut self,
-        within: ModId,
-        name: String,
-        kind: ItemKind,
-        decl: Span,
-    ) -> Result<ItemId, DuplicateItemError> {
-        let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
-        self[within].decl_item(name, id)?;
-        self.decls
-            .push(Item::new(decl, kind, self[within].current_scope())); // now `id` refers to an item
-        Ok(id)
-    }
-
     pub fn decl_member(
         &mut self,
         within: ModId,
@@ -332,7 +328,7 @@ impl ScopeEnvironment {
     ) -> Result<ItemId, LinkMemberError> {
         let child = ItemId(self.decls.len());
         self.decls
-            .push(Item::new(decl, kind, self[within].current_scope()));
+            .push(Item::new(decl, kind, self[within].curr_scope_id()));
         // TODO: duplicate name check on parent
         let [parent_item, child_item] = self
             .decls
@@ -356,12 +352,43 @@ impl ScopeEnvironment {
         }
     }
 
+    /// Declare an item at the current scope, generating a new ID. \
+    /// Returns [`Err`] if an item with that name is already in-scope.
+    pub fn decl_item(
+        &mut self,
+        within: ModId,
+        name: String,
+        kind: ItemKind,
+        decl: Span,
+    ) -> Result<ItemId, DuplicateItemError> {
+        let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
+        self[within].decl_item(name, id)?;
+        let scope = self[within].curr_scope_id();
+        self.decls.push(Item::new(decl, kind, scope)); // now `id` refers to an item
+        Ok(id)
+    }
+
+    /// Declare an item at the current scope, generating a new ID. \
+    /// Returns [`Err`] if an item with that name is already in-scope.
+    pub fn decl_label(
+        &mut self,
+        within: ModId,
+        name: String,
+        decl: Span,
+    ) -> (LabelId, Result<(), LabelJrError>) {
+        let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
+        let res = self[within].decl_label(name, id);
+        let scope = self[within].curr_scope_id();
+        self.decls.push(Item::new(decl, ItemKind::Label, scope)); // now `id` refers to an item
+        (id, res)
+    }
+
     /// Declare a variable at the current scope, generating a new ID.
     pub fn decl_var(&mut self, within: ModId, name: String, kind: ItemKind, decl: Span) -> VarId {
         let id = ItemId(self.decls.len()); // does not actually refer to an item yet!
         self[within].decl_var(name, id);
-        self.decls
-            .push(Item::new(decl, kind, self[within].current_scope())); // now `id` refers to an item
+        let scope = self[within].curr_scope_id();
+        self.decls.push(Item::new(decl, kind, scope)); // now `id` refers to an item
         id
     }
 
@@ -375,8 +402,14 @@ impl ScopeEnvironment {
 }
 
 /// Does not support shadowing, every item in a scope must be unique
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemScope(HashMap<String, ItemId>);
+
+impl Default for ItemScope {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ItemScope {
     pub fn new() -> Self {
@@ -399,58 +432,36 @@ impl ItemScope {
     }
 }
 
-/// Supports shadowing, most recent names are at the end
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct VarScope(Vec<(String, VarId)>);
+/// Supports shadowing; does not store all previous names, just the most recent item by a particular name
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShadowScope<T>(HashMap<String, T>);
 
-impl VarScope {
-    pub const fn new() -> Self {
-        Self(Vec::new())
+impl<T> Default for ShadowScope<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T> ShadowScope<T> {
+    pub fn new() -> Self {
+        Self(HashMap::new())
     }
 
     pub fn clear(&mut self) {
         self.0.clear();
     }
 
-    fn decl(&mut self, key: String, id: VarId) {
-        self.0.push((key, id));
+    fn decl(&mut self, key: String, id: T) {
+        self.0.insert(key, id);
     }
 
-    pub fn iter(&self) -> std::slice::Iter<'_, (String, VarId)> {
-        self.0.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, (String, VarId)> {
-        self.0.iter_mut()
+    pub fn get(&self, key: &str) -> Option<&T> {
+        self.0.get(key)
     }
 }
 
-impl IntoIterator for VarScope {
-    type Item = (String, VarId);
-    type IntoIter = std::vec::IntoIter<(String, VarId)>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a VarScope {
-    type Item = &'a (String, VarId);
-    type IntoIter = std::slice::Iter<'a, (String, VarId)>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a mut VarScope {
-    type Item = &'a mut (String, VarId);
-    type IntoIter = std::slice::IterMut<'a, (String, VarId)>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.iter_mut()
-    }
-}
+pub type LabelScope = ShadowScope<LabelId>;
+pub type VarScope = ShadowScope<VarId>;
 
 /// Functions have special scope limited to only themselves and global scope
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -463,6 +474,26 @@ pub struct Module {
     layers: Vec<Layer>,
 }
 
+pub type MinOneIntoIter<T> = std::iter::Chain<std::iter::Once<T>, std::vec::IntoIter<T>>;
+pub type MinOneIter<'a, T> = std::iter::Chain<std::iter::Once<&'a T>, std::slice::Iter<'a, T>>;
+pub type MinOneIterMut<'a, T> =
+    std::iter::Chain<std::iter::Once<&'a mut T>, std::slice::IterMut<'a, T>>;
+
+pub type LayerIntoIter = MinOneIntoIter<Layer>;
+pub type LayerIter<'a> = MinOneIter<'a, Layer>;
+pub type LayerIterMut<'a> = MinOneIterMut<'a, Layer>;
+
+pub type ScopeIntoIter = MinOneIntoIter<Scope>;
+pub type ScopeIter<'a> = MinOneIter<'a, Scope>;
+pub type ScopeIterMut<'a> = MinOneIterMut<'a, Scope>;
+
+pub type ModScopeIntoIter =
+    std::iter::FlatMap<LayerIntoIter, ScopeIntoIter, fn(Layer) -> ScopeIntoIter>;
+pub type ModScopeIter<'a> =
+    std::iter::FlatMap<LayerIter<'a>, ScopeIter<'a>, fn(&Layer) -> ScopeIter<'_>>;
+pub type ModScopeIterMut<'a> =
+    std::iter::FlatMap<LayerIterMut<'a>, ScopeIterMut<'a>, fn(&mut Layer) -> ScopeIterMut<'_>>;
+
 impl Module {
     pub fn new() -> Self {
         Self {
@@ -470,6 +501,30 @@ impl Module {
             global: Layer::new(),
             layers: Vec::new(),
         }
+    }
+
+    pub fn layer_iter(&self) -> LayerIter<'_> {
+        std::iter::once(&self.global).chain(&self.layers)
+    }
+
+    pub fn layer_iter_mut(&mut self) -> LayerIterMut<'_> {
+        std::iter::once(&mut self.global).chain(&mut self.layers)
+    }
+
+    pub fn scope_iter(&self) -> ModScopeIter<'_> {
+        self.layer_iter().flat_map(Layer::scope_iter)
+    }
+
+    pub fn scope_iter_mut(&mut self) -> ModScopeIterMut<'_> {
+        self.layer_iter_mut().flat_map(Layer::scope_iter_mut)
+    }
+
+    pub fn curr_layer(&self) -> &Layer {
+        self.layers.last().unwrap_or(&self.global)
+    }
+
+    pub fn curr_layer_mut(&mut self) -> &mut Layer {
+        self.layers.last_mut().unwrap_or(&mut self.global)
     }
 
     #[cfg(debug_assertions)]
@@ -483,7 +538,7 @@ impl Module {
         self.layers.clear();
     }
 
-    pub fn current_scope(&self) -> ScopeId {
+    pub fn curr_scope_id(&self) -> ScopeId {
         self.layers
             .last()
             .map_or(ScopeId::Global, |layer| ScopeId::Local {
@@ -510,37 +565,42 @@ impl Module {
     /// Insert an item with an existing ID into the current scope. \
     /// Returns [`Err`] if an item with `name` already exists at the current scope.
     pub fn decl_item(&mut self, name: String, id: ItemId) -> Result<(), DuplicateItemError> {
-        let layer = self.layers.last_mut().unwrap_or(&mut self.global);
-        layer
-            .scopes
-            .last_mut()
-            .unwrap_or(&mut layer.root)
-            .items
-            .decl(name, id)
+        let layer = self.curr_layer_mut();
+        layer.curr_scope_mut().items.decl(name, id)
+    }
+
+    /// Insert a label with an existing ID into the current scope. \
+    /// Returns [`Err`] if an item with `name` is still visible in an outer scope.
+    ///
+    /// If the label is labelling the scope itself, not another scope within it, `is_parent` should be true.
+    pub fn decl_label(&mut self, name: String, id: LabelId) -> Result<(), LabelJrError> {
+        let layer = self.curr_layer_mut();
+        if let Some((_, id)) = layer
+            .scope_iter()
+            .rev()
+            .flat_map(|scope| &scope.label)
+            .find(|(key, _)| *key == name)
+        {
+            Err(LabelJrError { og: *id })
+        } else {
+            layer.curr_scope_mut().set_label(name, id);
+            Ok(())
+        }
     }
 
     /// Insert a variable with an existing ID into the current scope. \
     /// Infallible because duplicate names shadow each other and a global scope is guaranteed.
     pub fn decl_var(&mut self, name: String, id: VarId) {
-        let layer = self.layers.last_mut().unwrap_or(&mut self.global);
-        layer
-            .scopes
-            .last_mut()
-            .unwrap_or(&mut layer.root)
-            .vars
-            .decl(name, id);
+        self.curr_layer_mut().curr_scope_mut().vars.decl(name, id);
     }
 
     pub fn lookup_item(&self, name: &str) -> Option<ItemId> {
         #[cfg(all(debug_assertions, false))]
         println!("looking for item `{name}`...");
 
-        let res = std::iter::once(&self.global)
-            .chain(self.layers.iter())
-            .flat_map(|layer| {
-                std::iter::once(&layer.root.items)
-                    .chain(layer.scopes.iter().map(|scope| &scope.items))
-            })
+        let res = self
+            .scope_iter()
+            .map(|scope| &scope.items)
             .rev()
             .find_map(|items| {
                 #[cfg(all(debug_assertions, false))]
@@ -557,22 +617,24 @@ impl Module {
         res
     }
 
+    pub fn lookup_label(&self, name: &str) -> Option<LabelId> {
+        self.scope_iter()
+            .flat_map(|scope| &scope.label)
+            .rev()
+            .find(|(label, _)| label == name)
+            .map(|(_, id)| *id)
+    }
+
     pub fn lookup_var(&self, name: &str) -> Option<VarId> {
         #[cfg(all(debug_assertions, false))]
         println!("looking for variable `{name}`...");
 
-        let res = std::iter::once(&self.global)
-            .chain(&self.layers)
-            .flat_map(|layer| std::iter::once(&layer.root).chain(&layer.scopes))
-            .flat_map(|scope| &scope.vars)
+        let res = self
+            .scope_iter()
+            .map(|scope| &scope.vars)
             .rev()
-            .find(|(key, _)| {
-                #[cfg(all(debug_assertions, false))]
-                println!("    trying `{key}`");
-
-                *key == name
-            })
-            .map(|(_, val)| *val);
+            .find_map(|scope| scope.get(name))
+            .copied();
         #[cfg(all(debug_assertions, false))]
         if let Some(res) = &res {
             println!("  found: `{res}`");
@@ -594,14 +656,12 @@ impl Module {
     }
 
     pub fn push_scope(&mut self) -> &mut Scope {
-        Layer::push_scope(self.layers.last_mut().unwrap_or(&mut self.global))
+        self.curr_layer_mut().push_scope()
     }
 
     #[track_caller]
     pub fn pop_scope(&mut self) -> Scope {
-        self.layers
-            .last_mut()
-            .unwrap_or(&mut self.global)
+        self.curr_layer_mut()
             .pop_scope()
             .expect("scope push/pop should be balanced")
     }
@@ -634,10 +694,28 @@ impl Layer {
     pub fn pop_scope(&mut self) -> Option<Scope> {
         self.scopes.pop()
     }
+
+    pub fn scope_iter(&self) -> ScopeIter<'_> {
+        std::iter::once(&self.root).chain(&self.scopes)
+    }
+
+    pub fn scope_iter_mut(&mut self) -> ScopeIterMut<'_> {
+        std::iter::once(&mut self.root).chain(&mut self.scopes)
+    }
+
+    pub fn curr_scope(&self) -> &Scope {
+        self.scopes.last().unwrap_or(&self.root)
+    }
+
+    pub fn curr_scope_mut(&mut self) -> &mut Scope {
+        self.scopes.last_mut().unwrap_or(&mut self.root)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Scope {
+    label: Option<(String, LabelId)>,
+
     /// Functions and types; unordered and must be unique within a scope
     items: ItemScope,
 
@@ -648,9 +726,15 @@ pub struct Scope {
 impl Scope {
     pub fn new() -> Self {
         Self {
+            label: None,
             items: ItemScope::new(),
             vars: VarScope::new(),
         }
+    }
+
+    fn set_label(&mut self, name: String, id: LabelId) {
+        let existing = self.label.replace((name, id));
+        debug_assert_eq!(existing, None, "should not reassign scope label");
     }
 
     fn clear(&mut self) {
