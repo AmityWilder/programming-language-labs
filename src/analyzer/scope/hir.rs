@@ -1045,14 +1045,30 @@ where
     }
 }
 
-#[derive(Walkable)]
-pub struct PickPattern {
-    // TODO
+pub enum PickPattern<S: HirPass> {
+    Constant(S::ItemRef),
+    Literal(S::Literal),
 }
 
-impl From<ast::PickPattern> for PickPattern {
-    fn from(ast::PickPattern {}: ast::PickPattern) -> Self {
-        Self {}
+impl<V, S: HirPass> TreeWalk<V, S> for PickPattern<S>
+where
+    V: Visitor<S>,
+{
+    type Output = PickPattern<V::Output>;
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
+        match self {
+            Self::Constant(x) => visitor.visit_item_ref(x).map(PickPattern::Constant),
+            Self::Literal(x) => visitor.visit_literal(x).map(PickPattern::Literal),
+        }
+    }
+}
+
+impl From<ast::PickPattern> for PickPattern<UnlinkedPass> {
+    fn from(value: ast::PickPattern) -> Self {
+        match value {
+            ast::PickPattern::Constant(x) => Self::Constant(x.into()),
+            ast::PickPattern::Literal(x) => Self::Literal(x.into()),
+        }
     }
 }
 
@@ -1849,6 +1865,7 @@ pub struct LinkedVar(pub VarId);
 #[derive(Walkable)]
 pub enum BlockExpr<S: HirPass> {
     If(Box<IfStmt<S>>),
+    Pick(Box<PickExpr<S>>),
     Loop(Box<LoopStmt<S>>),
     Cord(Box<CordStmt<S>>),
     Block(BlockStmt<S>),
@@ -1858,6 +1875,7 @@ impl From<ast::BlockExpr> for BlockExpr<UnlinkedPass> {
     fn from(value: ast::BlockExpr) -> Self {
         match value {
             ast::BlockExpr::If(inner) => Self::If(Box::new((*inner).into())),
+            ast::BlockExpr::Pick(inner) => Self::Pick(Box::new((*inner).into())),
             ast::BlockExpr::Loop(ast::LoopBlock {
                 label,
                 kw: _,
@@ -1983,6 +2001,7 @@ impl From<ast::Stmt> for Stmt<UnlinkedPass> {
         match value {
             ast::Stmt::Expr(inner) => Self::Expr(inner.into()),
             ast::Stmt::If(inner) => Self::If(inner.into()),
+            ast::Stmt::Pick(inner) => Self::Pick(inner.into()),
             ast::Stmt::Loop(ast::LoopBlock {
                 label,
                 kw: _,
@@ -2105,7 +2124,7 @@ impl From<ast::PickStmt> for PickExpr<UnlinkedPass> {
 
 #[derive(Walkable)]
 pub struct PickArm<S: HirPass> {
-    pub pat: PickPattern,
+    pub pat: PickPattern<S>,
     pub expr: Expr<S>,
 }
 

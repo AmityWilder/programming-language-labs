@@ -1122,6 +1122,7 @@ impl<S: hir::HirPass> HirDisplay for hir::BlockExpr<S> {
     ) -> fmt::Result {
         match self {
             hir::BlockExpr::If(inner) => inner.fmt(source, file, env, f),
+            hir::BlockExpr::Pick(inner) => inner.fmt(source, file, env, f),
             hir::BlockExpr::Loop(inner) => inner.fmt(source, file, env, f),
             hir::BlockExpr::Cord(inner) => inner.fmt(source, file, env, f),
             hir::BlockExpr::Block(inner) => inner.fmt(source, file, env, f),
@@ -1442,16 +1443,18 @@ impl<S: hir::HirPass> HirDisplay for hir::PickArm<S> {
     }
 }
 
-impl HirDisplay for hir::PickPattern {
+impl<S: hir::HirPass> HirDisplay for hir::PickPattern<S> {
     fn fmt(
         &self,
-        _source: &SourceMap,
-        _file: FileId,
-        _env: &ScopeEnvironment,
-        _f: &mut fmt::Formatter<'_>,
+        source: &SourceMap,
+        file: FileId,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self {} = self;
-        Ok(())
+        match self {
+            hir::PickPattern::Constant(inner) => inner.fmt(source, file, env, f),
+            hir::PickPattern::Literal(inner) => inner.fmt(source, file, env, f),
+        }
     }
 }
 

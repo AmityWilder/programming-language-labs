@@ -1496,6 +1496,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for Variable {
 #[derive(Debug, Clone, PartialEq, AstNodeEnum, VisitSpansEnum)]
 pub enum BlockExpr {
     If(Box<IfStmt>),
+    Pick(Box<PickStmt>),
     /// Only `loop` or `cord`
     Loop(Box<LoopBlock>),
     Block(BlockStmt),
@@ -1588,25 +1589,10 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for IfStmt {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct PickPattern {
-    // TODO
-}
-
-impl AstNode for PickPattern {
-    fn span_start(&self) -> uspan {
-        todo!()
-    }
-
-    fn span_end(&self) -> uspan {
-        todo!()
-    }
-}
-
-impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PickPattern {
-    fn visit_spans(&self, _brack_depth: u8, _visit: &mut F) {
-        todo!()
-    }
+#[derive(Debug, Clone, PartialEq, AstNodeEnum, VisitSpansEnum)]
+pub enum PickPattern {
+    Constant(Variable),
+    Literal(Literal),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2011,6 +1997,7 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ExprStmt {
 pub enum Stmt {
     Expr(ExprStmt),
     If(IfStmt),
+    Pick(PickStmt),
     Loop(LoopBlock),
     Fail(FailStmt),
     Give(GiveStmt),

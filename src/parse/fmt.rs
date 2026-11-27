@@ -375,6 +375,7 @@ impl LispDisplay for ast::BlockExpr {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::If(inner) => inner.fmt(source, f),
+            Self::Pick(inner) => inner.fmt(source, f),
             Self::Loop(inner) => inner.fmt(source, f),
             Self::Block(inner) => inner.fmt(source, f),
         }
@@ -428,6 +429,45 @@ impl LispDisplay for ast::OrBody {
         match self {
             Self::More(inner) => inner.fmt(source, f),
             Self::Last(inner) => inner.fmt(source, f),
+        }
+    }
+}
+
+impl LispDisplay for ast::PickStmt {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            kw,
+            expr,
+            open,
+            arms,
+            close,
+        } = self;
+        LispCall::new(kw, source, f)
+            .write_arg(expr, source)
+            .write_arg_iter(arms.as_slice(), source)
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::PickArm {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            pattern,
+            arrow,
+            then,
+        } = self;
+        LispCall::new(arrow, source, f)
+            .write_arg(pattern, source)
+            .write_arg(then, source)
+            .finish()
+    }
+}
+
+impl LispDisplay for ast::PickPattern {
+    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Constant(inner) => inner.fmt(source, f),
+            Self::Literal(inner) => inner.fmt(source, f),
         }
     }
 }
@@ -513,6 +553,7 @@ impl LispDisplay for ast::Stmt {
         match self {
             Self::Expr(inner) => inner.fmt(source, f),
             Self::If(inner) => inner.fmt(source, f),
+            Self::Pick(inner) => inner.fmt(source, f),
             Self::Loop(inner) => inner.fmt(source, f),
             Self::Fail(inner) => inner.fmt(source, f),
             Self::Give(inner) => inner.fmt(source, f),

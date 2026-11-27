@@ -799,6 +799,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
     ///     | done_statement
     ///     | skip_statement
     ///     | if_statement
+    ///     | pick_statement
     ///     | loop_block
     ///     | expression_statement`
     pub fn statement(&mut self) -> Result<ast::Stmt> {
@@ -811,6 +812,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .or_else(|| self.done_statement().map_inner(ast::Stmt::Done))
             .or_else(|| self.skip_statement().map_inner(ast::Stmt::Skip))
             .or_else(|| self.if_statement().map_inner(ast::Stmt::If))
+            .or_else(|| self.pick_statement().map_inner(ast::Stmt::Pick))
             .or_else(|| self.loop_block().map_inner(ast::Stmt::Loop))
             .unwrap_or_else(|| self.expression_statement().map(ast::Stmt::Expr))
             .inspect_always(|x| pop_parse_call!(self, "statement", x))
@@ -892,11 +894,14 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         .inspect_always(|x| pop_parse_call!(self, "pick_arm", x))
     }
 
-    /// `pick_pattern -> literal | ...`
+    /// `pick_pattern -> literal | bind_pattern`
     pub fn pick_pattern(&mut self) -> Result<ast::PickPattern> {
         push_parse_call!(self, "pick_pattern");
-        todo!();
-        Ok(ast::PickPattern { /* TODO */ })
+        self.literal()
+            .map(ast::PickPattern::Literal)
+            .map(Ok)
+            .or_else(|| self.variable().map_inner(ast::PickPattern::Constant))
+            .ok_or_else_flat(|| self.error(ExpectedToken::Pattern))
             .inspect_always(|x| pop_parse_call!(self, "pick_pattern", x))
     }
 
@@ -1185,11 +1190,15 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "assign", x))
     }
 
-    /// `expression -> if_statement | loop_block | block_statement | or`
+    /// `expression -> if_statement | pick_statement | loop_block | block_statement | or`
     pub fn expression(&mut self) -> Result<ast::Expr> {
         push_parse_call!(self, "expression");
         self.if_statement()
             .map_inner(|x| ast::BlockExpr::If(Box::new(x)))
+            .or_else(|| {
+                self.pick_statement()
+                    .map_inner(|x| ast::BlockExpr::Pick(Box::new(x)))
+            })
             .or_else(|| {
                 self.loop_block()
                     .map_inner(|x| ast::BlockExpr::Loop(Box::new(x)))
