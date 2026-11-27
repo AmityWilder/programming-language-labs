@@ -405,14 +405,6 @@ impl LispDisplay for ast::ExprStmt {
     }
 }
 
-impl LispDisplay for ast::PrintStmt {
-    fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LispCall::new(&self.kw, source, f)
-            .write_arg(&self.group.expr, source)
-            .finish()
-    }
-}
-
 impl LispDisplay for ast::IfStmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         LispCall::new(&self.kw, source, f)
@@ -520,7 +512,6 @@ impl LispDisplay for ast::Stmt {
     fn fmt(&self, source: &SourceCode, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Expr(inner) => inner.fmt(source, f),
-            Self::Print(inner) => inner.fmt(source, f),
             Self::If(inner) => inner.fmt(source, f),
             Self::Loop(inner) => inner.fmt(source, f),
             Self::Fail(inner) => inner.fmt(source, f),

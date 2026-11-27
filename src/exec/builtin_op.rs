@@ -244,20 +244,36 @@ mod inner {
                         }
 
                         Self::Prnt => {
-                            let [x] = <[_; 1]>::try_from(args).expect("bad argcount");
-                            match x {
-                                Value::None => print!("{}", Keyword::None),
-                                Value::Bool(x) => {
-                                    print!("{}", if x { Keyword::True } else { Keyword::Fals })
+                            if args.is_empty() {
+                                use std::io::Write as _;
+                                // flush
+                                if std::io::stdout().flush().is_err() {
+                                    return ControlFlow::Err(Failure::FailedWrite);
                                 }
-                                Value::Byte(x) => print!("{x}"),
-                                Value::Uint(x) => print!("{x}"),
-                                Value::Sint(x) => print!("{x}"),
-                                Value::Flpt(x) => print!("{x}"),
-                                Value::Char(x) => print!("{x}"),
-                                Value::Text(x) => print!("{x}"),
+                            } else {
+                                use std::fmt::Write as _;
+                                let mut buf = String::new();
+                                for arg in args {
+                                    match arg {
+                                        Value::None => _ = write!(buf, "{}", Keyword::None),
+                                        Value::Bool(x) => {
+                                            _ = write!(
+                                                buf,
+                                                "{}",
+                                                if x { Keyword::True } else { Keyword::Fals }
+                                            );
+                                        }
+                                        Value::Byte(x) => _ = write!(buf, "{x}"),
+                                        Value::Uint(x) => _ = write!(buf, "{x}"),
+                                        Value::Sint(x) => _ = write!(buf, "{x}"),
+                                        Value::Flpt(x) => _ = write!(buf, "{x}"),
+                                        Value::Char(x) => _ = write!(buf, "{x}"),
+                                        Value::Text(x) => _ = write!(buf, "{x}"),
 
-                                x => todo!("error: unsupported: prnt({x:?})"),
+                                        x => todo!("error: unsupported: prnt({x:?})"),
+                                    }
+                                }
+                                print!("{buf}");
                             }
                             Value::None
                         }

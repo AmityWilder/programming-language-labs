@@ -805,7 +805,6 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         push_parse_call!(self, "statement");
         self.block_statement()
             .map_inner(ast::Stmt::Block)
-            .or_else(|| self.print_statement().map_inner(ast::Stmt::Print))
             .or_else(|| self.fail_statement().map_inner(ast::Stmt::Fail))
             .or_else(|| self.give_statement().map_inner(ast::Stmt::Give))
             .or_else(|| self.emit_statement().map_inner(ast::Stmt::Emit))
@@ -828,20 +827,6 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 })
             })
             .inspect_always(|x| pop_parse_call!(self, "expression_statement", x))
-    }
-
-    /// `print_statement -> "prnt" expression ";"`
-    pub fn print_statement(&mut self) -> Option<Result<ast::PrintStmt>> {
-        push_parse_call!(self, "print_statement");
-        self.pull_if_eq(Keyword::Prnt)
-            .map(|kw| {
-                Ok(ast::PrintStmt {
-                    kw,
-                    group: self.group().ok_or_unexpected(self)?,
-                    semi: self.try_pull_eq(Punctuation::Semi)?,
-                })
-            })
-            .inspect_always(|x| pop_parse_call!(self, "print_statement", x))
     }
 
     /// `dfer_declaration -> "dfer" ( dfer_param )? block_statement`
@@ -907,7 +892,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         .inspect_always(|x| pop_parse_call!(self, "pick_arm", x))
     }
 
-    /// `pick_pattern -> ?`
+    /// `pick_pattern -> literal | ...`
     pub fn pick_pattern(&mut self) -> Result<ast::PickPattern> {
         push_parse_call!(self, "pick_pattern");
         todo!();
@@ -1525,7 +1510,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "member_access", x))
     }
 
-    /// `primary -> literal | group | variable | directive`
+    /// `primary -> literal | group | directive | variable`
     fn primary(&mut self) -> Result<ast::Expr> {
         push_parse_call!(self, "primary");
         self.literal()
@@ -1537,7 +1522,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "primary", x))
     }
 
-    /// `directive -> "inpt"`
+    /// `directive -> "inpt" | "prnt"`
     fn directive(&mut self) -> Option<ast::Directive> {
         push_parse_call!(self, "directive");
         self.pull_into()

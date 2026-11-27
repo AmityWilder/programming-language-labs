@@ -1337,12 +1337,14 @@ impl Expectable for Literal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DirectiveKw {
     Inpt,
+    Prnt,
 }
 
 impl DirectiveKw {
     pub const fn new(value: Keyword) -> Option<Self> {
         match value {
             Keyword::Inpt => Some(Self::Inpt),
+            Keyword::Prnt => Some(Self::Prnt),
             _ => None,
         }
     }
@@ -1350,6 +1352,7 @@ impl DirectiveKw {
     pub const fn to_keyword(self) -> Keyword {
         match self {
             Self::Inpt => Keyword::Inpt,
+            Self::Prnt => Keyword::Prnt,
         }
     }
 
@@ -2004,39 +2007,9 @@ impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for ExprStmt {
     }
 }
 
-// TODO: this might get mistaken for a normal function call by the parser!!
-#[derive(Debug, Clone, PartialEq)]
-pub struct PrintStmt {
-    /// `prnt`
-    pub kw: RelSpan,
-    pub group: Grouping,
-    /// `;`
-    pub semi: RelSpan,
-}
-
-impl AstNode for PrintStmt {
-    fn span_start(&self) -> uspan {
-        self.kw.start
-    }
-
-    fn span_end(&self) -> uspan {
-        self.semi.end
-    }
-}
-
-impl<F: FnMut(RelSpan, Syntax)> VisitSpans<F> for PrintStmt {
-    fn visit_spans(&self, brack_depth: u8, visit: &mut F) {
-        visit(self.kw, Syntax::Keyword);
-        self.group.visit_spans(brack_depth, visit);
-        visit(self.semi, Syntax::Normal);
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, AstNodeEnum, VisitSpansEnum)]
 pub enum Stmt {
     Expr(ExprStmt),
-    // TODO: im not too fond of the print keyword
-    Print(PrintStmt),
     If(IfStmt),
     Loop(LoopBlock),
     Fail(FailStmt),

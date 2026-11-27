@@ -1770,15 +1770,32 @@ pub enum LinkedLiteral {
     Text(text),
 }
 
-#[derive(Walkable)]
-pub enum Directive {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Walkable)]
+pub enum DirectiveKind {
     Inpt,
+    Prnt,
+}
+
+impl From<ast::DirectiveKw> for DirectiveKind {
+    fn from(kw: ast::DirectiveKw) -> Self {
+        match kw {
+            ast::DirectiveKw::Inpt => DirectiveKind::Inpt,
+            ast::DirectiveKw::Prnt => DirectiveKind::Prnt,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Hash, Walkable)]
+pub struct Directive {
+    pub span: RelSpan,
+    pub kind: DirectiveKind,
 }
 
 impl From<ast::Directive> for Directive {
-    fn from(ast::Directive { kw, kw_span: _ }: ast::Directive) -> Self {
-        match kw {
-            ast::DirectiveKw::Inpt => Directive::Inpt,
+    fn from(ast::Directive { kw, kw_span }: ast::Directive) -> Self {
+        Self {
+            span: kw_span,
+            kind: kw.into(),
         }
     }
 }
@@ -1933,7 +1950,6 @@ impl From<ast::DeclDfer> for DeclDfer<UnlinkedPass> {
 #[derive(Walkable)]
 pub enum Stmt<S: HirPass> {
     Expr(ExprStmt<S>),
-    Print(PrintStmt<S>),
     If(IfStmt<S>),
     Pick(PickExpr<S>),
     Loop(LoopStmt<S>),
@@ -1951,7 +1967,6 @@ impl From<ast::Stmt> for Stmt<UnlinkedPass> {
     fn from(value: ast::Stmt) -> Self {
         match value {
             ast::Stmt::Expr(inner) => Self::Expr(inner.into()),
-            ast::Stmt::Print(inner) => Self::Print(inner.into()),
             ast::Stmt::If(inner) => Self::If(inner.into()),
             ast::Stmt::Loop(ast::LoopBlock {
                 label,
@@ -2002,21 +2017,6 @@ pub struct ExprStmt<S: HirPass>(pub Expr<S>);
 impl From<ast::ExprStmt> for ExprStmt<UnlinkedPass> {
     fn from(ast::ExprStmt { expr, semi: _ }: ast::ExprStmt) -> Self {
         Self(expr.into())
-    }
-}
-
-#[derive(Walkable)]
-pub struct PrintStmt<S: HirPass>(pub Expr<S>);
-
-impl From<ast::PrintStmt> for PrintStmt<UnlinkedPass> {
-    fn from(
-        ast::PrintStmt {
-            kw: _,
-            group,
-            semi: _,
-        }: ast::PrintStmt,
-    ) -> Self {
-        Self(group.into())
     }
 }
 

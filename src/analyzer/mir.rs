@@ -3,9 +3,10 @@ use crate::{
         scope::hir,
         static_env::{LabelId, VarId, scope::ScopeEnvironment},
     },
-    error::{CheckDiagnostics, Diagnostic},
+    error::{CheckDiagnostics, Diagnostic, DiagnosticKind, Severity},
     exec::{EnvId, LblId, Value, tree},
-    src_code::map::SourceMap,
+    lex::token::keyword::Keyword,
+    src_code::{map::SourceMap, span::FileId},
 };
 use std::collections::VecDeque;
 
@@ -34,6 +35,7 @@ pub fn finalize(
         stmts.extend(finalize_decls::<_, Vec<_>>(
             unit.decls,
             source,
+            unit.file,
             env,
             diagnostics,
         )?);
@@ -46,6 +48,7 @@ pub fn finalize(
 fn finalize_decls<I, A>(
     decls: I,
     source: &SourceMap,
+    file: FileId,
     env: &mut ScopeEnvironment,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<A, CheckDiagnostics>
@@ -63,17 +66,17 @@ where
                 stmts.extend_one(tree::Stmt::Dfer(tree::Dfer {
                     ret_param: param.map(|x| env.get_env_id(x.var.0)),
 
-                    on_pop: on_pop.finalize(source, env, diagnostics)?,
+                    on_pop: on_pop.finalize(source, file, env, diagnostics)?,
 
                     do_first: tree::Block {
-                        stmts: finalize_decls::<_, Vec<_>>(decls, source, env, diagnostics)?
+                        stmts: finalize_decls::<_, Vec<_>>(decls, source, file, env, diagnostics)?
                             .into_boxed_slice(),
                     },
                 }));
                 break;
             }
 
-            x => stmts.extend(x.finalize(source, env, diagnostics)?),
+            x => stmts.extend(x.finalize(source, file, env, diagnostics)?),
         }
     }
     Ok(stmts)
@@ -83,33 +86,34 @@ impl hir::Decl<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<tree::Stmt>, CheckDiagnostics> {
         match self {
             hir::Decl::Mod(_) | hir::Decl::Rec(_) => Ok(Vec::new()),
 
-            hir::Decl::On(x) => x.finalize(source, env, diagnostics),
-            hir::Decl::Cat(x) => x.finalize(source, env, diagnostics),
-            hir::Decl::Fun(x) => x.finalize(source, env, diagnostics),
+            hir::Decl::On(x) => x.finalize(source, file, env, diagnostics),
+            hir::Decl::Cat(x) => x.finalize(source, file, env, diagnostics),
+            hir::Decl::Fun(x) => x.finalize(source, file, env, diagnostics),
 
             hir::Decl::Uni(x) => x
-                .finalize(source, env, diagnostics)
+                .finalize(source, file, env, diagnostics)
                 .map(|x| Vec::from_iter(x.map(tree::Stmt::Expr))),
             hir::Decl::Let(x) => x
-                .finalize(source, env, diagnostics)
+                .finalize(source, file, env, diagnostics)
                 .map(|x| Vec::from_iter(x.map(tree::Stmt::Expr))),
             hir::Decl::Pvt(x) => x
-                .finalize(source, env, diagnostics)
+                .finalize(source, file, env, diagnostics)
                 .map(|x| [tree::Stmt::Expr(x)].to_vec()),
 
             hir::Decl::Dfer(_) => unimplemented!("should be handled by caller"),
 
             hir::Decl::Stmt(hir::Stmt::Block(x)) => x
-                .finalize(source, env, diagnostics)
+                .finalize(source, file, env, diagnostics)
                 .map(|x| x.stmts.to_vec()),
 
-            hir::Decl::Stmt(x) => x.finalize(source, env, diagnostics).map(|x| vec![x]),
+            hir::Decl::Stmt(x) => x.finalize(source, file, env, diagnostics).map(|x| vec![x]),
         }
     }
 }
@@ -118,6 +122,7 @@ impl hir::DeclOn<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<tree::Stmt>, CheckDiagnostics> {
@@ -129,6 +134,7 @@ impl hir::DeclFun<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<tree::Stmt>, CheckDiagnostics> {
@@ -141,6 +147,7 @@ impl hir::DeclCat<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<tree::Stmt>, CheckDiagnostics> {
@@ -153,6 +160,7 @@ impl hir::DeclUni<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Option<tree::Expr>, CheckDiagnostics> {
@@ -161,8 +169,8 @@ impl hir::DeclUni<hir::FinalPass> {
                 Ok(tree::Expr::Operation(tree::Operation {
                     what: tree::Callable::Builtin(tree::BuiltinOp::Assign),
                     args: Box::from([
-                        self.id.finalize(source, env, diagnostics)?,
-                        x.finalize(source, env, diagnostics)?,
+                        self.id.finalize(source, file, env, diagnostics)?,
+                        x.finalize(source, file, env, diagnostics)?,
                     ]),
                 }))
             })
@@ -174,6 +182,7 @@ impl hir::DeclLet<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Option<tree::Expr>, CheckDiagnostics> {
@@ -182,8 +191,8 @@ impl hir::DeclLet<hir::FinalPass> {
                 Ok(tree::Expr::Operation(tree::Operation {
                     what: tree::Callable::Builtin(tree::BuiltinOp::Assign),
                     args: Box::from([
-                        self.id.finalize(source, env, diagnostics)?,
-                        x.finalize(source, env, diagnostics)?,
+                        self.id.finalize(source, file, env, diagnostics)?,
+                        x.finalize(source, file, env, diagnostics)?,
                     ]),
                 }))
             })
@@ -195,6 +204,7 @@ impl hir::DeclPvt<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
@@ -207,25 +217,47 @@ impl hir::Stmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Stmt, CheckDiagnostics> {
         match self {
-            Self::Expr(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Expr),
-            Self::Print(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Expr),
+            Self::Expr(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Expr),
 
-            Self::If(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Branch),
-            Self::Pick(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Branch),
+            Self::If(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Branch),
+            Self::Pick(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Branch),
 
-            Self::Loop(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Loop),
-            Self::Cord(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Loop),
-            Self::Rep(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Loop),
-            Self::For(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Loop),
+            Self::Loop(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Loop),
+            Self::Cord(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Loop),
+            Self::Rep(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Loop),
+            Self::For(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Loop),
 
-            Self::Give(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Give),
-            Self::Fail(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Fail),
-            Self::Done(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Done),
-            Self::Skip(x) => x.finalize(source, env, diagnostics).map(tree::Stmt::Skip),
+            Self::Give(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Give),
+            Self::Fail(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Fail),
+            Self::Done(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Done),
+            Self::Skip(x) => x
+                .finalize(source, file, env, diagnostics)
+                .map(tree::Stmt::Skip),
 
             Self::Block(_) => unimplemented!("should be handled by caller"),
         }
@@ -236,10 +268,11 @@ impl hir::ExprStmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        self.0.finalize(source, env, diagnostics)
+        self.0.finalize(source, file, env, diagnostics)
     }
 }
 
@@ -247,18 +280,39 @@ impl hir::Expr<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         match self {
-            hir::Expr::Block(x) => x.finalize(source, env, diagnostics),
-            hir::Expr::Binary(x) => x.finalize(source, env, diagnostics),
-            hir::Expr::Unary(x) => x.finalize(source, env, diagnostics),
-            hir::Expr::Index(x) => x.finalize(source, env, diagnostics),
-            hir::Expr::Call(x) => x.finalize(source, env, diagnostics),
-            hir::Expr::Literal(x) => x.finalize(source, env, diagnostics),
-            hir::Expr::Directive(x) => x.finalize(source, env, diagnostics),
-            hir::Expr::Variable(x) => x.finalize(source, env, diagnostics),
+            hir::Expr::Block(x) => x.finalize(source, file, env, diagnostics),
+            hir::Expr::Binary(x) => x.finalize(source, file, env, diagnostics),
+            hir::Expr::Unary(x) => x.finalize(source, file, env, diagnostics),
+            hir::Expr::Index(x) => x.finalize(source, file, env, diagnostics),
+            hir::Expr::Call(x) => x.finalize(source, file, env, diagnostics),
+            hir::Expr::Literal(x) => x.finalize(source, file, env, diagnostics),
+            hir::Expr::Variable(x) => x.finalize(source, file, env, diagnostics),
+
+            hir::Expr::Directive(x) => {
+                diagnostics.push(Diagnostic::new(
+                    x.span.within_file(file),
+                    DiagnosticKind::Other {
+                        severity: Severity::Info,
+                        category: crate::error::DiagnosticCategory::StaticAnalysis,
+                        msg: format!(
+                            "directives are nullary operators. while this may appear to be a value, it is a shorthand for `{}()`",
+                            match x.kind {
+                                hir::DirectiveKind::Inpt => Keyword::Inpt,
+                                hir::DirectiveKind::Prnt => Keyword::Prnt,
+                            },
+                        ),
+                    },
+                ));
+                Ok(tree::Expr::Operation(tree::Operation {
+                    what: tree::Callable::Builtin(x.finalize(source, file, env, diagnostics)?),
+                    args: Box::default(),
+                }))
+            }
         }
     }
 }
@@ -267,6 +321,7 @@ impl hir::BlockExpr<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
@@ -278,13 +333,14 @@ impl hir::Binary<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         use crate::lex::token::Operator;
         let Self { op, lhs, rhs } = self;
-        let lhs = lhs.finalize(source, env, diagnostics)?;
-        let rhs = rhs.finalize(source, env, diagnostics)?;
+        let lhs = lhs.finalize(source, file, env, diagnostics)?;
+        let rhs = rhs.finalize(source, file, env, diagnostics)?;
         let args = Box::from([lhs, rhs]);
 
         let what = tree::Callable::Builtin(match op {
@@ -343,12 +399,13 @@ impl hir::Unary<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         use crate::lex::token::Operator;
         let Self { op, operand, side } = self;
-        let operand = operand.finalize(source, env, diagnostics)?;
+        let operand = operand.finalize(source, file, env, diagnostics)?;
         let args = Box::from([operand]);
 
         let what = tree::Callable::Builtin(match op {
@@ -373,6 +430,7 @@ impl hir::Subscript<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
@@ -383,11 +441,33 @@ impl hir::Subscript<hir::FinalPass> {
 impl hir::FnCall<hir::FinalPass> {
     fn finalize(
         self,
-        _source: &SourceMap,
-        _env: &mut ScopeEnvironment,
-        _diagnostics: &mut Vec<Diagnostic>,
+        source: &SourceMap,
+        file: FileId,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        todo!("mir fn call")
+        let Self { fun, args } = self;
+        Ok(match fun {
+            hir::Expr::Block(_)
+            | hir::Expr::Binary(_)
+            | hir::Expr::Unary(_)
+            | hir::Expr::Index(_)
+            | hir::Expr::Call(_) => todo!("indirect call"),
+
+            hir::Expr::Directive(x) => tree::Expr::Operation(tree::Operation {
+                what: x
+                    .finalize(source, file, env, diagnostics)
+                    .map(tree::Callable::Builtin)?,
+                args: args
+                    .into_iter()
+                    .map(|x| x.finalize(source, file, env, diagnostics))
+                    .collect::<Result<_, _>>()?,
+            }),
+
+            hir::Expr::Variable(_) => todo!("user-defined functions"),
+
+            hir::Expr::Literal(_) => todo!("error: can't call literal"),
+        })
     }
 }
 
@@ -395,14 +475,14 @@ impl hir::Directive {
     fn finalize(
         self,
         _source: &SourceMap,
+        _file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<tree::Expr, CheckDiagnostics> {
-        Ok(match self {
-            Self::Inpt => tree::Expr::Operation(tree::Operation {
-                what: tree::Callable::Builtin(tree::BuiltinOp::Inpt),
-                args: Default::default(),
-            }),
+    ) -> Result<tree::BuiltinOp, CheckDiagnostics> {
+        let Self { span: _, kind } = self;
+        Ok(match kind {
+            hir::DirectiveKind::Inpt => tree::BuiltinOp::Inpt,
+            hir::DirectiveKind::Prnt => tree::BuiltinOp::Prnt,
         })
     }
 }
@@ -411,6 +491,7 @@ impl hir::LinkedLiteral {
     fn finalize(
         self,
         _source: &SourceMap,
+        _file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
@@ -431,6 +512,7 @@ impl hir::LinkedDecl {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
@@ -443,27 +525,12 @@ impl hir::LinkedVar {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         let Self(id) = self;
         Ok(tree::Expr::Access(env.get_env_id(id)))
-    }
-}
-
-impl hir::PrintStmt<hir::FinalPass> {
-    fn finalize(
-        self,
-        source: &SourceMap,
-        env: &mut ScopeEnvironment,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<tree::Expr, CheckDiagnostics> {
-        self.0.finalize(source, env, diagnostics).map(|msg| {
-            tree::Expr::Operation(tree::Operation {
-                what: tree::Callable::Builtin(tree::BuiltinOp::Prnt),
-                args: Box::from([msg]),
-            })
-        })
     }
 }
 
@@ -526,6 +593,7 @@ impl hir::IfStmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Branch, CheckDiagnostics> {
@@ -533,14 +601,14 @@ impl hir::IfStmt<hir::FinalPass> {
         let mut iter = IfStmtIntoIter::new(self);
         for (pred, then) in iter.by_ref() {
             let case = tree::Case {
-                pred: pred.finalize(source, env, diagnostics)?,
-                then: then.finalize(source, env, diagnostics)?,
+                pred: pred.finalize(source, file, env, diagnostics)?,
+                then: then.finalize(source, file, env, diagnostics)?,
             };
             cases.push(case);
         }
         let default = iter
             .default_case()
-            .map(|x| x.finalize(source, env, diagnostics))
+            .map(|x| x.finalize(source, file, env, diagnostics))
             .transpose()?;
         Ok(tree::Branch {
             cases: cases.into_boxed_slice(),
@@ -553,6 +621,7 @@ impl hir::PickExpr<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Branch, CheckDiagnostics> {
@@ -564,13 +633,14 @@ impl hir::LoopStmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Loop, CheckDiagnostics> {
         // TODO: label??
         let hir::LoopStmt { label, body } = self;
         let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
-        body.finalize(source, env, diagnostics)
+        body.finalize(source, file, env, diagnostics)
             .map(|block| tree::Loop { label, block })
     }
 }
@@ -579,13 +649,14 @@ impl hir::CordStmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Loop, CheckDiagnostics> {
         // TODO: label??
         let hir::CordStmt { label, body } = self;
         let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
-        finalize_decls(body.decls, source, env, diagnostics).map(|mut stmts: Vec<_>| {
+        finalize_decls(body.decls, source, file, env, diagnostics).map(|mut stmts: Vec<_>| {
             stmts.push(tree::Stmt::Done(tree::Done {
                 // only escape this loop
                 label: None,
@@ -605,14 +676,15 @@ impl hir::RepStmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Loop, CheckDiagnostics> {
         // TODO: label??
         let hir::RepStmt { label, pred, body } = self;
         let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
-        let pred = pred.finalize(source, env, diagnostics)?;
-        finalize_decls(body.decls, source, env, diagnostics).map(|mut stmts: VecDeque<_>| {
+        let pred = pred.finalize(source, file, env, diagnostics)?;
+        finalize_decls(body.decls, source, file, env, diagnostics).map(|mut stmts: VecDeque<_>| {
             stmts.push_front(tree::Stmt::Branch(tree::Branch {
                 cases: Box::from([tree::Case {
                     pred: tree::Expr::Operation(tree::Operation {
@@ -643,6 +715,7 @@ impl hir::ForStmt<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Loop, CheckDiagnostics> {
@@ -654,13 +727,14 @@ impl hir::GiveStmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Give, CheckDiagnostics> {
         Ok(tree::Give {
             value: self
                 .expr
-                .map(|x| x.finalize(source, env, diagnostics))
+                .map(|x| x.finalize(source, file, env, diagnostics))
                 .transpose()?
                 .unwrap_or_default(),
         })
@@ -671,13 +745,14 @@ impl hir::FailStmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Fail, CheckDiagnostics> {
         Ok(tree::Fail {
             value: self
                 .expr
-                .map(|x| x.finalize(source, env, diagnostics))
+                .map(|x| x.finalize(source, file, env, diagnostics))
                 .transpose()?
                 .unwrap_or_default(),
         })
@@ -688,6 +763,7 @@ impl hir::SkipStmt<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
+        file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Skip, CheckDiagnostics> {
@@ -700,6 +776,7 @@ impl hir::DoneStmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Done, CheckDiagnostics> {
@@ -708,7 +785,7 @@ impl hir::DoneStmt<hir::FinalPass> {
             label: None,
             value: self
                 .expr
-                .map(|x| x.finalize(source, env, diagnostics))
+                .map(|x| x.finalize(source, file, env, diagnostics))
                 .transpose()?
                 .unwrap_or_default(),
         })
@@ -719,10 +796,11 @@ impl hir::BlockStmt<hir::FinalPass> {
     fn finalize(
         self,
         source: &SourceMap,
+        file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Block, CheckDiagnostics> {
-        finalize_decls(self.decls, source, env, diagnostics).map(|x: Vec<_>| tree::Block {
+        finalize_decls(self.decls, source, file, env, diagnostics).map(|x: Vec<_>| tree::Block {
             stmts: x.into_boxed_slice(),
         })
     }

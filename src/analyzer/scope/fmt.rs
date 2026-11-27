@@ -31,11 +31,10 @@ use crate::{
     parse::ast,
     src_code::{map::SourceMap, span::FileId},
 };
-use std::fmt;
+use std::fmt::{self, Write};
 
 mod helpers {
     use super::*;
-    use fmt::Write;
 
     /// [`std::fmt::PadAdapter`] is private :c
     pub struct Indented<'buf> {
@@ -1063,7 +1062,6 @@ impl<S: hir::HirPass> HirDisplay for hir::Stmt<S> {
     ) -> fmt::Result {
         match self {
             hir::Stmt::Expr(inner) => inner.fmt(source, file, env, f),
-            hir::Stmt::Print(inner) => inner.fmt(source, file, env, f),
             hir::Stmt::If(inner) => inner.fmt(source, file, env, f),
             hir::Stmt::Pick(inner) => inner.fmt(source, file, env, f),
             hir::Stmt::Loop(inner) => inner.fmt(source, file, env, f),
@@ -1305,7 +1303,7 @@ impl HirDisplay for hir::LinkedLiteral {
     }
 }
 
-impl HirDisplay for hir::Directive {
+impl HirDisplay for hir::DirectiveKind {
     fn fmt(
         &self,
         _source: &SourceMap,
@@ -1314,8 +1312,21 @@ impl HirDisplay for hir::Directive {
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
         match self {
-            hir::Directive::Inpt => f.write_str(Keyword::Inpt.as_str()),
+            Self::Inpt => f.write_str(Keyword::Inpt.as_str()),
+            Self::Prnt => f.write_str(Keyword::Prnt.as_str()),
         }
+    }
+}
+
+impl HirDisplay for hir::Directive {
+    fn fmt(
+        &self,
+        source: &SourceMap,
+        file: FileId,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        self.kind.fmt(source, file, env, f)
     }
 }
 
@@ -1361,21 +1372,6 @@ impl HirDisplay for hir::LinkedTypename {
     ) -> fmt::Result {
         let Self(id) = self;
         id.fmt(source, file, env, f)
-    }
-}
-
-impl<S: hir::HirPass> HirDisplay for hir::PrintStmt<S> {
-    fn fmt(
-        &self,
-        source: &SourceMap,
-        file: FileId,
-        env: &ScopeEnvironment,
-        f: &mut fmt::Formatter<'_>,
-    ) -> fmt::Result {
-        let Self(expr) = self;
-        write!(f, "{}(", Keyword::Prnt)?;
-        expr.fmt(source, file, env, f)?;
-        f.write_str(");")
     }
 }
 

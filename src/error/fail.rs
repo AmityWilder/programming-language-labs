@@ -12,6 +12,7 @@ pub enum Failure {
     UnhandledOrNone,
     UnhandledOrNevr,
     FailedRead,
+    FailedWrite,
 
     #[deprecated = "should be guarded by static analysis"]
     Uninitialized,
@@ -70,6 +71,7 @@ impl std::fmt::Display for Failure {
             Self::UnhandledOrNone => write!(f, "tried to perform an operation with none"),
             Self::UnhandledOrNevr => write!(f, "tried to perform an operation with nevr"),
             Self::FailedRead => write!(f, "failed to read input"),
+            Self::FailedWrite => write!(f, "failed to write output"),
 
             Self::Uninitialized => write!(f, "attempted to read uninitialized memory"),
             Self::ImmutableAssignment => write!(f, "cannot assign to immutable"),
