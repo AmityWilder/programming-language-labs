@@ -23,12 +23,14 @@ pick x {
 }
 
 let x = inpt;
-// adjacent
+// adjacent, but out of order and not starting at 0
 pick x {
-    8 => { prnt("apple"); }
-    9 => { prnt("banana"); }
-    10 => { prnt("mango"); }
-    11 => { prnt("pineapple"); }
+    12 => { prnt("apple"); }
+    10 => { prnt("banana"); }
+    8 => { prnt("strawberry"); }
+    11 => { prnt("raspberry"); }
+    9 => { prnt("pineapple"); }
+    13 => { prnt("mango"); }
 }
 
 let x = inpt;
