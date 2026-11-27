@@ -1283,7 +1283,7 @@ impl HirDisplay for hir::UnlinkedLiteral {
     }
 }
 
-impl HirDisplay for hir::LinkedLiteral {
+impl HirDisplay for hir::LinkedLiteralValue {
     fn fmt(
         &self,
         _source: &SourceMap,
@@ -1301,6 +1301,19 @@ impl HirDisplay for hir::LinkedLiteral {
             Self::Char(x) => write!(f, "{x:?}"),
             Self::Text(ref x) => write!(f, "{x:?}"),
         }
+    }
+}
+
+impl HirDisplay for hir::LinkedLiteral {
+    fn fmt(
+        &self,
+        source: &SourceMap,
+        file: FileId,
+        env: &ScopeEnvironment,
+        f: &mut fmt::Formatter<'_>,
+    ) -> fmt::Result {
+        let Self { span: _, val } = self;
+        val.fmt(source, file, env, f)
     }
 }
 

@@ -77,7 +77,7 @@ impl<T: ExpectableExt> ParserExpect for T {
     where
         I: Iterator<Item = (RelSpan, TokenKind)>,
     {
-        self.ok_or_expected().map_err(|e| parser.error(e))
+        self.ok_or_expected().map_err(|e| parser.unexpected(e))
     }
 }
 
@@ -89,7 +89,7 @@ impl<T: Expectable> ParserExpect for Option<Result<T>> {
         I: Iterator<Item = (RelSpan, TokenKind)>,
     {
         self.ok_or(T::EXPECTED)
-            .map_err(|e| parser.error(e))
+            .map_err(|e| parser.unexpected(e))
             .flatten()
     }
 }
@@ -314,14 +314,14 @@ impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
     where
         P: FnOnce(&I::Item) -> bool,
     {
-        self.pull_if(p).ok_or_else(|| self.error(expected))
+        self.pull_if(p).ok_or_else(|| self.unexpected(expected))
     }
 
     fn try_pull_map<T, F>(&mut self, f: F, expected: ExpectedToken) -> Result<T>
     where
         F: FnOnce(I::Item) -> Option<T>,
     {
-        self.pull_if_map(f).ok_or_else(|| self.error(expected))
+        self.pull_if_map(f).ok_or_else(|| self.unexpected(expected))
     }
 
     fn try_pull_eq<Q>(&mut self, kind: Q) -> Result<RelSpan>
@@ -331,7 +331,7 @@ impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
         let kind = kind.into();
         // if the kind can only be one thing, we don't need to output it.
         self.pull_if_eq(kind)
-            .ok_or_else(|| self.error(ExpectedToken::Verbatim(kind)))
+            .ok_or_else(|| self.unexpected(ExpectedToken::Verbatim(kind)))
     }
 
     fn try_pull_into_if<T, P>(&mut self, expected: ExpectedToken, p: P) -> Result<(RelSpan, T)>
@@ -467,18 +467,28 @@ impl<'err, I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'err, I> {
     }
 
     /// Does not consume the next token
-    fn error(&mut self, expected: ExpectedToken) -> CheckDiagnostics {
-        let err = if let Some(&(span, _)) = self.peek() {
-            Diagnostic::new(
-                span.within_file(self.file),
-                DiagnosticKind::UnexpectedToken { expected },
-            )
-        } else {
-            Diagnostic::new(
-                RelSpan::from(self.file_len..self.file_len).within_file(self.file),
-                DiagnosticKind::MissingToken { expected },
-            )
-        };
+    fn unexpected(&mut self, expected: ExpectedToken) -> CheckDiagnostics {
+        self.error(|kind| {
+            if kind.is_some() {
+                DiagnosticKind::UnexpectedToken { expected }
+            } else {
+                DiagnosticKind::MissingToken { expected }
+            }
+        })
+    }
+
+    fn error<F>(&mut self, err: F) -> CheckDiagnostics
+    where
+        F: FnOnce(Option<TokenKind>) -> DiagnosticKind,
+    {
+        let (span, kind) = self.peek().copied().unzip();
+        let err = Diagnostic::new(
+            span.map(|rel| rel.within_file(self.file))
+                .unwrap_or_else(|| {
+                    RelSpan::from(self.file_len..self.file_len).within_file(self.file)
+                }),
+            err(kind),
+        );
         self.diagnostics.push(err);
         CheckDiagnostics
     }
@@ -619,7 +629,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 } else if let Some(body) = self.block_statement() {
                     body.map(|body| ast::DeclFun::Define(ast::DefFun { head, body }))
                 } else {
-                    Err(self.error(ExpectedToken::SemiOrBody))
+                    Err(self.unexpected(ExpectedToken::SemiOrBody))
                 }
             })
             .inspect_always(|x| pop_parse_call!(self, "fun_declaration", x))
@@ -646,7 +656,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                             .map(|x| (kw, x))
                     })
                     .ok_or_else_flat(|| {
-                        self.error(ExpectedToken::Verbatim(TokenKind::Punc(
+                        self.unexpected(ExpectedToken::Verbatim(TokenKind::Punc(
                             Punctuation::LParen,
                         )))
                     })?;
@@ -705,7 +715,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                     generics: self.generic_params().transpose()?,
                     body: self
                         .field_set()
-                        .ok_or_else_flat(|| self.error(ExpectedToken::RecBody))?,
+                        .ok_or_else_flat(|| self.unexpected(ExpectedToken::RecBody))?,
                 })
             })
             .inspect_always(|x| pop_parse_call!(self, "rec_declaration", x))
@@ -733,7 +743,9 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 Ok(ast::Field {
                     name,
                     ty: self.type_annotation().ok_or_else_flat(|| {
-                        self.error(ExpectedToken::Verbatim(TokenKind::Punc(Punctuation::Colon)))
+                        self.unexpected(ExpectedToken::Verbatim(TokenKind::Punc(
+                            Punctuation::Colon,
+                        )))
                     })?,
                 })
             })
@@ -749,7 +761,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                     kw,
                     name: self.try_pull_eq(TokenKind::Ident)?,
                     discriminants: self.cat_disc_set().ok_or_else_flat(|| {
-                        self.error(ExpectedToken::Verbatim(TokenKind::Punc(
+                        self.unexpected(ExpectedToken::Verbatim(TokenKind::Punc(
                             Punctuation::LBrace,
                         )))
                     })?,
@@ -855,7 +867,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
         .inspect_always(|x| pop_parse_call!(self, "dfer_param", x))
     }
 
-    /// `pick_statement -> "pick" expression "{" ( pick_arm ( "," pick_arm )* ( "," )? )? "}"`
+    /// `pick_statement -> "pick" expression "{" ( pick_arm )* "}"`
     pub fn pick_statement(&mut self) -> Option<Result<ast::PickStmt>> {
         push_parse_call!(self, "pick_statement");
         self.pull_if_eq(Keyword::Pick)
@@ -863,12 +875,14 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 let expr = self.expression()?;
                 let (open, arms, close) = self
                     .pull_if_delim(Bracket::Brace, |parser| {
-                        parser.pull_terminated(Punctuation::Comma, |parser| {
-                            parser.is_next_not_close().then(|| parser.pick_arm())
-                        })
+                        let mut arms = Vec::new();
+                        while parser.is_next_not_close() {
+                            arms.push(parser.pick_arm()?);
+                        }
+                        Ok(arms)
                     })
                     .ok_or_else_flat(|| {
-                        self.error(ExpectedToken::Verbatim(TokenKind::Punc(
+                        self.unexpected(ExpectedToken::Verbatim(TokenKind::Punc(
                             Punctuation::LBrace,
                         )))
                     })?;
@@ -883,13 +897,15 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .inspect_always(|x| pop_parse_call!(self, "pick_statement", x))
     }
 
-    /// `pick_arm -> pick_pattern "=>" expression`
+    /// `pick_arm -> pick_pattern "=>" block_statement`
     pub fn pick_arm(&mut self) -> Result<ast::PickArm> {
         push_parse_call!(self, "pick_arm");
         Ok(ast::PickArm {
             pattern: self.pick_pattern()?,
             arrow: self.try_pull_eq(Punctuation::FatArrow)?,
-            then: self.expression()?,
+            then: self
+                .block_statement()
+                .ok_or_else_flat(|| self.unexpected(ExpectedToken::BlockStmt))?,
         })
         .inspect_always(|x| pop_parse_call!(self, "pick_arm", x))
     }
@@ -901,7 +917,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .map(ast::PickPattern::Literal)
             .map(Ok)
             .or_else(|| self.variable().map_inner(ast::PickPattern::Constant))
-            .ok_or_else_flat(|| self.error(ExpectedToken::Pattern))
+            .ok_or_else_flat(|| self.unexpected(ExpectedToken::Pattern))
             .inspect_always(|x| pop_parse_call!(self, "pick_pattern", x))
     }
 
@@ -1527,7 +1543,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
             .or_else(|| self.group().map_inner(|x| ast::Expr::Grouping(Box::new(x))))
             .or_else(|| self.directive().map(|x| Ok(ast::Expr::Directive(x))))
             .or_else(|| self.variable().map_inner(ast::Expr::Variable))
-            .ok_or_else_flat(|| self.error(ExpectedToken::Expr))
+            .ok_or_else_flat(|| self.unexpected(ExpectedToken::Expr))
             .inspect_always(|x| pop_parse_call!(self, "primary", x))
     }
 
@@ -1750,7 +1766,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                         })
                     })
                     .ok_or_else_flat(|| {
-                        self.error(ExpectedToken::Verbatim(TokenKind::Punc(
+                        self.unexpected(ExpectedToken::Verbatim(TokenKind::Punc(
                             Punctuation::LParen,
                         )))
                     })?;
@@ -1823,7 +1839,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
     fn type_instance(&mut self) -> Result<ast::TypeInstance> {
         push_parse_call!(self, "type_instance");
         self.typename()
-            .ok_or_else_flat(|| self.error(ExpectedToken::Typename))
+            .ok_or_else_flat(|| self.unexpected(ExpectedToken::Typename))
             .and_then(|name| {
                 Ok(ast::TypeInstance {
                     name,
@@ -1877,7 +1893,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                             .then(|| p.type_bound_clause())
                     })? {
                         v @ [_, ..] => v,
-                        [] => return Err(self.error(ExpectedToken::TypeBound)),
+                        [] => return Err(self.unexpected(ExpectedToken::TypeBound)),
                     },
                 })
             })
@@ -1981,7 +1997,7 @@ impl<I: Iterator<Item = (RelSpan, TokenKind)>> Parser<'_, I> {
                 self.grouped_bound()
                     .map_inner(|x| ast::TypeBound::Group(Box::new(x)))
             })
-            .ok_or_else_flat(|| self.error(ExpectedToken::TypeBound))
+            .ok_or_else_flat(|| self.unexpected(ExpectedToken::TypeBound))
             .inspect_always(|x| pop_parse_call!(self, "primary_bound", x))
     }
 

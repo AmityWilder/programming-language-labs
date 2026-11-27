@@ -8,6 +8,7 @@ use crate::{
     todo_types::Todo,
     types::{byte, fail, flpt, none, sint, text, uint},
 };
+use std::collections::HashMap;
 
 const STATIC_GUARANTEE: &str = "should be guaranteed by static analysis";
 
@@ -17,7 +18,7 @@ thread_local! {
     static DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Program {
     pub stmts: Box<[Stmt]>,
 }
@@ -42,7 +43,7 @@ impl Program {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Expr(Expr),
     Loop(Loop),
@@ -198,7 +199,7 @@ pub enum Callable {
     UserDefined(Todo),
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Loop {
     pub label: Option<LblId>,
     pub block: Block,
@@ -230,7 +231,7 @@ impl Loop {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Dfer {
     pub do_first: Block,
     pub ret_param: Option<EnvId>,
@@ -279,35 +280,113 @@ impl Dfer {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
-pub struct Branch {
-    pub cases: Box<[Case]>,
-    /// Trailing `or` case
-    pub default: Option<Block>,
+#[derive(Debug, Clone, PartialEq)]
+pub enum Branch {
+    Cases(Cases),
+    Table(JumpTable),
 }
 
 impl Branch {
     fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
-        let Self { cases, default } = self;
+        match self {
+            Self::Cases(x) => x.eval(env),
+            Self::Table(x) => x.eval(env),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Cases {
+    /// Trailing `or` case should have its predicate be a tautology
+    pub cases: Box<[Case]>,
+}
+
+impl Cases {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        let Self { cases } = self;
         for Case { pred, then } in cases {
             if pred.eval_bool(env)? {
                 return then.eval(env);
             }
         }
-        default
-            .as_ref()
-            .map_or(ControlFlow::Ok(Value::None), |then| then.eval(env))
+        ControlFlow::Ok(Value::None)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Case {
     /// Promised by static analysis to output a boolean
     pub pred: Expr,
     pub then: Block,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct JumpTable {
+    pub expr: Expr,
+    pub transformer: JumpLookup,
+    pub thens: Box<[Block]>,
+}
+
+impl JumpTable {
+    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        let Self {
+            expr,
+            transformer,
+            thens,
+        } = self;
+        let val = expr.eval(env)?;
+        let idx = transformer.find(val);
+        debug_assert!(idx < thens.len(), "{STATIC_GUARANTEE}");
+        thens[idx].eval(env)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum JumpLookup {
+    Bools,
+
+    AdjacentBytes(byte),
+    AdjacentUints(uint),
+    AdjacentSints(sint),
+    AdjacentChars(char),
+
+    SparseBytes(Todo),
+    SparseUints(Todo),
+    SparseSints(Todo),
+    SparseChars(Todo),
+
+    Strings(HashMap<String, usize>),
+}
+
+impl JumpLookup {
+    fn find(&self, val: Value) -> usize {
+        match *self {
+            Self::Bools => val.bool().expect(STATIC_GUARANTEE).into(),
+
+            Self::AdjacentBytes(min) => usize::from(val.byte().expect(STATIC_GUARANTEE) - min),
+            Self::AdjacentUints(min) => val.uint().expect(STATIC_GUARANTEE) - min,
+            Self::AdjacentSints(min) => {
+                usize::try_from(val.sint().expect(STATIC_GUARANTEE) - min).expect(STATIC_GUARANTEE)
+            }
+            Self::AdjacentChars(min) => {
+                usize::try_from(u32::from(val.char().expect(STATIC_GUARANTEE)) - u32::from(min))
+                    .expect(STATIC_GUARANTEE)
+            }
+
+            Self::SparseBytes(_) => todo!(),
+            Self::SparseUints(_) => todo!(),
+            Self::SparseSints(_) => todo!(),
+            Self::SparseChars(_) => todo!(),
+
+            Self::Strings(ref map) => map
+                .get(&val.text().expect(STATIC_GUARANTEE))
+                .copied()
+                .expect("all cases should be covered"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Block {
     pub stmts: Box<[Stmt]>,
 }

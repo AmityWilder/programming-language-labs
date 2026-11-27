@@ -1600,7 +1600,7 @@ pub struct PickArm {
     pub pattern: PickPattern,
     /// `=>`
     pub arrow: RelSpan,
-    pub then: Expr,
+    pub then: BlockStmt,
 }
 
 impl AstNode for PickArm {

@@ -1789,7 +1789,7 @@ impl From<ast::Literal> for UnlinkedLiteral {
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
-pub enum LinkedLiteral {
+pub enum LinkedLiteralValue {
     #[default]
     None,
     Bool(bool),
@@ -1799,6 +1799,12 @@ pub enum LinkedLiteral {
     Flpt(flpt),
     Char(char),
     Text(text),
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+pub struct LinkedLiteral {
+    pub span: RelSpan,
+    pub val: LinkedLiteralValue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Walkable)]
@@ -1862,6 +1868,7 @@ impl From<ast::Variable> for UnlinkedVar {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinkedVar(pub VarId);
 
+/// An [`Expr`] whose value comes from a block-like context
 #[derive(Walkable)]
 pub enum BlockExpr<S: HirPass> {
     If(Box<IfStmt<S>>),
@@ -2125,7 +2132,7 @@ impl From<ast::PickStmt> for PickExpr<UnlinkedPass> {
 #[derive(Walkable)]
 pub struct PickArm<S: HirPass> {
     pub pat: PickPattern<S>,
-    pub expr: Expr<S>,
+    pub expr: BlockStmt<S>,
 }
 
 impl From<ast::PickArm> for PickArm<UnlinkedPass> {

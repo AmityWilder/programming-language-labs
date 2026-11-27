@@ -438,9 +438,9 @@ impl LispDisplay for ast::PickStmt {
         let Self {
             kw,
             expr,
-            open,
+            open: _,
             arms,
-            close,
+            close: _,
         } = self;
         LispCall::new(kw, source, f)
             .write_arg(expr, source)

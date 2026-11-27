@@ -511,24 +511,104 @@ impl MirDisplay for tree::Dfer {
 
 impl MirDisplay for tree::Branch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { cases, default } = self;
+        match self {
+            Self::Cases(x) => x.fmt(f),
+            Self::Table(x) => x.fmt(f),
+        }
+    }
+}
+
+impl MirDisplay for tree::Cases {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { cases } = self;
         let mut has_prev = false;
-        for tree::Case { pred, then } in cases {
+        for case in cases {
             if has_prev {
                 write!(f, " {} ", Keyword::Or)?;
             } else {
                 has_prev = true;
             }
-            write!(f, "{} ", Keyword::If)?;
-            pred.fmt(f)?;
-            f.write_char(' ')?;
-            then.fmt(f)?;
-        }
-        if let Some(default) = default {
-            write!(f, " {} ", Keyword::Or)?;
-            default.fmt(f)?;
+            case.fmt(f)?;
         }
         Ok(())
+    }
+}
+
+impl MirDisplay for tree::Case {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { pred, then } = self;
+        write!(f, "{} ", Keyword::If)?;
+        pred.fmt(f)?;
+        f.write_char(' ')?;
+        then.fmt(f)
+    }
+}
+
+impl MirDisplay for tree::JumpTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self {
+            expr,
+            transformer,
+            thens,
+        } = self;
+        write!(f, "{} ", Keyword::Pick)?;
+        match transformer {
+            tree::JumpLookup::Bools => {
+                f.write_str("(")?;
+                expr.fmt(f)?;
+                f.write_str(") -:> uint")?;
+            }
+
+            tf @ (tree::JumpLookup::AdjacentBytes(_)
+            | tree::JumpLookup::AdjacentUints(_)
+            | tree::JumpLookup::AdjacentSints(_)
+            | tree::JumpLookup::AdjacentChars(_)) => {
+                f.write_str("(")?;
+                expr.fmt(f)?;
+                f.write_str(" - ")?;
+                match tf {
+                    tree::JumpLookup::AdjacentBytes(min) => min.fmt(f)?,
+                    tree::JumpLookup::AdjacentUints(min) => min.fmt(f)?,
+                    tree::JumpLookup::AdjacentSints(min) => min.fmt(f)?,
+                    tree::JumpLookup::AdjacentChars(min) => min.fmt(f)?,
+                    _ => unreachable!(),
+                }
+                f.write_str(")")?;
+                if !matches!(tf, tree::JumpLookup::AdjacentUints(_)) {
+                    f.write_str(" -:> uint")?;
+                }
+            }
+
+            tree::JumpLookup::SparseBytes(_)
+            | tree::JumpLookup::SparseUints(_)
+            | tree::JumpLookup::SparseSints(_)
+            | tree::JumpLookup::SparseChars(_) => return Err(fmt::Error), // TODO
+
+            tree::JumpLookup::Strings(map) => {
+                f.write_str("table@[")?;
+                let mut has_prev = false;
+                for k in map.keys() {
+                    if has_prev {
+                        f.write_str(", ")?;
+                    } else {
+                        has_prev = true;
+                    }
+                    write!(f, "{k:?}")?;
+                }
+                f.write_str("].find(")?;
+                expr.fmt(f)?;
+                f.write_str(")")?;
+            }
+        }
+        f.write_str(" ")?;
+        let mut f = MirBlock::new(f);
+        for (i, x) in thens.iter().enumerate() {
+            f.entry_with(|f| {
+                write!(f, "{i} => ")?;
+                x.fmt(f)
+            });
+        }
+        f.finish()
     }
 }
 

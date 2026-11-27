@@ -7,8 +7,9 @@ use crate::{
     exec::{EnvId, LblId, Value, tree},
     lex::token::{Operator, keyword::Keyword, punc::OpSide},
     src_code::{map::SourceMap, span::FileId},
+    types::{byte, sint, uint},
 };
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 // TODO: this skips a lot of passes
 
@@ -105,7 +106,7 @@ impl hir::Decl<hir::FinalPass> {
                 .map(|x| Vec::from_iter(x.map(tree::Stmt::Expr))),
             hir::Decl::Pvt(x) => x
                 .finalize(source, file, env, diagnostics)
-                .map(|x| [tree::Stmt::Expr(x)].to_vec()),
+                .map(|x| Vec::from_iter(x.map(tree::Stmt::Expr))),
 
             hir::Decl::Dfer(_) => unimplemented!("should be handled by caller"),
 
@@ -122,7 +123,7 @@ impl hir::DeclOn<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
-        file: FileId,
+        _file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<tree::Stmt>, CheckDiagnostics> {
@@ -134,7 +135,7 @@ impl hir::DeclFun<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
-        file: FileId,
+        _file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<tree::Stmt>, CheckDiagnostics> {
@@ -147,7 +148,7 @@ impl hir::DeclCat<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
-        file: FileId,
+        _file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<tree::Stmt>, CheckDiagnostics> {
@@ -204,12 +205,12 @@ impl hir::DeclPvt<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
-        file: FileId,
+        _file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<tree::Expr, CheckDiagnostics> {
+    ) -> Result<Option<tree::Expr>, CheckDiagnostics> {
         // when are constants initialized?
-        todo!()
+        Ok(None)
     }
 }
 
@@ -321,7 +322,7 @@ impl hir::BlockExpr<hir::FinalPass> {
     fn finalize(
         self,
         _source: &SourceMap,
-        file: FileId,
+        _file: FileId,
         _env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
@@ -338,7 +339,7 @@ impl hir::Binary<hir::FinalPass> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         use crate::lex::token::Operator;
-        let Self { op, lhs, mut rhs } = self;
+        let Self { op, lhs, rhs } = self;
 
         let what = tree::Callable::Builtin(match op {
             Operator::Assign => tree::BuiltinOp::Assign,
@@ -405,7 +406,11 @@ impl hir::Unary<hir::FinalPass> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         use crate::lex::token::Operator;
-        let Self { op, operand, side } = self;
+        let Self {
+            op,
+            operand,
+            side: _,
+        } = self;
         let operand = operand.finalize(source, file, env, diagnostics)?;
         let args = Box::from([operand]);
 
@@ -495,7 +500,7 @@ impl hir::Directive {
     }
 }
 
-impl hir::LinkedLiteral {
+impl hir::LinkedLiteralValue {
     fn finalize(
         self,
         _source: &SourceMap,
@@ -516,11 +521,23 @@ impl hir::LinkedLiteral {
     }
 }
 
+impl hir::LinkedLiteral {
+    fn finalize(
+        self,
+        source: &SourceMap,
+        file: FileId,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<tree::Expr, CheckDiagnostics> {
+        self.val.finalize(source, file, env, diagnostics)
+    }
+}
+
 impl hir::LinkedDecl {
     fn finalize(
         self,
         _source: &SourceMap,
-        file: FileId,
+        _file: FileId,
         env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
@@ -533,7 +550,7 @@ impl hir::LinkedVar {
     fn finalize(
         self,
         _source: &SourceMap,
-        file: FileId,
+        _file: FileId,
         env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
@@ -614,26 +631,251 @@ impl hir::IfStmt<hir::FinalPass> {
             };
             cases.push(case);
         }
-        let default = iter
-            .default_case()
-            .map(|x| x.finalize(source, file, env, diagnostics))
-            .transpose()?;
-        Ok(tree::Branch {
+        if let Some(default) = iter.default_case() {
+            cases.push(tree::Case {
+                pred: tree::Expr::Literal(Value::Bool(true)),
+                then: default.finalize(source, file, env, diagnostics)?,
+            });
+        }
+        Ok(tree::Branch::Cases(tree::Cases {
             cases: cases.into_boxed_slice(),
-            default,
-        })
+        }))
     }
 }
 
 impl hir::PickExpr<hir::FinalPass> {
     fn finalize(
         self,
-        _source: &SourceMap,
+        source: &SourceMap,
         file: FileId,
-        _env: &mut ScopeEnvironment,
-        _diagnostics: &mut Vec<Diagnostic>,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Branch, CheckDiagnostics> {
-        todo!("mir pick expression")
+        use hir::LinkedLiteralValue as LitVal;
+        let Self { expr, arms } = self;
+        let expr = expr.finalize(source, file, env, diagnostics)?;
+        let mut arms = arms
+            .into_iter()
+            .map(|arm| Ok((arm.pat, arm.expr.finalize(source, file, env, diagnostics)?)))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        arms.sort_by(|(a, _), (b, _)| match (a, b) {
+            (hir::PickPattern::Literal(a), hir::PickPattern::Literal(b)) => {
+                match (&a.val, &b.val) {
+                    (LitVal::None, LitVal::None) => std::cmp::Ordering::Equal,
+                    (LitVal::None, _) => std::cmp::Ordering::Less,
+                    (_, LitVal::None) => std::cmp::Ordering::Greater,
+
+                    (LitVal::Bool(a), LitVal::Bool(b)) => a.cmp(b),
+                    (LitVal::Byte(a), LitVal::Byte(b)) => a.cmp(b),
+                    (LitVal::Uint(a), LitVal::Uint(b)) => a.cmp(b),
+                    (LitVal::Sint(a), LitVal::Sint(b)) => a.cmp(b),
+                    (LitVal::Char(a), LitVal::Char(b)) => a.cmp(b),
+                    (LitVal::Text(a), LitVal::Text(b)) => a.cmp(b),
+
+                    (LitVal::Flpt(_), _) | (_, LitVal::Flpt(_)) => {
+                        unimplemented!("cannot jump with floats")
+                    }
+
+                    _ => todo!("multi-type jump table"),
+                }
+            }
+
+            _ => todo!("non-literal jump table"),
+        });
+        arms.dedup_by(|&mut (ref a, _), &mut (ref b, _)| {
+            // note: `b` comes before `a`
+            let is_eq = match (a, b) {
+                (hir::PickPattern::Literal(a), hir::PickPattern::Literal(b)) => {
+                    match (&a.val, &b.val) {
+                        (LitVal::None, LitVal::None) => true,
+
+                        (LitVal::Bool(a), LitVal::Bool(b)) => a == b,
+                        (LitVal::Byte(a), LitVal::Byte(b)) => a == b,
+                        (LitVal::Uint(a), LitVal::Uint(b)) => a == b,
+                        (LitVal::Sint(a), LitVal::Sint(b)) => a == b,
+                        (LitVal::Char(a), LitVal::Char(b)) => a == b,
+                        (LitVal::Text(a), LitVal::Text(b)) => a == b,
+
+                        (LitVal::Flpt(_), _) | (_, LitVal::Flpt(_)) => {
+                            unimplemented!("cannot jump with floats")
+                        }
+
+                        _ => todo!("multi-type jump table"),
+                    }
+                }
+
+                _ => todo!("non-literal jump table"),
+            };
+            if is_eq {
+                let span = match a {
+                    hir::PickPattern::Constant(_) => todo!("non-literal jump table"),
+                    hir::PickPattern::Literal(x) => x.span.within_file(file),
+                };
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    DiagnosticKind::Other {
+                        severity: Severity::Warning,
+                        category: crate::error::DiagnosticCategory::StaticAnalysis,
+                        msg: "unreachable pattern".to_owned(),
+                    },
+                ));
+            }
+            is_eq
+        });
+        let (pats, thens) = arms.into_iter().collect::<(Vec<_>, Vec<_>)>();
+
+        // CURRENT IMPLEMENTATION: all arms must be literals of the same type.
+        // patterns are sorted and unique.
+
+        let num_pats = pats.len();
+        let mut iter = pats.into_iter();
+        let mut transformer = match iter.next().expect("should be caught by parser") {
+            hir::PickPattern::Literal(x) => match x.val {
+                LitVal::None => todo!("jump with `none`"),
+
+                // TODO: default case?
+                LitVal::Bool(true) => todo!("error: not all cases covered: missing `fals`"),
+                LitVal::Bool(false) => 'case: {
+                    if let Some(x) = iter.next() {
+                        match x {
+                            hir::PickPattern::Literal(x) => {
+                                if let hir::LinkedLiteralValue::Bool(b) = x.val {
+                                    debug_assert_eq!(b, true, "should not contain duplicates");
+                                    break 'case tree::JumpLookup::Bools;
+                                } else {
+                                    todo!("multi-type jump table")
+                                }
+                            }
+                            _ => todo!("non-literal jump table"),
+                        }
+                    }
+                    todo!("error: not all cases covered: missing `true`")
+                }
+
+                LitVal::Byte(min) => {
+                    if let Some((max, (pat, x))) = iter
+                        .enumerate()
+                        .map(|(i, x)| {
+                            (
+                                min + byte::try_from(i)
+                                    .expect("should not have more branches than integers"),
+                                match x {
+                                    hir::PickPattern::Literal(x) => {
+                                        if let hir::LinkedLiteralValue::Byte(val) = x.val {
+                                            (x, val)
+                                        } else {
+                                            todo!("multi-type jump table")
+                                        }
+                                    }
+                                    _ => todo!("non-literal jump table"),
+                                },
+                            )
+                        })
+                        .find(|(prev, (pat, x))| *x != prev + 1)
+                    {
+                        tree::JumpLookup::SparseBytes(todo!(
+                            "sparse lookup: found {x}, expected {}",
+                            max + 1,
+                        ))
+                    } else {
+                        tree::JumpLookup::AdjacentBytes(min)
+                    }
+                }
+
+                LitVal::Uint(min) => {
+                    if let Some((max, (pat, x))) = iter
+                        .enumerate()
+                        .map(|(i, x)| {
+                            (
+                                min + uint::try_from(i)
+                                    .expect("should not have more branches than integers"),
+                                match x {
+                                    hir::PickPattern::Literal(x) => {
+                                        if let hir::LinkedLiteralValue::Uint(val) = x.val {
+                                            (x, val)
+                                        } else {
+                                            todo!("multi-type jump table")
+                                        }
+                                    }
+                                    _ => todo!("non-literal jump table"),
+                                },
+                            )
+                        })
+                        .find(|(prev, (pat, x))| *x != prev + 1)
+                    {
+                        tree::JumpLookup::SparseUints(todo!(
+                            "sparse lookup: found {x}, expected {}",
+                            max + 1,
+                        ))
+                    } else {
+                        tree::JumpLookup::AdjacentUints(min)
+                    }
+                }
+
+                LitVal::Sint(min) => {
+                    if let Some((max, (pat, x))) = iter
+                        .enumerate()
+                        .map(|(i, x)| {
+                            (
+                                min + sint::try_from(i)
+                                    .expect("should not have more branches than integers"),
+                                match x {
+                                    hir::PickPattern::Literal(x) => {
+                                        if let hir::LinkedLiteralValue::Sint(val) = x.val {
+                                            (x, val)
+                                        } else {
+                                            todo!("multi-type jump table")
+                                        }
+                                    }
+                                    _ => todo!("non-literal jump table"),
+                                },
+                            )
+                        })
+                        .find(|(max, (pat, x))| *x != max + 1)
+                    {
+                        tree::JumpLookup::SparseSints(todo!(
+                            "sparse lookup: found {x}, expected {}",
+                            max + 1,
+                        ))
+                    } else {
+                        tree::JumpLookup::AdjacentSints(min)
+                    }
+                }
+
+                LitVal::Char(min) => todo!("pick char"),
+
+                LitVal::Text(x) => {
+                    let mut map = HashMap::with_capacity(num_pats);
+                    map.extend(
+                        std::iter::once(x)
+                            .chain(iter.map(|x| match x {
+                                hir::PickPattern::Literal(x) => {
+                                    if let LitVal::Text(x) = x.val {
+                                        x
+                                    } else {
+                                        todo!("multi-type jump table")
+                                    }
+                                }
+                                _ => todo!("non-literal jump table"),
+                            }))
+                            .enumerate()
+                            .map(|(i, x)| (x, i)),
+                    );
+                    tree::JumpLookup::Strings(map)
+                }
+
+                LitVal::Flpt(_) => unimplemented!("cannot jump with floats"),
+            },
+
+            _ => todo!("non-literal jump table"),
+        };
+
+        Ok(tree::Branch::Table(tree::JumpTable {
+            expr,
+            transformer, // TODO
+            thens: thens.into_boxed_slice(),
+        }))
     }
 }
 

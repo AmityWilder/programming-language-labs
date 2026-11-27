@@ -576,48 +576,55 @@ impl hir::LiteralVisitor<hir::UnlinkedLiteral> for LitVisitor<'_, '_, '_> {
 
     fn visit_literal(&mut self, x: hir::UnlinkedLiteral) -> Result<Self::Value, CheckDiagnostics> {
         let hir::UnlinkedLiteral(ast::Literal { kind, span }) = x;
-        let span = span.within_file(self.file);
-        let lex = &self.source[span];
-        Ok(match kind {
-            ast::LiteralKind::None => hir::LinkedLiteral::None,
+        Ok(hir::LinkedLiteral {
+            span,
+            val: {
+                let span = span.within_file(self.file);
+                let lex = &self.source[span];
+                match kind {
+                    ast::LiteralKind::None => hir::LinkedLiteralValue::None,
 
-            ast::LiteralKind::Bool(x) => hir::LinkedLiteral::Bool(x),
+                    ast::LiteralKind::Bool(x) => hir::LinkedLiteralValue::Bool(x),
 
-            ast::LiteralKind::Number => match lex.parse::<NumberLiteral>().map_err(|e| {
-                self.diagnostics.push(Diagnostic::new(span, e.into()));
-                CheckDiagnostics
-            })? {
-                NumberLiteral::Byte(x) => hir::LinkedLiteral::Byte(x),
-                NumberLiteral::Uint(x) => hir::LinkedLiteral::Uint(x),
-                NumberLiteral::Sint(x) => hir::LinkedLiteral::Sint(x),
-                NumberLiteral::Flpt(x) => hir::LinkedLiteral::Flpt(x),
+                    ast::LiteralKind::Number => match lex.parse::<NumberLiteral>().map_err(|e| {
+                        self.diagnostics.push(Diagnostic::new(span, e.into()));
+                        CheckDiagnostics
+                    })? {
+                        NumberLiteral::Byte(x) => hir::LinkedLiteralValue::Byte(x),
+                        NumberLiteral::Uint(x) => hir::LinkedLiteralValue::Uint(x),
+                        NumberLiteral::Sint(x) => hir::LinkedLiteralValue::Sint(x),
+                        NumberLiteral::Flpt(x) => hir::LinkedLiteralValue::Flpt(x),
+                    },
+
+                    ast::LiteralKind::Char => hir::LinkedLiteralValue::Char(
+                        lex.parse::<CharLiteral>()
+                            .map_err(|e| {
+                                self.diagnostics.push(Diagnostic::new(
+                                    span,
+                                    e.try_into().expect("should include delimiters"),
+                                ));
+                                CheckDiagnostics
+                            })?
+                            .0,
+                    ),
+
+                    ast::LiteralKind::Text => hir::LinkedLiteralValue::Text(
+                        lex.parse::<TextLiteral>()
+                            .map_err(|e| {
+                                self.diagnostics.push(Diagnostic::new(
+                                    span,
+                                    e.try_into().expect("should include delimiters"),
+                                ));
+                                CheckDiagnostics
+                            })?
+                            .0,
+                    ),
+
+                    ast::LiteralKind::Macro => {
+                        todo!("error: should not have any macros at this point")
+                    }
+                }
             },
-
-            ast::LiteralKind::Char => hir::LinkedLiteral::Char(
-                lex.parse::<CharLiteral>()
-                    .map_err(|e| {
-                        self.diagnostics.push(Diagnostic::new(
-                            span,
-                            e.try_into().expect("should include delimiters"),
-                        ));
-                        CheckDiagnostics
-                    })?
-                    .0,
-            ),
-
-            ast::LiteralKind::Text => hir::LinkedLiteral::Text(
-                lex.parse::<TextLiteral>()
-                    .map_err(|e| {
-                        self.diagnostics.push(Diagnostic::new(
-                            span,
-                            e.try_into().expect("should include delimiters"),
-                        ));
-                        CheckDiagnostics
-                    })?
-                    .0,
-            ),
-
-            ast::LiteralKind::Macro => todo!("error: should not have any macros at this point"),
         })
     }
 }
