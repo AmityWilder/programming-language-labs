@@ -1,10 +1,10 @@
 use crate::{
     analyzer::{
         scope::hir,
-        static_env::{VarId, scope::ScopeEnvironment},
+        static_env::{LabelId, VarId, scope::ScopeEnvironment},
     },
     error::{CheckDiagnostics, Diagnostic},
-    exec::{EnvId, Value, tree},
+    exec::{EnvId, LblId, Value, tree},
     src_code::map::SourceMap,
 };
 use std::collections::VecDeque;
@@ -14,6 +14,10 @@ use std::collections::VecDeque;
 impl ScopeEnvironment {
     fn get_env_id(&self, id: VarId) -> EnvId {
         EnvId(id.get())
+    }
+
+    fn get_lbl_id(&self, id: LabelId) -> LblId {
+        LblId(id.get())
     }
 }
 
@@ -350,13 +354,13 @@ impl hir::Unary<hir::FinalPass> {
         let what = tree::Callable::Builtin(match op {
             Operator::Not => tree::BuiltinOp::Not,
             Operator::Exists => tree::BuiltinOp::Exists,
-            Operator::Incr => todo!("mir Incr operator"),
+            Operator::Incr => tree::BuiltinOp::Incr,
             Operator::Neg => tree::BuiltinOp::Neg,
-            Operator::Decr => todo!("mir Decr operator"),
+            Operator::Decr => tree::BuiltinOp::Decr,
             Operator::Coalesce => todo!("mir Coalesce operator"),
             Operator::Ref => todo!("mir Ref operator"),
             Operator::Dot => todo!("mir Dot operator"),
-            Operator::Szof => todo!("mir Szof operator"),
+            Operator::Szof => tree::BuiltinOp::Szof,
 
             _ => todo!("not a unary operator"),
         });
@@ -439,11 +443,11 @@ impl hir::LinkedVar {
     fn finalize(
         self,
         _source: &SourceMap,
-        _env: &mut ScopeEnvironment,
+        env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         let Self(id) = self;
-        Ok(tree::Expr::Access(EnvId(id.get())))
+        Ok(tree::Expr::Access(env.get_env_id(id)))
     }
 }
 
@@ -565,8 +569,9 @@ impl hir::LoopStmt<hir::FinalPass> {
     ) -> Result<tree::Loop, CheckDiagnostics> {
         // TODO: label??
         let hir::LoopStmt { label, body } = self;
+        let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
         body.finalize(source, env, diagnostics)
-            .map(|block| tree::Loop { block })
+            .map(|block| tree::Loop { label, block })
     }
 }
 
@@ -579,6 +584,7 @@ impl hir::CordStmt<hir::FinalPass> {
     ) -> Result<tree::Loop, CheckDiagnostics> {
         // TODO: label??
         let hir::CordStmt { label, body } = self;
+        let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
         finalize_decls(body.decls, source, env, diagnostics).map(|mut stmts: Vec<_>| {
             stmts.push(tree::Stmt::Done(tree::Done {
                 // only escape this loop
@@ -586,6 +592,7 @@ impl hir::CordStmt<hir::FinalPass> {
                 value: tree::Expr::default(),
             }));
             tree::Loop {
+                label,
                 block: tree::Block {
                     stmts: stmts.into_boxed_slice(),
                 },
@@ -603,6 +610,7 @@ impl hir::RepStmt<hir::FinalPass> {
     ) -> Result<tree::Loop, CheckDiagnostics> {
         // TODO: label??
         let hir::RepStmt { label, pred, body } = self;
+        let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
         let pred = pred.finalize(source, env, diagnostics)?;
         finalize_decls(body.decls, source, env, diagnostics).map(|mut stmts: VecDeque<_>| {
             stmts.push_front(tree::Stmt::Branch(tree::Branch {
@@ -622,6 +630,7 @@ impl hir::RepStmt<hir::FinalPass> {
                 default: None,
             }));
             tree::Loop {
+                label,
                 block: tree::Block {
                     stmts: Box::from_iter(stmts),
                 },

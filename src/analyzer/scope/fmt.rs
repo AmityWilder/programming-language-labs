@@ -5,6 +5,7 @@
     clippy::todo,
     reason = "need to be aware of when the structure changes so its formatting can update"
 )]
+#![deny(unused_must_use, reason = "don't miss formatter errors")]
 
 use crate::{
     SYNTAX_STYLE_ANSI,

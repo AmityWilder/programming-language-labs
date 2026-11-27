@@ -1,3 +1,5 @@
+#![deny(unused_must_use, reason = "don't miss formatter errors")]
+
 use crate::{
     SYNTAX_STYLE_ANSI,
     highlight::{TokenHighlight, style::StyleWrapper as _, syntax::Syntax, write_highlight},

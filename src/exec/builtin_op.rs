@@ -15,10 +15,13 @@ mod inner {
         Assign,
         Inpt,
         Prnt,
+        Szof,
         Exists,
         /// TODO: how will other views be indexed?
         Index,
         Slice,
+        Incr,
+        Decr,
         Not,
         And,
         Or,
@@ -49,21 +52,90 @@ mod inner {
         pub fn eval(self, env: &mut Environment, args: &[Expr]) -> ControlFlow<Failure, Value> {
             ControlFlow::Ok(match self {
                 // mutate reference
-                Self::Assign => {
-                    let [a, b] = args else { unimplemented!() };
+                Self::Assign | Self::Incr | Self::Decr => {
+                    let [dst, rest @ ..] = args else {
+                        unimplemented!()
+                    };
                     // TODO: change this to eval_var() when the static analyzer can determine types statically
-                    let Some(var) = a.eval(env)?.var() else {
+                    let Some(var) = dst.eval(env)?.var() else {
                         return ControlFlow::Err(Failure::ImmutableAssignment);
                     };
-                    let value = b.eval(env)?;
-                    if let Some(var) = env.get_mut(var) {
-                        // existing
-                        *var = value;
-                    } else {
-                        // initializer
-                        env.insert(var, value);
+                    match self {
+                        // binary
+                        Self::Assign => {
+                            let [x] = rest else {
+                                unimplemented!("should be binary")
+                            };
+                            let value = x.eval(env)?;
+                            if let Some(var) = env.get_mut(var) {
+                                // existing
+                                *var = value;
+                            } else {
+                                // initializer
+                                env.insert(var, value);
+                            }
+                            Value::None
+                        }
+
+                        // unary
+                        Self::Incr | Self::Decr => {
+                            debug_assert_eq!(rest, [], "should be unary");
+                            let var = env
+                                .get_mut(var)
+                                .expect("cannot initialize with mutator; need something to mutate");
+                            match (self, var) {
+                                // base case - when an iterator is finished, it may switch out with None which should never iterate
+                                (Self::Incr | Self::Decr, Value::None) => Value::None,
+
+                                // increment
+                                (Self::Incr, var @ &mut Value::Byte(n)) => {
+                                    std::mem::replace(var, Value::Byte(n + 1))
+                                }
+                                (Self::Incr, var @ &mut Value::Uint(n)) => {
+                                    std::mem::replace(var, Value::Uint(n + 1))
+                                }
+                                (Self::Incr, var @ &mut Value::Sint(n)) => {
+                                    std::mem::replace(var, Value::Sint(n + 1))
+                                }
+                                (Self::Incr, Value::Text(s)) => {
+                                    if s.is_empty() {
+                                        Value::None
+                                    } else {
+                                        Value::Char(s.remove(0))
+                                    }
+                                }
+                                (Self::Incr, Value::Var(_)) => todo!("increment reference(?)"),
+                                (Self::Incr, Value::View { .. }) => todo!("iterate view"),
+                                (Self::Incr, x) => todo!("error: unsupported: {x:?}++"),
+
+                                // decrement
+                                (Self::Decr, var @ &mut Value::Byte(n)) => {
+                                    std::mem::replace(var, Value::Byte(n - 1))
+                                }
+                                (Self::Decr, var @ &mut Value::Uint(n)) => {
+                                    std::mem::replace(var, Value::Uint(n - 1))
+                                }
+                                (Self::Decr, var @ &mut Value::Sint(n)) => {
+                                    std::mem::replace(var, Value::Sint(n - 1))
+                                }
+                                (Self::Decr, Value::Text(s)) => {
+                                    // TBD: is it intuitive for `--` to be `next_back`?
+                                    if let Some(ch) = s.pop() {
+                                        Value::Char(ch)
+                                    } else {
+                                        Value::None
+                                    }
+                                }
+                                (Self::Decr, Value::Var(_)) => todo!("decrement reference(?)"),
+                                (Self::Decr, Value::View { .. }) => todo!("iterate view"),
+                                (Self::Decr, x) => todo!("error: unsupported: {x:?}--"),
+
+                                _ => unreachable!("guarded by Incr | Decr"),
+                            }
+                        }
+
+                        _ => unreachable!("guarded by outer match arm"),
                     }
-                    Value::None
                 }
 
                 // short circuiting
@@ -127,7 +199,13 @@ mod inner {
                         Err(res) => return ControlFlow::from_residual(res),
                     };
                     match self {
-                        Self::Assign | Self::And | Self::Or | Self::Nand | Self::Nor => {
+                        Self::Assign
+                        | Self::Incr
+                        | Self::Decr
+                        | Self::And
+                        | Self::Or
+                        | Self::Nand
+                        | Self::Nor => {
                             unreachable!()
                         }
 
@@ -162,6 +240,26 @@ mod inner {
                         Self::Index => todo!("exec Index"),
                         Self::Slice => todo!("exec Slice"),
 
+                        Self::Szof => {
+                            let [x] = <[_; 1]>::try_from(args).expect("bad argcount");
+                            Value::Uint(match x {
+                                Value::None => 0,
+                                Value::Fail(e) => todo!("size of fail"),
+                                Value::Bool(_)
+                                | Value::Byte(_)
+                                | Value::Uint(_)
+                                | Value::Sint(_)
+                                | Value::Flpt(_) => {
+                                    unimplemented!(
+                                        "szof represents len at runtime, numbers don't have a len. should have been baked in by static analysis"
+                                    )
+                                }
+                                Value::Char(ch) => ch.len_utf8(),
+                                Value::Text(s) => s.len(),
+                                Value::Var(_) => todo!("reference size"),
+                                Value::View { start: _, count } => count,
+                            })
+                        }
                         Self::Xor => {
                             let [a, b] = <[_; 2]>::try_from(args).expect("bad argcount");
                             match (a, b) {

@@ -1,7 +1,4 @@
-use crate::{
-    todo_types::Todo,
-    types::{byte, fail, flpt, none, sint, text, uint},
-};
+use crate::types::{byte, fail, flpt, none, sint, text, uint};
 
 pub mod builtin_op;
 pub mod env;
@@ -17,9 +14,18 @@ impl std::fmt::Debug for EnvId {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct LblId(pub usize);
+
+impl std::fmt::Debug for LblId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, ".{:X}", self.0)
+    }
+}
+
 #[must_use]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ControlFlow<E, T, U = T, L = Todo> {
+pub enum ControlFlow<E, T, U = T, L = LblId> {
     Ok(T),
     Err(E),
     Skip { label: Option<L> },

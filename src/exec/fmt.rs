@@ -5,9 +5,11 @@
     clippy::todo,
     reason = "need to be aware of when the structure changes so its formatting can update"
 )]
+#![deny(unused_must_use, reason = "don't miss formatter errors")]
 
 use super::{EnvId, Value, tree};
 use crate::{
+    exec::LblId,
     lex::{
         symbols::{BYTE_SUFFIX, SIGNED_SUFFIX, UNSIGNED_SUFFIX},
         token::{keyword::Keyword, punc::Punctuation},
@@ -297,9 +299,12 @@ impl MirDisplay for tree::Operation {
                 let nary = match op {
                     tree::BuiltinOp::Inpt => Nary::Nullary,
 
-                    tree::BuiltinOp::Exists | tree::BuiltinOp::Not | tree::BuiltinOp::Neg => {
-                        Nary::UnaryPre
-                    }
+                    tree::BuiltinOp::Exists
+                    | tree::BuiltinOp::Not
+                    | tree::BuiltinOp::Neg
+                    | tree::BuiltinOp::Szof => Nary::UnaryPre,
+
+                    tree::BuiltinOp::Incr | tree::BuiltinOp::Decr => Nary::UnaryPost,
 
                     tree::BuiltinOp::Assign
                     | tree::BuiltinOp::And
@@ -334,7 +339,10 @@ impl MirDisplay for tree::Operation {
                     tree::BuiltinOp::Inpt => Keyword::Inpt.as_str(),
                     tree::BuiltinOp::Prnt => Keyword::Prnt.as_str(),
                     tree::BuiltinOp::Exists => Punctuation::Exists.as_str(),
+                    tree::BuiltinOp::Szof => Keyword::Szof.as_str(),
                     tree::BuiltinOp::Index | tree::BuiltinOp::Slice => "",
+                    tree::BuiltinOp::Incr => Punctuation::Incr.as_str(),
+                    tree::BuiltinOp::Decr => Punctuation::Decr.as_str(),
                     tree::BuiltinOp::Not => Punctuation::Not.as_str(),
                     tree::BuiltinOp::And => Punctuation::And.as_str(),
                     tree::BuiltinOp::Or => Punctuation::Or.as_str(),
@@ -420,9 +428,21 @@ impl MirDisplay for tree::Operation {
 
 impl MirDisplay for tree::Loop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { block } = self;
+        let Self { label, block } = self;
+        if let Some(label) = label {
+            f.write_char('.')?;
+            label.fmt(f)?;
+            f.write_str(": ")?;
+        }
         write!(f, "{} ", Keyword::Loop)?;
         block.fmt(f)
+    }
+}
+
+impl MirDisplay for LblId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self(id) = self;
+        write!(f, "lbl@{id:X}")
     }
 }
 

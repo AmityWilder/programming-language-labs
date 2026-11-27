@@ -4,7 +4,7 @@ use super::ControlFlow;
 pub use super::builtin_op::BuiltinOp;
 use crate::{
     error::fail::Failure,
-    exec::{EnvId, Value, env::Environment},
+    exec::{EnvId, LblId, Value, env::Environment},
     todo_types::Todo,
     types::{byte, fail, flpt, none, sint, text, uint},
 };
@@ -200,26 +200,27 @@ pub enum Callable {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Loop {
+    pub label: Option<LblId>,
     pub block: Block,
 }
 
 impl Loop {
     fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        let Self { label, block } = self;
         loop {
-            match self.block.eval(env) {
+            match block.eval(env) {
                 ControlFlow::Ok(res) => {
                     debug_assert_eq!(res, Value::None, "non-none loop body");
                 }
 
-                ControlFlow::Skip { label }
-                    if label.is_none_or(|_| todo!("test if label matches this loop")) =>
-                {
+                ControlFlow::Skip { label: target } if target.is_none() || target == *label => {
                     // TODO: jump to the iterator if this is a for loop
                 }
 
-                ControlFlow::Break { label, value } | ControlFlow::Break { label, value }
-                    if label.is_none_or(|_| todo!("test if label matches this loop")) =>
-                {
+                ControlFlow::Break {
+                    label: target,
+                    value,
+                } if target.is_none() || target == *label => {
                     break ControlFlow::Ok(value);
                 }
 
@@ -354,7 +355,7 @@ impl Fail {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Skip {
-    pub label: Option<Todo>,
+    pub label: Option<LblId>,
 }
 
 impl Skip {
@@ -366,7 +367,7 @@ impl Skip {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
 pub struct Done {
-    pub label: Option<Todo>,
+    pub label: Option<LblId>,
     pub value: Expr,
 }
 
