@@ -3,6 +3,6 @@
         done .a;
     }
     .b: cord {
-        .a: cord {} // expect error: shares a name with an ancestor
+        .a: cord {} // expect warning: shares a name with an ancestor
     }
 }

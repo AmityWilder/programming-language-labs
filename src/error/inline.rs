@@ -1,5 +1,6 @@
 use crate::{
     SYNTAX_STYLE_ANSI,
+    error::Severity,
     highlight::{
         style::{Color, Style, StyleWrapper as _},
         write_highlight,
@@ -18,19 +19,15 @@ pub struct MessageStyle {
     pub underline: char,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum MessageKind {
-    #[default]
-    Info,
-    #[expect(dead_code, reason = "future use")]
-    Warning,
-    Error,
-}
-
-impl MessageKind {
+impl Severity {
     const INFO_STYLE: MessageStyle = MessageStyle {
         style: Style::new().foreground(Color::BrightBlue).bold(true),
         underline: '-',
+    };
+
+    const SUGGESTION_STYLE: MessageStyle = MessageStyle {
+        style: Style::new().foreground(Color::BrightGreen).bold(true),
+        underline: '+',
     };
 
     const WARNING_STYLE: MessageStyle = MessageStyle {
@@ -46,6 +43,7 @@ impl MessageKind {
     pub const fn style(self) -> MessageStyle {
         match self {
             Self::Info => Self::INFO_STYLE,
+            Self::Suggestion => Self::SUGGESTION_STYLE,
             Self::Warning => Self::WARNING_STYLE,
             Self::Error => Self::ERROR_STYLE,
         }
@@ -75,25 +73,25 @@ impl<T> CodeDelta<T> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodeRef<T> {
-    pub kind: MessageKind,
+    pub kind: Severity,
     pub span: Span,
     pub msg: T,
 }
 
 impl<T> CodeRef<T> {
-    pub const fn new(kind: MessageKind, span: Span, msg: T) -> Self {
+    pub const fn new(kind: Severity, span: Span, msg: T) -> Self {
         Self { kind, span, msg }
     }
 }
 
 pub trait CodeReference {
-    fn kind(&self) -> &MessageKind;
+    fn kind(&self) -> &Severity;
     fn span(&self) -> &Span;
     fn msg(&self) -> &dyn std::fmt::Display;
 }
 
 impl<T: ?Sized + CodeReference> CodeReference for &T {
-    fn kind(&self) -> &MessageKind {
+    fn kind(&self) -> &Severity {
         (*self).kind()
     }
 
@@ -107,7 +105,7 @@ impl<T: ?Sized + CodeReference> CodeReference for &T {
 }
 
 impl<T: ?Sized + CodeReference> CodeReference for Box<T> {
-    fn kind(&self) -> &MessageKind {
+    fn kind(&self) -> &Severity {
         (**self).kind()
     }
 
@@ -121,7 +119,7 @@ impl<T: ?Sized + CodeReference> CodeReference for Box<T> {
 }
 
 impl<T: std::fmt::Display> CodeReference for CodeRef<T> {
-    fn kind(&self) -> &MessageKind {
+    fn kind(&self) -> &Severity {
         &self.kind
     }
 

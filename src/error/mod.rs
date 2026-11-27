@@ -3,7 +3,7 @@ use crate::{
     analyzer::types::{AbstractType, SizeReq},
     error::{
         fail::Failure,
-        inline::{CodeRef, CodeReference, MessageKind, render_code_refs},
+        inline::{CodeRef, CodeReference, render_code_refs},
     },
     highlight::{
         style::{Color, Style, StyleWrapper as _},
@@ -1391,16 +1391,12 @@ impl<'smap, 'err> ContextDiagnostic<'smap, 'err> {
 
 impl Display for ContextDiagnostic<'_, '_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let (color, title) = match self.error.kind.severity() {
-            Severity::Info => (Color::BrightCyan, "info"),
-            Severity::Suggestion => (Color::BrightGreen, "suggestion"),
-            Severity::Warning => (Color::BrightYellow, "warning"),
-            Severity::Error => (Color::BrightRed, "error"),
-        };
+        let severity = self.error.kind.severity();
         write!(
             f,
-            "{}{title}{}: ",
-            Style::new().foreground(color).bold(true).begin(),
+            "{}{}\x1b[0m{}: ",
+            severity.style().style.begin(),
+            severity.as_str(),
             Style::new().foreground(Color::BrightWhite).begin()
         )?;
         self.err(f)?;
@@ -1420,7 +1416,7 @@ impl Display for ContextDiagnostic<'_, '_> {
         {
             #[expect(unused_mut, reason = "will be mutated in the future")]
             let mut refs: Vec<Box<dyn CodeReference>> = vec![Box::new(CodeRef::new(
-                MessageKind::Error,
+                self.error.kind.severity(),
                 self.error.span,
                 self.inline(),
             ))];
