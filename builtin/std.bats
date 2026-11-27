@@ -47,3 +47,16 @@ rec Size3 {
     y: uint,
     z: uint,
 }
+
+//fun starts_with_char(s: text, pat: char) -> bool {
+//    give s++ == pat;
+//}
+//
+//fun starts_with_text(s: text, pat: text) -> bool {
+//    for ch in pat {
+//        if !starts_with_char(s, pat++) {
+//            give fals;
+//        }
+//    }
+//    give true;
+//}

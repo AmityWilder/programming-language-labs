@@ -7,7 +7,10 @@ use crate::{
 #[cfg(true)]
 mod inner {
     use super::*;
-    use crate::{exec::ControlFlow, lex::token::keyword::Keyword};
+    use crate::{
+        exec::{ControlFlow, EnvId},
+        lex::token::keyword::Keyword,
+    };
     use std::ops::FromResidual as _;
 
     #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -104,8 +107,20 @@ mod inner {
                                         Value::Char(s.remove(0))
                                     }
                                 }
+                                // TBD: treat as a reference and dereference, or a pointer and go to the next id?
                                 (Self::Incr, Value::Var(_)) => todo!("increment reference(?)"),
-                                (Self::Incr, Value::View { .. }) => todo!("iterate view"),
+                                (Self::Incr, var @ &mut Value::View { start, count }) => {
+                                    if let Some(count) = count.checked_sub(1) {
+                                        *var = Value::View {
+                                            start: EnvId(start.0 + 1),
+                                            count,
+                                        };
+                                        Value::Var(start)
+                                    } else {
+                                        // already len 0
+                                        Value::None
+                                    }
+                                }
                                 (Self::Incr, x) => todo!("error: unsupported: {x:?}++"),
 
                                 // decrement
@@ -127,7 +142,17 @@ mod inner {
                                     }
                                 }
                                 (Self::Decr, Value::Var(_)) => todo!("decrement reference(?)"),
-                                (Self::Decr, Value::View { .. }) => todo!("iterate view"),
+                                (Self::Decr, var @ &mut Value::View { start, count }) => {
+                                    if let Some(count) = count.checked_sub(1) {
+                                        // count after subtraction is the index of the final item
+                                        let end = EnvId(start.0 + count);
+                                        *var = Value::View { start, count };
+                                        Value::Var(end)
+                                    } else {
+                                        // already len 0
+                                        Value::None
+                                    }
+                                }
                                 (Self::Decr, x) => todo!("error: unsupported: {x:?}--"),
 
                                 _ => unreachable!("guarded by Incr | Decr"),
