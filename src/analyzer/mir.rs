@@ -429,12 +429,19 @@ impl hir::Unary<hir::FinalPass> {
 impl hir::Subscript<hir::FinalPass> {
     fn finalize(
         self,
-        _source: &SourceMap,
+        source: &SourceMap,
         file: FileId,
-        _env: &mut ScopeEnvironment,
-        _diagnostics: &mut Vec<Diagnostic>,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        todo!("mir indexer")
+        let Self { arr, idx } = self;
+        Ok(tree::Expr::Operation(tree::Operation {
+            what: tree::Callable::Builtin(tree::BuiltinOp::Index),
+            args: Box::from([
+                arr.finalize(source, file, env, diagnostics)?,
+                idx.finalize(source, file, env, diagnostics)?,
+            ]),
+        }))
     }
 }
 

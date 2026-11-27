@@ -278,14 +278,41 @@ mod inner {
                             Value::None
                         }
 
-                        Self::Index => todo!("exec Index"),
+                        Self::Index => {
+                            let [arr, idx] = <[_; 2]>::try_from(args).expect("bad argcount");
+                            match (arr, idx) {
+                                (Value::Text(s), Value::Uint(i)) => {
+                                    if let Some(ch) = s.chars().nth(i) {
+                                        Value::Char(ch)
+                                    } else {
+                                        return ControlFlow::Err(Failure::OutOfBounds);
+                                    }
+                                }
+
+                                (Value::View { start, count }, Value::Uint(i)) => {
+                                    if i < count {
+                                        Value::Var(EnvId(start.0 + i))
+                                    } else {
+                                        return ControlFlow::Err(Failure::OutOfBounds);
+                                    }
+                                }
+
+                                (Value::Var(_), _) => todo!("index reference"),
+
+                                (arr, idx) => todo!("error: incompatible: {arr:?}[{idx:?}]"),
+                            }
+                        }
+
+                        // what index type?
                         Self::Slice => todo!("exec Slice"),
 
                         Self::Szof => {
                             let [x] = <[_; 1]>::try_from(args).expect("bad argcount");
                             Value::Uint(match x {
                                 Value::None => 0,
-                                Value::Fail(e) => todo!("size of fail"),
+
+                                Value::Fail(_) => todo!("size of fail"),
+
                                 Value::Bool(_)
                                 | Value::Byte(_)
                                 | Value::Uint(_)
