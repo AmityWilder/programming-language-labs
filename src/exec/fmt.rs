@@ -536,6 +536,7 @@ impl MirDisplay for tree::Done {
         write!(f, "{} ", Keyword::Done)?;
         if let Some(label) = label {
             label.fmt(f)?;
+            f.write_str(" ")?;
         }
         value.fmt(f)?;
         f.write_char(';')

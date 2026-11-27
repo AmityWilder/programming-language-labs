@@ -764,11 +764,13 @@ impl hir::SkipStmt<hir::FinalPass> {
         self,
         _source: &SourceMap,
         file: FileId,
-        _env: &mut ScopeEnvironment,
+        env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Skip, CheckDiagnostics> {
-        // TODO: label
-        Ok(tree::Skip { label: None })
+        let Self { label } = self;
+        Ok(tree::Skip {
+            label: label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id)),
+        })
     }
 }
 
@@ -780,11 +782,10 @@ impl hir::DoneStmt<hir::FinalPass> {
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Done, CheckDiagnostics> {
-        // TODO: label
+        let Self { label, expr } = self;
         Ok(tree::Done {
-            label: None,
-            value: self
-                .expr
+            label: label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id)),
+            value: expr
                 .map(|x| x.finalize(source, file, env, diagnostics))
                 .transpose()?
                 .unwrap_or_default(),
