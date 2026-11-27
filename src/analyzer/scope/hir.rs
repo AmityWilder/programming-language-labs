@@ -19,6 +19,7 @@ use crate::{
     types::{byte, flpt, sint, text, uint},
     util::OrAllErrsExt as _,
 };
+use std::collections::VecDeque;
 
 fn convert_iter<U, A: IntoIterator<Item: Into<U>>, B: FromIterator<U>>(vec: A) -> B {
     vec.into_iter().map(Into::into).collect::<B>()
@@ -339,6 +340,20 @@ where
     T: TreeWalk<V, S>,
 {
     type Output = Vec<T::Output>;
+
+    fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
+        self.into_iter()
+            .map(|x| x.walk(visitor))
+            .collect_or_acc_errs()
+    }
+}
+
+impl<V, S: HirPass, T> TreeWalk<V, S> for VecDeque<T>
+where
+    V: Visitor<S>,
+    T: TreeWalk<V, S>,
+{
+    type Output = VecDeque<T::Output>;
 
     fn walk(self, visitor: &mut V) -> Result<Self::Output, CheckDiagnostics> {
         self.into_iter()
@@ -2356,7 +2371,7 @@ impl From<ast::SkipStmt> for SkipStmt<UnlinkedPass> {
 }
 
 pub struct BlockStmt<S: HirPass> {
-    pub decls: Box<[Decl<S>]>,
+    pub decls: VecDeque<Decl<S>>,
 }
 
 impl<V, S: HirPass> TreeWalk<V, S> for BlockStmt<S>

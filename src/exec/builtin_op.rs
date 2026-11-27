@@ -210,7 +210,9 @@ mod inner {
                                     let mut val = &val;
                                     while let Value::Var(id) = *val {
                                         // TODO: what if there's a cycle?
-                                        val = env.get(id).expect("invalid reference");
+                                        val = env.get(id).unwrap_or_else(|| {
+                                            panic!("reference should be valid\n reference: {id:?}\n environment: {env:?}\n operation: {self:?}")
+                                        });
                                     }
                                     val.clone()
                                 } else {

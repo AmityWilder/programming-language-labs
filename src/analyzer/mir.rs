@@ -5,7 +5,7 @@ use crate::{
     },
     error::{CheckDiagnostics, Diagnostic, DiagnosticKind, Severity},
     exec::{EnvId, LblId, Value, tree},
-    lex::token::keyword::Keyword,
+    lex::token::{Operator, keyword::Keyword, punc::OpSide},
     src_code::{map::SourceMap, span::FileId},
 };
 use std::collections::VecDeque;
@@ -644,8 +644,7 @@ impl hir::LoopStmt<hir::FinalPass> {
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Loop, CheckDiagnostics> {
-        // TODO: label??
-        let hir::LoopStmt { label, body } = self;
+        let Self { label, body } = self;
         let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
         body.finalize(source, file, env, diagnostics)
             .map(|block| tree::Loop { label, block })
@@ -660,22 +659,15 @@ impl hir::CordStmt<hir::FinalPass> {
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Loop, CheckDiagnostics> {
-        // TODO: label??
-        let hir::CordStmt { label, body } = self;
-        let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
-        finalize_decls(body.decls, source, file, env, diagnostics).map(|mut stmts: Vec<_>| {
-            stmts.push(tree::Stmt::Done(tree::Done {
+        let Self { label, mut body } = self;
+        body.decls
+            .push_back(hir::Decl::Stmt(hir::Stmt::Done(hir::DoneStmt {
                 // only escape this loop
                 label: None,
-                value: tree::Expr::default(),
-            }));
-            tree::Loop {
-                label,
-                block: tree::Block {
-                    stmts: stmts.into_boxed_slice(),
-                },
-            }
-        })
+                // TBD: should this output the previous statement value?
+                expr: None,
+            })));
+        hir::LoopStmt { label, body }.finalize(source, file, env, diagnostics)
     }
 }
 
@@ -687,46 +679,76 @@ impl hir::RepStmt<hir::FinalPass> {
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Loop, CheckDiagnostics> {
-        // TODO: label??
-        let hir::RepStmt { label, pred, body } = self;
-        let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
-        let pred = pred.finalize(source, file, env, diagnostics)?;
-        finalize_decls(body.decls, source, file, env, diagnostics).map(|mut stmts: VecDeque<_>| {
-            stmts.push_front(tree::Stmt::Branch(tree::Branch {
-                cases: Box::from([tree::Case {
-                    pred: tree::Expr::Operation(tree::Operation {
-                        what: tree::Callable::Builtin(tree::BuiltinOp::Not),
-                        args: Box::from([pred]),
-                    }),
-                    then: tree::Block {
-                        stmts: Box::from([tree::Stmt::Done(tree::Done {
-                            // only escape this loop
-                            label: None,
-                            value: tree::Expr::default(),
-                        })]),
-                    },
-                }]),
-                default: None,
-            }));
-            tree::Loop {
-                label,
-                block: tree::Block {
-                    stmts: Box::from_iter(stmts),
+        let Self {
+            label,
+            pred,
+            mut body,
+        } = self;
+        body.decls
+            .push_front(hir::Decl::Stmt(hir::Stmt::If(hir::IfStmt {
+                pred: hir::Expr::Unary(Box::new(hir::Unary {
+                    op: Operator::Not,
+                    operand: pred,
+                    side: OpSide::Prefix,
+                })),
+                then: hir::BlockStmt {
+                    decls: VecDeque::from([hir::Decl::Stmt(hir::Stmt::Done(hir::DoneStmt {
+                        // only escape this loop
+                        label: None,
+                        expr: None,
+                    }))]),
                 },
-            }
-        })
+                or: None,
+            })));
+        hir::LoopStmt { label, body }.finalize(source, file, env, diagnostics)
     }
 }
 
 impl hir::ForStmt<hir::FinalPass> {
     fn finalize(
         self,
-        _source: &SourceMap,
+        source: &SourceMap,
         file: FileId,
-        _env: &mut ScopeEnvironment,
-        _diagnostics: &mut Vec<Diagnostic>,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Loop, CheckDiagnostics> {
-        todo!("mir for loop")
+        let Self {
+            label,
+            var: hir::BindingPattern { var },
+            iter,
+            mut body,
+        } = self;
+        // cant be `rep` because `rep` would put the predicate before everything the for loop inserts
+        body.decls
+            .push_front(hir::Decl::Stmt(hir::Stmt::If(hir::IfStmt {
+                pred: hir::Expr::Unary(Box::new(hir::Unary {
+                    op: Operator::Not,
+                    operand: hir::Expr::Unary(Box::new(hir::Unary {
+                        op: Operator::Exists,
+                        operand: hir::Expr::Variable(hir::LinkedVar(var.0)),
+                        side: OpSide::Prefix,
+                    })),
+                    side: OpSide::Prefix,
+                })),
+                then: hir::BlockStmt {
+                    decls: VecDeque::from([hir::Decl::Stmt(hir::Stmt::Done(hir::DoneStmt {
+                        // only escape this loop
+                        label: None,
+                        expr: None,
+                    }))]),
+                },
+                or: None,
+            })));
+        body.decls.push_front(hir::Decl::Let(hir::DeclLet {
+            id: var,
+            ty: None,
+            init: Some(hir::Expr::Unary(Box::new(hir::Unary {
+                op: Operator::Incr,
+                operand: iter,
+                side: OpSide::Postfix,
+            }))),
+        }));
+        hir::LoopStmt { label, body }.finalize(source, file, env, diagnostics)
     }
 }
 
