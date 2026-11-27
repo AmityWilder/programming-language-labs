@@ -307,6 +307,22 @@ impl MirDisplay for tree::Operation {
                     tree::BuiltinOp::Incr | tree::BuiltinOp::Decr => Nary::UnaryPost,
 
                     tree::BuiltinOp::Assign
+                    | tree::BuiltinOp::AndAssign
+                    | tree::BuiltinOp::OrAssign
+                    | tree::BuiltinOp::XorAssign
+                    | tree::BuiltinOp::NandAssign
+                    | tree::BuiltinOp::NorAssign
+                    | tree::BuiltinOp::XnorAssign
+                    | tree::BuiltinOp::AddAssign
+                    | tree::BuiltinOp::SubAssign
+                    | tree::BuiltinOp::MulAssign
+                    | tree::BuiltinOp::PowAssign
+                    | tree::BuiltinOp::DivAssign
+                    | tree::BuiltinOp::RemAssign
+                    | tree::BuiltinOp::ShlAssign
+                    | tree::BuiltinOp::ShrAssign
+                    | tree::BuiltinOp::RotlAssign
+                    | tree::BuiltinOp::RotrAssign
                     | tree::BuiltinOp::And
                     | tree::BuiltinOp::Or
                     | tree::BuiltinOp::Xor
@@ -336,6 +352,22 @@ impl MirDisplay for tree::Operation {
                 };
                 let sym = match op {
                     tree::BuiltinOp::Assign => Punctuation::Assign.as_str(),
+                    tree::BuiltinOp::AndAssign => Punctuation::AndAssign.as_str(),
+                    tree::BuiltinOp::OrAssign => Punctuation::OrAssign.as_str(),
+                    tree::BuiltinOp::XorAssign => Punctuation::XorAssign.as_str(),
+                    tree::BuiltinOp::NandAssign => Punctuation::NandAssign.as_str(),
+                    tree::BuiltinOp::NorAssign => Punctuation::NorAssign.as_str(),
+                    tree::BuiltinOp::XnorAssign => Punctuation::XnorAssign.as_str(),
+                    tree::BuiltinOp::AddAssign => Punctuation::AddAssign.as_str(),
+                    tree::BuiltinOp::SubAssign => Punctuation::SubAssign.as_str(),
+                    tree::BuiltinOp::MulAssign => Punctuation::MulAssign.as_str(),
+                    tree::BuiltinOp::PowAssign => Punctuation::PowAssign.as_str(),
+                    tree::BuiltinOp::DivAssign => Punctuation::DivAssign.as_str(),
+                    tree::BuiltinOp::RemAssign => Punctuation::RemAssign.as_str(),
+                    tree::BuiltinOp::ShlAssign => Punctuation::ShlAssign.as_str(),
+                    tree::BuiltinOp::ShrAssign => Punctuation::ShrAssign.as_str(),
+                    tree::BuiltinOp::RotlAssign => Punctuation::RotlAssign.as_str(),
+                    tree::BuiltinOp::RotrAssign => Punctuation::RotrAssign.as_str(),
                     tree::BuiltinOp::Inpt => Keyword::Inpt.as_str(),
                     tree::BuiltinOp::Prnt => Keyword::Prnt.as_str(),
                     tree::BuiltinOp::Exists => Punctuation::Exists.as_str(),

@@ -16,6 +16,24 @@ mod inner {
     #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
     pub enum BuiltinOp {
         Assign,
+
+        AndAssign,
+        OrAssign,
+        XorAssign,
+        NandAssign,
+        NorAssign,
+        XnorAssign,
+        AddAssign,
+        SubAssign,
+        MulAssign,
+        PowAssign,
+        DivAssign,
+        RemAssign,
+        ShlAssign,
+        ShrAssign,
+        RotlAssign,
+        RotrAssign,
+
         Inpt,
         Prnt,
         Szof,
@@ -55,7 +73,25 @@ mod inner {
         pub fn eval(self, env: &mut Environment, args: &[Expr]) -> ControlFlow<Failure, Value> {
             ControlFlow::Ok(match self {
                 // mutate reference
-                Self::Assign | Self::Incr | Self::Decr => {
+                Self::Assign
+                | Self::AndAssign
+                | Self::OrAssign
+                | Self::XorAssign
+                | Self::NandAssign
+                | Self::NorAssign
+                | Self::XnorAssign
+                | Self::AddAssign
+                | Self::SubAssign
+                | Self::MulAssign
+                | Self::PowAssign
+                | Self::DivAssign
+                | Self::RemAssign
+                | Self::ShlAssign
+                | Self::ShrAssign
+                | Self::RotlAssign
+                | Self::RotrAssign
+                | Self::Incr
+                | Self::Decr => {
                     let [dst, rest @ ..] = args else {
                         unimplemented!()
                     };
@@ -77,6 +113,49 @@ mod inner {
                                 // initializer
                                 env.insert(var, value);
                             }
+                            Value::None
+                        }
+
+                        Self::AndAssign
+                        | Self::OrAssign
+                        | Self::XorAssign
+                        | Self::NandAssign
+                        | Self::NorAssign
+                        | Self::XnorAssign
+                        | Self::AddAssign
+                        | Self::SubAssign
+                        | Self::MulAssign
+                        | Self::PowAssign
+                        | Self::DivAssign
+                        | Self::RemAssign
+                        | Self::ShlAssign
+                        | Self::ShrAssign
+                        | Self::RotlAssign
+                        | Self::RotrAssign => {
+                            let op = match self {
+                                Self::AndAssign => Self::And,
+                                Self::OrAssign => Self::Or,
+                                Self::XorAssign => Self::Xor,
+                                Self::NandAssign => Self::Nand,
+                                Self::NorAssign => Self::Nor,
+                                Self::XnorAssign => Self::Xnor,
+                                Self::AddAssign => Self::Add,
+                                Self::SubAssign => Self::Sub,
+                                Self::MulAssign => Self::Mul,
+                                Self::PowAssign => Self::Pow,
+                                Self::DivAssign => Self::Div,
+                                Self::RemAssign => Self::Rem,
+                                Self::ShlAssign => Self::Shl,
+                                Self::ShrAssign => Self::Shr,
+                                Self::RotlAssign => Self::Rotl,
+                                Self::RotrAssign => Self::Rotr,
+                                _ => unreachable!(),
+                            };
+                            let value = op.eval(env, args)?; // TODO: what if lhs shouldn't be evaluated multiple times
+                            let var = env
+                                .get_mut(var)
+                                .expect("cannot initialize with mutator; need something to mutate");
+                            *var = value;
                             Value::None
                         }
 
@@ -227,6 +306,22 @@ mod inner {
                     };
                     match self {
                         Self::Assign
+                        | Self::AndAssign
+                        | Self::OrAssign
+                        | Self::XorAssign
+                        | Self::NandAssign
+                        | Self::NorAssign
+                        | Self::XnorAssign
+                        | Self::AddAssign
+                        | Self::SubAssign
+                        | Self::MulAssign
+                        | Self::PowAssign
+                        | Self::DivAssign
+                        | Self::RemAssign
+                        | Self::ShlAssign
+                        | Self::ShrAssign
+                        | Self::RotlAssign
+                        | Self::RotrAssign
                         | Self::Incr
                         | Self::Decr
                         | Self::And

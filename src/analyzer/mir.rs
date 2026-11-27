@@ -338,30 +338,27 @@ impl hir::Binary<hir::FinalPass> {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         use crate::lex::token::Operator;
-        let Self { op, lhs, rhs } = self;
-        let lhs = lhs.finalize(source, file, env, diagnostics)?;
-        let rhs = rhs.finalize(source, file, env, diagnostics)?;
-        let args = Box::from([lhs, rhs]);
+        let Self { op, lhs, mut rhs } = self;
 
         let what = tree::Callable::Builtin(match op {
             Operator::Assign => tree::BuiltinOp::Assign,
 
-            Operator::AndAssign
-            | Operator::OrAssign
-            | Operator::XorAssign
-            | Operator::NandAssign
-            | Operator::NorAssign
-            | Operator::XnorAssign
-            | Operator::AddAssign
-            | Operator::SubAssign
-            | Operator::MulAssign
-            | Operator::PowAssign
-            | Operator::DivAssign
-            | Operator::RemAssign
-            | Operator::ShlAssign
-            | Operator::ShrAssign
-            | Operator::RotlAssign
-            | Operator::RotrAssign => todo!("mir assignment shorthand"),
+            Operator::AndAssign => tree::BuiltinOp::AndAssign,
+            Operator::OrAssign => tree::BuiltinOp::OrAssign,
+            Operator::XorAssign => tree::BuiltinOp::XorAssign,
+            Operator::NandAssign => tree::BuiltinOp::NandAssign,
+            Operator::NorAssign => tree::BuiltinOp::NorAssign,
+            Operator::XnorAssign => tree::BuiltinOp::XnorAssign,
+            Operator::AddAssign => tree::BuiltinOp::AddAssign,
+            Operator::SubAssign => tree::BuiltinOp::SubAssign,
+            Operator::MulAssign => tree::BuiltinOp::MulAssign,
+            Operator::PowAssign => tree::BuiltinOp::PowAssign,
+            Operator::DivAssign => tree::BuiltinOp::DivAssign,
+            Operator::RemAssign => tree::BuiltinOp::RemAssign,
+            Operator::ShlAssign => tree::BuiltinOp::ShlAssign,
+            Operator::ShrAssign => tree::BuiltinOp::ShrAssign,
+            Operator::RotlAssign => tree::BuiltinOp::RotlAssign,
+            Operator::RotrAssign => tree::BuiltinOp::RotrAssign,
 
             Operator::And => tree::BuiltinOp::And,
             Operator::Or => tree::BuiltinOp::Or,
@@ -390,6 +387,10 @@ impl hir::Binary<hir::FinalPass> {
 
             _ => todo!("not a binary operator"),
         });
+
+        let lhs = lhs.finalize(source, file, env, diagnostics)?;
+        let rhs = rhs.finalize(source, file, env, diagnostics)?;
+        let args = Box::from([lhs, rhs]);
 
         Ok(tree::Expr::Operation(tree::Operation { what, args }))
     }
