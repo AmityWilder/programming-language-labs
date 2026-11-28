@@ -8,6 +8,15 @@ let NUMBER: byte = 5b;
 let STRING: byte = 6b;
 let PUNC: byte = 7b;
 
+fun foo(x: sint) -> bool {
+    let is_three = x == 3;
+    prnt(x, " == 3: ", is_three, "\n");
+    give is_three;
+}
+
+if !foo(3) { fail "3 == 3"; }
+if foo(5) { fail "5 != 3"; }
+
 prnt("paste program code\n");
 let code = inpt; // take input from the user
 let copy = code + "";

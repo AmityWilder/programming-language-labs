@@ -8,7 +8,7 @@ use crate::{
 mod inner {
     use super::*;
     use crate::{
-        exec::{ControlFlow, EnvId},
+        exec::{ControlFlow, EnvId, funcs::FuncTable},
         lex::token::keyword::Keyword,
     };
     use std::ops::FromResidual as _;
@@ -70,7 +70,12 @@ mod inner {
     }
 
     impl BuiltinOp {
-        pub fn eval(self, env: &mut Environment, args: &[Expr]) -> ControlFlow<Failure, Value> {
+        pub fn eval(
+            self,
+            funs: &FuncTable,
+            env: &mut Environment,
+            args: &[Expr],
+        ) -> ControlFlow<Failure, Value> {
             ControlFlow::Ok(match self {
                 // mutate reference
                 Self::Assign
@@ -96,7 +101,7 @@ mod inner {
                         unimplemented!()
                     };
                     // TODO: change this to eval_var() when the static analyzer can determine types statically
-                    let Some(var) = dst.eval(env)?.var() else {
+                    let Some(var) = dst.eval(funs, env)?.var() else {
                         return ControlFlow::Err(Failure::ImmutableAssignment);
                     };
                     match self {
@@ -105,7 +110,7 @@ mod inner {
                             let [x] = rest else {
                                 unimplemented!("should be binary")
                             };
-                            let value = x.eval(env)?;
+                            let value = x.eval(funs, env)?;
                             if let Some(var) = env.get_mut(var) {
                                 // existing
                                 *var = value;
@@ -151,7 +156,7 @@ mod inner {
                                 Self::RotrAssign => Self::Rotr,
                                 _ => unreachable!(),
                             };
-                            let value = op.eval(env, args)?; // TODO: what if lhs shouldn't be evaluated multiple times
+                            let value = op.eval(funs, env, args)?; // TODO: what if lhs shouldn't be evaluated multiple times
                             let var = env
                                 .get_mut(var)
                                 .expect("cannot initialize with mutator; need something to mutate");
@@ -245,14 +250,14 @@ mod inner {
                 // short circuiting
                 Self::And | Self::Or | Self::Nand | Self::Nor => {
                     let [a, b] = args else { unimplemented!() };
-                    match match a.eval(env) {
+                    match match a.eval(funs, env) {
                         ControlFlow::Ok(x) => x,
                         res => return res,
                     } {
                         Value::Bool(a) => {
                             let res = match self {
-                                Self::And | Self::Nand => a && b.eval_bool(env)?,
-                                Self::Or | Self::Nor => a || b.eval_bool(env)?,
+                                Self::And | Self::Nand => a && b.eval_bool(funs, env)?,
+                                Self::Or | Self::Nor => a || b.eval_bool(funs, env)?,
                                 _ => unreachable!(),
                             };
                             let is_neg = matches!(self, Self::Nand | Self::Nor);
@@ -260,18 +265,18 @@ mod inner {
                         }
 
                         Value::Byte(a) => Value::Byte(match self {
-                            Self::And | Self::Nand => a & b.eval_byte(env)?,
-                            Self::Or | Self::Nor => a | b.eval_byte(env)?,
+                            Self::And | Self::Nand => a & b.eval_byte(funs, env)?,
+                            Self::Or | Self::Nor => a | b.eval_byte(funs, env)?,
                             _ => unreachable!(),
                         }),
                         Value::Uint(a) => Value::Uint(match self {
-                            Self::And | Self::Nand => a & b.eval_uint(env)?,
-                            Self::Or | Self::Nor => a | b.eval_uint(env)?,
+                            Self::And | Self::Nand => a & b.eval_uint(funs, env)?,
+                            Self::Or | Self::Nor => a | b.eval_uint(funs, env)?,
                             _ => unreachable!(),
                         }),
                         Value::Sint(a) => Value::Sint(match self {
-                            Self::And | Self::Nand => a & b.eval_sint(env)?,
-                            Self::Or | Self::Nor => a | b.eval_sint(env)?,
+                            Self::And | Self::Nand => a & b.eval_sint(funs, env)?,
+                            Self::Or | Self::Nor => a | b.eval_sint(funs, env)?,
                             _ => unreachable!(),
                         }),
 
@@ -284,7 +289,7 @@ mod inner {
                     let args = match args
                         .iter()
                         .map(|x| {
-                            x.eval(env).ok().map(|val| {
+                            x.eval(funs, env).ok().map(|val| {
                                 if matches!(val, Value::Var(_)) {
                                     let mut val = &val;
                                     while let Value::Var(id) = *val {

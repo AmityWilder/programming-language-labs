@@ -4,22 +4,44 @@ use crate::{
         static_env::{LabelId, VarId, scope::ScopeEnvironment},
     },
     error::{CheckDiagnostics, Diagnostic, DiagnosticKind, Severity},
-    exec::{EnvId, LblId, Value, tree},
+    exec::{EnvId, FunId, LblId, Value, funcs::FuncTable, tree},
     lex::token::{Operator, keyword::Keyword, punc::OpSide},
-    src_code::{map::SourceMap, span::FileId},
+    src_code::{
+        map::SourceMap,
+        span::{FileId, Span},
+    },
     types::{byte, sint, uint},
+    util::OrAllErrsExt as _,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 // TODO: this skips a lot of passes
 
+#[expect(clippy::unused_self, reason = "will be used in the future")]
 impl ScopeEnvironment {
-    fn get_env_id(&self, id: VarId) -> EnvId {
+    const fn get_env_id(&self, id: VarId) -> EnvId {
         EnvId(id.get())
     }
 
-    fn get_lbl_id(&self, id: LabelId) -> LblId {
+    const fn get_lbl_id(&self, id: LabelId) -> LblId {
         LblId(id.get())
+    }
+
+    const fn get_fun_id(&self, id: LabelId) -> FunId {
+        // doesn't filter function definitions, because non-functions may implement call.
+        FunId(id.get())
+    }
+}
+
+#[derive(Debug, Clone)]
+enum FuncIntent {
+    Expecting(HashSet<Span>),
+    Defined(tree::Func),
+}
+
+impl Default for FuncIntent {
+    fn default() -> Self {
+        Self::Expecting(HashSet::new())
     }
 }
 
@@ -32,22 +54,49 @@ pub fn finalize(
     let units = hir.into_iter();
     let (lo, hi) = units.size_hint();
     let mut stmts = Vec::with_capacity(hi.unwrap_or(lo));
+    let mut funcs = BTreeMap::new();
     for unit in units {
         stmts.extend(finalize_decls::<_, Vec<_>>(
             unit.decls,
+            &mut funcs,
             source,
             unit.file,
             env,
             diagnostics,
         )?);
     }
+    // TODO: compress IDs (would require rearranging them in all instances in the code :c)
     Ok(tree::Program {
+        funs: funcs
+            .into_iter()
+            .map(|(id, def)| match def {
+                FuncIntent::Expecting(calls) => {
+                    for span in calls {
+                        diagnostics.push(Diagnostic::new(
+                            span,
+                            DiagnosticKind::Other {
+                                severity: Severity::Error,
+                                category: crate::error::DiagnosticCategory::StaticAnalysis,
+                                msg: format!(
+                                    "`{}` does not overload the `call` operator",
+                                    &source[span]
+                                ),
+                            },
+                        ));
+                    }
+                    Err(CheckDiagnostics)
+                }
+                FuncIntent::Defined(def) => Ok((id, def)),
+            })
+            .collect_or_acc_errs::<Vec<_>, _>()
+            .map(FuncTable::from_iter)?,
         stmts: stmts.into_boxed_slice(),
     })
 }
 
 fn finalize_decls<I, A>(
     decls: I,
+    funcs: &mut BTreeMap<FunId, FuncIntent>,
     source: &SourceMap,
     file: FileId,
     env: &mut ScopeEnvironment,
@@ -67,17 +116,24 @@ where
                 stmts.extend_one(tree::Stmt::Dfer(tree::Dfer {
                     ret_param: param.map(|x| env.get_env_id(x.var.0)),
 
-                    on_pop: on_pop.finalize(source, file, env, diagnostics)?,
+                    on_pop: on_pop.finalize(funcs, source, file, env, diagnostics)?,
 
                     do_first: tree::Block {
-                        stmts: finalize_decls::<_, Vec<_>>(decls, source, file, env, diagnostics)?
-                            .into_boxed_slice(),
+                        stmts: finalize_decls::<_, Vec<_>>(
+                            decls,
+                            funcs,
+                            source,
+                            file,
+                            env,
+                            diagnostics,
+                        )?
+                        .into_boxed_slice(),
                     },
                 }));
                 break;
             }
 
-            x => stmts.extend(x.finalize(source, file, env, diagnostics)?),
+            x => stmts.extend(x.finalize(funcs, source, file, env, diagnostics)?),
         }
     }
     Ok(stmts)
@@ -86,6 +142,7 @@ where
 impl hir::Decl<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -94,27 +151,29 @@ impl hir::Decl<hir::FinalPass> {
         match self {
             hir::Decl::Mod(_) | hir::Decl::Rec(_) => Ok(Vec::new()),
 
-            hir::Decl::On(x) => x.finalize(source, file, env, diagnostics),
-            hir::Decl::Cat(x) => x.finalize(source, file, env, diagnostics),
-            hir::Decl::Fun(x) => x.finalize(source, file, env, diagnostics),
+            hir::Decl::On(x) => x.finalize(funcs, source, file, env, diagnostics),
+            hir::Decl::Cat(x) => x.finalize(funcs, source, file, env, diagnostics),
+            hir::Decl::Fun(x) => x.finalize(funcs, source, file, env, diagnostics),
 
             hir::Decl::Uni(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(|x| Vec::from_iter(x.map(tree::Stmt::Expr))),
             hir::Decl::Let(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(|x| Vec::from_iter(x.map(tree::Stmt::Expr))),
             hir::Decl::Pvt(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(|x| Vec::from_iter(x.map(tree::Stmt::Expr))),
 
             hir::Decl::Dfer(_) => unimplemented!("should be handled by caller"),
 
             hir::Decl::Stmt(hir::Stmt::Block(x)) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(|x| x.stmts.to_vec()),
 
-            hir::Decl::Stmt(x) => x.finalize(source, file, env, diagnostics).map(|x| vec![x]),
+            hir::Decl::Stmt(x) => x
+                .finalize(funcs, source, file, env, diagnostics)
+                .map(|x| vec![x]),
         }
     }
 }
@@ -122,6 +181,7 @@ impl hir::Decl<hir::FinalPass> {
 impl hir::DeclOn<hir::FinalPass> {
     fn finalize(
         self,
+        _funcs: &mut BTreeMap<FunId, FuncIntent>,
         _source: &SourceMap,
         _file: FileId,
         _env: &mut ScopeEnvironment,
@@ -134,19 +194,49 @@ impl hir::DeclOn<hir::FinalPass> {
 impl hir::DeclFun<hir::FinalPass> {
     fn finalize(
         self,
-        _source: &SourceMap,
-        _file: FileId,
-        _env: &mut ScopeEnvironment,
-        _diagnostics: &mut Vec<Diagnostic>,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
+        source: &SourceMap,
+        file: FileId,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<Vec<tree::Stmt>, CheckDiagnostics> {
-        // TODO: function bodies can contain globals or other definitions that need to be evaluated
-        todo!()
+        // TODO: everything else
+        let Self {
+            id: hir::LinkedDecl(id),
+            generics,
+            self_param,
+            params,
+            ret,
+            iff,
+            body,
+        } = self;
+        if let Some(body) = body {
+            let id = env.get_fun_id(id);
+            let body = body.finalize(funcs, source, file, env, diagnostics)?;
+            funcs.insert(
+                id,
+                FuncIntent::Defined(tree::Func {
+                    params: self_param
+                        .map(|x| x.id)
+                        .into_iter()
+                        .chain(params.iter().map(|x| x.id))
+                        .map(|id| env.get_env_id(id.0))
+                        .collect(),
+                    body,
+                }),
+            );
+        } else {
+            // abstract decl doesnt get inserted
+        }
+        // TODO: function bodies may contain globals or other definitions that need to be evaluated(?)
+        Ok(Vec::new())
     }
 }
 
 impl hir::DeclCat<hir::FinalPass> {
     fn finalize(
         self,
+        _funcs: &mut BTreeMap<FunId, FuncIntent>,
         _source: &SourceMap,
         _file: FileId,
         _env: &mut ScopeEnvironment,
@@ -160,6 +250,7 @@ impl hir::DeclCat<hir::FinalPass> {
 impl hir::DeclUni<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -170,8 +261,8 @@ impl hir::DeclUni<hir::FinalPass> {
                 Ok(tree::Expr::Operation(tree::Operation {
                     what: tree::Callable::Builtin(tree::BuiltinOp::Assign),
                     args: Box::from([
-                        self.id.finalize(source, file, env, diagnostics)?,
-                        x.finalize(source, file, env, diagnostics)?,
+                        self.id.finalize(funcs, source, file, env, diagnostics)?,
+                        x.finalize(funcs, source, file, env, diagnostics)?,
                     ]),
                 }))
             })
@@ -182,6 +273,7 @@ impl hir::DeclUni<hir::FinalPass> {
 impl hir::DeclLet<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -192,8 +284,8 @@ impl hir::DeclLet<hir::FinalPass> {
                 Ok(tree::Expr::Operation(tree::Operation {
                     what: tree::Callable::Builtin(tree::BuiltinOp::Assign),
                     args: Box::from([
-                        self.id.finalize(source, file, env, diagnostics)?,
-                        x.finalize(source, file, env, diagnostics)?,
+                        self.id.finalize(funcs, source, file, env, diagnostics)?,
+                        x.finalize(funcs, source, file, env, diagnostics)?,
                     ]),
                 }))
             })
@@ -204,6 +296,7 @@ impl hir::DeclLet<hir::FinalPass> {
 impl hir::DeclPvt<hir::FinalPass> {
     fn finalize(
         self,
+        _funcs: &mut BTreeMap<FunId, FuncIntent>,
         _source: &SourceMap,
         _file: FileId,
         _env: &mut ScopeEnvironment,
@@ -217,6 +310,7 @@ impl hir::DeclPvt<hir::FinalPass> {
 impl hir::Stmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -224,40 +318,40 @@ impl hir::Stmt<hir::FinalPass> {
     ) -> Result<tree::Stmt, CheckDiagnostics> {
         match self {
             Self::Expr(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Expr),
 
             Self::If(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Branch),
             Self::Pick(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Branch),
 
             Self::Loop(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Loop),
             Self::Cord(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Loop),
             Self::Rep(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Loop),
             Self::For(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Loop),
 
             Self::Give(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Give),
             Self::Fail(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Fail),
             Self::Done(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Done),
             Self::Skip(x) => x
-                .finalize(source, file, env, diagnostics)
+                .finalize(funcs, source, file, env, diagnostics)
                 .map(tree::Stmt::Skip),
 
             Self::Block(_) => unimplemented!("should be handled by caller"),
@@ -268,31 +362,36 @@ impl hir::Stmt<hir::FinalPass> {
 impl hir::ExprStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        self.0.finalize(source, file, env, diagnostics)
+        self.0.finalize(funcs, source, file, env, diagnostics)
     }
 }
 
 impl hir::Expr<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         match self {
-            hir::Expr::Block(x) => x.finalize(source, file, env, diagnostics),
-            hir::Expr::Binary(x) => x.finalize(source, file, env, diagnostics),
-            hir::Expr::Unary(x) => x.finalize(source, file, env, diagnostics),
-            hir::Expr::Index(x) => x.finalize(source, file, env, diagnostics),
-            hir::Expr::Call(x) => x.finalize(source, file, env, diagnostics),
-            hir::Expr::Literal(x) => x.finalize(source, file, env, diagnostics),
-            hir::Expr::Variable(x) => x.finalize(source, file, env, diagnostics),
+            hir::Expr::Block(x) => x
+                .finalize(funcs, source, file, env, diagnostics)
+                .map(|x| tree::Expr::Block(Box::new(x))),
+
+            hir::Expr::Binary(x) => x.finalize(funcs, source, file, env, diagnostics),
+            hir::Expr::Unary(x) => x.finalize(funcs, source, file, env, diagnostics),
+            hir::Expr::Index(x) => x.finalize(funcs, source, file, env, diagnostics),
+            hir::Expr::Call(x) => x.finalize(funcs, source, file, env, diagnostics),
+            hir::Expr::Literal(x) => x.finalize(funcs, source, file, env, diagnostics),
+            hir::Expr::Variable(x) => x.finalize(funcs, source, file, env, diagnostics),
 
             hir::Expr::Directive(x) => {
                 diagnostics.push(Diagnostic::new(
@@ -310,7 +409,13 @@ impl hir::Expr<hir::FinalPass> {
                     },
                 ));
                 Ok(tree::Expr::Operation(tree::Operation {
-                    what: tree::Callable::Builtin(x.finalize(source, file, env, diagnostics)?),
+                    what: tree::Callable::Builtin(x.finalize(
+                        funcs,
+                        source,
+                        file,
+                        env,
+                        diagnostics,
+                    )?),
                     args: Box::default(),
                 }))
             }
@@ -321,18 +426,38 @@ impl hir::Expr<hir::FinalPass> {
 impl hir::BlockExpr<hir::FinalPass> {
     fn finalize(
         self,
-        _source: &SourceMap,
-        _file: FileId,
-        _env: &mut ScopeEnvironment,
-        _diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<tree::Expr, CheckDiagnostics> {
-        todo!("mir block expression")
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
+        source: &SourceMap,
+        file: FileId,
+        env: &mut ScopeEnvironment,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Result<tree::BlockExpr, CheckDiagnostics> {
+        match self {
+            Self::If(x) => x
+                .finalize(funcs, source, file, env, diagnostics)
+                .map(tree::BlockExpr::Branch),
+            Self::Pick(x) => x
+                .finalize(funcs, source, file, env, diagnostics)
+                .map(tree::BlockExpr::Branch),
+
+            Self::Loop(x) => x
+                .finalize(funcs, source, file, env, diagnostics)
+                .map(tree::BlockExpr::Loop),
+            Self::Cord(x) => x
+                .finalize(funcs, source, file, env, diagnostics)
+                .map(tree::BlockExpr::Loop),
+
+            Self::Block(x) => x
+                .finalize(funcs, source, file, env, diagnostics)
+                .map(tree::BlockExpr::Block),
+        }
     }
 }
 
 impl hir::Binary<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -389,8 +514,8 @@ impl hir::Binary<hir::FinalPass> {
             _ => todo!("not a binary operator"),
         });
 
-        let lhs = lhs.finalize(source, file, env, diagnostics)?;
-        let rhs = rhs.finalize(source, file, env, diagnostics)?;
+        let lhs = lhs.finalize(funcs, source, file, env, diagnostics)?;
+        let rhs = rhs.finalize(funcs, source, file, env, diagnostics)?;
         let args = Box::from([lhs, rhs]);
 
         Ok(tree::Expr::Operation(tree::Operation { what, args }))
@@ -400,6 +525,7 @@ impl hir::Binary<hir::FinalPass> {
 impl hir::Unary<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -411,7 +537,7 @@ impl hir::Unary<hir::FinalPass> {
             operand,
             side: _,
         } = self;
-        let operand = operand.finalize(source, file, env, diagnostics)?;
+        let operand = operand.finalize(funcs, source, file, env, diagnostics)?;
         let args = Box::from([operand]);
 
         let what = tree::Callable::Builtin(match op {
@@ -435,6 +561,7 @@ impl hir::Unary<hir::FinalPass> {
 impl hir::Subscript<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -444,8 +571,8 @@ impl hir::Subscript<hir::FinalPass> {
         Ok(tree::Expr::Operation(tree::Operation {
             what: tree::Callable::Builtin(tree::BuiltinOp::Index),
             args: Box::from([
-                arr.finalize(source, file, env, diagnostics)?,
-                idx.finalize(source, file, env, diagnostics)?,
+                arr.finalize(funcs, source, file, env, diagnostics)?,
+                idx.finalize(funcs, source, file, env, diagnostics)?,
             ]),
         }))
     }
@@ -454,39 +581,50 @@ impl hir::Subscript<hir::FinalPass> {
 impl hir::FnCall<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
         let Self { fun, args } = self;
-        Ok(match fun {
+        let what = match fun {
             hir::Expr::Block(_)
             | hir::Expr::Binary(_)
             | hir::Expr::Unary(_)
             | hir::Expr::Index(_)
             | hir::Expr::Call(_) => todo!("indirect call"),
 
-            hir::Expr::Directive(x) => tree::Expr::Operation(tree::Operation {
-                what: x
-                    .finalize(source, file, env, diagnostics)
-                    .map(tree::Callable::Builtin)?,
-                args: args
-                    .into_iter()
-                    .map(|x| x.finalize(source, file, env, diagnostics))
-                    .collect::<Result<_, _>>()?,
-            }),
+            hir::Expr::Directive(x) => x
+                .finalize(funcs, source, file, env, diagnostics)
+                .map(tree::Callable::Builtin)?,
 
-            hir::Expr::Variable(_) => todo!("user-defined functions"),
+            hir::Expr::Variable(hir::LinkedVar { span, id }) => {
+                let id = env.get_fun_id(id);
+                // insert [`None`] into the table (but don't overwrite if there is already something)
+                // to indicate intent to call, so we can error if it is never defined
+                if let FuncIntent::Expecting(uses) = funcs.entry(id).or_default() {
+                    uses.insert(span.within_file(file));
+                }
+                tree::Callable::UserDefined(id)
+            }
 
             hir::Expr::Literal(_) => todo!("error: can't call literal"),
-        })
+        };
+        Ok(tree::Expr::Operation(tree::Operation {
+            what,
+            args: args
+                .into_iter()
+                .map(|x| x.finalize(funcs, source, file, env, diagnostics))
+                .collect::<Result<_, _>>()?,
+        }))
     }
 }
 
 impl hir::Directive {
     fn finalize(
         self,
+        _funcs: &mut BTreeMap<FunId, FuncIntent>,
         _source: &SourceMap,
         _file: FileId,
         _env: &mut ScopeEnvironment,
@@ -503,6 +641,7 @@ impl hir::Directive {
 impl hir::LinkedLiteralValue {
     fn finalize(
         self,
+        _funcs: &mut BTreeMap<FunId, FuncIntent>,
         _source: &SourceMap,
         _file: FileId,
         _env: &mut ScopeEnvironment,
@@ -524,18 +663,20 @@ impl hir::LinkedLiteralValue {
 impl hir::LinkedLiteral {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        self.val.finalize(source, file, env, diagnostics)
+        self.val.finalize(funcs, source, file, env, diagnostics)
     }
 }
 
 impl hir::LinkedDecl {
     fn finalize(
         self,
+        _funcs: &mut BTreeMap<FunId, FuncIntent>,
         _source: &SourceMap,
         _file: FileId,
         env: &mut ScopeEnvironment,
@@ -549,12 +690,13 @@ impl hir::LinkedDecl {
 impl hir::LinkedVar {
     fn finalize(
         self,
+        _funcs: &mut BTreeMap<FunId, FuncIntent>,
         _source: &SourceMap,
         _file: FileId,
         env: &mut ScopeEnvironment,
         _diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Expr, CheckDiagnostics> {
-        let Self(id) = self;
+        let Self { span: _, id } = self;
         Ok(tree::Expr::Access(env.get_env_id(id)))
     }
 }
@@ -617,6 +759,7 @@ impl<S: hir::HirPass> Iterator for IfStmtIntoIter<S> {
 impl hir::IfStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -626,15 +769,15 @@ impl hir::IfStmt<hir::FinalPass> {
         let mut iter = IfStmtIntoIter::new(self);
         for (pred, then) in iter.by_ref() {
             let case = tree::Case {
-                pred: pred.finalize(source, file, env, diagnostics)?,
-                then: then.finalize(source, file, env, diagnostics)?,
+                pred: pred.finalize(funcs, source, file, env, diagnostics)?,
+                then: then.finalize(funcs, source, file, env, diagnostics)?,
             };
             cases.push(case);
         }
         if let Some(default) = iter.default_case() {
             cases.push(tree::Case {
                 pred: tree::Expr::Literal(Value::Bool(true)),
-                then: default.finalize(source, file, env, diagnostics)?,
+                then: default.finalize(funcs, source, file, env, diagnostics)?,
             });
         }
         Ok(tree::Branch::Cases(tree::Cases {
@@ -646,6 +789,7 @@ impl hir::IfStmt<hir::FinalPass> {
 impl hir::PickExpr<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -653,10 +797,15 @@ impl hir::PickExpr<hir::FinalPass> {
     ) -> Result<tree::Branch, CheckDiagnostics> {
         use hir::LinkedLiteralValue as LitVal;
         let Self { expr, arms } = self;
-        let expr = expr.finalize(source, file, env, diagnostics)?;
+        let expr = expr.finalize(funcs, source, file, env, diagnostics)?;
         let mut arms = arms
             .into_iter()
-            .map(|arm| Ok((arm.pat, arm.expr.finalize(source, file, env, diagnostics)?)))
+            .map(|arm| {
+                Ok((
+                    arm.pat,
+                    arm.expr.finalize(funcs, source, file, env, diagnostics)?,
+                ))
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         arms.sort_by(|(a, _), (b, _)| match (a, b) {
@@ -882,6 +1031,7 @@ impl hir::PickExpr<hir::FinalPass> {
 impl hir::LoopStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -889,7 +1039,7 @@ impl hir::LoopStmt<hir::FinalPass> {
     ) -> Result<tree::Loop, CheckDiagnostics> {
         let Self { label, body } = self;
         let label = label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id));
-        body.finalize(source, file, env, diagnostics)
+        body.finalize(funcs, source, file, env, diagnostics)
             .map(|block| tree::Loop { label, block })
     }
 }
@@ -897,6 +1047,7 @@ impl hir::LoopStmt<hir::FinalPass> {
 impl hir::CordStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -910,13 +1061,14 @@ impl hir::CordStmt<hir::FinalPass> {
                 // TBD: should this output the previous statement value?
                 expr: None,
             })));
-        hir::LoopStmt { label, body }.finalize(source, file, env, diagnostics)
+        hir::LoopStmt { label, body }.finalize(funcs, source, file, env, diagnostics)
     }
 }
 
 impl hir::RepStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -943,13 +1095,14 @@ impl hir::RepStmt<hir::FinalPass> {
                 },
                 or: None,
             })));
-        hir::LoopStmt { label, body }.finalize(source, file, env, diagnostics)
+        hir::LoopStmt { label, body }.finalize(funcs, source, file, env, diagnostics)
     }
 }
 
 impl hir::ForStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -968,7 +1121,17 @@ impl hir::ForStmt<hir::FinalPass> {
                     op: Operator::Not,
                     operand: hir::Expr::Unary(Box::new(hir::Unary {
                         op: Operator::Exists,
-                        operand: hir::Expr::Variable(hir::LinkedVar(var.0)),
+                        operand: hir::Expr::Variable({
+                            let id = var.0;
+                            hir::LinkedVar {
+                                span: env
+                                    .get_decl(id)
+                                    .expect("earlier pass should have declared")
+                                    .decl
+                                    .rel,
+                                id,
+                            }
+                        }),
                         side: OpSide::Prefix,
                     })),
                     side: OpSide::Prefix,
@@ -991,13 +1154,14 @@ impl hir::ForStmt<hir::FinalPass> {
                 side: OpSide::Postfix,
             }))),
         }));
-        hir::LoopStmt { label, body }.finalize(source, file, env, diagnostics)
+        hir::LoopStmt { label, body }.finalize(funcs, source, file, env, diagnostics)
     }
 }
 
 impl hir::GiveStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -1006,7 +1170,7 @@ impl hir::GiveStmt<hir::FinalPass> {
         Ok(tree::Give {
             value: self
                 .expr
-                .map(|x| x.finalize(source, file, env, diagnostics))
+                .map(|x| x.finalize(funcs, source, file, env, diagnostics))
                 .transpose()?
                 .unwrap_or_default(),
         })
@@ -1016,6 +1180,7 @@ impl hir::GiveStmt<hir::FinalPass> {
 impl hir::FailStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -1024,7 +1189,7 @@ impl hir::FailStmt<hir::FinalPass> {
         Ok(tree::Fail {
             value: self
                 .expr
-                .map(|x| x.finalize(source, file, env, diagnostics))
+                .map(|x| x.finalize(funcs, source, file, env, diagnostics))
                 .transpose()?
                 .unwrap_or_default(),
         })
@@ -1034,6 +1199,7 @@ impl hir::FailStmt<hir::FinalPass> {
 impl hir::SkipStmt<hir::FinalPass> {
     fn finalize(
         self,
+        _funcs: &mut BTreeMap<FunId, FuncIntent>,
         _source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -1049,6 +1215,7 @@ impl hir::SkipStmt<hir::FinalPass> {
 impl hir::DoneStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
@@ -1058,7 +1225,7 @@ impl hir::DoneStmt<hir::FinalPass> {
         Ok(tree::Done {
             label: label.map(|hir::LinkedLabel(id)| env.get_lbl_id(id)),
             value: expr
-                .map(|x| x.finalize(source, file, env, diagnostics))
+                .map(|x| x.finalize(funcs, source, file, env, diagnostics))
                 .transpose()?
                 .unwrap_or_default(),
         })
@@ -1068,13 +1235,16 @@ impl hir::DoneStmt<hir::FinalPass> {
 impl hir::BlockStmt<hir::FinalPass> {
     fn finalize(
         self,
+        funcs: &mut BTreeMap<FunId, FuncIntent>,
         source: &SourceMap,
         file: FileId,
         env: &mut ScopeEnvironment,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<tree::Block, CheckDiagnostics> {
-        finalize_decls(self.decls, source, file, env, diagnostics).map(|x: Vec<_>| tree::Block {
-            stmts: x.into_boxed_slice(),
+        finalize_decls(self.decls, funcs, source, file, env, diagnostics).map(|x: Vec<_>| {
+            tree::Block {
+                stmts: x.into_boxed_slice(),
+            }
         })
     }
 }

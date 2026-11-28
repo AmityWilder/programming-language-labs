@@ -1866,7 +1866,10 @@ impl From<ast::Variable> for UnlinkedVar {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LinkedVar(pub VarId);
+pub struct LinkedVar {
+    pub span: RelSpan,
+    pub id: VarId,
+}
 
 /// An [`Expr`] whose value comes from a block-like context
 #[derive(Walkable)]

@@ -1,5 +1,4 @@
-use super::EnvId;
-use crate::exec::Value;
+use crate::exec::{EnvId, Value};
 
 // TODO: push down automata
 
@@ -16,6 +15,22 @@ impl Environment {
             stack: Vec::new(),
             heap: Vec::new(),
         }
+    }
+
+    /// Get the current position of the stack, so that a function can remember where to rewind to when it ends
+    pub fn stack_ptr(&mut self) -> EnvId {
+        EnvId(self.stack.len())
+    }
+
+    pub fn push(&mut self, value: Value) -> EnvId {
+        let id = self.stack.len();
+        self.stack.push(value);
+        EnvId(id)
+    }
+
+    /// Pop all variables off the stack until only IDs lower than `end` remain
+    pub fn pop_stack(&mut self, end: EnvId) {
+        self.stack.truncate(end.0);
     }
 
     /// Create a new variable and assign it with the value

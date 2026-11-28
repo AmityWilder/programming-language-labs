@@ -413,17 +413,17 @@ impl hir::ItemRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_> {
     type Value = hir::LinkedVar;
 
     fn visit_item_ref(&mut self, x: hir::UnlinkedVar) -> Result<Self::Value, CheckDiagnostics> {
-        let hir::UnlinkedVar(ast::Variable { path, ident }) = x;
+        let hir::UnlinkedVar(ast::Variable { path, ident: span }) = x;
         let mod_id = self.lookup_mod_path(
             path.into_iter()
                 .flatten()
                 .map(|ast::ModPathPart { ident, sep: _ }| ident),
         )?;
-        let ident = ident.within_file(self.file);
+        let ident = span.within_file(self.file);
         let name = &self.source[ident];
         self.env[mod_id]
             .lookup_item(name)
-            .map(hir::LinkedVar)
+            .map(|id| hir::LinkedVar { span, id })
             .ok_or_else(|| {
                 self.diagnostics
                     .push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));
@@ -436,19 +436,19 @@ impl hir::VarRefVisitor<hir::UnlinkedVar> for VarRefVisitor<'_, '_, '_> {
     type Value = hir::LinkedVar;
 
     fn visit_var_ref(&mut self, x: hir::UnlinkedVar) -> Result<Self::Value, CheckDiagnostics> {
-        let hir::UnlinkedVar(ast::Variable { path, ident }) = x;
+        let hir::UnlinkedVar(ast::Variable { path, ident: span }) = x;
         let mod_id = self.lookup_mod_path(
             path.into_iter()
                 .flatten()
                 .map(|ast::ModPathPart { ident, sep: _ }| ident),
         )?;
-        let ident = ident.within_file(self.file);
+        let ident = span.within_file(self.file);
         let name = &self.source[ident];
         self.env[mod_id]
             .lookup_var(name)
             // might be a function
             .or_else(|| self.env[mod_id].lookup_item(name))
-            .map(hir::LinkedVar)
+            .map(|id| hir::LinkedVar { span, id })
             .ok_or_else(|| {
                 self.diagnostics
                     .push(Diagnostic::new(ident, DiagnosticKind::UnknownVar));

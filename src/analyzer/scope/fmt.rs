@@ -1371,7 +1371,7 @@ impl HirDisplay for hir::LinkedVar {
         env: &ScopeEnvironment,
         f: &mut fmt::Formatter<'_>,
     ) -> fmt::Result {
-        let Self(id) = self;
+        let Self { span: _, id } = self;
         id.fmt(source, file, env, f)
     }
 }

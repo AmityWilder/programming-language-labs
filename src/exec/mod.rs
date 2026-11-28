@@ -3,6 +3,7 @@ use crate::types::{byte, fail, flpt, none, sint, text, uint};
 pub mod builtin_op;
 pub mod env;
 pub mod fmt;
+pub mod funcs;
 pub mod tree;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -11,6 +12,15 @@ pub struct EnvId(pub usize);
 impl std::fmt::Debug for EnvId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "var@{:X}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct FunId(pub usize);
+
+impl std::fmt::Debug for FunId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "func@{:X}", self.0)
     }
 }
 

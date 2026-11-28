@@ -4,7 +4,7 @@ use super::ControlFlow;
 pub use super::builtin_op::BuiltinOp;
 use crate::{
     error::fail::Failure,
-    exec::{EnvId, LblId, Value, env::Environment},
+    exec::{EnvId, FunId, LblId, Value, env::Environment, funcs::FuncTable},
     todo_types::Todo,
     types::{byte, fail, flpt, none, sint, text, uint},
 };
@@ -20,13 +20,14 @@ thread_local! {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Program {
+    pub funs: FuncTable,
     pub stmts: Box<[Stmt]>,
 }
 
 impl Program {
     pub fn exec(&self, env: &mut Environment) -> Result<(), Failure> {
         for stmt in &self.stmts {
-            match stmt.eval(env) {
+            match stmt.eval(&self.funs, env) {
                 ControlFlow::Ok(res) => {
                     debug_assert_eq!(res, Value::None, "non-none output from statement");
                 }
@@ -56,25 +57,26 @@ pub enum Stmt {
 }
 
 impl Stmt {
-    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+    pub fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
         match self {
-            Self::Expr(x) => x.eval(env),
-            Self::Loop(x) => x.eval(env),
-            Self::Dfer(x) => x.eval(env),
-            Self::Branch(x) => x.eval(env),
-            Self::Give(x) => x.eval(env),
-            Self::Fail(x) => ControlFlow::Err(x.eval(env)),
-            Self::Skip(x) => x.eval(env),
-            Self::Done(x) => x.eval(env),
+            Self::Expr(x) => x.eval(funs, env),
+            Self::Loop(x) => x.eval(funs, env),
+            Self::Dfer(x) => x.eval(funs, env),
+            Self::Branch(x) => x.eval(funs, env),
+            Self::Give(x) => x.eval(funs, env),
+            Self::Fail(x) => ControlFlow::Err(x.eval(funs, env)),
+            Self::Skip(x) => x.eval(funs, env),
+            Self::Done(x) => x.eval(funs, env),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Literal(Value),
     Access(EnvId),
     Operation(Operation),
+    Block(Box<BlockExpr>),
 }
 
 impl Default for Expr {
@@ -84,7 +86,11 @@ impl Default for Expr {
 }
 
 impl Expr {
-    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value, Value> {
+    pub fn eval(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, Value, Value> {
         if cfg!(all(debug_assertions, false)) {
             for _ in 0..DEPTH.get() {
                 print!("  ");
@@ -95,7 +101,8 @@ impl Expr {
         let res = match self {
             Self::Literal(x) => ControlFlow::Ok(x.clone()),
             Self::Access(x) => ControlFlow::Ok(Value::Var(*x)),
-            Self::Operation(x) => x.eval(env),
+            Self::Operation(x) => x.eval(funs, env),
+            Self::Block(x) => x.eval(funs, env),
         };
         if cfg!(all(debug_assertions, false)) {
             DEPTH.update(|n| n - 1);
@@ -107,96 +114,208 @@ impl Expr {
         res
     }
 
-    pub fn eval_none(&self, env: &mut Environment) -> ControlFlow<Failure, none, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_none(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, none, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::None => (),
-            x => panic!("expected none, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected none, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 
-    pub fn eval_fail(&self, env: &mut Environment) -> ControlFlow<Failure, fail, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_fail(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, fail, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::Fail(x) => x,
-            x => panic!("expected fail, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected fail, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 
-    pub fn eval_bool(&self, env: &mut Environment) -> ControlFlow<Failure, bool, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_bool(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, bool, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::Bool(x) => x,
-            x => panic!("expected bool, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected bool, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 
-    pub fn eval_byte(&self, env: &mut Environment) -> ControlFlow<Failure, byte, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_byte(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, byte, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::Byte(x) => x,
-            x => panic!("expected byte, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected byte, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 
-    pub fn eval_uint(&self, env: &mut Environment) -> ControlFlow<Failure, uint, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_uint(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, uint, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::Uint(x) => x,
-            x => panic!("expected uint, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected uint, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 
-    pub fn eval_sint(&self, env: &mut Environment) -> ControlFlow<Failure, sint, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_sint(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, sint, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::Sint(x) => x,
-            x => panic!("expected sint, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected sint, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 
-    pub fn eval_flpt(&self, env: &mut Environment) -> ControlFlow<Failure, flpt, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_flpt(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, flpt, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::Flpt(x) => x,
-            x => panic!("expected flpt, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected flpt, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 
-    pub fn eval_char(&self, env: &mut Environment) -> ControlFlow<Failure, char, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_char(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, char, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::Char(x) => x,
-            x => panic!("expected char, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected char, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 
-    pub fn eval_text(&self, env: &mut Environment) -> ControlFlow<Failure, text, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_text(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, text, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::Text(x) => x,
-            x => panic!("expected text, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected text, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 
-    pub fn eval_var(&self, env: &mut Environment) -> ControlFlow<Failure, EnvId, Value> {
-        self.eval(env).map(|x| match x {
+    pub fn eval_var(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+    ) -> ControlFlow<Failure, EnvId, Value> {
+        self.eval(funs, env).map(|x| match x {
             Value::Var(x) => x,
-            x => panic!("expected var, found {x:?}. {}", STATIC_GUARANTEE),
+            x => panic!("expected var, found {x:?}. {STATIC_GUARANTEE}"),
         })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Operation {
     pub what: Callable,
     pub args: Box<[Expr]>,
 }
 
 impl Operation {
-    pub fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
-        match self.what {
-            Callable::Builtin(op) => op.eval(env, &self.args),
-            Callable::UserDefined(_fun) => todo!(),
+    pub fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        self.what.eval(funs, env, &self.args)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Callable {
+    Builtin(BuiltinOp),
+    UserDefined(FunId),
+}
+
+impl Callable {
+    pub fn eval(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+        args: &[Expr],
+    ) -> ControlFlow<Failure, Value> {
+        match self {
+            Callable::Builtin(op) => op.eval(funs, env, args),
+            // TODO: what about global variables?
+            Callable::UserDefined(id) => funs[*id].eval(funs, env, args),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
-pub enum Callable {
-    Builtin(BuiltinOp),
-    UserDefined(Todo),
+#[derive(Debug, Clone, PartialEq)]
+pub struct Func {
+    pub params: Vec<EnvId>,
+    pub body: Block,
+}
+
+impl Func {
+    pub fn eval(
+        &self,
+        funs: &FuncTable,
+        env: &mut Environment,
+        args: &[Expr],
+    ) -> ControlFlow<Failure, Value> {
+        let Self { params, body } = self;
+        let sp = env.stack_ptr();
+        // TODO: offsets
+        for (param, arg) in params.iter().zip(args) {
+            let val = arg.eval(funs, env)?;
+            env.insert(*param, val);
+        }
+        let res = match body.eval(funs, env) {
+            res @ (ControlFlow::Ok(_) | ControlFlow::Err(_)) => res,
+            ControlFlow::Return { value } => ControlFlow::Ok(value),
+
+            ControlFlow::Skip { .. } => todo!("error: tried to `skip` out of a function"),
+            ControlFlow::Break { .. } => {
+                todo!("error: tried to `done` out of a function")
+            }
+        };
+        // TODO: copy from stack
+        let res = match res {
+            ControlFlow::Ok(x) => ControlFlow::Ok(if let Value::Var(id) = x {
+                env.get(id).expect("id should be valid").clone()
+            } else {
+                x
+            }),
+            res => res,
+        };
+        env.pop_stack(sp);
+        res
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BlockExpr {
+    Loop(Loop),
+    Branch(Branch),
+    Block(Block),
+}
+
+impl BlockExpr {
+    pub fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        match self {
+            Self::Loop(x) => x.eval(funs, env),
+            Self::Branch(x) => x.eval(funs, env),
+            Self::Block(x) => x.eval(funs, env),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -206,10 +325,10 @@ pub struct Loop {
 }
 
 impl Loop {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+    fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
         let Self { label, block } = self;
         loop {
-            match block.eval(env) {
+            match block.eval(funs, env) {
                 ControlFlow::Ok(res) => {
                     debug_assert_eq!(res, Value::None, "non-none loop body");
                 }
@@ -239,37 +358,37 @@ pub struct Dfer {
 }
 
 impl Dfer {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
-        let res = self.do_first.eval(env);
+    fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
+        let res = self.do_first.eval(funs, env);
         if let Some(id) = self.ret_param {
             match res {
                 ControlFlow::Ok(value) => {
                     env.insert(id, value);
-                    self.on_pop.eval(env)
+                    self.on_pop.eval(funs, env)
                 }
                 ControlFlow::Err(e) => {
                     env.insert(id, Value::Fail(e));
-                    self.on_pop.eval(env)
+                    self.on_pop.eval(funs, env)
                 }
                 ControlFlow::Skip { label } => {
                     env.insert(id, Value::None);
-                    let res = self.on_pop.eval(env)?; // TODO: dfer should not
+                    let res = self.on_pop.eval(funs, env)?; // TODO: dfer should not
                     debug_assert_eq!(res, Value::None, "non-none dfer result in skip");
                     ControlFlow::Skip { label }
                 }
                 ControlFlow::Break { label, value } => {
                     env.insert(id, value);
-                    let value = self.on_pop.eval(env)?; // TODO: dfer should not
+                    let value = self.on_pop.eval(funs, env)?; // TODO: dfer should not
                     ControlFlow::Break { label, value }
                 }
                 ControlFlow::Return { value } => {
                     env.insert(id, value);
-                    let value = self.on_pop.eval(env)?; // TODO: dfer should not
+                    let value = self.on_pop.eval(funs, env)?; // TODO: dfer should not
                     ControlFlow::Return { value }
                 }
             }
         } else {
-            let on_pop_res = self.on_pop.eval(env)?;
+            let on_pop_res = self.on_pop.eval(funs, env)?;
             debug_assert_eq!(
                 on_pop_res,
                 Value::None,
@@ -287,10 +406,10 @@ pub enum Branch {
 }
 
 impl Branch {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+    fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
         match self {
-            Self::Cases(x) => x.eval(env),
-            Self::Table(x) => x.eval(env),
+            Self::Cases(x) => x.eval(funs, env),
+            Self::Table(x) => x.eval(funs, env),
         }
     }
 }
@@ -302,11 +421,11 @@ pub struct Cases {
 }
 
 impl Cases {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+    fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
         let Self { cases } = self;
         for Case { pred, then } in cases {
-            if pred.eval_bool(env)? {
-                return then.eval(env);
+            if pred.eval_bool(funs, env)? {
+                return then.eval(funs, env);
             }
         }
         ControlFlow::Ok(Value::None)
@@ -328,16 +447,16 @@ pub struct JumpTable {
 }
 
 impl JumpTable {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+    fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
         let Self {
             expr,
             transformer,
             thens,
         } = self;
-        let val = expr.eval(env)?;
+        let val = expr.eval(funs, env)?;
         let idx = transformer.find(val);
         debug_assert!(idx < thens.len(), "{STATIC_GUARANTEE}");
-        thens[idx].eval(env)
+        thens[idx].eval(funs, env)
     }
 }
 
@@ -392,24 +511,24 @@ pub struct Block {
 }
 
 impl Block {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+    fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
         let mut res = Value::None;
         for stmt in &self.stmts {
-            res = stmt.eval(env)?;
+            res = stmt.eval(funs, env)?;
         }
         ControlFlow::Ok(res)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Give {
     pub value: Expr,
 }
 
 impl Give {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+    fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
         let Self { value } = self;
-        match value.eval(env) {
+        match value.eval(funs, env) {
             ControlFlow::Ok(value) => ControlFlow::Return { value },
             ControlFlow::Err(e) => ControlFlow::Err(e),
             _ => todo!(),
@@ -417,14 +536,14 @@ impl Give {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Fail {
     pub value: Expr,
 }
 
 impl Fail {
-    fn eval(&self, env: &mut Environment) -> Failure {
-        match self.value.eval_text(env) {
+    fn eval(&self, funs: &FuncTable, env: &mut Environment) -> Failure {
+        match self.value.eval_text(funs, env) {
             ControlFlow::Ok(x) => Failure::Other(x),
             ControlFlow::Err(e) => e,
             _ => todo!(),
@@ -438,22 +557,22 @@ pub struct Skip {
 }
 
 impl Skip {
-    fn eval(&self, _env: &mut Environment) -> ControlFlow<Failure, Value> {
+    fn eval(&self, _funs: &FuncTable, _env: &mut Environment) -> ControlFlow<Failure, Value> {
         let Self { label } = self;
         ControlFlow::Skip { label: *label }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Done {
     pub label: Option<LblId>,
     pub value: Expr,
 }
 
 impl Done {
-    fn eval(&self, env: &mut Environment) -> ControlFlow<Failure, Value> {
+    fn eval(&self, funs: &FuncTable, env: &mut Environment) -> ControlFlow<Failure, Value> {
         let Self { label, value } = self;
-        match value.eval(env) {
+        match value.eval(funs, env) {
             ControlFlow::Ok(value) => ControlFlow::Break {
                 label: *label,
                 value,

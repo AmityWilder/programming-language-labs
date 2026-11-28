@@ -9,7 +9,7 @@
 
 use super::{EnvId, Value, tree};
 use crate::{
-    exec::LblId,
+    exec::{FunId, LblId},
     lex::{
         symbols::{BYTE_SUFFIX, SIGNED_SUFFIX, UNSIGNED_SUFFIX},
         token::{keyword::Keyword, punc::Punctuation},
@@ -158,7 +158,7 @@ impl fmt::Display for DisplayMir<'_> {
 
 impl MirDisplay for tree::Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { stmts } = self;
+        let Self { funs: _, stmts } = self;
         let mut has_prev = false;
         for stmt in stmts {
             if has_prev {
@@ -196,6 +196,7 @@ impl MirDisplay for tree::Expr {
             Self::Literal(x) => x.fmt(f),
             Self::Access(x) => x.fmt(f),
             Self::Operation(x) => x.fmt(f),
+            Self::Block(x) => x.fmt(f),
         }
     }
 }
@@ -278,8 +279,13 @@ impl MirDisplay for text {
 
 impl MirDisplay for EnvId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self(id) = self;
-        write!(f, "var@{id:X}")
+        write!(f, "{self:?}")
+    }
+}
+
+impl MirDisplay for FunId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 
@@ -452,8 +458,30 @@ impl MirDisplay for tree::Operation {
                 }
             }
 
-            // TODO
-            tree::Callable::UserDefined(x) => x.fmt(f),
+            tree::Callable::UserDefined(x) => {
+                x.fmt(f)?;
+                f.write_char('(')?;
+                let mut has_prev = false;
+                for arg in args {
+                    if has_prev {
+                        f.write_str(", ")?;
+                    } else {
+                        has_prev = true;
+                    }
+                    arg.fmt(f)?;
+                }
+                f.write_char(')')
+            }
+        }
+    }
+}
+
+impl MirDisplay for tree::BlockExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Loop(x) => x.fmt(f),
+            Self::Branch(x) => x.fmt(f),
+            Self::Block(x) => x.fmt(f),
         }
     }
 }
